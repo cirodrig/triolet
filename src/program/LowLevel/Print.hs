@@ -107,7 +107,10 @@ pprFunSignature domain range =
 
 pprFunDef :: FunDef -> Doc
 pprFunDef (Def v f) =
-  let intro = if isPrimFun f then text "procedure" else text "function"
+  let intro = case funConvention f 
+              of PrimCall -> text "procedure"
+                 ClosureCall -> text "function"
+                 JoinCall -> text "label"
       uses = case funUses f
              of ZeroUses -> text "[0]"
                 OneUse -> text "[1]"
@@ -137,6 +140,7 @@ pprFun fun =
       fun_call = inl_doc <+> case funConvention fun
                              of PrimCall -> text "lambda_p"
                                 ClosureCall -> text "lambda_c"
+                                JoinCall -> text "lambda_j"
   in fun_call <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
      nest 4 local_doc $$
      nest 4 (pprBlock $ funBody fun)
@@ -272,6 +276,7 @@ pprAtom atom =
        let conv_doc = case conv
                       of ClosureCall -> text "call" 
                          PrimCall -> text "primcall"
+                         JoinCall -> text "jump"
        in conv_doc <+> pprVal v <> arg_list vs
      PrimA p [v1, v2] 
        | Just infix_op <- pprInfixPrim p ->

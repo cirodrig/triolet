@@ -13,6 +13,7 @@ module LowLevel.Closure.Code
         emitClosureGlobalData,
         genClosureCall,
         genPrimCall,
+        genJoinCall,
         genIndirectCall,
         genVarRef
        )
@@ -427,9 +428,9 @@ genClosureCall return_types fun args = do
     Just cc@(GlobalClosure {}) -> closure_call cc
     Just cc@(LocalClosure {}) -> closure_call cc
     
-    -- If it's a prim-call function, generate a primitive call 
-    Just cc@(GlobalPrim {}) -> prim_call fun cc
-    Just cc@(LocalPrim {_cEntryPoint = ep}) -> prim_call ep cc
+    -- If it's a prim-call function, the arguments must match exactly
+    Just cc@(GlobalPrim {}) -> check_args cc $ prim_call fun cc
+    Just cc@(LocalPrim {_cEntryPoint = ep}) -> check_args cc $ join_call ep cc
   where
     arity cc = length (ftParamTypes $ ccType cc)
 
@@ -451,17 +452,21 @@ genClosureCall return_types fun args = do
 
     indirect_call call_captured =
       genIndirectCall return_types (VarV fun) (call_captured ++ args)
-    
-    prim_call entry_point cc
+
+    check_args cc k
       | length args /= (arity cc) =
           -- Error to call with the wrong number of arguments
           internalError "genClosureCall: Procedure call has wrong number of arguments"
-      | otherwise =
-        let call_captured = map VarV (ccCallCaptured cc)
-        in return $ primCallA (VarV entry_point) (call_captured ++ args)
+      | otherwise = k
 
--- | Generate a call to a procedure.  Since procedures aren't closure-converted,
---   the only change is to add call-captured variables.
+    prim_call entry_point cc =
+      return $ primCallA (VarV entry_point) args
+
+    join_call entry_point cc =
+      let call_captured = map VarV (ccCallCaptured cc)
+      in return $ joinCallA (VarV entry_point) (call_captured ++ args)
+
+-- | Generate a call to a global procedure.
 genPrimCall :: Var               -- ^ Function that is called
             -> [Val]             -- ^ Arguments
             -> GenM Atom
@@ -469,17 +474,35 @@ genPrimCall fun args = do
   info <- lift $ lookupCCInfo fun
   case info of
     -- If function is unknown, it doesn't capture variables
-    Nothing -> make_call []
+    Nothing -> return call
 
     -- If it's a prim-call function, generate a primitive call 
-    Just cc@(GlobalPrim {}) -> make_call $ ccCallCaptured cc
-    Just cc@(LocalPrim {})  -> make_call $ ccCallCaptured cc
+    Just cc@(GlobalPrim {}) -> return call
 
     -- Closure-call functions cannot be called with this calling convention
     Just _ -> internalError "genPrimCall"
   where
+    call = primCallA (VarV fun) args
+
+-- | Generate a call to a local procedure.
+genJoinCall :: Var               -- ^ Function that is called
+            -> [Val]             -- ^ Arguments
+            -> GenM Atom
+genJoinCall fun args = do
+  info <- lift $ lookupCCInfo fun
+  case info of
+    Just cc@(LocalPrim {})  -> make_call $ ccCallCaptured cc
+
+    -- Similar to 'genClosureCall'.
+    -- Since join calls are always saturated, we can go directly to the
+    -- saturated case.
+    Just cc@(LocalClosure {}) -> genDirectCall cc args
+
+    -- Closure-call functions cannot be called with this calling convention
+    Just _ -> internalError "genJoinCall"
+  where
     make_call extra_args =
-      return $ primCallA (VarV fun) (map VarV extra_args ++ args)
+      return $ joinCallA (VarV fun) (map VarV extra_args ++ args)
 
 -- | Generate the closure-converted form of a variable reference.
 --
@@ -550,9 +573,9 @@ genIndirectCall return_types op args = do
             (do exact_call ret_vars inf_ptr
                 return cont)
             -- False: Callee is under- or over-saturated
-            (return $ ReturnE $ primCallA inexact_target []))
+            (return $ ReturnE $ joinCallA inexact_target []))
       -- False: Callee is not a function
-      (return $ ReturnE $ primCallA inexact_target [])
+      (return $ ReturnE $ joinCallA inexact_target [])
   return $ ValA (map VarV ret_vars)
   where
     return_value_types = map PrimType return_types
@@ -563,7 +586,7 @@ genIndirectCall return_types op args = do
       inexact_fun_body <- lift $ execBuild return_value_types $ do
         inexact_call ret_vars
         return cont
-      let inexact_fun = primFun [] return_value_types inexact_fun_body
+      let inexact_fun = joinFun [] return_value_types inexact_fun_body
       emitLetrec (NonRec (Def inexact_target inexact_fun))
       return (VarV inexact_target)
     

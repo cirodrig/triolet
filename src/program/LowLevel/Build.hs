@@ -116,14 +116,14 @@ emit f = tell (MkStm f)
 -- instances become temporary variables that are passed as arguments when
 -- calling the continuation.
 getContinuation :: (Monad m, Supplies m (Ident Var)) =>
-                   Bool         -- ^ Create a primitive call?
+                   Bool         -- ^ Create a join call?
                 -> [ParamVar]   -- ^ Live-out variables
                 -> (Stm -> Gen m Stm) -- ^ Code using the continuation
                 -> Gen m ()
 getContinuation primcall live_outs f = Gen $ \return_type -> do
   -- Create a call to the continuation
   cont_var <- newAnonymousVar (PrimType PointerType)
-  let convention = if primcall then PrimCall else ClosureCall
+  let convention = if primcall then JoinCall else ClosureCall
   let cont_call =
         ReturnE $ CallA convention (VarV cont_var) (map VarV live_outs)
       
@@ -215,7 +215,7 @@ emitLetrec defs = emit $ LetrecE defs
 emitLambda :: (Monad m, Supplies m (Ident Var)) => Fun -> Gen m Var
 emitLambda f = do
   let f_type = case funConvention f
-               of PrimCall -> PrimType PointerType
+               of JoinCall -> PrimType PointerType
                   ClosureCall -> PrimType OwnedType
   v <- newAnonymousVar f_type
   emit $ LetrecE (NonRec (Def v f))

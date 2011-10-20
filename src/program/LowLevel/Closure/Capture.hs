@@ -233,9 +233,18 @@ isContinuation v = Scan $ \i ->
 --   between the definition of @f@ and the use of @f@.  If @f@ is in a
 --   recursive group,
 --   the context includes the definition of @f@.
-enterGroup :: Scan a -> Scan a
+enterGroup :: ScanExp -> ScanExp
 enterGroup (Scan f) =
-  Scan $ \i -> do f (pushContext i)
+  Scan $ \i -> do
+    -- Scan the local functions
+    ScanResult (fv, inherited) global_constraints <- f (pushContext i)
+
+    -- If a variable is defined in this function, we can't inherit it as
+    -- a free variable from a subfunction.
+    let inherited' =
+          case inherited
+          of FreeInherit m -> FreeInherit $ Map.map (scanLocals i ++) m
+    return $ ScanResult (fv, inherited') global_constraints
 
 -- | Enter a context in which variables defined by a definition group are 
 --   in scope.
@@ -368,7 +377,7 @@ generateConstraint fun_name free inherits = do
   rconts <- getRConts
   let (free_k, inherits_k) =
         case LocalCPS.lookupCont fun_name rconts
-        of Just (LocalCPS.RCont k) ->
+        of Just (LocalCPS.RCont k _) ->
              (Set.insert k free,
               inherits `captInheritUnion` FreeInherit (Map.singleton k []))
            _ -> (free, inherits)
@@ -422,6 +431,7 @@ scanTopLevelDef rconts globals conts (Def v f) = do
     runScan (scanDef (Def v f)) initial_context
 
   unless (Set.null free) $
+    traceShow free $
     internalError "scanTopLevelDef: Top-level function has free variables"
 
   unless (Map.null (case inherits of FreeInherit m -> m)) $

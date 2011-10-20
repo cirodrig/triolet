@@ -159,6 +159,7 @@ Executable pyon
     LowLevel.CSE
     LowLevel.InitializeBuiltins
     LowLevel.Inlining
+    LowLevel.Inlining2
     LowLevel.InterfaceFile
     LowLevel.Build
     LowLevel.Closure.CCInfo
@@ -178,7 +179,7 @@ Executable pyon
     LowLevel.GenerateCXXHeader
     LowLevel.GenerateCUtils
     LowLevel.Intrinsics
-    LowLevel.LambdaConvert
+    LowLevel.JoinPoints
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record

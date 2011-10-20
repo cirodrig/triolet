@@ -122,9 +122,12 @@ withLocalFunctions local_fs m = GenC $ \env st ->
                      foldr (uncurry Map.insert) (localFunctions env) local_fs}
   in runGenC m env' st      
 
-lookupLocalFunction :: Var -> GenC (Maybe LocalFunction)
+lookupLocalFunction :: Var -> GenC LocalFunction
 lookupLocalFunction v = GenC $ \env st ->
-  return (Map.lookup v (localFunctions env), st)
+  case Map.lookup v (localFunctions env)
+  of Just f  -> return (f, st)
+     Nothing -> internalError $
+                "lookupLocalFunction: Cannot find function '" ++ show v ++ "'"
 
 -- | Get the name of the structure type used to encode the given sequence 
 --   of values.  An existing structure is returned if found, otherwise a
@@ -344,14 +347,17 @@ genAtom returns atom =
        return (code, True)
 
      CallA PrimCall op args -> do
-       call <- genCall (returnTypes returns) op args
-       case call of
-         Left items -> return (items, False)
-         Right call -> do result <- genOneResult returns call
-                          return (result, True)
+       call <- genPrimCall (returnTypes returns) op args
+       result <- genOneResult returns call
+       return (result, True)
+
+     CallA JoinCall (VarV op) args -> do
+       items <- genJoinCall (returnTypes returns) op args
+       return (items, False)
+
      PrimA op args -> do
        args' <- genVals args
-       result <- genOneResult returns $ genPrimCall op args'
+       result <- genOneResult returns $ genPrimOp op args'
        return (result, True)
 
      UnpackA _ arg -> do
@@ -359,54 +365,51 @@ genAtom returns atom =
        return (result, True)
      _ -> internalError "genAtom: Unexpected atom"
 
--- | Create a function call expression.  The call is either generated as a
--- sequence of assignments followed by a @goto@ or a C function call.
-genCall :: [ValueType] 
-        -> Val 
-        -> [Val] 
-        -> GenC (Either [CBlockItem] CExpr)
-genCall return_types op args =
-  -- If calling a local function, generate a goto call
-  case op
-  of VarV v -> do
-       lfun <- lookupLocalFunction v
-       case lfun of
-         Nothing -> fmap Right gen_c_call
-         Just f  -> fmap Left $ gen_goto_call f
-     _ -> fmap Right gen_c_call
-  where
-    gen_goto_call lfun = do
-      -- Generate a local function "call".  Jump to the function. 
-      -- Assign parameter variables
-      args' <- genVals args
-      let assignments = zipWith make_assignment (lfunParamVars lfun) args'
-            where
-              make_assignment ident expr =
-                cExprStat $ cAssign (cVar ident) expr
+-- | Create a join call.  The call is generated as a
+-- sequence of assignments followed by a @goto@.
+genJoinCall :: [ValueType] 
+            -> Var
+            -> [Val]
+            -> GenC [CBlockItem]
+genJoinCall return_types op args = do
+  lfun <- lookupLocalFunction op
 
-          statements = map CBlockStmt $
-                       assignments ++ [cGoto $ lfunLabel lfun]
-      return statements
+  -- Generate a local function "call".  Jump to the function.
+  -- Assign parameter variables.
+  args' <- genVals args
+  let assignments = zipWith make_assignment (lfunParamVars lfun) args'
+        where
+          make_assignment ident expr =
+            cExprStat $ cAssign (cVar ident) expr
 
-    gen_c_call = do
-      -- Generate an ordinary function call.
-      op' <- genVal op
-      args' <- genVals args
+      statements = map CBlockStmt $
+                   assignments ++ [cGoto $ lfunLabel lfun]
+  return statements
+
+-- | Create a function call expression.  The call is generated as a
+--   C function call.
+genPrimCall :: [ValueType] 
+            -> Val 
+            -> [Val] 
+            -> GenC CExpr
+genPrimCall return_types op args = do
+  op' <- genVal op
+  args' <- genVals args
       
-      -- Create the actual function type
-      return_type <- returnTypeDecl $ map valueToPrimType return_types
+  -- Create the actual function type
+  return_type <- returnTypeDecl $ map valueToPrimType return_types
 
-      let param_types =
-            map (anonymousDecl . primTypeDeclSpecs . valPrimType) args
-          fn_type =
-            ptrDeclSpecs $ funDeclSpecs param_types return_type
+  let param_types =
+        map (anonymousDecl . primTypeDeclSpecs . valPrimType) args
+      fn_type =
+        ptrDeclSpecs $ funDeclSpecs param_types return_type
 
-          -- Cast operator to function pointer type
-          cast = CCast (anonymousDecl fn_type) op' internalNode
-      return $ cCall cast args'
+      -- Cast operator to function pointer type
+      cast = CCast (anonymousDecl fn_type) op' internalNode
+  return $ cCall cast args'
 
-genPrimCall :: Prim -> [CExpr] -> CExpr
-genPrimCall prim args =
+genPrimOp :: Prim -> [CExpr] -> CExpr
+genPrimOp prim args =
   case prim
   of PrimCastZ from_sgn to_sgn sz ->
        case args of [arg] -> cCast (IntType to_sgn sz) arg
@@ -549,7 +552,7 @@ genPrimCall prim args =
     equals x y = binary' CEqOp x y
     binary' op x y = cBinary op x y
     binary op [x, y] = binary' op x y
-    binary op _ = internalError "genPrimCall: Wrong number of arguments"
+    binary op _ = internalError "genPrimOp: Wrong number of arguments"
     
     float_modulus [x, y] =
       -- x mod y = x - y * floor(x / y)
@@ -709,8 +712,14 @@ genLocalFunctions returns fs m = do
 -- assigned if the function falls through.
 genLocalFunction :: ReturnValues -> FunDef -> GenC LocalFunction
 genLocalFunction returns (Def v f)
-  | not (isPrimFun f) =
-      internalError "genLocalFunction: Not a primitive-call function"
+  | not (isJoinFun f) =
+      internalError "genLocalFunction: Not a join point"
+  | funUses f == ZeroUses =
+      -- A local function with zero uses represents unreachable code. 
+      -- This situation is an error because the function may have unexpected
+      -- behavior, such as a return type that's not consistent with the
+      -- enclosing function's return type.
+      internalError "genLocalFunction: Unreachable code"
   | otherwise = do
       let fun_name = localVarIdent v
       param_decls <- mapM declareUndefLocalVariable $ funParams f

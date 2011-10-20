@@ -13,6 +13,7 @@ module LowLevel.CodeTypes
         CallConvention(..),
         FunctionType,
         primFunctionType,
+        joinFunctionType,
         closureFunctionType,
         mkFunctionType,
         ftIsPrim,
@@ -52,12 +53,22 @@ valueToFieldType (RecordType rt) = RecordField rt
 
 -- | A function calling convention
 data CallConvention =
-    PrimCall                    -- ^ Primitive calling convention.
-                                --   Compiles to a machine function call.
-  | ClosureCall                 -- ^ Closure-based calling convention.
-                                --   Compiles to constructing and entering
-                                --   a closure.
-    deriving(Eq, Enum, Bounded)
+    -- | Primitive calling conventions using the C ABI.
+    --   Primitive calls are compiled to machine-level function calls.
+    --   Functions that use this convention must be global.
+    PrimCall
+    -- | Closure-based calling convention.  A call becomes constructing and
+    --   entering a closure.  Closure functions may be applied to fewer or  
+    --   more arguments than they expect.  Closure functions may be global or
+    --   local.  This convention is not used after closure conversion.
+  | ClosureCall
+    -- | Control flow join points.  Join points must local functions, and
+    --   calls to join points must be tail calls.
+    --   A call compiles to an unconditional branch.
+    --   A join point must be defined in the same function where it is
+    --   used or in a join point of the function where it is used.
+  | JoinCall
+  deriving(Eq, Enum, Bounded)
 
 -- | A primitive or closure function type.
 data FunctionType =
@@ -69,6 +80,9 @@ primFunctionType params returns = FunctionType PrimCall params returns
 
 closureFunctionType :: [ValueType] -> [ValueType] -> FunctionType
 closureFunctionType params returns = FunctionType ClosureCall params returns
+
+joinFunctionType :: [ValueType] -> [ValueType] -> FunctionType
+joinFunctionType params returns = FunctionType JoinCall params returns
 
 mkFunctionType :: CallConvention -> [ValueType] -> [ValueType] -> FunctionType
 mkFunctionType = FunctionType

@@ -20,6 +20,7 @@ import qualified Data.Graph.Inductive as Graph
 import qualified Data.Graph.Inductive.Query.DFS as Graph
 import qualified Data.HashTable as HashTable
 import qualified Data.IntMap as IntMap
+import qualified Data.IntSet as IntSet
 import Data.Traversable
 import Data.IORef
 import Data.List
@@ -70,21 +71,21 @@ type CoContMap = Map.Map Var Var
 --
 --   The tuple members are:
 --
---   1. The set of continuations in the program and their parameter variables.
+--   1. The set of continuation labels in the program, including labels that
+--      won't become functions.
 --   2. A map from continuation to its first caller.
 --   3. A map from caller to continuation.  For each continuation, only the 
 --      first caller is in the map.
---   4. The set of local variables in scope at each definition group.
-mkContMap :: LocalCPS.RConts -> LFunDef -> (ContMap, CoContMap)
+mkContMap :: LocalCPS.RConts -> LFunDef -> (Set.Set Var, ContMap, CoContMap)
 mkContMap rconts def = let
   -- Construct a map from continuation to caller
-  conts_set = Set.fromList [k | LocalCPS.RCont k <- IntMap.elems rconts]
+  conts_set = Set.fromList [k | LocalCPS.RCont k _ <- IntMap.elems rconts]
   caller_map = findOutermostCallerDef rconts conts_set def
 
   -- Reverse the map, producing a map from caller to continuation
   cont_map = Map.fromList [(caller, cont)
                           | (cont, caller) <- Map.toList caller_map]
-  in (cont_map, caller_map)
+  in (conts_set, cont_map, caller_map)
 
 -- | For each continuation called in this function definition, find
 --   the lexically outermost caller.
@@ -94,6 +95,16 @@ mkContMap rconts def = let
 findOutermostCallerDef :: LocalCPS.RConts -> Set.Set Var -> LFunDef
                        -> ContMap
 findOutermostCallerDef rconts conts_set (Def v f) =
+  -- Get the continuation that was computed for this function
+  (let current_cont =
+        case LocalCPS.lookupCont v rconts
+        of Just c -> c
+           Nothing -> internalError $ "No continuation for " ++ show v
+  in -- Determine whether an explicit continuation call will be
+     -- inserted here 
+     case current_cont
+     of LocalCPS.RCont cont _ -> Map.singleton cont v
+        _   -> mempty) `mappend`
   findOutermostCallerFun rconts conts_set v f
 
 findOutermostCallerFun rconts conts_set v f = 
@@ -133,16 +144,17 @@ findOutermostCaller rconts conts_set current_fun stm =
        mconcat $ map (continue . snd) alts
 
      ReturnLCPS atom ->
-       -- If this function has a continuation, it will be called here
+       -- Get the continuation that was computed for this function
        let current_cont =
              case LocalCPS.lookupCont current_fun rconts
              of Just c -> c
-                Nothing -> internalError $ "No continuation for " ++ show current_fun
-       in case LocalCPS.needsContinuationCall rconts current_cont atom
-          of Just current_cont ->
-               Map.singleton current_cont current_fun
-             Nothing ->
-               mempty
+                Nothing -> internalError $
+                           "No continuation for " ++ show current_fun
+       in -- Determine whether an explicit continuation call will be
+          -- inserted here 
+          case LocalCPS.needsContinuationCall rconts current_cont atom
+          of Just cont -> Map.singleton cont current_fun
+             Nothing   -> mempty
 
      ThrowLCPS exc ->
        mempty
@@ -152,149 +164,208 @@ findOutermostCaller rconts conts_set current_fun stm =
     continue stm =
       findOutermostCaller rconts conts_set current_fun stm
 
+
 -------------------------------------------------------------------------------
--- Computation of in-scope variables
 
--- | Compute the set of variables that is in scope at the definition of each
---   local function or procedure /after/ closure conversion.
+-- | A mapping that associates function IDs with the definition groups where
+--   the functions belong.  All functions that should be relocated are
+--   in the mapping.
+type MovedFunctions = IntMap.IntMap (Ident GroupLabel)
+
+-- | Group together all functions that have the same continution.
 --
---   The in-scope set is mostly the same before closure conversion as
---   after closure conversion.  Variable capture, by itself, does not
---   change the in-scope set.  However, continuations are moved to a
---   new location in the source code.  This changes the in-scope set
---   at the point where the continuation is defined.  It does not
---   change the in-scope set in the body of the continuation.  This also
---   puts the continuation into the scope of other variables. 
-mkInScopeSet :: ContMap -> LFunDef -> LocalsAtGroup
-mkInScopeSet cont_map def =
-  let local_list = mkInScopeSetFun cont_map [] (definiens def)
-  in IntMap.fromList local_list
+--   The return value is a map from function ID to the definition group ID
+--   that the function should be moved to.
+unifyRConts :: LocalCPS.RConts  -- ^ Continuations of each function
+            -> Set.Set Var      -- ^ Hoisted functions
+            -> CoContMap        -- ^ Lexically first caller of each continuation
+            -> (Var -> Maybe (Ident GroupLabel))
+               -- ^ ID of group containing each function
+            -> MovedFunctions
+unifyRConts rconts hoisted_set caller_map lookup_group = let
+  -- Map each continuation function ID to all functions that transitively
+  -- tail-call the continuation
+  tail_callers_of_continuation :: IntMap.IntMap [Int]
+  tail_callers_of_continuation =
+    IntMap.mapWithKey insert_self $
+    foldl' insert_cont IntMap.empty $ IntMap.toList rconts
 
-mkInScopeSetFun cont_map locals f =
-  mkInScopeSetStm cont_map (funParams f ++ locals) (funBody f)
+  in IntMap.fromList [ (f_id, cont_group_id)
+                     | (cont_id, f_ids) <-
+                          IntMap.toList tail_callers_of_continuation
 
-mkInScopeSetStm cont_map locals stm =
-  case stm
-  of LetLCPS params rhs label body -> continue params body
-     LetrecLCPS defs group_id body ->
-       let definienda = map definiendum $ groupMembers defs
-
-           -- Find the continuations that will be moved to this group
-           continuations_here =
-             nub $ catMaybes [Map.lookup v cont_map | v <- definienda]
-           
-           -- Add letrec-bound functions to the in-scope set.
-           -- Continuations are always added to the scope.
-           -- (A nonrecursive let will be converted to a recursive one if
-           -- necessary so that the scoping rules work).
-           locals' = case defs
-                     of NonRec _ -> continuations_here ++ locals
-                        Rec _    -> continuations_here ++ definienda ++ locals
-
-           -- Record these definitions
-           local_defs = (fromIdent group_id, locals')
-
-           -- Continue processing local functions and body
-           defs_result =
-             concat [mkInScopeSetFun cont_map locals' (definiens d)
-                    | d <- groupMembers defs]
-           
-           body_result = continue (continuations_here ++ definienda) body
-       in local_defs : defs_result ++ body_result
-
-     SwitchLCPS cond alts ->
-       concat [continue [] s | (_, s) <- alts]
-
-     ReturnLCPS atom -> []
-
-     ThrowLCPS exc -> []
+                       -- Look up the destination group ID.
+                       -- Find the first function that calls the continuation, 
+                       -- then find it's group.
+                     , let cont_group_id =
+                             case IntMap.lookup cont_id caller_int_map
+                             of Just first_caller ->
+                                  case lookup_group first_caller 
+                                  of Just gid -> gid
+                                     Nothing -> internalError "unifyRConts"
+                                Nothing -> internalError "unifyRConts"
+                     , f_id <- f_ids]
   where
-    continue new_locals stm =
-      mkInScopeSetStm cont_map (new_locals ++ locals) stm
+    -- A continuation should appear in the same list as its callers
+    insert_self k v | k `elem` v = v
+                    | otherwise = k : v
 
--------------------------------------------------------------------------------
+    -- Insert a (function ID, continuation) association into the unified
+    -- continuation table.
+    insert_cont m (f_id, LocalCPS.RCont k _) =
+      insert_cont' f_id (fromIdent $ varID k) m
+    
+    insert_cont m _ = m
+    
+    insert_cont' f_id k_id m
+      | Just (LocalCPS.RCont k' _) <- IntMap.lookup k_id rconts =
+          insert_cont' f_id (fromIdent $ varID k') m
+      | otherwise =
+          IntMap.insertWith (++) k_id [f_id] m
 
--- | Convert all continuations to local functions in a function definition.
+    is_unhoisted f_id = not $ IntSet.member f_id hoisted
+
+    hoisted =
+      IntSet.fromList $ map (fromIdent . varID) $ Set.toList hoisted_set
+
+    caller_int_map = IntMap.fromList [ (fromIdent $ varID f, g)
+                                     | (f, g) <- Map.toList caller_map]
+
+-- | Move un-hoisted functions to different definition groups.  Turn
+--   continuations into functions.  Insert tail calls to continuations.
 --
---   This allows closure conversion to hoist and insert captured variable
---   parameters.
-reifyContinuations :: IdentSupply Var -> LocalCPS.RConts -> ContMap -> LFunDef
-                   -> IO FunDef
-reifyContinuations var_ids rconts cont_map ann_def = do
-  (cont_funs, def1) <- extractContinuations var_ids rconts ann_def
+--   Functions that aren't hoisted and that share the same continuation 
+--   are moved to the lexically first definition group where any such function
+--   is defined.  Moving code this way ensures that the region of code
+--   where the function is in scope can only become bigger, and furthermore,
+--   if any tail-calls are inserted by the transformation, the callee is in
+--   scope where it is called.
+--
+--   After moving code, functions may refer to variables that are not
+--   in scope at the definition site.  That is fixed later.
+moveFunctions :: IdentSupply Var
+              -> LocalCPS.RConts
+              -> MovedFunctions
+                 -- ^ The set of functions and continuations that should be
+                 --   moved, and their destination groups
+              -> ContMap
+              -> LFunDef
+              -> IO FunDef
+moveFunctions var_ids rconts moved_functions cont_map ann_def = do
+  (extracted_funs, def1) <- extractFunctions var_ids rconts moved_functions ann_def
+  
+  return $ insertFunctions moved_functions extracted_funs def1
 
-  return $ insertContinuations cont_map cont_funs def1
+data MFContext =
+  MFContext
+  { -- | Return continuations of each function and continuation.
+    --   The return continuation is looked up to decide where to insert
+    --   explicit calls to continuations.
+    mfRConts     :: !LocalCPS.RConts
 
-data ECContext =
-  ECContext
-  { ecRConts     :: LocalCPS.RConts
-  , ecCurrentFun :: Var
-  , ecRType      :: [ValueType]
-  , ecIdentSupply :: {-# UNPACK #-}!(IdentSupply Var)
+    -- | Moved functions.  Definitions of moved functions are extracted
+    --   from the code and returned in a list.
+  , mfMoved      :: !MovedFunctions
+
+    -- | The function containing the current statement 
+  , mfCurrentFun :: Var
+
+    -- | Return type of the function containing the current statement before
+    --   CPS conversion.
+  , mfRType      :: [ValueType]
+
+    -- | CPS-transformed return type of the function containing
+    --   the current statement.  This is either the function's original
+    --   return type, or its continuation's return type.
+  , mfContType    :: [ValueType]
+  , mfIdentSupply :: {-# UNPACK #-}!(IdentSupply Var)
   }
 
--- | Extract continuations from the code.
+-- | Get the CPS-transformed function's return type.
+--   If the function has a continuation, it's the continuation's return type. 
+--   Otherwise, it's the function's original return type.
+--   If the function
+cpsReturnType :: LFunDef -> LocalCPS.RConts -> [ValueType]
+cpsReturnType (Def v f) rconts =
+  lookup_cps_return_type v $ funReturnTypes f
+  where
+    -- Look up the CPS-transformed function's return type.
+    -- If the function has a continuation, take the continuation's return type.
+    lookup_cps_return_type fun_name fun_return_type =
+      case IntMap.lookup (fromIdent $ varID fun_name) rconts
+      of Just (LocalCPS.RCont cont_fun rtypes) ->
+           -- Look up the continuation's return type
+           lookup_cps_return_type cont_fun rtypes
+         _ -> fun_return_type
+
+-- | Extract functions from the code.
 --
 --   A function definition is created for each continuation, and the
 --   original continuation is removed from the code.  Tail-calls to
---   continuations are inserted.
---
---   The first return value in the returned tuple is a mapping from
---   each continuation to its syntactically first caller.  Because the
---   continuation is a continuation, the first caller dominates all
---   other callers.
---
---   The other return values are the continuation functions, and the
---   modified top-level function definition.
-extractContinuations :: IdentSupply Var -> LocalCPS.RConts -> LFunDef
-                     -> IO ([FunDef], FunDef)
-extractContinuations supply rconts def = do
-  let no_fun = internalError "extractContinuations: No function" 
-      no_rettype = internalError "extractContinuations: No return type"
+--   continuations are inserted.  In functions where tail-calls are inserted,
+--   return types are changed.
+extractFunctions :: IdentSupply Var
+                 -> LocalCPS.RConts
+                 -> MovedFunctions
+                 -> LFunDef
+                 -> IO ([(Ident GroupLabel, LFunDef)], LFunDef)
+extractFunctions supply rconts moved def = do
+  let no_fun = internalError "extractFunctions: No function" 
+      no_rettype = internalError "extractFunctions: No return type"
+      context = MFContext rconts moved no_fun no_rettype no_rettype supply
   (def', (), cont_funs) <-
-    runRWST (extractContinuationsDef def) (ECContext rconts no_fun no_rettype supply) ()
+    runRWST (extractFunctionsDef def) context ()
   return (cont_funs, def')
 
-extractContinuationsDef (Def v f) =
-  local (\ctx -> ctx {ecRType = funReturnTypes f, ecCurrentFun = v}) $ do
-    body' <- extractContinuationsStm (funBody f)
+extractFunctionsDef def@(Def v f) = do
+  -- Compute this function's new return type
+  rconts <- asks mfRConts
+  let new_rtype = cpsReturnType def rconts
+  let new_ctx ctx = ctx { mfRType = funReturnTypes f
+                        , mfContType = new_rtype
+                        , mfCurrentFun = v}
+  local new_ctx $ do
+    body' <- extractFunctionsStm (funBody f)
     let f' = mkFun (funConvention f) (funInlineRequest f) (funFrameSize f)
-             (funParams f) (funReturnTypes f) body'
+             (funParams f) new_rtype body'
     return $ Def v f'
 
-extractContinuationsStm stm =
+extractFunctionsStm stm =
   case stm
   of LetLCPS params rhs label body -> do
-       rconts <- asks ecRConts
-       let is_cont = LocalCPS.RCont label `elem` IntMap.elems rconts
-       if is_cont
-         then do
+       moved <- asks mfMoved
+       case IntMap.lookup (fromIdent $ varID label) moved of
+         Just destination_group -> do
            -- Create continuation function
-           rtype <- asks ecRType
+           rtype <- asks mfRType
            let fun = mkFun ClosureCall False 0 params rtype body
-           cont_def <- extractContinuationsDef (Def label fun)
-           tell [cont_def]
+           cont_def <- extractFunctionsDef (Def label fun)
+           tell [(destination_group, cont_def)]
 
            -- The RHS becomes a tail expression
-           return $ ReturnE rhs
-         else do
-           body' <- extractContinuationsStm body
-           return $ LetE params rhs body'
+           return $ ReturnLCPS rhs
+         Nothing -> do
+           body' <- extractFunctionsStm body
+           return $ LetLCPS params rhs label body'
 
      LetrecLCPS defs group_id body -> do
-       defs' <- mapM extractContinuationsDef defs
-       body' <- extractContinuationsStm body
-       return $ LetrecE defs' body'
+       moved <- asks mfMoved
+       defs' <- mapM extractFunctionsDef $ groupMembers defs
+       let (defs_moved, defs_here) = partition_moved moved defs'
+       tell defs_moved
+       body' <- extractFunctionsStm body
+       return $ LetrecLCPS (Rec defs_here) group_id body'
      
      SwitchLCPS cond alts -> do
        alts' <- mapM do_alt alts
-       return $ SwitchE cond alts'
+       return $ SwitchLCPS cond alts'
      
      ReturnLCPS atom -> do
        context <- ask
-       let rconts = ecRConts context
-           current_fun = ecCurrentFun context
-           rtype = ecRType context
+       let moved = mfMoved context
+           rconts = mfRConts context
+           current_fun = mfCurrentFun context
+           rtype = mfRType context
        let current_cont =
              case LocalCPS.lookupCont current_fun rconts
              of Just c -> c
@@ -302,67 +373,82 @@ extractContinuationsStm stm =
        case LocalCPS.needsContinuationCall rconts current_cont atom of
          Just current_cont -> do
            -- This function has a continuation call.
-           -- Bind the atom's results to temporary variables, and
-           -- create a continuation call.
-           tmpvars <- mapM newAnonymousVar_ec rtype
-           return $ LetE tmpvars atom $
-             ReturnE (CallA ClosureCall (VarV current_cont) (map VarV tmpvars))
+           -- What used to be the function's return values becomes bound to
+           -- temporary variables, then passed to the continuation call.
+           tmpvars <- mapM newAnonymousVar_mf rtype
+
+           -- Use an arbitrary variable as the label; its value is ignored
+           return $ LetLCPS tmpvars atom current_cont $
+             ReturnLCPS (CallA ClosureCall (VarV current_cont) (map VarV tmpvars))
          Nothing ->
-           return $ ReturnE atom
+           return $ ReturnLCPS atom
      ThrowLCPS exc ->
-       return $ ThrowE exc
+       return $ ThrowLCPS exc
   where
-    do_alt (tag, s) = liftM ((,) tag) $ extractContinuationsStm s
+    do_alt (tag, s) = liftM ((,) tag) $ extractFunctionsStm s
     
-    newAnonymousVar_ec t = do
-      id_supply <- asks ecIdentSupply
+    -- Partition a set of function definitions into those that are moved 
+    -- and those that are left in place.
+    partition_moved :: MovedFunctions
+                    -> [LFunDef]
+                    -> ([(Ident GroupLabel, LFunDef)], [LFunDef])
+    partition_moved moved defs = go id id defs
+      where
+        go moved_defs unmoved_defs (def:defs) =
+          case IntMap.lookup (fromIdent $ varID $ definiendum def) moved
+          of Nothing  -> go moved_defs (unmoved_defs . (def:)) defs
+             Just gid -> go (moved_defs . ((gid, def):)) unmoved_defs defs
+
+        go moved_defs unmoved_defs [] = (moved_defs [], unmoved_defs [])
+
+    newAnonymousVar_mf t = do
+      id_supply <- asks mfIdentSupply
       lift $ runFreshVarM id_supply $ newAnonymousVar t
 
--- | Insert the continuation function definitions into the code.
-insertContinuations :: Map.Map Var Var
-                       -- ^ Map from function to its continuation
-                    -> [FunDef] -- ^ Continuation function definitions
-                    -> FunDef   -- ^ Top-level function definition
-                    -> FunDef
-insertContinuations cont_map cont_funs def =
-  runReader (insertContinuationsDef def) (cont_map, cont_funs)
+-- | Insert the extracted function definitions into the code.
+insertFunctions :: MovedFunctions
+                   -- ^ Map from function to its continuation
+                -> [(Ident GroupLabel, LFunDef)]
+                   -- ^ Continuation function definitions
+                -> LFunDef   -- ^ Top-level function definition
+                -> FunDef
+insertFunctions moved_functions funs def =
+  let fun_map = foldl' insert_def Map.empty funs
+        where
+          insert_def m (grp, f) = Map.insertWith (++) grp [f] m
+  in runReader (insertFunctionsDef def) (moved_functions, fun_map)
 
-insertContinuationsDef (Def v f) = do
-  body <- insertContinuationsStm $ funBody f
+insertFunctionsDef (Def v f) = do
+  body <- insertFunctionsStm $ funBody f
   return $ Def v (f {funBody = body})
 
-insertContinuationsStm stm =
+insertFunctionsStm stm =
   case stm
-  of LetE params rhs body ->
-       LetE params rhs <$> insertContinuationsStm body
-     LetrecE defs body -> do
+  of LetLCPS params rhs _ body ->
+       LetE params rhs <$> insertFunctionsStm body
+     LetrecLCPS defs group_id body -> do
        -- Add continuations to this definition group
-       (cont_map, cont_funs) <- ask
-       let definienda = map definiendum $ groupMembers defs
-           continuations_here = nub $ mapMaybe lookup_cont definienda
-             where
-               lookup_cont v = Map.lookup v cont_map
-           continuation_defs = map lookup_def continuations_here
-             where
-               lookup_def v =
-                 case find ((v ==) . definiendum) cont_funs 
-                 of Just d -> d
-                    Nothing -> internalError "insertContinuations: Not found"
+       (_, fun_map) <- ask
+       let functions_here = fromMaybe [] $ Map.lookup group_id fun_map
+       let defs' = functions_here ++ groupMembers defs
 
-           defs' =
-             if null continuation_defs
-             then defs
-             else Rec (continuation_defs ++ groupMembers defs)
-         in LetrecE <$>
-            mapM insertContinuationsDef defs' <*>
-            insertContinuationsStm body
-     SwitchE cond alts ->
+       -- Recurse on the bodies of these function definitions
+       finished_defs <- mapM insertFunctionsDef defs'
+
+       finished_body <- insertFunctionsStm body
+
+       -- If the transformation has removed all local function definitions,
+       -- then eliminate this 'Letrec' term
+       if null finished_defs
+         then return finished_body
+         else return $ LetrecE (Rec finished_defs) finished_body
+     SwitchLCPS cond alts ->
        SwitchE cond <$> mapM do_alt alts
-     ReturnE _ -> pure stm
-     ThrowE _ -> pure stm
+     ReturnLCPS atom -> pure (ReturnE atom)
+     ThrowLCPS val -> pure (ThrowE val)
      where
        do_alt (tag, s) = do
-         s' <- insertContinuationsStm s
+         s' <- insertFunctionsStm s
          return (tag, s')
 
 -------------------------------------------------------------------------------
@@ -411,52 +497,53 @@ findFunctionsToHoist var_ids global_vars def = do
 
   -- Compute continuations
   let rconts = LocalCPS.identifyLocalContinuations ann_def
-      conts_set = Set.fromList [v | LocalCPS.RCont v <- IntMap.elems rconts]
 
   -- Find the first caller of each continuation
-  let (cont_map, caller_map) =
+  let (conts_set, cont_map, caller_map) =
         mkContMap rconts ann_def
 
-  -- Find the set of variables that will be in scope at each definition group
-  -- after closure converison
-  let locals_in_scope =
-        mkInScopeSet cont_map ann_def 
-  
   when debug $ do
     putStrLn "Computing hoisting and variable capture for closure conversion"
     print $ pprLFunDef ann_def
     print $ text "Continuations:" <+>
       fsep [parens $ int f <+> text "|->" <+> text (show k)
            | (f, k) <- IntMap.toList rconts]
-    print $ text "Locals:" <+> vcat [int g <+> text "|->" <+> text (show l) 
-                                    | (g, l) <- IntMap.toList locals_in_scope]
+    print $ text "Callers:" <+>
+      fsep [parens $ text (show f) <+> text "called by" <+> text (show k)
+           | (f, k) <- Map.toList caller_map]
 
   -- Compute hoisting
-  (hoisted_groups, fun_to_group) <- findHoistedGroups ann_def rconts
+  (hoisted_set, fun_to_group) <- findHoistedGroups ann_def rconts
 
   -- Compute free variables
   captures <- findCapturedVariables rconts global_vars conts_set ann_def
   
   -- Debugging
   when debug $ do
-    putStrLn $ "Hoisted set: " ++ show hoisted_groups
-    putStrLn "Captured variables:"
+    putStrLn $ "Hoisted set: " ++ show hoisted_set
+    putStrLn "Free variables:"
     print captures
-
-  -- Reify continuations and remove annotations
-  cont_def <- reifyContinuations var_ids rconts cont_map ann_def
+  
+  -- Move function definitions so that all functions having the same
+  -- continuation are in the same definition group
+  let moved_functions = unifyRConts rconts hoisted_set caller_map fun_to_group
+  cont_def <- moveFunctions var_ids rconts moved_functions cont_map ann_def
 
   -- Construct closure conversion info
   let lookup_function f =
         FunAnalysisResults
-        { funHoisted  = f `Set.member` hoisted_groups
-        , funGroup    = fun_to_group f
+        { funHoisted  = f `Set.member` hoisted_set
         , funCaptured = fromMaybe Set.empty $ Map.lookup f captures
         }
-  cc_info <- runFreshVarM var_ids $ stmCCInfo lookup_function locals_in_scope (funBody $ definiens $ cont_def)
-  
+  cc_info <- runFreshVarM var_ids $
+             stmCCInfo lookup_function Set.empty (funBody $ definiens $ cont_def)
+
   when debug $ do
     putStrLn "Results of analysis:"
-    print $ vcat[hang (pprVar v) 2 (pprCCInfo cc_info) | (v, cc_info) <- cc_info]
+    print $ vcat[hang (pprVar v) 2 (pprCCInfo cc) | (v, cc) <- cc_info]
+    putStrLn "Unified RConts"
+    print moved_functions
+    putStrLn "Moved"
+    print $ pprFunDef cont_def
 
   return (cont_def, Map.fromList cc_info)

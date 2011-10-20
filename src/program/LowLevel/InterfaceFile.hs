@@ -65,12 +65,15 @@ renamePreImport rn (Def v pi) = do
 mkImport :: PreImport -> FreshVarM Import
 mkImport pre_import = label `seq` -- Verify that label is valid
   case definiens pre_import
-  of PreImportFun ft mfun
-       | ftIsPrim ft ->
-           return $ ImportPrimFun import_var ft mfun
-       | ftIsClosure ft -> do
-           ep <- mkGlobalEntryPoints ft label import_var
-           return $ ImportClosureFun ep mfun
+  of PreImportFun ft mfun ->
+       case ftConvention ft
+       of PrimCall ->
+            return $ ImportPrimFun import_var ft mfun
+          ClosureCall -> do
+            ep <- mkGlobalEntryPoints ft label import_var
+            return $ ImportClosureFun ep mfun
+          JoinCall ->
+            internalError "Imported function is a join point"
      PreImportData sdata ->
        return $ ImportData import_var (Just sdata)
   where

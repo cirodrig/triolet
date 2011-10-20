@@ -308,9 +308,13 @@ data Atom =
     -- be an owned pointer.  The call may have a different number of arguments
     -- than the callee actually takes.
     --
-    -- If 'PrimCall', call a function directly.  The function must be a
+    -- If 'PrimCall', call a global function directly.  The function must be a
     -- non-owned pointer.  The number of arguments must match what the function
     -- expects.
+    --
+    -- If 'JoinCall', branch to a local function.  The function must be a
+    -- non-owned pointer.  The number of arguments must match what the function
+    -- expects.  The call must be in tail position.
   | CallA !CallConvention Val [Val]
     -- | Perform a primitive operation (such as 'add' or 'load').
     --   Must have exactly the right number of arguments.
@@ -327,6 +331,7 @@ data Atom =
 
 closureCallA = CallA ClosureCall
 primCallA = CallA PrimCall
+joinCallA = CallA JoinCall
 
 -- | A statement.  Statements may have side effects.
 data Stm =
@@ -365,8 +370,9 @@ data FunBase a =
 
 type Fun = FunBase Stm
 
-isPrimFun, isClosureFun :: FunBase a -> Bool
+isPrimFun, isJoinFun, isClosureFun :: FunBase a -> Bool
 isPrimFun f = funConvention f == PrimCall
+isJoinFun f = funConvention f == JoinCall
 isClosureFun f = funConvention f == ClosureCall
 
 setFunSize :: CodeSize -> FunBase a -> FunBase a
@@ -394,6 +400,10 @@ closureFun params returns body =
 primFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
 primFun params returns body =
   mkFun PrimCall False 0 params returns body
+
+joinFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
+joinFun params returns body =
+  mkFun JoinCall False 0 params returns body
 
 changeFunBody :: (a -> b) -> FunBase a -> FunBase b
 changeFunBody f (Fun cc s u inl fs p r b) = Fun cc s u inl fs p r (f b)
@@ -618,10 +628,21 @@ newExternalVar name ty = do
                , varType = ty
                }
 
+-- | Create a new variable that is identical to the given variable except that
+--   it has a different ID.
+--
+--   The variable's name is not changed.  In the case of external variables,
+--   the old and new variables cannot coexist because they have the same name.
+newClonedVar :: Supplies m (Ident Var) => Var -> m Var
+newClonedVar v = do
+  ident <- fresh
+  return $ v {varID = ident}
+
 -- | Get the type of a literal
 litType :: Lit -> PrimType
 litType UnitL = UnitType
 litType NullL = PointerType
+litType NullRefL = OwnedType
 litType (BoolL _) = BoolType
 litType (IntL sgn sz _) = IntType sgn sz
 litType (FloatL sz _) = FloatType sz

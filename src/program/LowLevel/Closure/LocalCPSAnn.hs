@@ -71,19 +71,6 @@ instance Supplies Ann (Ident Var) where
 instance Supplies Ann (Ident GroupLabel) where
   fresh = Ann $ ReaderT $ \(_, supply) -> supplyValue supply
 
--- | Is the variable the name of a let-statement continuation from inside the
---   given expression?
-containsLetContinuation :: LStm -> Var -> Bool
-stm `containsLetContinuation` search_v = search stm
-  where
-    search (LetLCPS _ _ v s) = search_v == v || search s
-    search (LetrecLCPS grp _ s) = any search_fun (groupMembers grp) || search s
-    search (SwitchLCPS _ alts) = any (search . snd) alts
-    search (ReturnLCPS _) = False
-    search (ThrowLCPS _) = False
-    
-    search_fun (Def _ f) = search $ funBody f
-
 annotateStm :: Stm -> Ann LStm
 annotateStm statement =
   case statement
@@ -161,7 +148,10 @@ pprLabeledLStm label stmt =
 --   version of 'pprFunDef'.
 pprLFunDef :: Def LFun -> Doc
 pprLFunDef (Def v f) =
-  let intro = if isPrimFun f then text "procedure" else text "function"
+  let intro = case funConvention f
+              of JoinCall -> text "label"
+                 ClosureCall -> text "function"
+                 PrimCall -> text "procedure"
       uses = case funUses f
              of ZeroUses -> text "[0]"
                 OneUse -> text "[1]"

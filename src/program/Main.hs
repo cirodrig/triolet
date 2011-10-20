@@ -47,12 +47,13 @@ import qualified LowLevel.RecordFlattening as LowLevel
 import qualified LowLevel.CSE as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.DeadCode as LowLevel
-import qualified LowLevel.LambdaConvert as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
 import qualified LowLevel.GenerateCXXHeader as LowLevel
 import qualified LowLevel.Inlining as LowLevel
+import qualified LowLevel.Inlining2
+import qualified LowLevel.JoinPoints as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
@@ -360,24 +361,18 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   putStrLn "Lowered and flattened"
   print $ LowLevel.pprModule ll_mod
   
-  -- First round of optimizations: Simplify code, and 
-  -- eliminate trivial lambda abstractions that were introduced by lowering
+  -- First round of optimizations: Simplify code
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  ll_mod <- LowLevel.inlineModule ll_mod
-  
-  -- Second round of optimization: in addition to the other steps,
-  -- convert lambdas to local functions.  This increases freedom for
-  -- optimizing partial applications whose arguments are functions.
-  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
-  ll_mod <- LowLevel.lambdaConvert ll_mod
-  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  ll_mod <- LowLevel.inlineModule ll_mod
+
+  -- Label join points, then inline
+  ll_mod <- LowLevel.convertJoinPoints ll_mod
+  ll_mod <- LowLevel.Inlining2.inlineModule ll_mod
 
   -- Additional rounds: more inlining
   ll_mod <- iterateM (LowLevel.commonSubexpressionElimination >=>
                       return . LowLevel.eliminateDeadCode >=>
-                      LowLevel.inlineModule) 4 ll_mod
+                      LowLevel.Inlining2.inlineModule) 5 ll_mod
 
   -- Cleanup
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
@@ -393,7 +388,6 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
 
   -- Closure conversion
   -- Remove any lambda values created by the last round of optimization
-  ll_mod <- LowLevel.lambdaConvert ll_mod
   putStrLn ""
   putStrLn "Before closure conversion"
   print $ LowLevel.pprModule ll_mod
@@ -402,6 +396,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   
   -- Second round of optimizations
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  -- FIXME: Why do we need to call 'eliminateDeadCode' twice to
+  -- get the job done?
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   putStrLn ""
   putStrLn "Second optimization pass"

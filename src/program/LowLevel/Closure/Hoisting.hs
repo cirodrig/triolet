@@ -33,6 +33,9 @@ import LowLevel.Types
 import LowLevel.Build
 import Globals
 
+-- | Set to 'True' to turn on debugging
+debug = False
+
 -------------------------------------------------------------------------------
 -- Constraints
 
@@ -389,10 +392,16 @@ scanTopLevelDef :: LocalCPS.RConts
                 -> LFunDef
                 -> IO (HoistCsts, Set.Set GroupID, [UnsolvedGroup])
 scanTopLevelDef rconts def = do
-  let continuations = Set.fromList [v | LocalCPS.RCont v <- IntMap.elems rconts]
+  let continuations = Set.fromList [v | LocalCPS.RCont v _ <- IntMap.elems rconts]
       initial_context = ScanInputs Map.empty Nothing rconts continuations
   ScanResult () (GlobalConstraints h_csts hoisted groups) <-
     runScan (scanFunDef def) initial_context
+
+  -- Debugging output
+  when debug $ do
+    putStrLn "Hoisting constraints:"
+    print hoisted
+    print h_csts
 
   return (h_csts, hoisted, groups)
 
@@ -538,7 +547,7 @@ stmGroupTable :: LocalCPS.RConts -> LStm -> GroupMembership
 stmGroupTable rconts stm =
   case stm
   of LetLCPS _ _ label body
-       | LocalCPS.RCont label `elem` IntMap.elems rconts ->
+       | LocalCPS.RCont label undefined `elem` IntMap.elems rconts ->
            -- This is a continuation function
            (ContID label, [label]) : stmGroupTable rconts body
        | otherwise ->
@@ -588,7 +597,7 @@ findHoistedGroups fdef rconts = do
   table <- mkGroupTable unsolved
   groups <-
     setupAndSolveHoistingConstraints h_csts unsolved initial_hoisted table
-  
+
   -- Return the hoisted functions
   return (Set.fromList $ concatMap group_members $ Set.toList groups, fun_group)
 

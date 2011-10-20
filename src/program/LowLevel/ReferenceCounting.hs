@@ -41,6 +41,9 @@ isOwnedVar v =
 -------------------------------------------------------------------------------
 -- * Conversion on expressions
 
+toPointerLit NullRefL = NullL
+toPointerLit l = l
+
 -- | Convert owned variables to pointer variables.  Leave other variables
 -- unchanged.
 toPointerVar :: Var -> Var
@@ -53,7 +56,7 @@ toPointerVal :: Val -> Val
 toPointerVal value =
   case value
   of VarV v -> VarV (toPointerVar v)
-     LitV l -> value
+     LitV l -> LitV (toPointerLit l)
      _ -> internalError "toPointerVal"
        
 
@@ -77,7 +80,7 @@ toPointerData value =
   case value
   of VarV v -> VarV (toPointerVar v)
      RecV rt vs -> RecV (toPointerRecordType rt) (map toPointerData vs)
-     LitV _ -> value
+     LitV l -> LitV (toPointerLit l)
      _ -> internalError "toPointerData"
 
 toPointerDataList :: [Val] -> [Val]

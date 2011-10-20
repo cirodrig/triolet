@@ -92,11 +92,11 @@ data CCInfo =
     { _cType :: FunctionType
     }
     -- | A local function that must be direct tail-called.
-    --   The function may have originally been a closure-call or prim-call
+    --   The function may have originally been a closure-call or join-call
     --   function.
     --
     --   The closure-converted entry point is saved here.  If it was
-    --   originally a prim-call function, it's the same as the original entry 
+    --   originally a join-call function, it's the same as the original entry 
     --   point; otherwise it's a new variable. 
     --   Creating a new variable is necessary because the variable's type
     --   changed in the conversion process.
@@ -117,7 +117,7 @@ pprCCInfo (GlobalPrim {}) =
   text "GlobalPrim"
 
 pprCCInfo (LocalPrim {_cCallCaptured = call}) =
-  hang (text "LocalClosure") 4 (text $ show call)
+  hang (text "LocalPrim") 4 (text $ show call)
 
 -- | Closure conversion uses a lookup table to find CCInfo for a function
 type CCInfos = Map.Map Var CCInfo
@@ -208,6 +208,8 @@ globalCCInfo (Def v f) =
        return $ GlobalClosure ep
      PrimCall -> do
        return $ GlobalPrim (funType f)
+     JoinCall ->
+       internalError "globalCCInfo: Global function is a join point"
 
 -- | Create a 'CCInfo' for an imported symbol,
 --   if the symbol is a function or procedure.
@@ -230,113 +232,14 @@ importCCInfos imps = foldM go Map.empty imps
 --   A procedure translates to a procedure, so we can reuse the variable name.
 --   A function is translated to a procedure, so create a new name.
 mkLocalEntryPointName :: CallConvention -> Var -> FreshVarM Var
-mkLocalEntryPointName PrimCall v =
+mkLocalEntryPointName JoinCall v =
   return v
 
 mkLocalEntryPointName ClosureCall v =
   newVar (varName v) (PrimType PointerType)
 
-groupCCInfo :: (Var -> FunAnalysisResults) -- ^ Hoisting and capture information
-            -> LocalsAtGroup
-            -> Group FunDef                 -- ^ The definition group
-            -> FreshVarM [(Var, CCInfo)]
-groupCCInfo get_capture locals_at_group (NonRec def) =
-  if funHoisted analysis_result
-  then case funConvention $ definiens def
-       of ClosureCall -> do
-            -- All captured variables go into the closure
-            let captured_list = Set.toList captured
-                captured_record = variablesRecord captured_list
-                closure_record = localClosureRecord captured_record
-            ep <- mkEntryPoints NeverDeallocate False fun_type fun_name
-            let ccinfo = LocalClosure ep closure_record [] captured_list captured_record
-            return [(fun_name, ccinfo)]
-          PrimCall ->
-            internalError "groupCCInfo: Cannot hoist procedure"
-
-  else do
-    -- Both kinds of functions become primcall functions
-    -- Create an entry point with the right type
-    entry_point <-
-      mkLocalEntryPointName (funConvention $ definiens def) (definiendum def)
-    
-    -- Compute the call-captured variables.  Any variables used by the function
-    -- that are not in scope at the defgroup are call-captured.
-    let in_scope =
-          case IntMap.lookup (fromIdent group_id) locals_at_group
-          of Just g -> g
-             Nothing -> internalError "groupCCInfo"
-        call_captured = foldr Set.delete captured in_scope
-    return [(fun_name, LocalPrim fun_type entry_point (Set.toList call_captured))]
-  where
-    fun_name = definiendum def
-    fun_type = funType $ definiens def
-    analysis_result = get_capture fun_name
-    captured = funCaptured analysis_result
-    group_id = case funGroup analysis_result
-               of Just id -> id
-                  Nothing -> internalError "groupCCInfo"
-
-groupCCInfo get_capture locals_at_group (Rec grp_members) =
-  let capture_info = do
-        member <- grp_members
-        let v = definiendum member
-            conv = funConvention $ definiens member
-            ftype = funType $ definiens member
-            FunAnalysisResults hoisted grp captured  = get_capture v
-        return (hoisted, (v, conv, ftype, grp, captured))
-
-      -- Get the definition group's ID.  Must ignore continuations when
-      -- searching for the ID.
-      group_id = get_id capture_info
-        where
-          get_id ((_, (_, _, _, Just gid, _)) : _) = gid
-          get_id (_ : xs) = get_id xs
-          get_id [] = internalError "groupCCInfo"
-
-      -- Find the hoisted and unhoisted functions in the group
-      hoisted   :: [(Var, CallConvention, FunctionType, Maybe (Ident GroupLabel), Set.Set Var)]
-      unhoisted :: [(Var, CallConvention, FunctionType, Maybe (Ident GroupLabel), Set.Set Var)]
-      (hoisted, unhoisted) = partition_h [] [] capture_info
-        where
-          partition_h h u ((True,  x):xs) = partition_h (x : h) u xs
-          partition_h h u ((False, x):xs) = partition_h h (x : u) xs
-          partition_h h u []              = (reverse h, reverse u)
-
-      -- Get the variables that are in scope at the defgroup.
-      definienda = map definiendum grp_members
-      in_scope = case IntMap.lookup (fromIdent group_id) locals_at_group
-                 of Just g -> g
-                    Nothing -> internalError "groupCCInfo"
-      in_scope_set = Set.fromList in_scope
-
-      -- Identify the captured variable set, which is a subset of the
-      -- variables in scope at the defgroup.
-      shared_set = in_scope_set `Set.intersection`
-                   Set.unions [s | (_, _, _, _, s) <- hoisted ++ unhoisted]
-      shared_list = Set.toList shared_set
-      shared_record = variablesRecord shared_list
-      closure_record = localClosureRecord shared_record
-      
-      create_hoisted_closure (v, ClosureCall, ftype, _, captured_set) = do
-        let call_captured = Set.toList (captured_set Set.\\ shared_set)
-        ep <- mkEntryPoints NeverDeallocate False ftype v
-        return (v, LocalClosure ep closure_record call_captured shared_list shared_record)
-
-      create_hoisted_closure (v, PrimCall, ftype, _, captured_set) =
-            internalError "groupCCInfo: Cannot hoist procedure"
-
-      create_unhoisted_closure (v, conv, ftype, _, captured_set) = do
-        let call_captured_set1 = captured_set Set.\\ shared_set
-            -- Don't capture the functions in the definition group
-            call_captured_set2 = foldr Set.delete call_captured_set1 definienda
-            call_captured = Set.toList call_captured_set2
-        entry_point <- mkLocalEntryPointName conv v
-        return (v, LocalPrim ftype entry_point call_captured)
-
-  in do h <- mapM create_hoisted_closure hoisted
-        u <- mapM create_unhoisted_closure unhoisted
-        return (h ++ u)
+mkLocalEntryPointName PrimCall _ =
+  internalError "mkLocalEntryPointName: Local function is a procedure"
 
 -- | Analysis results regarding a single function.  These results are used for
 -- constructing a 'CCInfo'.
@@ -344,9 +247,6 @@ data FunAnalysisResults =
   FunAnalysisResults
   { -- | Whether the function will be hoisted
     funHoisted :: !Bool
-    -- | The definition group this function belongs to, for local functions;
-    --   @Nothing@ for continuations.
-  , funGroup :: !(Maybe (Ident GroupLabel))
     -- | The set of local variables used by the function but not defined in
     --   the function
   , funCaptured :: Set.Set Var
@@ -355,31 +255,103 @@ data FunAnalysisResults =
 -- | A list of local variables that are in scope at some program point.
 type LocalsInScope = [Var]
 
--- | A list of local variables that are in scope at a definition group,
---   indexed by group label.  The list include variables defined
---   by a recursive definition group.
-type LocalsAtGroup = IntMap.IntMap LocalsInScope
+-------------------------------------------------------------------------------
+
+groupCCInfo :: (Var -> FunAnalysisResults) -- ^ Hoisting and capture information
+            -> [Var]
+            -> Set.Set Var
+            -> Group FunDef                 -- ^ The definition group
+            -> FreshVarM [(Var, CCInfo)]
+groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
+  let capture_info = do
+        member <- grp_members
+        let v = definiendum member
+            conv = funConvention $ definiens member
+            ftype = funType $ definiens member
+            FunAnalysisResults hoisted captured  = get_capture v
+        return (hoisted, (v, conv, ftype, captured))
+
+      -- Find the hoisted and unhoisted functions in the group
+      hoisted   :: [(Var, CallConvention, FunctionType, Set.Set Var)]
+      unhoisted :: [(Var, CallConvention, FunctionType, Set.Set Var)]
+      (hoisted, unhoisted) = partition_h [] [] capture_info
+        where
+          partition_h h u ((True,  x):xs) = partition_h (x : h) u xs
+          partition_h h u ((False, x):xs) = partition_h h (x : u) xs
+          partition_h h u []              = (reverse h, reverse u)
+
+      definienda = map definiendum grp_members
+
+      -- Identify the captured variable set, which is a subset of the
+      -- variables in scope at the defgroup.
+      shared_set = in_scope_set `Set.intersection`
+                   Set.unions [s | (_, _, _, s) <- hoisted ++ unhoisted]
+      shared_list = Set.toList shared_set
+      shared_record = variablesRecord shared_list
+      closure_record = localClosureRecord shared_record
+      
+      create_hoisted_closure (v, call_conv, ftype, captured_set) = do
+        let call_captured = Set.toList (captured_set Set.\\ shared_set)
+        entry_points <-
+          case call_conv
+          of ClosureCall -> mkEntryPoints NeverDeallocate False ftype v
+             JoinCall -> do
+               v' <- newVar (varName v) (PrimType OwnedType)
+               let ftype' = closureFunctionType (ftParamTypes ftype) (ftReturnTypes ftype)
+               mkEntryPoints NeverDeallocate False ftype' v'
+               
+        return (v, LocalClosure entry_points closure_record call_captured shared_list shared_record)
+
+      create_unhoisted_closure (v, conv, ftype, captured_set) = do
+        let call_captured_set1 = captured_set Set.\\ shared_set
+            -- Don't capture the definition group members
+            call_captured_set2 = foldr Set.delete call_captured_set1 defined_here
+            call_captured = Set.toList call_captured_set2
+        entry_point <- mkLocalEntryPointName conv v
+        return (v, LocalPrim ftype entry_point call_captured)
+
+  in do h <- mapM create_hoisted_closure hoisted
+        u <- mapM create_unhoisted_closure unhoisted
+        return (h ++ u)
 
 -- | Extract closure conversion information from all function definitions 
 --   in a statement.
 --
---   To generate the information for a variable, the 
+--   Ignore the 'funGroup' field of 'FunAnalysisResults'.  It used to be
+--   used, but we no longer need it.
 stmCCInfo :: (Var -> FunAnalysisResults)
-          -> LocalsAtGroup
+          -> Set.Set Var
           -> Stm
           -> FreshVarM [(Var, CCInfo)]
-stmCCInfo cc_stats locals_at_group stm =
+stmCCInfo cc_stats in_scope stm =
   case stm
-  of LetE _ _ body -> continue body
+  of LetE params _ body ->
+       continue (extend_scope in_scope params) body
      LetrecE g body -> do
-       xs1 <- groupCCInfo cc_stats locals_at_group g
-       xss2 <- mapM (continue . funBody . definiens) $ groupMembers g
-       xs3 <- continue body
+       -- Add the local variables to the set of in-scope variables
+       let local_fun_vars = case g of Rec defs -> map definiendum defs
+           local_vars = extend_scope in_scope local_fun_vars
+
+       -- Compute CCInfo for this group, function bodies in this group, and
+       -- the letrec body
+       xs1 <- groupCCInfo cc_stats local_fun_vars local_vars g
+
+       -- Each function brings its call-captured variables and parameters
+       -- into scope.
+       xss2 <- forM (groupMembers g) $ \def ->
+         let Just cc = lookup (definiendum def) xs1 
+             call_captured = ccCallCaptured cc
+             fun_params = funParams $ definiens def
+             body_scope = extend_scope local_vars (call_captured ++ fun_params)
+         in continue body_scope $ funBody $ definiens def
+
+       xs3 <- continue local_vars body
        return (xs1 ++ concat xss2 ++ xs3)
      SwitchE _ alts -> do
-       xs <- sequence [continue s | (_, s) <- alts]
+       xs <- sequence [continue in_scope s | (_, s) <- alts]
        return $ concat xs
      ReturnE _ -> return []
      ThrowE _ -> return []
   where
-    continue stm = stmCCInfo cc_stats locals_at_group stm
+    extend_scope scope vs = foldr Set.insert scope vs
+    continue local_vars stm = stmCCInfo cc_stats local_vars stm

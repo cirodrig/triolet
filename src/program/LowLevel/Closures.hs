@@ -1,8 +1,7 @@
 {-| Closure conversion.
 
-This pass converts all functions into primitive (non-closure-based)
-functions.  Lambda values and letrec expressions are eliminated.  This pass
-runs before reference counting is inserted.
+This pass converts all functions into a form that can be represented directly
+with function calls and jumps.  Letrec expressions are eliminated.
 
 Data structures should be flattened before running closure conversion.
 CSE and DCE must be performed (at least once) before running closure
@@ -69,6 +68,9 @@ ccAtom returns atom =
      CallA PrimCall (VarV v) vs ->
        genPrimCall v =<< ccVals vs
 
+     CallA JoinCall (VarV v) vs ->
+       genJoinCall v =<< ccVals vs
+
      -- General case
      CallA conv v vs -> do
        v' <- ccVal v
@@ -112,8 +114,7 @@ ccFunBody fun =
 
 -- | Perform closure conversion on a letrec-bound function group.
 --
---   Either all functions in the group are hoisted, or all functions are
---   un-hoisted. Hoisted functions become closures.
+--   Hoisted functions become closures.
 --   Un-hoisted functions become a new 'letrec'.
 ccLocalGroup :: Group FunDef -> GenM a -> GenM a
 ccLocalGroup defs do_body = do
@@ -155,11 +156,7 @@ ccLocalGroup defs do_body = do
 --  
 --   Other parts of the converted function must be built elsewhere.
 ccHoistedFun :: (FunDef, CCInfo) -> CC ()
-ccHoistedFun (def, ccinfo)
-  | isPrimFun (definiens def) =
-      internalError "ccHoistedFun: Attempting to hoist a primitive function"
-                                            
-  | otherwise = do
+ccHoistedFun (def, ccinfo) = do
       let fun = definiens def
       body <- ccFunBody fun
 
@@ -179,7 +176,7 @@ ccUnhoistedFun (def, ccinfo) = do
   let fun = definiens def
   body <- ccFunBody fun
   -- Call-captured variables become additional function parameters
-  let fun' = primFun (ccCallCaptured ccinfo ++ funParams fun)
+  let fun' = joinFun (ccCallCaptured ccinfo ++ funParams fun)
              (funReturnTypes fun) body
       def' = Def (ccJumpTarget ccinfo) fun'
   return def'
