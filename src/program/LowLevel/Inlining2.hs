@@ -1,6 +1,7 @@
 
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
-module LowLevel.Inlining2 where
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, BangPatterns #-}
+module LowLevel.Inlining2(inlineModule)
+where
 
 import Control.Applicative
 import Control.Monad
@@ -9,6 +10,10 @@ import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Data.Monoid
+import Debug.Trace
+
+import System.IO
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.MonadLogic
@@ -30,8 +35,8 @@ primInlineCutoff = 5
 
 emptyRenaming = IntMap.empty
 
--- | The set of functions that can be inlined.
-type InlinedFunctions = IntMap.IntMap Fun
+-- | The set of functions that can be inlined, and their numbers of endpoints.
+type InlinedFunctions = IntMap.IntMap (Fun, NumReturns)
 
 -- | The continuation of a function call.
 --   Inlining may turn the continuation into a local function.
@@ -39,7 +44,7 @@ data ContinuationCode =
     HasContinuation [ParamVar] [ValueType] Stm
   | IsTailCall
 
-data NumReturns = Zero | One | Many
+data NumReturns = Zero | One | Many deriving(Show)
 
 instance Monoid NumReturns where
   mempty = Zero
@@ -54,7 +59,6 @@ data InlEnv =
            -- | Return types of the current function.  'Nothing' when not
            --   processing a function body.
          , currentReturns :: !(Maybe [ValueType])
-         -- , continuation :: !(Maybe ([Var], Stm))
          }
 
 -- | While inlining code in a function body,
@@ -91,10 +95,33 @@ instance Supplies (Inl s) (Ident Var) where
     env <- ask
     liftIO $ supplyValue (varSupply env)
 
-tellReturn :: InlStm ()
-tellReturn = Inl $ RWST $ \_ s ->
-  let s' = s `mappend` InlState One mempty
+tellReturns :: NumReturns -> InlStm ()
+tellReturns n = Inl $ RWST $ \_ s ->
+  let s' = s `mappend` InlState n mempty
   in s' `seq` return ((), s', mempty)
+
+tellReturn :: InlStm ()
+tellReturn = tellReturns One
+
+-- | Capture the number of return values produced by the computation
+censorReturns :: InlStm a -> InlStm (NumReturns, a)
+censorReturns (Inl m) = Inl $ RWST $ \env s -> do
+  let InlState n_returns size = s
+  (x, InlState local_n_returns size', ()) <- runRWST m env (InlState Zero size)
+  return ((local_n_returns, x), InlState n_returns size', ())
+
+-- | Given a local function definition and the number of endpoints it has,
+--   assign its endpoints to the caller.
+--
+--   If the function is not a join point, it contributes no endpoints to
+--   the enclosing function.  That is, if a continuation is grafted onto the 
+--   enclosing function, it doesn't affect the function.
+--   If this function is a join point, its endpoints are endpoints of the
+--   enclosing function.
+propagateLetrecReturn :: Fun -> NumReturns -> InlStm ()
+propagateLetrecReturn f n
+  | funConvention f == JoinCall = tellReturns n
+  | otherwise                   = return ()
 
 tellCodeGrowth :: CodeSize -> InlStm ()
 tellCodeGrowth size = Inl $ RWST $ \_ s ->
@@ -103,13 +130,13 @@ tellCodeGrowth size = Inl $ RWST $ \_ s ->
 
 -- | Do inlining in a function body
 doFunctionBody :: InlStm a -> InlFun (NumReturns, CodeSize, a)
-doFunctionBody (Inl m) = Inl $ RWST $ \env s -> do
+doFunctionBody (Inl m) = Inl $ RWST $ \env () -> do
   -- To get statistics for the function body, start processing with
   -- 'mempty' as the state.
   (x, InlState num_returns code_size, _) <- runRWST m env mempty
 
   -- Write out the code size so it will be accumulated by the caller.
-  return ((num_returns, code_size, x), s, ())
+  return ((num_returns, code_size, x), (), ())
 
 -- | Do inlining on functions that appear inside a function body
 doFunction :: InlFun a -> InlStm a
@@ -170,18 +197,24 @@ renameExport (v, sig) = do
   v' <- renameVar v
   return (v', sig)
 
-lookupInlinedFunction :: Var -> Inl s (Maybe Fun)
+lookupInlinedFunction :: Var -> Inl s (Maybe (Fun, NumReturns))
 lookupInlinedFunction v =
   asks (IntMap.lookup (fromIdent $ varID v) . functions)
 
 -- | Consider the function for inlining.  If it's small enough, then inline it.
-considerForInlining :: Var -> Fun -> Inl s a -> Inl s a
-considerForInlining v f m
-  | willInline f = local (insert v f) m
+considerForInlining :: Var -> Fun -> NumReturns -> Inl s a -> Inl s a
+considerForInlining v f num_returns m
+  | willInline f = local (insert v (f, num_returns)) m
   | otherwise = m
   where
-    insert v f env =
-      env {functions = IntMap.insert (fromIdent $ varID v) f $ functions env}
+    insert v x env =
+      env {functions = IntMap.insert (fromIdent $ varID v) x $ functions env}
+
+    report_inlining = traceShow message
+
+    message =
+      hang (text "Will inline" <+> pprVar v <+> parens (text $ show num_returns)) 4
+      (pprFun f)
 
 willInline f = funIsInlinable f && worthInlining f
 
@@ -193,15 +226,28 @@ worthInlining f
     Just sz <- fromCodeSize (funSize f) = sz < closureInlineCutoff
   | funConvention f == PrimCall,
     Just sz <- fromCodeSize (funSize f) = sz < primInlineCutoff
+  | funConvention f == JoinCall,
+    isTinyJoinPoint f = True
   | otherwise = False
 
+-- | Always inline join points if the body is one of the following:
+--
+--   * A 'ValA' term
+--   * A tail call to a join point
+isTinyJoinPoint :: Fun -> Bool
+isTinyJoinPoint f =
+  case funBody f
+  of ReturnE (ValA _)             -> True
+     ReturnE (CallA JoinCall _ _) -> True
+     _                            -> False
+
 -- | Return True if it's possible to inline the function.
-funIsInlinable f = False &&
+funIsInlinable f =
   -- Function must not use stack data
-  funFrameSize f == 0 &&
+  funFrameSize f == 0
   
   -- (TEMPORARY) cannot inline a join point
-  funConvention f /= JoinCall
+  --  funConvention f /= JoinCall
 
 -------------------------------------------------------------------------------
 -- The actual inlining stage
@@ -210,13 +256,17 @@ funIsInlinable f = False &&
 --
 --   The function and continuation should be renamed before they are passed 
 --   to this function.
-inlineCall :: Fun              -- ^ Function to inline
-           -> [Val]            -- ^ Function arguments
-           -> ContinuationCode -- ^ Continuation of function call
+inlineCall :: (Fun, NumReturns) -- ^ Function to inline
+           -> [Val]             -- ^ Function arguments
+           -> ContinuationCode  -- ^ Continuation of function call
            -> InlStm Stm
-inlineCall f args cont
+inlineCall x args cont =
+  {-# SCC "inlineCall" #-} inlineCall' x args cont
+
+inlineCall' (!f, n_returns) args cont
   | n_args == n_params =
-      inlineSaturatedCall f args cont
+      inlineSaturatedCall f n_returns args cont
+
   | n_args > n_params = do
       -- Inline a saturated call.  The saturated call returns a function.
       -- Apply the remaining arguments to that function.
@@ -226,12 +276,15 @@ inlineCall f args cont
         case cont
         of IsTailCall -> do
              rtypes <- getReturns
+             tellReturn         -- This continuation is an endpoint
              return $ HasContinuation [ret_var] rtypes (ReturnE ret_call)
            HasContinuation cont_vars cont_rtypes cont_stm ->
              let app_cont_stm = LetE cont_vars ret_call cont_stm
              in return $ HasContinuation [ret_var] cont_rtypes app_cont_stm
-      inlineSaturatedCall f (take n_params args) app_cont
-  | n_args < n_params = do
+      inlineSaturatedCall f n_returns (take n_params args) app_cont
+
+  | otherwise = do
+      -- Undersaturated call.
       -- Create a local function and pass it to the continuation
       let fun_body = bindArguments args (take n_args $ funParams f) (funBody f)
           partial_app =
@@ -240,13 +293,17 @@ inlineCall f args cont
       case cont of
         IsTailCall -> do
           partial_app_var <- newAnonymousVar (PrimType OwnedType)
+          tellReturn            -- This is an endpoint
           return $
             LetrecE (NonRec (Def partial_app_var partial_app)) $
             ReturnE (ValA [VarV partial_app_var])
         HasContinuation [cont_var] cont_rtypes cont_stm 
           | PrimType OwnedType <- varType cont_var -> do
-          return $
-            LetrecE (NonRec (Def cont_var partial_app)) cont_stm
+            -- This is not an endpoint.  If there are endpoints, they are 
+            -- part of the continuation, 'cont_stm', and they have already
+            -- been marked.
+            return $
+              LetrecE (NonRec (Def cont_var partial_app)) cont_stm
         HasContinuation {} ->
           -- Wrong number of return values
           internalError "inlineCall: Type error detected"
@@ -256,27 +313,45 @@ inlineCall f args cont
 
 -- | Inline a function that is called with exactly the right number of 
 --   arguments.
-inlineSaturatedCall f args IsTailCall =
+--
+inlineSaturatedCall (!f) (!n_returns) args IsTailCall = do
+  -- This many endpoints are inserted
+  tellReturns n_returns
   return $ bindArguments args (funParams f) (funBody f)
 
-inlineSaturatedCall f args (HasContinuation params rtypes stm) = do
-  -- Create a continuation function
-  cont_name <- newAnonymousVar (PrimType OwnedType)
-  let cont_function = closureFun params rtypes stm
+--   If the function has one endpoint,
+--   graft the continuation onto the endpoint.
+--   Otherwise, turn the continuation into a join point.
 
-  f_return_vars <- mapM newAnonymousVar (funReturnTypes f)
-  let cont_call =
-        ReturnE $ closureCallA (VarV cont_name) (map VarV f_return_vars)
-  let inlined_body =
-        -- Bind the function's parameters
-        bindArguments args (funParams f) $
-        -- Define the continuation function
-        LetrecE (NonRec (Def cont_name cont_function)) $
-        -- Insert a call to the continuation at the end of the
-        -- inlined function body
-        insertContinuation f_return_vars cont_call $ funBody f
+inlineSaturatedCall (!f) (!n_returns) args (HasContinuation params rtypes stm) =
+  case n_returns
+  of Zero -> 
+       -- The function has no endpoints; the continuation is unreachable
+       -- and can be discarded.
+       return $ bindArguments args (funParams f) (funBody f)
+     One ->
+       -- The function has one endpoint.  Graft the continuation onto the
+       -- endpoint.
+       return $ insertContinuation params stm $
+         bindArguments args (funParams f) (funBody f)
+     Many -> do
+       -- Create a continuation function
+       cont_name <- newAnonymousVar (PrimType OwnedType)
+       let cont_function = closureFun params rtypes stm
 
-  return inlined_body
+       f_return_vars <- mapM newAnonymousVar (funReturnTypes f)
+       let cont_call =
+             ReturnE $ closureCallA (VarV cont_name) (map VarV f_return_vars)
+       let inlined_body =
+             -- Bind the function's parameters
+             bindArguments args (funParams f) $
+             -- Define the continuation function
+             LetrecE (NonRec (Def cont_name cont_function)) $
+             -- Insert a call to the continuation at the end of the
+             -- inlined function body
+             insertContinuation f_return_vars cont_call $ funBody f
+
+       return inlined_body
 
 -- | Bind inlined function parameters to argument values
 bindArguments (arg:args) (param:params) e =
@@ -310,10 +385,33 @@ insertContinuation return_vars cont_code e = go e
 
 -------------------------------------------------------------------------------
 
+-- | Count the number of endpoints a function has.
+--
+--   This function is only used for imported functions. 
+--   For other functions, the number of endpoints is computed 
+--   when the function's body is processed by 'inlineFun'.
+--   Since 'inlineFun' is not called on imported functions, we use
+--   'countReturns' to count the endpoints.
+countReturns :: Fun -> NumReturns
+countReturns f = count $ funBody f
+  where
+    count (LetE _ _ body) = count body
+    count (LetrecE defs body) = count_defs defs `mappend` count body
+    count (SwitchE _ alts) = mconcat [count s | (_, s) <- alts]
+    count (ReturnE (CallA JoinCall _ _)) = Zero
+    count (ReturnE _) = One
+    count (ThrowE _) = Zero
+
+    count_defs group = mconcat $ map count_def $ groupMembers group
+
+    count_def (Def v f)
+      | funConvention f == JoinCall = count $ funBody f
+      | otherwise = Zero
+
 -- | Perform inlining on a function body.
---   Returns the new function and the amount of code growth that occurred due
---   to inlining.
-inlineFun :: Fun -> InlFun (Fun, CodeSize)
+--   Returns the new function, the amount of code growth that occurred due
+--   to inlining, and the number of endpoints in the function.
+inlineFun :: Fun -> InlFun (Fun, NumReturns, CodeSize)
 inlineFun f =
   setReturns (funReturnTypes f) $
   renameParameters (funParams f) $ \params -> do
@@ -321,11 +419,14 @@ inlineFun f =
     let f' = f { funSize = addCodeSize code_growth $ funSize f
                , funParams = params
                , funBody = body}
-
-    return (f', code_growth)
+    return (f', n_returns, code_growth)
 
 -- | Consider an atom for inlining.
 --   If it shall be inlined, replace it with an inlined function.
+--
+--   If it won't be inlined, determine whether inlining may insert code at 
+--   this point later.  If code is inserted, it will be inserted by
+--   'insertContinuation'.
 --
 --   The arguments should be renamed before they are passed to this function.
 inlineAtom :: Atom -> ContinuationCode -> InlStm Stm
@@ -335,14 +436,18 @@ inlineAtom atom cont =
        inlined_function <- lookupInlinedFunction op
        case inlined_function of
           Nothing -> don't_inline
-          Just f  -> inlineCall f args cont
+          Just x  -> inlineCall x args cont
      _ -> don't_inline
   where
     don't_inline =
       case cont
       of HasContinuation params _ k -> do
            return $ LetE params atom k
-         IsTailCall -> do                 
+         IsTailCall -> do
+           -- Is this a tail call to a join point?
+           case atom of
+             CallA JoinCall _ _ -> return ()
+             _ -> tellReturn    -- Inlining may insert a tail call here
            return $ ReturnE atom
 
 -- | Inlining performs the following steps at each statement:
@@ -396,21 +501,24 @@ inlineThrow value = do
 
 inlineGroup (NonRec (Def v f)) do_body = do
   -- Perform inlining inside the function
-  (f', code_growth) <- doFunction $ inlineFun f
+  (f', n_returns, code_growth) <- doFunction $ inlineFun f
+  propagateLetrecReturn f' n_returns
   tellCodeGrowth code_growth
 
   -- Rename the bound variable
   renameParameter v $ \v' -> do
-    body' <- considerForInlining v' f' do_body
+    body' <- considerForInlining v' f' n_returns do_body
     return (NonRec (Def v' f'), body')
 
 inlineGroup (Rec defs) do_body = do
   -- Rename bound variables
   renameParameters (map definiendum defs) $ \vs' -> do
     -- Perform renaming inside each function
-    (fs', code_growths) <-
-      doFunction $ mapAndUnzipM (inlineFun . definiens) defs
-    tellCodeGrowth $ mconcat code_growths
+    results <- doFunction $ mapM (inlineFun . definiens) defs
+    let fs' = [f | (f, _, _) <- results]
+        code_growth = mconcat [g | (_, _, g) <- results]
+    sequence [propagateLetrecReturn f n | (f, n, _) <- results]
+    tellCodeGrowth code_growth
 
     -- Recursive functions may not be inlined
     body' <- do_body
@@ -421,8 +529,8 @@ inlineGroup (Rec defs) do_body = do
 -- This deviation in behavior is kind of a hack that should be fixed.
 inlineGlobalGroup (NonRec (GlobalFunDef (Def v f))) do_body = do
   -- Perform inlining inside the function
-  (f', _) <- inlineFun f
-  body' <- considerForInlining v f' do_body
+  (f', n_returns, _) <- inlineFun f
+  body' <- considerForInlining v f' n_returns do_body
   return (NonRec (GlobalFunDef (Def v f')), body')
 
 inlineGlobalGroup (NonRec (GlobalDataDef (Def v dat))) do_body = do
@@ -441,7 +549,7 @@ inlineGlobalGroup (Rec defs) do_body = do
   return (Rec new_defs, body')
   where
     inline_global (GlobalFunDef (Def _ f)) = do
-      (f', _) <- inlineFun f
+      (f', _, _) <- inlineFun f
       return $ Left f'
 
     inline_global (GlobalDataDef (Def _ d)) = Right `liftM` renameStaticData d
@@ -450,7 +558,8 @@ inlineGlobalGroup (Rec defs) do_body = do
 
 inlineGlobals :: [Group GlobalDef] -> [(Var, ExportSig)]
               -> InlFun ([Group GlobalDef], [(Var, ExportSig)])
-inlineGlobals defss exports = do_defs defss
+inlineGlobals defss exports =
+  {-# SCC "inlineGlobals" #-} do_defs defss
   where
     do_defs (defs : defss) = do
       (defs', (defss', exports')) <-
@@ -469,9 +578,9 @@ makeImportsInlinable imports =
     get_imported_function impent =
       case impent
       of ImportClosureFun _ (Just f) | willInline f ->
-           Just (fromIdent $ varID $ importVar impent, f)
+           Just (fromIdent $ varID $ importVar impent, (f, countReturns f))
          ImportPrimFun _ _ (Just f) | willInline f ->
-           Just (fromIdent $ varID $ importVar impent, f)
+           Just (fromIdent $ varID $ importVar impent, (f, countReturns f))
          _ -> Nothing
 
 inlineModule :: Module -> IO Module
