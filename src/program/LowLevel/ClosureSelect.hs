@@ -496,7 +496,7 @@ findFunctionsToHoist var_ids global_vars def = do
   let ann_def = Def (definiendum def) ann_fun
 
   -- Compute continuations
-  let rconts = LocalCPS.identifyLocalContinuations ann_def
+  rconts <- LocalCPS.identifyLocalContinuations ann_def
 
   -- Find the first caller of each continuation
   let (conts_set, cont_map, caller_map) =

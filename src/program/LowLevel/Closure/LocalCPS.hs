@@ -25,6 +25,7 @@ import Prelude hiding(mapM)
 
 import Control.Applicative hiding(empty)
 import Control.Monad hiding(mapM, forM, join)
+import qualified Data.HashTable as HashTable
 import qualified Data.Set as Set
 import Data.Traversable
 import qualified Data.IntMap as IntMap
@@ -102,11 +103,6 @@ singletonRConts :: Var -> RCont -> RConts
 singletonRConts v rc = IntMap.singleton (fromIdent $ varID v) rc
 
 -- | Look up the return continuation assigned to the given variable.
---   If not in the map, then no continuations (bottom) have been assigned.
-lookupContSet :: Var -> RConts -> RCont
-lookupContSet v m = fromMaybe bottom $ IntMap.lookup (fromIdent $ varID v) m
-
--- | Look up the return continuation assigned to the given variable.
 lookupCont :: Var -> RConts -> Maybe RCont
 lookupCont v m = IntMap.lookup (fromIdent $ varID v) m
 
@@ -163,54 +159,71 @@ definedFunctionsStm stm xs =
 --   be called with the right number of arguments.
 type Relevant = IntMap.IntMap Int
 
+type RContHT = HashTable.HashTable Var RCont
+
+-- | Assign a function's return continuation.
+--   Join the new information with whatever was in the hash table before.
+assignCont :: RContHT -> Var -> RCont -> IO ()
+assignCont hashtable v cont = do
+  -- Join new and old values
+  m_old_cont <- HashTable.lookup hashtable v
+  let old_cont = fromMaybe bottom m_old_cont
+      new_cont = join old_cont cont
+  when (new_cont /= old_cont) $
+    void $ HashTable.update hashtable v new_cont
+
+-- | Look up the return continuation assigned to the given variable.
+--   If not in the map, then no continuations (bottom) have been assigned.
+lookupContSet :: RContHT -> Var -> IO RCont
+lookupContSet hashtable v = do
+  mcont <- HashTable.lookup hashtable v
+  return $ fromMaybe bottom mcont
+
 -- | A scan to identify LCPS candidates.
 --
---   The parameters are the set of local functions, the current function's 
---   return type, and the current statement's return continuation.
---
---   Scanning produces a continuation map
-newtype Scan = Scan {runScan :: Relevant -> [ValueType] -> RCont -> RConts}
-
-joinScanResult = join
-
-joinScanResults = foldr join bottom
-
-emptyScanResult = bottom
+--   Scanning is an imperative algorithm that generates a map assigning
+--   a set of continuations to each local function.
+newtype Scan =
+  Scan {runScan :: RContHT      -- ^ Map from local function to continuation
+                -> Relevant     -- ^ In-scope local functions
+                -> [ValueType]  -- ^ Current function's return types
+                -> RCont        -- ^ Current function's return continuation
+                -> IO ()}
 
 instance Monoid Scan where
-  mempty = Scan (\_ _ _ -> emptyScanResult)
-  mappend (Scan f1) (Scan f2) = Scan $ \r rtypes c ->
-    joinScanResult (f1 r rtypes c) (f2 r rtypes c)
-
-addRelevant :: Var -> Int -> Scan -> Scan
-addRelevant v a (Scan f) =
-  Scan $ \r -> f (IntMap.insert (fromIdent $ varID v) a r)
-
-addRelevants :: [(Var, Int)] -> Scan -> Scan
-addRelevants vs s = foldr (uncurry addRelevant) s vs
+  {-# INLINE mempty #-}
+  {-# INLINE mappend #-}
+  {-# INLINE mconcat #-}
+  mempty = Scan $ \_ _ _ _ -> return ()
+  mappend (Scan f1) (Scan f2) = Scan $ \hashtable r rtypes c -> do
+    f1 hashtable r rtypes c
+    f2 hashtable r rtypes c
+  mconcat scans = Scan $ \hashtable r rtypes c -> do
+    sequence_ [f hashtable r rtypes c | Scan f <- scans]
 
 -- | Set the return continuation of the scanned code.  The return continuation
 --   is what executes after the scanned code finishes executing.  The return
 --   continuation is taken from the current function, so it has the same
 --   return type as the current function.
 setCont :: Var -> Scan -> Scan
-setCont cont_var (Scan f) = Scan $ \r rtypes _ ->
-  f r rtypes (RCont cont_var rtypes)
+setCont cont_var (Scan f) = Scan $ \hashtable r rtypes _ ->
+  f hashtable r rtypes (RCont cont_var rtypes)
 
 -- | Record the variable's return continuation.
 --
 --   If the variable is not a candidate for transformation, nothing happens.
 tellRCont :: Var -> RCont -> Scan
-tellRCont v c = Scan $ \relevant _ _ ->
+tellRCont v c = Scan $ \hashtable relevant _ _ ->
   if fromIdent (varID v) `IntMap.member` relevant
-  then singletonRConts v c
-  else IntMap.empty
+  then assignCont hashtable v c
+  else return ()
 
 -- | Record the continuation's return continuation.
 --
 --   For every labeled statement, its continuation is the current continuation.
 tellContCont :: Var -> Scan
-tellContCont v = Scan $ \_ _ rc -> singletonRConts v rc
+tellContCont v = Scan $ \hashtable _ _ rc ->
+  assignCont hashtable v rc
 
 -- | The variable was called with some arguments.
 --
@@ -222,11 +235,11 @@ tellContCont v = Scan $ \_ _ rc -> singletonRConts v rc
 --   If it's an under- or oversaturated call, then the function's return
 --   continuation becomes unknown.
 tellCurrentRCont :: Var -> Int -> Scan
-tellCurrentRCont v n_args = Scan $ \relevant _ rc ->
+tellCurrentRCont v n_args = Scan $ \hashtable relevant _ rc ->
   case IntMap.lookup (fromIdent $ varID v) relevant
-  of Nothing -> emptyScanResult
-     Just arity | arity == n_args -> singletonRConts v rc
-                | otherwise       -> singletonRConts v Top
+  of Nothing -> return ()
+     Just arity | arity == n_args -> assignCont hashtable v rc
+                | otherwise       -> assignCont hashtable v Top
 
 scanValue :: Val -> Scan
 scanValue value =
@@ -252,48 +265,44 @@ scanAtom atom =
      UnpackA _ v -> scanValue v
 
 scanDefGroup :: Group (Def LFun) -> Scan -> Scan
-scanDefGroup group scan_body = Scan $ \relevant rtypes rcont ->
-  let -- Scan the body to find calls of local functions
-      body_conts = runScan (in_scope scan_body) relevant rtypes rcont
-      
-      -- Scan each function, using its return continuation in the body.
-      -- Iterate until a fixed point is reached.
-      fun_conts = scan_until_convergence relevant body_conts
-  in join body_conts fun_conts
+scanDefGroup group scan_body = Scan $ \hashtable relevant rtypes rcont -> do
+  let local_relevant = foldr add_relevant relevant arities
+        where
+          add_relevant (v, a) r = IntMap.insert (fromIdent $ varID v) a r
+
+  -- Scan the body to find calls of local functions
+  runScan scan_body hashtable local_relevant rtypes rcont
+
+  -- Scan the local functions until a fixed point is reached
+  scan_until_convergence hashtable local_relevant
   where
     -- Names and arities of functions in the definition group
     arities :: [(Var, Int)]
     arities = [(definiendum def, length $ funParams $ definiens def)
               | def <- groupMembers group]
-    in_scope scan = addRelevants arities scan
-    
+    definienda = map fst arities 
+
     -- Scan a function definition.  Look up the function's continuation in
     -- the given RConts map.
-    scan_def relevant rconts (Def v f) =
-      let return_continuation = lookupContSet v rconts
-          rtypes = funReturnTypes f
-      in runScan (in_scope $ scanStm $ funBody f) relevant rtypes return_continuation
-
-    -- Perform a scan of the definition group, using the given continuations
-    -- as a starting point.
-    --
-    -- The set of variables is the same in every scan, so we just retain the
-    -- final result.
-    scan_group_once :: Relevant -> RConts
-                    -> RConts
-                    -> RConts
-    scan_group_once relevant body_conts given_conts =
-      let rconts = join body_conts given_conts
-      in joinScanResults [scan_def relevant rconts d | d <- groupMembers group]
+    scan_def hashtable relevant return_continuation (Def v f) =
+      let rtypes = funReturnTypes f
+      in runScan (scanStm $ funBody f) hashtable relevant rtypes return_continuation
 
     -- Scan the group, updating continuation info, until the results converge.
-    scan_until_convergence :: Relevant -> RConts -> RConts
-    scan_until_convergence relevant body_conts =
-      let steps =
-            -- Iterate the operation.  Discard the initial value.
-            tail $ iterate (scan_group_once relevant body_conts) emptyScanResult
-      in case find (uncurry (==)) $ zip steps (tail steps)
-         of Just (final, _) -> final
+    scan_until_convergence :: RContHT -> Relevant -> IO ()
+    scan_until_convergence hashtable relevant = do
+      -- Look up the continuations currently assigned to each local function
+      mapM (lookupContSet hashtable) definienda >>= iterate
+      where
+        iterate old_conts = do
+          -- Scan all functions, using the continuation info that's known so far
+          zipWithM_ (scan_def hashtable relevant) old_conts $ groupMembers group
+
+          -- If any functions have changed, then repeat
+          new_conts <- mapM (lookupContSet hashtable) definienda
+          if new_conts /= old_conts
+            then iterate new_conts
+            else return ()
 
 scanStm :: LStm -> Scan
 scanStm statement =
@@ -351,17 +360,21 @@ reachableConts initial_reachable_set all_rconts = {-# SCC "reachableConts" #-}
 -- | Identify local continuations within a top-level function.  If a local 
 --   function's continuation is a unique statement, then that will be recorded
 --   in a mapping.
-identifyLocalContinuations :: LFunDef -> RConts
-identifyLocalContinuations top_level_def@(Def v f) = let
+identifyLocalContinuations :: LFunDef -> IO RConts
+identifyLocalContinuations top_level_def@(Def v f) = do
   -- Determine continuations for all functions, including every
   -- hypothetical continuation point.
-  all_rconts = {-# SCC "runScan" #-}
-    runScan (scanStm (funBody f)) IntMap.empty (funReturnTypes f) Top
-  all_funs = definedFunctions top_level_def
+  rconts_table <- HashTable.new (==) (HashTable.hashInt . fromIdent . varID)
+  ({-# SCC "runScan" #-}
+    runScan (scanStm (funBody f)) rconts_table IntMap.empty (funReturnTypes f) Top)
+  rconts_list <- HashTable.toList rconts_table
+  let all_rconts = IntMap.fromList [(fromIdent $ varID v, c) | (v, c) <- rconts_list]
+
 
   -- Retain only the continuations that are reachable from a local function
-  all_fun_ids = IntSet.fromList $ map (fromIdent . varID) all_funs
-  real_rconts = reachableConts all_fun_ids all_rconts
+  let all_funs = definedFunctions top_level_def
+  let all_fun_ids = IntSet.fromList $ map (fromIdent . varID) all_funs
+  let real_rconts = reachableConts all_fun_ids all_rconts
 
   -- Add an entry for the top-level function
-  in IntMap.insert (fromIdent $ varID v) Top real_rconts
+  return $ IntMap.insert (fromIdent $ varID v) Top real_rconts
