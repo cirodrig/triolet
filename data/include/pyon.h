@@ -4,11 +4,16 @@
 #ifndef PYON_H
 #define PYON_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <inttypes.h>
 #include <gc.h>
 
 /* Basic Pyon data types */
 typedef int PyonInt;
+typedef unsigned int PyonUInt;
 typedef float PyonFloat;
 typedef int PyonBool;
 typedef void *PyonPtr;
@@ -32,5 +37,9 @@ static inline void Pyon_init(void) {
    * That is why this code is in a header file. */
   GC_INIT();
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

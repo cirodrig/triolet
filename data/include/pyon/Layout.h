@@ -80,6 +80,52 @@ namespace Pyon {
     return allocateObject(o, bare_type::getSize(), bare_type::getAlignment());
   }
 
+  /* Layout and member access of various data structures */
+  extern "C" const PyonUInt pyon_List_size;
+  extern "C" const PyonUInt pyon_List_alignment;
+  extern "C" void
+  pyon_List_initialize(PyonInt length,
+                       PyonUInt elt_size,
+                       PyonUInt elt_align,
+                       PyonBarePtr ret);
+  extern "C" PyonBarePtr
+  pyon_List_get_contents(PyonBarePtr list) __attribute__((pure));
+
+  extern "C" PyonUInt
+  pyon_Array0_size(PyonUInt elt_size,
+                   PyonUInt elt_align) __attribute__((const));
+  extern "C" PyonUInt
+  pyon_Array0_alignment(PyonUInt elt_size,
+                        PyonUInt elt_align) __attribute__((const));
+  extern "C" PyonBarePtr
+  pyon_Array0_get_contents(PyonBarePtr array,
+                           PyonUInt elt_size,
+                           PyonUInt elt_align) __attribute__((pure));
+
+  extern "C" const PyonUInt pyon_Array1_size;
+  extern "C" const PyonUInt pyon_Array1_alignment;
+  extern "C" void
+  pyon_Array1_initialize(PyonInt min,
+                         PyonInt end,
+                         PyonUInt elt_size,
+                         PyonUInt elt_align,
+                         PyonBarePtr ret);
+  extern "C" PyonBarePtr
+  pyon_Array1_get_contents(PyonBarePtr array) __attribute__((pure));
+
+  extern "C" const PyonUInt pyon_Array2_size;
+  extern "C" const PyonUInt pyon_Array2_alignment;
+  extern "C" void
+  pyon_Array2_initialize(PyonInt y_min,
+                         PyonInt y_end,
+                         PyonInt x_min,
+                         PyonInt x_end,
+                         PyonUInt elt_size,
+                         PyonUInt elt_align,
+                         PyonBarePtr ret);
+  extern "C" PyonBarePtr
+  pyon_Array2_get_contents(PyonBarePtr array) __attribute__((pure));
+  
 }
 
 #endif
