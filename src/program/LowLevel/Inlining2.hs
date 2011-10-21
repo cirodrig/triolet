@@ -216,6 +216,8 @@ considerForInlining v f num_returns m
       hang (text "Will inline" <+> pprVar v <+> parens (text $ show num_returns)) 4
       (pprFun f)
 
+-- Make this function NOINLINE so it can be CSE'd.
+{-# NOINLINE willInline #-}
 willInline f = funIsInlinable f && worthInlining f
 
 -- | Return True if the function is judged /profitable/ to inline.
@@ -478,9 +480,7 @@ inlineLet params rhs body = do
     rtypes <- getReturns
     inlineAtom rhs' $ HasContinuation params' rtypes body'
       
-inlineLetrec defs body = do
-  (defs', body') <- inlineGroup defs (inline body)
-  return $ LetrecE defs' body'
+inlineLetrec defs body = inlineGroup defs (inline body)
 
 inlineSwitch scrutinee alts = do
   scrutinee' <- renameVal scrutinee
@@ -505,14 +505,23 @@ inlineGroup (NonRec (Def v f)) do_body = do
   propagateLetrecReturn f' n_returns
   tellCodeGrowth code_growth
 
-  -- Rename the bound variable
+  -- If the function is a join point and will be inlined,
+  -- then delete the function definition.  It will not be referenced
+  -- after inlining.
+  let delete_definition = willInline f' && funConvention f' == JoinCall
+
+  -- Rename the bound variable and perform inlining in the body 
   renameParameter v $ \v' -> do
     body' <- considerForInlining v' f' n_returns do_body
-    return (NonRec (Def v' f'), body')
+
+    return $! if delete_definition
+              then body'
+              else LetrecE (NonRec (Def v' f')) body'
 
 inlineGroup (Rec defs) do_body = do
   -- Rename bound variables
   renameParameters (map definiendum defs) $ \vs' -> do
+
     -- Perform renaming inside each function
     results <- doFunction $ mapM (inlineFun . definiens) defs
     let fs' = [f | (f, _, _) <- results]
@@ -522,7 +531,7 @@ inlineGroup (Rec defs) do_body = do
 
     -- Recursive functions may not be inlined
     body' <- do_body
-    return (Rec (zipWith Def vs' fs'), body')
+    return $ LetrecE (Rec (zipWith Def vs' fs')) body'
 
 -- Globals are not renamed during inlining, because the global variable
 -- may be mentioned in the import list (which isn't renamed).
