@@ -135,6 +135,25 @@ needsContinuationCall _ _ _ =
   Nothing
 
 -------------------------------------------------------------------------------
+-- Scanning to find all functions defined in a piece of code.
+
+definedFunctions :: LFunDef -> [Var]
+definedFunctions def = definedFunctionsDef def []
+
+definedFunctionsDef (Def v f) xs = v : definedFunctionsStm (funBody f) xs
+
+definedFunctionsStm stm xs =
+  case stm
+  of LetLCPS _ _ _ body -> definedFunctionsStm body xs
+     LetrecLCPS defs _ body ->
+       let body_xs = definedFunctionsStm body xs
+       in foldr definedFunctionsDef body_xs $ groupMembers defs
+     SwitchLCPS _ alts ->
+       foldr definedFunctionsStm xs (map snd alts)
+     ReturnLCPS _ -> xs
+     ThrowLCPS _ -> xs
+
+-------------------------------------------------------------------------------
 -- Scanning to identify LCPS candidates.  A scan computes return continuations
 -- of local functions.
 
@@ -149,16 +168,14 @@ type Relevant = IntMap.IntMap Int
 --   The parameters are the set of local functions, the current function's 
 --   return type, and the current statement's return continuation.
 --
---   Scanning produces a continuation map and the set of local functions that
---   were seen.
-newtype Scan = Scan {runScan :: Relevant -> [ValueType] -> RCont
-                             -> (RConts, Set.Set Var)}
+--   Scanning produces a continuation map
+newtype Scan = Scan {runScan :: Relevant -> [ValueType] -> RCont -> RConts}
 
-joinScanResult (r1, s1) (r2, s2) = (join r1 r2, Set.union s1 s2)
+joinScanResult = join
 
-joinScanResults = foldr joinScanResult emptyScanResult
+joinScanResults = foldr join bottom
 
-emptyScanResult = (bottom, Set.empty)
+emptyScanResult = bottom
 
 instance Monoid Scan where
   mempty = Scan (\_ _ _ -> emptyScanResult)
@@ -186,18 +203,14 @@ setCont cont_var (Scan f) = Scan $ \r rtypes _ ->
 tellRCont :: Var -> RCont -> Scan
 tellRCont v c = Scan $ \relevant _ _ ->
   if fromIdent (varID v) `IntMap.member` relevant
-  then (singletonRConts v c, Set.empty)
-  else (IntMap.empty, Set.empty)
+  then singletonRConts v c
+  else IntMap.empty
 
 -- | Record the continuation's return continuation.
 --
 --   For every labeled statement, its continuation is the current continuation.
 tellContCont :: Var -> Scan
-tellContCont v = Scan $ \_ _ rc -> (singletonRConts v rc, Set.empty)
-
--- | Record that some function definitions were seen.
-tellDefs :: [Var] -> Scan
-tellDefs vs = Scan $ \_ _ _ -> (bottom, Set.fromList vs)
+tellContCont v = Scan $ \_ _ rc -> singletonRConts v rc
 
 -- | The variable was called with some arguments.
 --
@@ -212,8 +225,8 @@ tellCurrentRCont :: Var -> Int -> Scan
 tellCurrentRCont v n_args = Scan $ \relevant _ rc ->
   case IntMap.lookup (fromIdent $ varID v) relevant
   of Nothing -> emptyScanResult
-     Just arity | arity == n_args -> (singletonRConts v rc, Set.empty)
-                | otherwise       -> (singletonRConts v Top, Set.empty)
+     Just arity | arity == n_args -> singletonRConts v rc
+                | otherwise       -> singletonRConts v Top
 
 scanValue :: Val -> Scan
 scanValue value =
@@ -241,19 +254,13 @@ scanAtom atom =
 scanDefGroup :: Group (Def LFun) -> Scan -> Scan
 scanDefGroup group scan_body = Scan $ \relevant rtypes rcont ->
   let -- Scan the body to find calls of local functions
-      (body_conts, body_vars) =
-        runScan (in_scope scan_body) relevant rtypes rcont
+      body_conts = runScan (in_scope scan_body) relevant rtypes rcont
       
       -- Scan each function, using its return continuation in the body.
       -- Iterate until a fixed point is reached.
-      (fun_conts, fun_vars) = scan_until_convergence relevant body_conts
-      
-      conts = join body_conts fun_conts
-      vars = body_vars `Set.union` fun_vars `Set.union` Set.fromList definienda
-  in (conts, vars)
+      fun_conts = scan_until_convergence relevant body_conts
+  in join body_conts fun_conts
   where
-    definienda = map definiendum $ groupMembers group
-
     -- Names and arities of functions in the definition group
     arities :: [(Var, Int)]
     arities = [(definiendum def, length $ funParams $ definiens def)
@@ -273,28 +280,35 @@ scanDefGroup group scan_body = Scan $ \relevant rtypes rcont ->
     -- The set of variables is the same in every scan, so we just retain the
     -- final result.
     scan_group_once :: Relevant -> RConts
-                    -> (RConts, Set.Set Var)
-                    -> (RConts, Set.Set Var)
-    scan_group_once relevant body_conts (given_conts, _) =
+                    -> RConts
+                    -> RConts
+    scan_group_once relevant body_conts given_conts =
       let rconts = join body_conts given_conts
       in joinScanResults [scan_def relevant rconts d | d <- groupMembers group]
 
     -- Scan the group, updating continuation info, until the results converge.
-    scan_until_convergence :: Relevant -> RConts -> (RConts, Set.Set Var)
+    scan_until_convergence :: Relevant -> RConts -> RConts
     scan_until_convergence relevant body_conts =
       let steps =
             -- Iterate the operation.  Discard the initial value.
             tail $ iterate (scan_group_once relevant body_conts) emptyScanResult
-      in case find (\((x, _), (y, _)) -> x == y) $ zip steps (tail steps)
+      in case find (uncurry (==)) $ zip steps (tail steps)
          of Just (final, _) -> final
 
 scanStm :: LStm -> Scan
 scanStm statement =
   case statement
-  of LetLCPS params rhs v body ->
+  of LetLCPS params rhs@(CallA {}) v body ->
+       -- The RHS could be CPS-transformed.
        -- The continuation of the body is the current continuation.
        -- Record it in case the body will be transformed into a real function.
        tellContCont v `mappend`
+       -- The RHS's continuation is the body
+       setCont v (scanAtom rhs) `mappend`
+       scanStm body
+     LetLCPS params rhs v body ->
+       -- RHSes other than calls will not be CPS-transformed, so don't
+       -- generate info for this continuation
        -- The RHS's continuation is the body
        setCont v (scanAtom rhs) `mappend`
        scanStm body
@@ -312,7 +326,7 @@ scanStm statement =
 
 -- | Interpreting 'RConts' as a graph, find the subgraph that is reachable from
 --   the given starting set.
-reachableConts initial_reachable_set all_rconts =
+reachableConts initial_reachable_set all_rconts = {-# SCC "reachableConts" #-}
   accumulate initial_reachable_set
   where
     -- Compute the reachable set
@@ -338,14 +352,15 @@ reachableConts initial_reachable_set all_rconts =
 --   function's continuation is a unique statement, then that will be recorded
 --   in a mapping.
 identifyLocalContinuations :: LFunDef -> RConts
-identifyLocalContinuations (Def v f) = let
+identifyLocalContinuations top_level_def@(Def v f) = let
   -- Determine continuations for all functions, including every
   -- hypothetical continuation point.
-  (all_rconts, all_funs) =
+  all_rconts = {-# SCC "runScan" #-}
     runScan (scanStm (funBody f)) IntMap.empty (funReturnTypes f) Top
+  all_funs = definedFunctions top_level_def
 
   -- Retain only the continuations that are reachable from a local function
-  all_fun_ids = IntSet.fromList $ map (fromIdent . varID) $ Set.toList all_funs
+  all_fun_ids = IntSet.fromList $ map (fromIdent . varID) all_funs
   real_rconts = reachableConts all_fun_ids all_rconts
 
   -- Add an entry for the top-level function
