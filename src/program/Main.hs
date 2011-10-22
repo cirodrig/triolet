@@ -220,7 +220,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
 
   repr_mod <- SystemF.longRangeFloating repr_mod
   when debugMode $ void $ do
-    putStrLn "After floating"
+    putStrLn "After floating 1"
     print $ SystemF.PrintMemoryIR.pprModule repr_mod
     evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
 
@@ -244,8 +244,14 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   -- Inline loops
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
 
+  repr_mod <- SystemF.longRangeFloating repr_mod
+  when debugMode $ void $ do
+    putStrLn "After floating 2"
+    print $ SystemF.PrintMemoryIR.pprModule repr_mod
+    evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
+
   -- Restructure the code resulting from inlining, which may create new
-  -- local functions  
+  -- local functions
   repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
   repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
 
@@ -255,8 +261,12 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.performGlobalDemandAnalysis repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
-  -- repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
-  -- repr_mod <- SystemF.flattenLocals repr_mod
+  
+  when debugMode $ void $ do
+    putStrLn "After argument flattening"
+    print $ SystemF.PrintMemoryIR.pprModule repr_mod
+    evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
+  tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
 
   -- Reconstruct demand information after flattening variables,
   -- so that the next optimization pass can do more work
@@ -392,6 +402,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   putStrLn "Before closure conversion"
   print $ LowLevel.pprModule ll_mod
   ll_mod <- LowLevel.closureConvert ll_mod
+  putStrLn ""
+  putStrLn "After closure conversion"
+  print $ LowLevel.pprModule ll_mod
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
   
   -- Second round of optimizations
