@@ -20,9 +20,11 @@ import Type.Environment
 import GlobalVar
 import Globals
 
-isSingletonConInst :: ConInst -> Bool
-isSingletonConInst (VarCon op _ _) = isSingletonCon op
-isSingletonConInst (TupleCon _) = False
+-- | Return 'True' if this 'ConInst' constructs a data type that is
+--   OK to float.
+isDictionaryConInst :: ConInst -> Bool
+isDictionaryConInst (VarCon op _ _) = isDictionaryDataCon op
+isDictionaryConInst (TupleCon _) = False
 
 -------------------------------------------------------------------------------
 -- The Floating monad
@@ -97,11 +99,23 @@ floatExp expression =
        
        -- If constructing a known-safe singleton type, float the constructor
        -- outward as far as possible
-       if isSingletonConInst $ fromCInstM con
+       if isDictionaryConInst $ fromCInstM con
          then do
            ty <- inferExpType expression
            joinInContext new_exp $ asLetContext ty
          else return new_exp
+
+     AppE inf (ExpM (VarE op_inf op_var)) ty_args args 
+       | isReprCon op_var -> do
+
+           -- Float out this Repr dictionary term
+           ctx_args <- floatExps args
+           let make_new_exp args' =
+                 ExpM $ AppE inf (ExpM $ VarE op_inf op_var) ty_args args'
+               new_exp = mapContext make_new_exp ctx_args
+           ty <- inferExpType expression
+           joinInContext new_exp $ asLetContext ty
+
      AppE inf op ty_args args -> do
        ctx_op <- floatExp op
        ctx_args <- floatExps args
