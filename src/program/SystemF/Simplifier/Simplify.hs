@@ -2207,34 +2207,58 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
 --   If the pattern does not bind any fields, then create a dummy parameter
 --   of type 'NoneType'.
 makeBranchContinuation :: ExpInfo -> Maybe PatSM -> AltSM -> LR (Def Mem)
-makeBranchContinuation inf m_return_param (AltSM alt) = do
-  let ex_types = deConExTypes $ fromDeCInstSM $ altCon alt
+makeBranchContinuation inf m_return_param alt = do
+  -- Rename the return parameter (if present) to avoid name collisions
+  (m_return_param', alt') <-
+    case m_return_param
+    of Nothing  -> return (m_return_param, alt)
+       Just pat -> substitutePatSM emptySubst pat $ \s pat' -> do
+         alt' <- substitute s alt
+         return (Just pat', alt')
 
-  -- If there's a current return parameter,
-  -- pass that to the branch continuation also.
-  -- It's expected by argument flattening.
-  let fun_params = altParams alt ++ maybeToList m_return_param
-  nonempty_params <-
-    if null fun_params
-    then do field_var <- newAnonymousVar ObjectLevel
-            return [PatSM $ patM (field_var ::: VarT (pyonBuiltin The_NoneType))]
-    else return fun_params
-  let body = altBody alt
-  return_type <-
-    assumeBinders ex_types $ assumePatterns (map fromPatSM nonempty_params) $ do
-      inferExpType =<< applySubstitution body
-       
-  fun_name <- newAnonymousVar ObjectLevel
-  let fun_ty_params = map (TyPatSM . TyPatM) ex_types 
-      fun = FunSM $ Fun inf fun_ty_params nonempty_params (TypSM return_type) body
-
+  fun <- constructBranchContinuationFunction inf m_return_param' alt'
+  
   -- Simplify the function
   (fun', _) <- rwFun fun
 
   -- Create a function definition
+  fun_name <- newAnonymousVar ObjectLevel
   let def1 = mkDef fun_name fun'
       def2 = modifyDefAnnotation (\a -> a {defAnnJoinPoint = True}) def1
   return def2
+
+-- | Turn the body of a case alternative into a function.
+-- The function's parameters consist of the variables that are bound by 
+-- the case alternative, and the return parameter of the enclosing function
+-- (if there is one).
+-- There must be at least one parameter;
+-- create a dummy parameter if needed.
+constructBranchContinuationFunction :: ExpInfo -> Maybe PatSM -> AltSM
+                                    -> LR FunSM
+constructBranchContinuationFunction inf m_return_param (AltSM alt) = do
+  nonempty_params <-
+    if null params
+    then make_dummy_parameter
+    else return params
+
+  -- Compute the case alternative's return type
+  return_type <-
+    assumeBinders ex_types $ assumePatterns (map fromPatSM nonempty_params) $ do
+      inferExpType =<< applySubstitution body
+  
+  -- Construct a function
+  let ty_params = map (TyPatSM . TyPatM) ex_types 
+      fun = FunSM $ Fun inf ty_params nonempty_params (TypSM return_type) body
+  return fun
+  where
+    -- These will become the parameters and body of the returned function
+    ex_types = deConExTypes $ fromDeCInstSM $ altCon alt
+    params = altParams alt ++ maybeToList m_return_param
+    body = altBody alt
+
+    make_dummy_parameter = do
+      field_var <- newAnonymousVar ObjectLevel
+      return [PatSM $ patM (field_var ::: VarT (pyonBuiltin The_NoneType))]
 
 -- | Perform case analysis on the expression's result.  Use the @(AltM, Var)@
 --   pairs to dispatch each case.
