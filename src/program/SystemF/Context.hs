@@ -62,13 +62,6 @@ import Type.Substitute(substitute, freshen, Substitutable(..))
 intersects :: Ord a => Set.Set a -> Set.Set a -> Bool
 s1 `intersects` s2 = not $ Set.null $ Set.intersection s1 s2
 
-renameMany :: (st -> a -> (st -> a -> b) -> b)
-           -> st -> [a] -> (st -> [a] -> b) -> b
-renameMany f rn (x:xs) k =
-  f rn x $ \rn' x' -> renameMany f rn' xs $ \rn'' xs' -> k rn'' (x':xs')
-
-renameMany _ rn [] k = k rn []
-
 -- | Is this a singleton type?
 isSingletonType :: Type -> Bool
 isSingletonType ty =

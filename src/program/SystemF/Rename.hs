@@ -3,6 +3,7 @@
 module SystemF.Rename
        (Subst(..),
         ValAss(..),
+        renameMany,
         emptySubst,
         isEmptySubst,
         composeSubst,

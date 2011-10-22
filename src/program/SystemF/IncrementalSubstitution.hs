@@ -4,6 +4,7 @@ module SystemF.IncrementalSubstitution
        (SM,
         Typ(..), CInst(..), DeCInst(..), TyPat(..), Pat(..), Alt(..), Fun(..),
         TypSM, PatSM, ExpSM, AltSM, FunSM, CInstSM, DeCInstSM,
+        substitutePatSM, substitutePatSMs,
         deferSubstitution,
         deferEmptySubstitution,
         addDeferredSubstitution,
@@ -54,6 +55,16 @@ newtype instance Fun SM = FunSM {fromFunSM :: BaseFun SM}
 --   inspecting the expression.
 data instance Exp SM = ExpSM !Subst ExpM
 
+-- | 'PatSM' behaves like 'PatM'
+substitutePatSM :: EvalMonad m =>
+                   Subst -> PatSM -> (Subst -> PatSM -> m a) -> m a
+substitutePatSM s pat k =
+  substitutePatM s (fromPatSM pat) $ \s' p' -> k s' (PatSM p')
+
+substitutePatSMs :: EvalMonad m =>
+                    Subst -> [PatSM] -> (Subst -> [PatSM] -> m a) -> m a
+substitutePatSMs = renameMany substitutePatSM
+
 instance Substitutable (Exp SM) where
   type Substitution (Exp SM) = Subst
   substituteWorker = addDeferredSubstitution
@@ -64,14 +75,23 @@ instance Substitutable (Fun SM) where
     -- Push the substitution down to the body of the function.  Defer further
     -- processing.
     substituteTyPatMs s (map fromTyPatSM $ funTyParams fun) $ \s' ty_params ->
-    substitutePatMs s' (map fromPatSM $ funParams fun) $ \s'' params -> do
+    substitutePatSMs s' (funParams fun) $ \s'' params -> do
       ret <- substitute (typeSubst s'') $ fromTypSM $ funReturn fun
       body <- substitute s'' $ funBody fun
       return $ FunSM $ Fun { funInfo = funInfo fun
                            , funTyParams = castTyPats ty_params
-                           , funParams = castPats params
+                           , funParams = params
                            , funReturn = TypSM ret
                            , funBody = body}
+
+instance Substitutable (Alt SM) where
+  type Substitution (Alt SM) = Subst
+  substituteWorker s (AltSM (Alt decon params body)) =
+    substituteDeConInst (typeSubst s) (fromDeCInstSM decon) $ \type_subst decon' ->
+    let s' = setTypeSubst type_subst s
+    in substitutePatSMs s' params $ \s'' params' -> do
+      body' <- substitute s'' body
+      return $ AltSM $ Alt (DeCInstSM decon') params' body'
 
 -- | Apply a substitution to an 'ExpM'.  The actual substitution is
 --   performed later.
