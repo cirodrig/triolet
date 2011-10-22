@@ -305,7 +305,7 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
     fun_size_threshold =
       -- Use a low threshold for compiler-inserted join points, because
       -- they generally don't provide useful opportunities for optimization
-      if defAnnJoinPoint ann then 8 else 100
+      if defAnnJoinPoint ann then 8 else 800
 
 -- | Decide whether the function is good for inlining, based on 
 --   its use annotation.  Functions that are used exactly once should be
