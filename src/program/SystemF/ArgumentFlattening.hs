@@ -781,15 +781,23 @@ lambdaAbstractReturn :: (ReprDictMonad m, TypeEnvMonad m) =>
                      -> PatM    -- ^ Parameter to abstract over
                      -> ExpM    -- ^ Expression
                      -> m ExpM  -- ^ Create a new expression
-lambdaAbstractReturn rtype pat exp = mapOverTailExps lambda_abstract exp
-  where
-    lambda_abstract e =
-      return $ ExpM $ LamE defaultExpInfo $
-               FunM $ Fun { funInfo = defaultExpInfo
-                          , funTyParams = []
-                          , funParams = [pat]
-                          , funReturn = rtype
-                          , funBody = e}
+lambdaAbstractReturn rtype pat exp =
+  mapOverTailExps (lambdaAbstract defaultExpInfo rtype pat) exp
+
+-- | Lambda-abstract over a single parameter, which may already be in scope.
+--   Rename the pattern variable to avoid name shadowing.
+lambdaAbstract inf rtype pat e = do
+  let old_var = patMVar pat
+  pat_var <- newClonedVar old_var
+  let pat' = patM (pat_var ::: patMType pat)
+      renaming = Rename.singleton old_var pat_var
+      e' = Rename.rename renaming e
+  return $ ExpM $ LamE inf $
+           FunM $ Fun { funInfo = inf
+                      , funTyParams = []
+                      , funParams = [pat']
+                      , funReturn = rtype
+                      , funBody = e'}
 
 -------------------------------------------------------------------------------
 -- * Decisions on how to flatten
@@ -1294,7 +1302,8 @@ mkWrapperFunction plan annotation wrapper_name worker_name = do
     make_wrapper_body = assumeTyPatMs (originalTyParams plan) $ do
       -- Call the worker function and re-pack its arguments
       tenv <- getTypeEnv
-      body <- packReturn (planRetFlatRet $ flatReturn plan) (worker_call tenv)
+      worker_call_exp <- worker_call tenv
+      body <- packReturn (planRetFlatRet $ flatReturn plan) worker_call_exp
       
       -- Apply the return argument, if the original function had one
       let ret_body =
@@ -1321,17 +1330,12 @@ mkWrapperFunction plan annotation wrapper_name worker_name = do
           ty_args = orig_ty_args ++ new_ty_args
           args = input_args ++ output_args
           worker_e = ExpM $ VarE defaultExpInfo worker_name
-          worker_call = appE defaultExpInfo worker_e ty_args args
+          worker_call_exp = appE defaultExpInfo worker_e ty_args args
       in -- If the worker function returns by reference, then lambda-abstract
          -- over its output parameter
          case output_params
-         of [] -> worker_call
-            [p] -> ExpM $ LamE defaultExpInfo $
-                   FunM $ Fun { funInfo = defaultExpInfo
-                              , funTyParams = []
-                              , funParams = [p]
-                              , funReturn = return_type
-                              , funBody = worker_call}
+         of [] -> return worker_call_exp
+            [p] -> lambdaAbstract defaultExpInfo return_type p worker_call_exp
 
 -- | Create a worker function.  The worker function takes unpacked arguments
 --   and returns an unpacked return value.  The worker function body repacks
