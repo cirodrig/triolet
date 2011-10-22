@@ -173,9 +173,12 @@ floatAlt (AltM (Alt (DeCInstM decon) params body)) = do
 floatFun :: [Binder] -> FunM -> Flt (Contexted FunM)
 floatFun fun_binders (FunM f@(Fun inf ty_params params return_type body)) = do
   fun_body <-
-    enterScope' [p | TyPatM p <- ty_params] params (return $ fromTypM return_type) $
+    enterScopeOfVars fun_binders get_return_type $
+    enterScope' [p | TyPatM p <- ty_params] params get_return_type $
     floatExp body
   return $ mapContext (\e -> FunM $ f {funBody = e}) fun_body
+  where
+    get_return_type = return $ fromTypM return_type
 
 -- | Perform floating in a top-level function.  Nothing is floated out of
 --   the function.
