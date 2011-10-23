@@ -13,6 +13,7 @@ extern "C" {
 #ifdef USE_TBB
 # include "tbb/tbb_stddef.h"
 # include "tbb/blocked_range.h"
+# include "tbb/blocked_range2d.h"
 # include "tbb/parallel_for.h"
 # include "tbb/parallel_reduce.h"
 #endif
@@ -154,8 +155,39 @@ blocked_doall2_worker(void *worker_fn,
 
 /* Function exported to pyon */
 extern "C" void
+pyon_C_blocked_doall2(void *worker_fn, PyonInt count_y, PyonInt count_x);
+
+#ifndef USE_TBB
+
+extern "C" void
 pyon_C_blocked_doall2(void *worker_fn, PyonInt count_y, PyonInt count_x)
 {
-  fprintf(stderr, "pyon_C_blocked_doall2: Not implemented\n");
-  exit(-1);
+  blocked_doall2_worker(worker_fn, 0, count_y, 0, count_x);
 }
+
+#else
+
+// Parallel loop partitioned using TBB
+
+struct BlockedDoer2 {
+  void *data;
+
+  BlockedDoer2(void *_data) : data(_data) {}
+
+  void operator()(tbb::blocked_range2d<int> &range) const {
+    int first_y = range.rows().begin();
+    int end_y = range.rows().end();
+    int first_x = range.cols().begin();
+    int end_x = range.cols().end(); 
+    blocked_doall2_worker(data, first_y, end_y, first_x, end_x);
+  }
+};
+
+extern "C" void
+pyon_C_blocked_doall2(void *data, PyonInt count_y, PyonInt count_x)
+{
+  tbb::parallel_for(tbb::blocked_range2d<int>(0, count_y, 0, count_x),
+		    BlockedDoer2(data));
+}
+
+#endif // USE_TBB
