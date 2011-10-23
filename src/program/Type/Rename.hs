@@ -9,6 +9,7 @@ module Type.Rename
         fromList,
         union,
         extend,
+        compose,
         exclude,
         lookup,
         renameBinder,
@@ -68,6 +69,16 @@ union (R r1) (R r2) = R (IntMap.union r1 r2)
 
 extend :: Var -> Var -> Renaming -> Renaming
 extend v1 v2 (R r) = R (IntMap.insert (fromIdent $ varID v1) v2 r)
+
+-- | @r2 `compose` r1@ is a renaming equivalent to applying @r1@, then
+--   applying @r2@.
+compose :: Renaming -> Renaming -> Renaming
+r2 `compose` r1 =
+  -- Apply r2 to the range of r1
+  let r1' = IntMap.map (rename r2) (unR r1)
+  
+  -- Take the union of r1 and r2, with r1 overriding r2
+  in R $ IntMap.union r1' (unR r2)
 
 exclude :: Var -> Renaming -> Renaming
 exclude v (R r) = R (IntMap.delete (fromIdent $ varID v) r)
