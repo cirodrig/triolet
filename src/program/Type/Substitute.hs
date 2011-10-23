@@ -158,6 +158,14 @@ instance Substitutable a => Substitutable [a] where
   type Substitution [a] = Substitution a
   substituteWorker s xs = mapM (substituteWorker s) xs
 
+-- | A data type that does not mention any variables in the domain of
+--   substitution 's'
+newtype Nameless s a = Nameless a
+
+instance SubstitutionMap s => Substitutable (Nameless s a) where
+  type Substitution (Nameless s a) = s
+  substituteWorker _ x = return x
+
 instance Substitutable Type where
   type Substitution Type = TypeSubst
   substituteWorker sb ty =

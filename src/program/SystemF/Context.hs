@@ -15,6 +15,7 @@ module SystemF.Context
         
         -- * Eliminating contexts
         discardContext,
+        eliminateContext,
         contextExpression,
         pprContext,
 
@@ -614,6 +615,14 @@ joinInContext :: (EvalMonad m, Substitutable a, Substitutable b,
                   Substitution a ~ Subst, Substitution b ~ Subst) =>
                  Contexted a -> (a -> m (Contexted b)) -> m (Contexted b)
 joinInContext c f = liftM joinContext (traverseContext f c)
+
+eliminateContext :: (EvalMonad m, Substitutable a, Substitution a ~ Subst) =>
+                    (a -> m (Substitute.Nameless Subst b))
+                 -> Contexted a
+                 -> m b
+eliminateContext f x = do
+  y <- traverseContext f x
+  return $ case discardContext y of Substitute.Nameless y' -> y'
 
 -- | Merge two contexts, renaming variables if necessary to avoid name
 --   conflicts.
