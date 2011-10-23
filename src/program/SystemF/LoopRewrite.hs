@@ -59,9 +59,17 @@ incOtherLoopCount m = local (modifyLoopNesting inc_count) m
 
 parLoopOperator, otherLoopOperator :: Var -> Bool
 parLoopOperator v =
-  v `elem` [pyonBuiltin The_blocked_reduce,
-            pyonBuiltin The_blocked_doall]
-
+  v `elem` [pyonBuiltin The_parallel_doall,
+            pyonBuiltin The_parallel_doall2,
+            pyonBuiltin The_blocked_reduce,
+            pyonBuiltin The_blocked_doall,
+            pyonBuiltin The_blocked_doall2,
+            pyonBuiltin The_parallel_dim1_reduce,
+            pyonBuiltin The_parallel_dim1_reduce1,
+            pyonBuiltin The_parallel_dim1_generate,
+            pyonBuiltin The_parallel_dim2_generate
+           ] 
+  
 otherLoopOperator v =
   v `elem` [pyonBuiltin The_for,
             pyonBuiltin The_doall,
@@ -71,7 +79,12 @@ otherLoopOperator v =
             pyonBuiltin The_fun_reduce_Stream,
             pyonBuiltin The_fun_reduce1,
             pyonBuiltin The_fun_reduce1_Stream,
-            pyonBuiltin The_TraversableDict_list_build]
+            pyonBuiltin The_TraversableDict_list_build,
+            pyonBuiltin The_primitive_dim1_reduce,
+            pyonBuiltin The_primitive_dim1_reduce1,
+            pyonBuiltin The_primitive_dim1_generate,
+            pyonBuiltin The_primitive_dim2_generate
+            ]
 
 -- | Use rewrite rules on an application
 useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)
@@ -119,6 +132,10 @@ replaceWithParallelApp inf op_var ty_args args = ReaderT $ \env ->
          pyonBuiltin The_parallel_dim1_reduce)
       , (pyonBuiltin The_primitive_dim1_reduce1,
          pyonBuiltin The_parallel_dim1_reduce1)
+      , (pyonBuiltin The_primitive_dim1_generate,
+         pyonBuiltin The_parallel_dim1_generate)
+      , (pyonBuiltin The_primitive_dim2_generate,
+         pyonBuiltin The_parallel_dim2_generate)
       , (pyonBuiltin The_doall,
          pyonBuiltin The_parallel_doall)
       ]

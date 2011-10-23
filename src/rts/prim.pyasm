@@ -354,3 +354,18 @@ function inline blocked_doall
 procedure blocked_doall_worker (owned f, int start, int end) -> () {
   () call f (start, FinIndInt {end - start});
 };
+
+function blocked_doall2
+  (FinIndInt size_y, FinIndInt size_x, owned worker) -> () {
+
+  FinIndInt {count_y} = size_y;
+  FinIndInt {count_x} = size_x;
+
+  () primcall pyon_C_blocked_doall2 (worker, count_y, count_x);
+};
+
+procedure blocked_doall2_worker
+  (owned f, int start_y, int end_y, int start_x, int end_x) -> () {
+  () call f (start_y, FinIndInt {end_y - start_y},
+             start_x, FinIndInt {end_x - start_x});
+};

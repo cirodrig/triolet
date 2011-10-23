@@ -561,14 +561,8 @@ arr2D_build @(M N : intindex) @(a : bare)
   -> IEffect (arr M (arr N a))
   attribute(inline, inline_final) =
 
-  let row_repr : Repr (arr N a) = repr_arr @N @a width repr in
   case s of mk_darr2 @M @N @a (f : int -> int -> Writer a).
-
-  doall @M @(arr M (arr N a)) @(arr N a) height
-  (\ (j : int) -> IEffect (arr N a).
-     doall @N @(arr N a) @a width
-     (\ (i : int) -> IEffect a.
-        f j i (subscript_out @N @a repr (subscript_out @M @(arr N a) row_repr ret j) i)));
+  primitive_dim2_generate @M @N @a repr height width f ret;
 
 {-
 Old array builder function, using a stream to write the array
@@ -2599,7 +2593,7 @@ primitive_dim1_generate @(N : intindex) @(a : bare)
   (ret : OutPtr (arr N a))
   -> IEffect (arr N a)
   attribute(inline, inline_sequential) =
-  parallel_doall @N @(arr N a) @a size
+  doall @N @(arr N a) @a size
   (\ (i : int) -> IEffect a. f i (subscript_out @N @a repr ret i));
 
 
@@ -2763,6 +2757,20 @@ Sequence_fold @(a acc : bare)
       }
   in go state (convertToBoxed @acc repr_acc (copy @acc repr_acc init)) ret;
 
+
+primitive_dim2_generate @(M N : intindex) @(a : bare)
+  (repr : Repr a) (height : FIInt M) (width : FIInt N)
+  (f : int -> int -> Writer a)
+  (ret : OutPtr (arr M (arr N a)))
+  -> IEffect (arr M (arr N a))
+  attribute(inline, inline_sequential) =
+
+  let row_repr : Repr (arr N a) = repr_arr @N @a width repr in
+  doall @M @(arr M (arr N a)) @(arr N a) height
+  (\ (j : int) -> IEffect (arr N a).
+     doall @N @(arr N a) @a width
+     (\ (i : int) -> IEffect a.
+        f j i (subscript_out @N @a repr (subscript_out @M @(arr N a) row_repr ret j) i)));
 
 -------------------------------------------------------------------------------
 -- Methods specifically for 1D streams
@@ -3307,6 +3315,16 @@ parallel_doall @(N : intindex) @(a b : bare)
   blocked_doall @N @a @b count do_range;
 
 
+parallel_dim1_generate @(N : intindex) @(a : bare)
+  (repr : Repr a) (size : FIInt N)
+  (f : int -> Writer a)
+  (ret : OutPtr (arr N a))
+  -> IEffect (arr N a)
+  attribute(inline) =
+  parallel_doall @N @(arr N a) @a size
+  (\ (i : int) -> IEffect a. f i (subscript_out @N @a repr ret i));
+
+
 parallel_dim1_reduce @(N : intindex) @(a : bare)
   (repr : Repr a) (count : FIInt N)
   (f : a -> a -> Writer a)
@@ -3384,7 +3402,41 @@ parallel_dim1_reduce1 @(N : intindex) @(a : bare)
 
     -- If 'nothing' is returned, then the range was empty.  This is an error.
   ; nothing @a. except @(IEffect a) 
-  }
+  };
+
+
+parallel_dim2_generate @(M N : intindex) @(a : bare)
+  (repr : Repr a) (height : FIInt M) (width : FIInt N)
+  (f : int -> int -> Writer a)
+  (ret : OutPtr (arr M (arr N a)))
+  -> IEffect (arr M (arr N a))
+  attribute(inline, inline_sequential) =
+
+  let row_repr : Repr (arr N a) = repr_arr @N @a width repr in
+  parallel_doall2 @M @N @(arr M (arr N a)) @a height width
+  (\ (j : int) (i : int) -> IEffect a.
+     f j i (subscript_out @N @a repr (subscript_out @M @(arr N a) row_repr ret j) i));
+
+
+parallel_doall2 @(M N : intindex) @(a b : bare)
+  (count_y : FIInt M)
+  (count_x : FIInt N)
+  (f : int -> int -> IEffect b)
+  -> IEffect a
+  attribute(inline, inline_sequential) =
+
+  letfun
+    do_range @(M N : intindex)
+      (lb_m : int) (range_count_m : FIInt M)
+      (lb_n : int) (range_count_n : FIInt N)
+      -> IEffect b =
+    doall @M @b @b range_count_m
+    (\ (range_j : int) -> IEffect b.
+      doall @N @b @b range_count_n
+      (\ (range_i : int) -> IEffect b.
+        f (range_j +# lb_m) (range_i +# lb_n)))
+  in
+  blocked_doall2 @M @N @a @b count_y count_x do_range;
 
 
 

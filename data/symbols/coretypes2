@@ -1226,6 +1226,10 @@ Sequence_fold : (a acc : bare)
 	      -> Sequence a
 	      -> Writer acc;
 
+primitive_dim2_generate :
+    (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
+ -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
+
 fun_reduce_Stream : (a : bare)
           	 -> Repr a
           	 -> (a -> a -> Writer a)
@@ -1712,6 +1716,21 @@ parallel_dim1_reduce1 :
  -> (a -> a -> Writer a) -> (int -> Writer a)
  -> Writer a;
 
+parallel_dim1_generate :
+    (N : intindex) -> (a : bare) -> Repr a -> FIInt N
+ -> (int -> Writer a) -> Writer (arr N a);
+
+parallel_doall2 : (M N : intindex)
+     -> (a b : bare)
+     -> FIInt M
+     -> FIInt N
+     -> (int -> int -> IEffect b)
+     -> IEffect a;
+
+parallel_dim2_generate :
+    (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
+ -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
+
 -- Blocked parallel reduction, implemented in low-level.
 blocked_reduce :
     (N : intindex)
@@ -1729,4 +1748,13 @@ blocked_doall :
  -> (a b : bare)
  -> FIInt N
  -> ((M : intindex) -> int -> FIInt M -> IEffect b)
+ -> IEffect a;
+
+-- Blocked 2D parallel loop
+blocked_doall2 :
+    (M N : intindex)
+ -> (a b : bare)
+ -> FIInt M
+ -> FIInt N
+ -> ((M N : intindex) -> int -> FIInt M -> int -> FIInt N -> IEffect b)
  -> IEffect a;

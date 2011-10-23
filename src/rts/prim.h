@@ -97,3 +97,13 @@ import procedure pyon_C_blocked_doall
 
 extern procedure pyon.internal.prim.blocked_doall_worker
   "blocked_doall_worker" (owned, int, int) -> ();
+
+extern function pyon.internal.prim.blocked_doall2
+  (FinIndInt, FinIndInt, owned) -> ();
+
+// C implementation of blocked_doall2
+import procedure pyon_C_blocked_doall2
+  (owned, int, int) -> ();
+
+extern procedure pyon.internal.prim.blocked_doall2_worker
+  "blocked_doall2_worker" (owned, int, int, int, int) -> ();

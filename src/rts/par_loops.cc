@@ -4,6 +4,7 @@
 // Pyon code to do the actual work.
 
 #include <stdio.h>
+#include <stdlib.h>
 
 extern "C" {
 #include "pyon.h"
@@ -141,3 +142,20 @@ pyon_C_blocked_doall(void *data, PyonInt count)
 }
 
 #endif	// USE_TBB
+
+/*****************************************************************************/
+/* Parallelized 2D doall */
+
+/* Functions written in low-level pyon */
+extern "C" void
+blocked_doall2_worker(void *worker_fn,
+                      PyonInt start_y, PyonInt end_y,
+                      PyonInt start_x, PyonInt end_x);
+
+/* Function exported to pyon */
+extern "C" void
+pyon_C_blocked_doall2(void *worker_fn, PyonInt count_y, PyonInt count_x)
+{
+  fprintf(stderr, "pyon_C_blocked_doall2: Not implemented\n");
+  exit(-1);
+}

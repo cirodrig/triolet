@@ -298,6 +298,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_blocked_reduce) |])
   , (PyonName module_prim "blocked_doall",
      Right [| pyonBuiltin (SystemF.The_blocked_doall) |])
+  , (PyonName module_prim "blocked_doall2",
+     Right [| pyonBuiltin (SystemF.The_blocked_doall2) |])
 
     -- Functions that are replaced by primitive operations
   , (PyonName module_prim "eq_int",

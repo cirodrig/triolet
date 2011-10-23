@@ -331,6 +331,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin The_darr1_reduce, rwDarr1Reduce)
             , (pyonBuiltin The_darr1_reduce1, rwDarr1Reduce1)
             , (pyonBuiltin The_arr1D_build, rwArr1DBuild)
+            , (pyonBuiltin The_arr2D_build, rwArr2DBuild)
             -- , (pyonBuiltin The_range, rwRange)
             -- , (pyonBuiltin The_TraversableDict_list_traverse, rwTraverseList)
             --, (pyonBuiltin The_TraversableDict_list_build, rwBuildList)
@@ -608,6 +609,24 @@ rwArr1DBuild inf [size_index, ty]
      _ -> return Nothing
 
 rwArr1DBuild _ _ _ = return Nothing
+
+-- | Convert a 2D array creation on a @mk_darr2@ to a loop.
+--   The result is basically the same as if the function were inlined.
+--   It's done as a rewrite rule because we want to \"inline\" only if
+--   the argument is a data constructor.
+rwArr2DBuild :: RewriteRule
+rwArr2DBuild inf [size_index_y, size_index_x, ty]
+  (repr : count_y : count_x : darr : other_args) =
+  case fromExpM darr
+  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+       | con `isPyonBuiltin` The_mk_darr2 ->
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim2_generate
+             exp = appE inf op [size_index_y, size_index_x, ty]
+                   (repr : count_y : count_x : producer : other_args)
+         in return $ Just exp
+     _ -> return Nothing
+
+rwArr2DBuild _ _ _ = return Nothing
 
 {-
 -- | Convert 'range' into an explicitly indexed variant
