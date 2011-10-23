@@ -100,10 +100,23 @@ lookupReprDict' ty = withDictEnv (DictEnv.lookup ty . reprDictEnv)
 
 -- | Look up the integer value indexed by the given index.  The index must
 --   have kind 'intindex'.
-lookupIndexedInt :: ReprDictMonad m => Type -> m (Maybe ExpM)
+lookupIndexedInt :: forall m. ReprDictMonad m => Type -> m (Maybe ExpM)
 lookupIndexedInt ty = do
-  mk <- withDictEnv (DictEnv.lookup ty . intIndexEnv)
-  mapM (\(MkDict m) -> m) mk
+  whnf_ty <- reduceToWhnf ty
+  case whnf_ty of
+    IntT n -> create_indexed_int n
+    _ -> do
+      mk <- withDictEnv (DictEnv.lookup ty . intIndexEnv)
+      mapM (\(MkDict m) -> m) mk
+  where
+    -- Create an indexed integer constant
+    create_indexed_int :: forall. Integer -> m (Maybe ExpM)
+    create_indexed_int n =
+      let e = conE defaultExpInfo (VarCon (pyonBuiltin The_fiInt) [IntT n] [])
+              [ExpM $ LitE defaultExpInfo (IntL n int_type)]
+      in return $ Just e
+
+    int_type = VarT $ pyonBuiltin The_int
 
 lookupIndexedInt' :: ReprDictMonad m => Type -> m ExpM
 lookupIndexedInt' ty = lookupIndexedInt ty >>= check

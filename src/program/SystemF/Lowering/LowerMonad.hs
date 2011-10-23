@@ -23,6 +23,7 @@ import qualified LowLevel.CodeTypes as LL
 import qualified SystemF.DictEnv as DictEnv
 import SystemF.Syntax
 import Type.Environment
+import Type.Eval
 import Type.Type
 import Type.Substitute(TypeSubst)
 import qualified Type.Substitute as Substitute
@@ -214,19 +215,23 @@ assumeReprDict ty val (Lower m) = Lower $ local update m
 -- | Find a finite integer indexed by the given index, which should be a type
 --   of kind @intindex@.  Fail if not found.
 lookupIndexedInt :: Type -> GenLower LL.Val
-lookupIndexedInt (IntT n) =
-  -- Create a literal value
-  return $ LL.RecV (LL.finIndexedIntRecord) [nativeIntV n]
-
 lookupIndexedInt ty = do
-  match <- lookup_dict
-  case match of
-    Just make_int_val -> make_int_val
-    Nothing -> internalError $ 
-               "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
+  whnf_ty <- lift $ reduceToWhnf ty
+  case whnf_ty of
+    IntT n -> create_indexed_int n
+    _ -> do
+      match <- lookup_dict
+      case match of
+        Just make_int_val -> make_int_val
+        Nothing -> internalError $
+                   "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
   where
+    create_indexed_int n =
+      -- Create a literal value
+      return $ LL.RecV (LL.finIndexedIntRecord) [nativeIntV n]
+
     lookup_dict = lift $ do
-      dict_env <- Lower $ asks intEnvironment 
+      dict_env <- Lower $ asks intEnvironment
       DictEnv.lookup ty dict_env
 
 -- | Add a finite indexed integer for this type index to the environment

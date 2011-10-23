@@ -61,7 +61,7 @@ lookup :: EvalMonad m => Type -> DictEnv a -> m (Maybe a)
 lookup key (DictEnv xs) = go xs
   where
     go (TypePattern qvars t mk_value : xs) = do
-      -- Try to match 'key' against this pattenr
+      -- Try to match 'key' against this pattern
       match <- unifyTypeWithPattern qvars t key
       case match of
         Nothing     -> go xs
