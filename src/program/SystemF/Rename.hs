@@ -15,10 +15,13 @@ module SystemF.Rename
         singletonV,
         fromListV,
         renamePatM,
+        freshenPatM,
         renamePatMs,
+        freshenPatMs,
         renameTyPatM,
         renameTyPatMs,
         renameDeConInst,
+        freshenDeConInst,
         renameDefGroup,
         deConFreeVariables,
         defGroupFreeVariables,
@@ -179,6 +182,21 @@ renamePatM rn (PatM binding uses) k =
   Rename.renameBinder rn binding $ \rn' binding' ->
   k rn' (PatM binding' (rename rn uses))
 
+-- | Replace the pattern variable with a fresh name
+freshenPatM :: Supplies m (Ident Var) => PatM -> m (PatM, Renaming)
+freshenPatM pat = do
+  let old_var = patMVar pat
+      ty = patMType pat
+      dmd = patMDmd pat
+  new_var <- newClonedVar old_var
+  return (setPatMDmd dmd $ patM (new_var ::: ty),
+          Rename.singleton old_var new_var)
+
+freshenPatMs :: Supplies m (Ident Var) => [PatM] -> m ([PatM], Renaming)
+freshenPatMs pats = do
+  (pats', rns) <- mapAndUnzipM freshenPatM pats
+  return (pats', foldr Rename.union Rename.empty rns)
+
 renamePatMs :: Renaming -> [PatM] -> (Renaming -> [PatM] -> a) -> a
 renamePatMs = renameMany renamePatM
 
@@ -220,6 +238,19 @@ renameDeConInst rn decon k =
      TupleDeCon ty_args ->
        let ty_args' = rename rn ty_args
        in k rn (TupleDeCon ty_args')
+
+-- | Rename each bound variable to a fresh name
+freshenDeConInst :: (Supplies m (Ident Var)) =>
+                    DeConInst -> m (DeConInst, Renaming)
+freshenDeConInst decon =
+  case decon
+  of VarDeCon con ty_args ex_types -> do
+       new_vars <- mapM (newClonedVar . binderVar) ex_types
+       let renaming = Rename.fromList $ zip (map binderVar ex_types) new_vars
+           ex_types' = [v ::: t | (v, _ ::: t) <- zip new_vars ex_types]
+       return (VarDeCon con ty_args ex_types', renaming)
+     TupleDeCon _ ->
+       return (decon, Rename.empty)
 
 deConFreeVariables :: DeConInst -> Set.Set Var -> Set.Set Var
 deConFreeVariables (VarDeCon op ty_args ex_types) fv =

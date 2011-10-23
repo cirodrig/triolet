@@ -2304,7 +2304,7 @@ constructBranchContinuationAlt
   -- Rename all parameters that came from the original case alternative.
   -- The return and dummy parameters are newly created, so they don't need 
   -- to be renamed.
-  (decon', decon_rn) <- rename_decon decon
+  (decon', decon_rn) <- freshenDeConInst decon
   params' <- mapM (rename_param decon_rn) params
 
   -- Construct the new case alternative
@@ -2326,16 +2326,6 @@ constructBranchContinuationAlt
       let ty = Rename.rename rn $ patMType param
           dmd = Dmd OnceSafe Used
       return $ setPatMDmd dmd $ patM (new_var ::: ty)
-
-    -- Rename all existential type variables defined by the deconstructor
-    rename_decon (VarDeCon con ty_args ex_types) = do
-      new_ex_vars <- mapM (newClonedVar . binderVar) ex_types
-      let renaming = Rename.fromList $ zip (map binderVar ex_types) new_ex_vars
-          ex_types' = [v ::: t | (v, _ ::: t) <- zip new_ex_vars ex_types]
-      return (VarDeCon con ty_args ex_types', renaming)
-
-    -- Tuple deconstructor doesn't bind variables
-    rename_decon decon@(TupleDeCon _) = return (decon, Rename.empty)
 
 rwCoerce inf (TypSM from_t) (TypSM to_t) body = do
   -- Are the types equal in this context?
