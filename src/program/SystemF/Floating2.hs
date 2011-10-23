@@ -10,13 +10,20 @@ import Control.Monad.Trans
 import qualified Data.Set as Set
 
 import Common.Identifier
+import Common.MonadLogic
 import Common.Supply
+import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.MemoryIR
+import SystemF.PrintMemoryIR
+import SystemF.Rename
 import SystemF.Context
 import SystemF.TypecheckMem
+import qualified Type.Rename as Rename
+import qualified Type.Substitute as Substitute
 import Type.Type
 import Type.Environment
+import Type.Eval
 import GlobalVar
 import Globals
 
@@ -25,6 +32,121 @@ import Globals
 isDictionaryConInst :: ConInst -> Bool
 isDictionaryConInst (VarCon op _ _) = isDictionaryDataCon op
 isDictionaryConInst (TupleCon _) = False
+
+-- | Decide whether a call of a particular function may be floated.
+--   Floating has already been performed on the argument expressions.  
+--   The entire call expression will be floated, including arguments.
+--
+--   To be floatable, an expression should:
+--
+--   1. Be very cheap to execute.  Floating may cause a function to execute
+--      more often, increasing the overall amount of computation.
+--   2. Not raise an exception.  Floating may cause an exeception to be 
+--      raised where it would not otherwise have been executed.
+--   3. Produce a value or boxed result, because the computed value will be 
+--      assigned to a variable.
+--
+--   We float dictionary-constructing functions.  We also float integer
+--   add, subtract, min, and max, because these are used by
+--   dictionary-constructing functions.
+isFloatableFunction :: Var -> [ExpM] -> Flt Bool
+isFloatableFunction v args =
+  if floatable_op 
+  then allM isFloatableFunctionArg args
+  else return False
+  where
+    floatable_op =
+      isReprCon v ||
+      v `isPyonBuiltin` The_AdditiveDict_int_add ||
+      v `isPyonBuiltin` The_AdditiveDict_int_sub ||
+      v `isPyonBuiltin` The_max_int ||
+      v `isPyonBuiltin` The_min_int
+
+-- | Return 'True' if it is okay to float a function call in which
+--   this expression appears as a subexpression.
+isFloatableFunctionArg :: ExpM -> Flt Bool
+isFloatableFunctionArg (ExpM expression) =
+  case expression
+  of VarE {} -> return True
+     LitE {} -> return True
+     ConE _ (CInstM con) args -> isFloatableData con args
+     AppE _ (ExpM (VarE _ op_var)) _ args -> isFloatableFunction op_var args
+     _ -> return False
+
+isFloatableFunction' :: Var -> Contexted [ExpM] -> Flt Bool
+isFloatableFunction' op_var ctx_args =
+  -- Add the context to the environment while making the decision.
+  eliminateContext test_floatable ctx_args
+  where
+    test_floatable args =
+      liftM Substitute.Nameless $ isFloatableFunction op_var args
+
+-- | Decide whether a data constructor term appearing as a function argument
+--   can be floated.
+isFloatableData :: ConInst -> [ExpM] -> Flt Bool
+isFloatableData cinst args =
+  isFloatableCon cinst >&&> allM isFloatableFunctionArg args
+-- | Decide whether a deconstructor can be floated. 
+--
+--   To be floated, the data type must have exactly one data constructor,
+--   so that the pattern match is sure to succeed.
+--   Moreover, that constructor's fields must fit in a single register, 
+--   which is true if it has exactly one field and that field is boxed,
+--   bare, or an approved value type.
+isFloatableDecon :: DeConInst -> Flt Bool
+isFloatableDecon (VarDeCon con ty_args ex_types) = do
+  tenv <- getTypeEnv
+  case lookupDataConWithType con tenv of
+    Just (data_type, con_type) ->
+      let instantiate_field_types = do
+            (_, field_types, _) <-
+              instantiateDataConType con_type ty_args $ map binderVar ex_types
+            return field_types
+      in isFloatableDataType tenv data_type con_type instantiate_field_types
+
+-- Don't attempt to float tuples.
+-- We could change this to be more permissive if there's a good reason to.
+isFloatableDecon (TupleDeCon _) = return False
+
+-- | Decide whether a constructor term can be floated.
+--
+--   The critera are the same as for deconstructors.
+isFloatableCon :: ConInst -> Flt Bool
+isFloatableCon (VarCon con ty_args ex_types) = do
+  tenv <- getTypeEnv
+  case lookupDataConWithType con tenv of
+    Just (data_type, con_type) ->
+      let instantiate_field_types = do
+            (field_types, _) <-
+              instantiateDataConTypeWithExistentials con_type
+              (ty_args ++ ex_types)
+            return field_types
+      in isFloatableDataType tenv data_type con_type instantiate_field_types
+
+isFloatableCon (TupleCon _) = return False
+
+isFloatableDataType tenv data_type con_type compute_field_types
+  | dataTypeIsAbstract data_type = return False
+  | not_length_1 (dataTypeDataConstructors data_type) = return False
+  | not_length_1 (dataConPatternArgs con_type) = return False
+  | otherwise = do
+      -- Get the type of the data constructor's single field
+      [field_type] <- compute_field_types
+      return $!
+        case toBaseKind $ typeKind tenv field_type
+        of BoxK -> True
+           BareK -> True
+           ValK ->
+             -- Only allow types that are known to fit in a register
+             case field_type
+             of VarT a -> a `isPyonBuiltin` The_int ||
+                          a `isPyonBuiltin` The_float ||
+                          a `isPyonBuiltin` The_bool
+                _ -> False
+  where
+    not_length_1 :: [a] -> Bool
+    not_length_1 [_] = False
+    not_length_1 _   = True
 
 -------------------------------------------------------------------------------
 -- The Floating monad
@@ -105,30 +227,14 @@ floatExp expression =
            joinInContext new_exp $ asLetContext ty
          else return new_exp
 
-     AppE inf (ExpM (VarE op_inf op_var)) ty_args args 
-       | isReprCon op_var -> do
+     AppE inf op ty_args args ->
+       floatAppExp expression inf op ty_args args
 
-           -- Float out this Repr dictionary term
-           ctx_args <- floatExps args
-           let make_new_exp args' =
-                 ExpM $ AppE inf (ExpM $ VarE op_inf op_var) ty_args args'
-               new_exp = mapContext make_new_exp ctx_args
-           ty <- inferExpType expression
-           joinInContext new_exp $ asLetContext ty
-
-     AppE inf op ty_args args -> do
-       ctx_op <- floatExp op
-       ctx_args <- floatExps args
-       let make_new_exp op' args' = ExpM $ AppE inf op' ty_args args'
-       mergeWith make_new_exp ctx_op ctx_args
      LamE inf f -> do
        ctx_f <- floatFun [] f
        return $ mapContext (\f' -> ExpM $ LamE inf f') ctx_f
-     LetE inf pat rhs body -> do
-       ctx_rhs <- floatExp rhs
-       ctx_body <- enterScope1 pat (inferExpType body) $ floatExp body
-       let make_new_exp rhs' body' = ExpM $ LetE inf pat rhs' body'
-       mergeWith make_new_exp ctx_rhs ctx_body
+     LetE inf pat rhs body ->
+       floatLetExp inf pat rhs body
      LetfunE inf (NonRec def) body -> do
        let f = definiens def
        ctx_f <- floatFun [] f
@@ -149,15 +255,86 @@ floatExp expression =
              let defs' = [def {definiens = f'} | (def, f') <- zip defs fs']
              in ExpM $ LetfunE inf (Rec defs') body'
        mergeWith make_new_exp ctx_fs ctx_body
-     CaseE inf scr alts -> do
-       ctx_scr <- floatExp scr
-       ctx_alts <- mergeList =<< mapM floatAlt alts
-       let make_new_exp scr' alts' = ExpM $ CaseE inf scr' alts'
-       mergeWith make_new_exp ctx_scr ctx_alts
+     CaseE inf scr alts ->
+       floatCaseExp inf scr alts
      ExceptE inf ty -> return $ unitContext expression
      CoerceE inf t1 t2 body -> do
        ctx_body <- floatExp body
        return $ mapContext (\e -> ExpM $ CoerceE inf t1 t2 e) ctx_body
+
+floatAppExp original_expression inf op ty_args args =
+  case op
+  of ExpM (VarE op_inf op_var) -> do
+       -- This may be a floatable term
+       ctx_args <- floatExps args
+       is_floatable <- isFloatableFunction' op_var ctx_args
+       if is_floatable
+         then do
+           -- Float this application term
+           let new_exp =
+                 mapContext (make_app (ExpM $ VarE op_inf op_var)) ctx_args
+           ty <- inferExpType original_expression
+           joinInContext new_exp $ asLetContext ty
+
+         else don't_float (unitContext op) ctx_args
+
+     _ -> do
+       -- Not floatable
+       ctx_op <- floatExp op
+       ctx_args <- floatExps args
+       don't_float ctx_op ctx_args
+  where
+    make_app new_op new_args = ExpM $ AppE inf new_op ty_args new_args
+
+    don't_float ctx_op ctx_args =
+      mergeWith make_app ctx_op ctx_args
+
+-- | Perform floating in a case expression.
+--
+--   The entire expression should be floated if
+--
+--   1. The scrutinee is a variable
+--   2. The data type is cheap to deconstruct (see 'isFloatableDecon').
+floatCaseExp inf scr alts =
+  case scr
+  of ExpM (VarE {}) -> do
+       tenv <- getTypeEnv
+       case alts of
+         [AltM (Alt (DeCInstM decon) params body)] -> do
+           floatable <- isFloatableDecon decon 
+           if floatable
+             then float decon params body
+             else don't_float
+         _ -> don't_float
+     _ -> don't_float
+  where
+    don't_float = do
+      ctx_scr <- floatExp scr
+      ctx_alts <- mergeList =<< mapM floatAlt alts
+      let make_new_exp scr' alts' = ExpM $ CaseE inf scr' alts'
+      mergeWith make_new_exp ctx_scr ctx_alts
+
+    float decon params body = do
+      -- Since the case binding will be floated outwards,
+      -- bound variables must be given fresh names
+      (decon', decon_rn) <- freshenDeConInst decon
+      renamePatMs decon_rn params $ \rn1 params1 -> do
+        (params', params_rn) <- freshenPatMs params1
+        let rn = params_rn `Rename.compose` decon_rn
+        let body' = Rename.rename rn body
+
+        -- Float this case binding.  The body stays here.
+        ctx_body <- assumeBinders (deConExTypes decon') $
+                    assumePatMs params' $
+                    floatExp body'
+        return $
+          caseContext False inf scr (DeCInstM decon') params' [] ctx_body
+
+floatLetExp inf pat rhs body = do
+  ctx_rhs <- floatExp rhs
+  ctx_body <- enterScope1 pat (inferExpType body) $ floatExp body
+  let make_new_exp rhs' body' = ExpM $ LetE inf pat rhs' body'
+  mergeWith make_new_exp ctx_rhs ctx_body
 
 floatAlt :: AltM -> Flt (Contexted AltM)
 floatAlt (AltM (Alt (DeCInstM decon) params body)) = do
