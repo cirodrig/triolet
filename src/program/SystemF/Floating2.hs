@@ -330,11 +330,33 @@ floatCaseExp inf scr alts =
         return $
           caseContext False inf scr (DeCInstM decon') params' [] ctx_body
 
+-- When floating let expressions, we take care to ensure that floating in the
+-- body is not restricted.  Consider the expression
+--
+-- > let x = A
+-- > let y = B x
+-- > C
+--
+-- If A is floated, then 'floatLetExp' will remove the binding of x and
+-- rename x, so that floating of 'B x' is not blocked by the let-binding that
+-- defines x.
+
 floatLetExp inf pat rhs body = do
   ctx_rhs <- floatExp rhs
-  ctx_body <- enterScope1 pat (inferExpType body) $ floatExp body
-  let make_new_exp rhs' body' = ExpM $ LetE inf pat rhs' body'
-  mergeWith make_new_exp ctx_rhs ctx_body
+
+  -- Check whether the RHS is a single variable (which probably means
+  -- the RHS has been floated).  If so, eliminate this let-binding.
+  case discardContext ctx_rhs of
+    ExpM (VarE {}) -> joinInContext ctx_rhs $ \(ExpM (VarE _ rhs_var)) -> do
+      -- Rename the pattern variable to 'rhs_var'
+      let rn = Rename.singleton (patMVar pat) rhs_var
+      floatExp $ Rename.rename rn body
+    _ -> do
+      -- Cannot eliminate the let-binding
+      ctx_body <- enterScope1 pat (inferExpType body) $ floatExp body
+      mergeWith make_let ctx_rhs ctx_body
+  where
+    make_let rhs' body' = ExpM $ LetE inf pat rhs' body'
 
 floatAlt :: AltM -> Flt (Contexted AltM)
 floatAlt (AltM (Alt (DeCInstM decon) params body)) = do
