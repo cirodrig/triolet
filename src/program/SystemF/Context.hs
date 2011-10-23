@@ -2,7 +2,14 @@
 
 An expression context represents some code that can be put around an
 expression to bind variables and guard execution.  This module provides
-ways to construct and transform contexts.
+ways to construct and transform contexts.  In particular, context-handling
+functions can merge contexts without risk of name capture, by renaming
+variables in contexts as needed.
+
+Contexts don't represent a fully encapsulated variable scope.  Things
+outside a context may refer to variables that are bound by the
+context.  It is only the contexts themselves that are not allowed to refer  
+to one another's variables.
 -}
 
 module SystemF.Context
@@ -576,7 +583,7 @@ instance (Substitutable a, Substitution a ~ Subst) =>
                                    , _ctxBody = body}) =
     substituteCtx s context $ \s' context' -> do
       body' <- substitute s' body
-      return $ ApplyContext { _ctxFree = ctxFreeVariables context
+      return $ ApplyContext { _ctxFree = ctxFreeVariables context'
                             , _ctxContext = context'
                             , _ctxBody = body'}
 
@@ -625,7 +632,7 @@ eliminateContext f x = do
   return $ case discardContext y of Substitute.Nameless y' -> y'
 
 -- | Merge two contexts, renaming variables if necessary to avoid name
---   conflicts.
+--   capture.  Only the contexts are checked for name capture.
 merge :: (Renameable a, Substitutable b, EvalMonad m,
           Substitution b ~ Subst) => 
          Contexted a -> Contexted b -> m (Contexted (a, b))
