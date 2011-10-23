@@ -2181,32 +2181,47 @@ rwCaseOfCase :: ExpInfo
              -> LR (ExpM, AbsCode)
 rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
   m_return_param <- getCurrentReturnParameter
-  outer_defs <- mapM (makeBranchContinuation inf (fmap PatSM m_return_param)) outer_branches
-  let outer_ks = zip outer_branches $ map definiendum outer_defs
+
+  -- For each of the outer case statement's alternatives, create a function
+  -- and a case alternative that calls that function
+  (outer_defs, moveable_alts) <-
+    mapAndUnzipM (makeBranchContinuation inf (fmap PatSM m_return_param)) outer_branches
 
   -- Put a new case statement into each branch of the inner case statement
-  new_branches <- mapM (invert_branch m_return_param outer_ks) inner_branches
+  new_branches <- mapM (invert_branch moveable_alts) inner_branches
 
+  -- Insert function definitions before the new case statement
   let new_case = ExpM $ CaseE inf scrutinee new_branches
       new_expr = foldr bind_outer_def new_case outer_defs
         where
           bind_outer_def def e = ExpM $ LetfunE inf (NonRec def) e
   return (new_expr, topCode)
   where
-    invert_branch m_return_param outer_ks (AltM branch) =
+    invert_branch moveable_alts (AltM branch) =
       let boxed_body =
             case result_is_boxed
             of Nothing -> altBody branch
                Just (TypM t) -> let con = VarCon (pyonBuiltin The_boxed) [t] []
                                 in ExpM $ ConE inf (CInstM con) [altBody branch]
-          body' = caseAnalyze inf m_return_param outer_ks boxed_body
+          body' = ExpM $ CaseE inf boxed_body moveable_alts
       in return $ AltM (branch {altBody = body'})
 
--- | Create a function that is equivalent to a case alternative.
---   The pattern-bound variables become function parameters.
---   If the pattern does not bind any fields, then create a dummy parameter
---   of type 'NoneType'.
-makeBranchContinuation :: ExpInfo -> Maybe PatSM -> AltSM -> LR (Def Mem)
+-- | Convert a case alternative's body expression into a function, and
+--   create an equivalent case alternative that calls the newly cretaed
+--   function.
+--   For example, transform the case alternative @C x y. foo y x@ into
+--   the function @f = \ x y. foo y x@ and the case alternative
+--   @C x2 y2. f x2 y2@.
+--
+--   The case alternative is renamed to avoid name shadowing, because it
+--   will be moved inside another case statement.
+--
+--   The function's parameters are the variables bound by the case
+--   alternative's pattern, plus a return parameter if required.
+--   If there would be no function parameters, a dummy parameter
+--   of type 'NoneType' is created.
+makeBranchContinuation :: ExpInfo -> Maybe PatSM -> AltSM
+                       -> LR (Def Mem, AltM)
 makeBranchContinuation inf m_return_param alt = do
   -- Rename the return parameter (if present) to avoid name collisions
   (m_return_param', alt') <-
@@ -2216,7 +2231,16 @@ makeBranchContinuation inf m_return_param alt = do
          alt' <- substitute s alt
          return (Just pat', alt')
 
-  fun <- constructBranchContinuationFunction inf m_return_param' alt'
+  -- Create dummy parameter if there are no other parameters
+  m_dummy_param <-
+    if null (altParams $ fromAltSM alt) && isNothing m_return_param'
+    then do
+      field_var <- newAnonymousVar ObjectLevel
+      return $ Just $ PatSM $ patM (field_var ::: VarT (pyonBuiltin The_NoneType))
+    else return Nothing
+
+  fun <- constructBranchContinuationFunction
+         inf m_return_param' m_dummy_param alt'
   
   -- Simplify the function
   (fun', _) <- rwFun fun
@@ -2225,7 +2249,16 @@ makeBranchContinuation inf m_return_param alt = do
   fun_name <- newAnonymousVar ObjectLevel
   let def1 = mkDef fun_name fun'
       def2 = modifyDefAnnotation (\a -> a {defAnnJoinPoint = True}) def1
-  return def2
+
+  -- Create the case alternative
+  let m_return_arg =
+        case m_return_param
+        of Nothing -> Nothing 
+           Just pat -> Just $ ExpM $ VarE defaultExpInfo (patMVar $ fromPatSM pat)
+
+  alt <- constructBranchContinuationAlt
+         inf m_return_param' m_return_arg m_dummy_param alt' fun_name
+  return (def2, alt)
 
 -- | Turn the body of a case alternative into a function.
 -- The function's parameters consist of the variables that are bound by 
@@ -2233,57 +2266,76 @@ makeBranchContinuation inf m_return_param alt = do
 -- (if there is one).
 -- There must be at least one parameter;
 -- create a dummy parameter if needed.
-constructBranchContinuationFunction :: ExpInfo -> Maybe PatSM -> AltSM
+constructBranchContinuationFunction :: ExpInfo
+                                    -> Maybe PatSM
+                                    -> Maybe PatSM
+                                    -> AltSM
                                     -> LR FunSM
-constructBranchContinuationFunction inf m_return_param (AltSM alt) = do
-  nonempty_params <-
-    if null params
-    then make_dummy_parameter
-    else return params
+constructBranchContinuationFunction
+  inf m_return_param m_dummy_param (AltSM alt) = do
 
   -- Compute the case alternative's return type
   return_type <-
-    assumeBinders ex_types $ assumePatterns (map fromPatSM nonempty_params) $ do
+    assumeBinders ex_types $ assumePatterns (map fromPatSM params) $ do
       inferExpType =<< applySubstitution body
   
   -- Construct a function
   let ty_params = map (TyPatSM . TyPatM) ex_types 
-      fun = FunSM $ Fun inf ty_params nonempty_params (TypSM return_type) body
+      fun = FunSM $ Fun inf ty_params params (TypSM return_type) body
   return fun
   where
     -- These will become the parameters and body of the returned function
     ex_types = deConExTypes $ fromDeCInstSM $ altCon alt
-    params = altParams alt ++ maybeToList m_return_param
+    params = maybeToList m_dummy_param ++
+             altParams alt ++
+             maybeToList m_return_param
     body = altBody alt
 
-    make_dummy_parameter = do
-      field_var <- newAnonymousVar ObjectLevel
-      return [PatSM $ patM (field_var ::: VarT (pyonBuiltin The_NoneType))]
+-- | Rename variables bound by the case alternative, and replace its body
+--   with a function call.
+constructBranchContinuationAlt
+  inf m_return_param m_return_arg m_dummy_param
+  (AltSM (Alt (DeCInstSM decon) params _)) callee = do
 
--- | Perform case analysis on the expression's result.  Use the @(AltM, Var)@
---   pairs to dispatch each case.
---
---   Each alternative is converted to a function, so it must take at least one
---   parameter.  If the original data constructor had no fields,
---   create a dummy argument.
-caseAnalyze :: ExpInfo -> Maybe PatM -> [(AltSM, Var)] -> ExpM -> ExpM
-caseAnalyze inf m_return_parameter branches scrutinee =
-  ExpM $ CaseE inf scrutinee (map dispatch branches)
+  unless (isJust m_return_param && isJust m_return_arg ||
+          isNothing m_return_param && isNothing m_return_arg) $
+    internalError "constructBranchContinuationAlt: Inconsistent arguments"
+
+  -- Rename all parameters that came from the original case alternative.
+  -- The return and dummy parameters are newly created, so they don't need 
+  -- to be renamed.
+  (decon', decon_rn) <- rename_decon decon
+  params' <- mapM (rename_param decon_rn) params
+
+  -- Construct the new case alternative
+  let call_ty_args = map (TypM . VarT . binderVar) $ deConExTypes decon'
+      decon_args = [ExpM $ VarE inf (patMVar p) | p <- params']
+      dummy_arg = case m_dummy_param
+                  of Nothing -> []
+                     Just _ -> [conE inf (VarCon (pyonBuiltin The_None) [] []) []]
+      call_args = dummy_arg ++ decon_args ++ maybeToList m_return_arg
+      call = ExpM $ AppE inf (ExpM $ VarE inf callee) call_ty_args call_args
+  return $ AltM $ Alt (DeCInstM decon') params' call
   where
-    dispatch ((AltSM (Alt (DeCInstSM decon) params _)), callee) =
-      let ty_args = [TypM $ VarT a | a ::: _ <- deConExTypes decon]
-          return_arg =
-            case m_return_parameter
-            of Nothing -> Nothing
-               Just p -> Just $ ExpM $ VarE inf (patMVar p)
-          args = [ExpM $ VarE inf (patMVar $ fromPatSM p) | p <- params] ++
-                 maybeToList return_arg
-          nonempty_args =
-            if null args
-            then [conE inf (VarCon (pyonBuiltin The_None) [] []) []]
-            else args
-          call = ExpM $ AppE inf (ExpM $ VarE inf callee) ty_args nonempty_args
-      in AltM (Alt (DeCInstM decon) (map fromPatSM params) call)
+    -- Apply the given renaming to the pattern, and rename the pattern
+    -- variable.
+    -- The bound variable is used exactly once in the new case alternative,
+    -- as a parameter to 'callee'.
+    rename_param rn (PatSM param) = do
+      new_var <- newClonedVar $ patMVar param 
+      let ty = Rename.rename rn $ patMType param
+          dmd = Dmd OnceSafe Used
+      return $ setPatMDmd dmd $ patM (new_var ::: ty)
+
+    -- Rename all existential type variables defined by the deconstructor
+    rename_decon (VarDeCon con ty_args ex_types) = do
+      new_ex_vars <- mapM (newClonedVar . binderVar) ex_types
+      let renaming = Rename.fromList $ zip (map binderVar ex_types) new_ex_vars
+          ex_types' = [v ::: t | (v, _ ::: t) <- zip new_ex_vars ex_types]
+      return (VarDeCon con ty_args ex_types', renaming)
+
+    -- Tuple deconstructor doesn't bind variables
+    rename_decon decon@(TupleDeCon _) = return (decon, Rename.empty)
 
 rwCoerce inf (TypSM from_t) (TypSM to_t) body = do
   -- Are the types equal in this context?
