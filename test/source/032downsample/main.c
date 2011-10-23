@@ -15,7 +15,7 @@ int main()
 {
   Pyon_init();
 
-  PyonMatrix *mat = pyon_Matrix_PyonInt_FromArray(4, 6, arr);
+  PyonMatrix *mat = pyon_Matrix_PyonInt_FromArray(0, 4, 0, 6, arr);
   PyonMatrix *mat2 = downsample(mat);
 
   int w, h;

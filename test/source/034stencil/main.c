@@ -28,7 +28,7 @@ int main()
 {
   Pyon_init();
 
-  PyonMatrix *mat1 = pyon_Matrix_PyonFloat_FromArray(DIMY, DIMX, arr);
+  PyonMatrix *mat1 = pyon_Matrix_PyonFloat_FromArray(0, DIMY, 0, DIMX, arr);
   PyonMatrix *mat2 = heat(mat1);
   pyon_Matrix_PyonFloat_Free(mat1);
 
