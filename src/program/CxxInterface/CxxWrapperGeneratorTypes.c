@@ -227,13 +227,22 @@ Expression_constructor_create(Pool* p, QName* qName, int argumentCount, Expressi
 }
 
 Expression* 
-Expression_function_call_create(Pool* p, QName* qName, int argumentCount, Expression** argumentList){
-  Expression* expression = Pool_malloc(p, &Expression_alloc);
-  expression->kind = FUNCTION_CALL;
-  expression->functionCall.qName = qName;
-  expression->functionCall.argumentCount = argumentCount;
-  expression->functionCall.argumentList = argumentList;
-  return expression;
+Expression_function_call_create(Pool* p, Expression* expression, int argumentCount, Expression** argumentList){
+  Expression* expression_ret = Pool_malloc(p, &Expression_alloc);
+  expression_ret->kind = FUNCTION_CALL;
+  expression_ret->functionCall.expression = expression;
+  expression_ret->functionCall.argumentCount = argumentCount;
+  expression_ret->functionCall.argumentList = argumentList;
+  return expression_ret;
+}
+
+Expression* 
+Expression_member_access_create(Pool* p, Expression* expression, Name* name){
+  Expression* expression_ret = Pool_malloc(p, &Expression_alloc);
+  expression_ret->kind = MEMBER_ACCESS;
+  expression_ret->memberAccess.expression = expression;
+  expression_ret->memberAccess.name = name;
+  return expression_ret;
 }
 
 // Statements

@@ -60,6 +60,9 @@ printPrimType(FILE* fp, PrimType primType) {
     case NONE_TYPE:
       fputs("int", fp);
       break;
+    case VOID:
+      fputs("void", fp);
+      break;
     default: ERR("invalid PrimType");
   }
 }
@@ -110,8 +113,8 @@ printExpression(FILE* fp, Expression* expression) {
       }
       fputs(")", fp);
       break;
-    case FUNCTION_CALL: // qName (expressionList[0], expressionList[1], ...)
-      printQName(fp, expression->functionCall.qName);
+    case FUNCTION_CALL: // exprerssion (expressionList[0], expressionList[1], ...)
+      printExpression(fp, expression->functionCall.expression);
       fputs("(", fp);
       { int index;
         for (index=0; index<expression->functionCall.argumentCount; index++) {
@@ -120,6 +123,12 @@ printExpression(FILE* fp, Expression* expression) {
         }
        }
       fputs(")", fp);
+      break;
+    case MEMBER_ACCESS: // (exprerssion).name
+      fputs("(", fp);
+      printExpression(fp, expression->memberAccess.expression);
+      fputs(").", fp);
+      printName(fp, expression->memberAccess.name);
       break;
     default: ERR("invalid Expression kind");
   }

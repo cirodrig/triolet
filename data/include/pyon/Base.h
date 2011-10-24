@@ -65,7 +65,7 @@ namespace Pyon {
 #if BEGIN_SIGNATURE
     static unsigned int getSize(void);
     static unsigned int getAlignment(void);
-    static void copy(T *, Incomplete<T> *);
+    static void copy(T, Incomplete<T>&);
     static bool isPOD(void);
 #endif
   };

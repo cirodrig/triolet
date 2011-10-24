@@ -1,12 +1,19 @@
+
 /* C++ data marshaling interface for Pyon
  */
+
+#ifndef PYON_DATA_H
+#define PYON_DATA_H
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <pyon.h>
 #include <pyon/Base.h>
 #include <pyon/Layout.h>
+
+#include "inttypes.h"
 
 namespace Pyon {
 
@@ -118,21 +125,23 @@ namespace Pyon {
     IncompleteSingleRef(const IncompleteSingleRef& other) {
       // Cannot copy incomplete references that own an object
       if (other.isOwner()) {
-	pyonError ("Cannot copy a reference to an allocated object");
+        pyonError ("Cannot copy a reference to an allocated object");
       }
       owner = NULL;
       object = other.object;
     }
+    
+    PyonBarePtr getObject() { return object; }
 
     void operator=(const IncompleteSingleRef& other) {
       // Cannot copy incomplete references that own an object
       if (other.isOwner()) {
-	pyonError ("Cannot copy a reference to an allocated object");
+        pyonError ("Cannot copy a reference to an allocated object");
       }
 
       // If the reference owns an object, release it first
       if (isOwner()) {
-	freeze(); // Freeze and discard the result
+        freeze(); // Freeze and discard the result
       }
 
       owner = NULL;
@@ -141,22 +150,21 @@ namespace Pyon {
 
     void allocate(void) {
       if (!isEmpty()) {
- 	pyonError("Incomplete object is already referencing an object");
+        pyonError("Incomplete object is already referencing an object");
       }
 
       // Create boxed object and initialize header
-      owner = pyon_alloc_boxed(bare_type::getSize(),
-			       bare_type::getAlignment());
+      owner = pyon_alloc_boxed(bare_type::getSize(), bare_type::getAlignment());
 
       // Get pointer to the bare object
-      object = ((char *)owner) + addPadding<bare_type>(sizeof(void *));
+      object = (PyonBarePtr) ((char *)owner) + addPadding<bare_type>(sizeof(void *));
     }
 
     bare_type freeze(void) {
       if (!isOwner()) {
- 	pyonError("No incomplete object reference");
+        pyonError("No incomplete object reference");
       }
-      PyonBoxPtr ret = owner;
+      PyonBarePtr ret = object;
       object = NULL;
       owner = NULL;
       return bare_type(ret);
@@ -204,4 +212,382 @@ namespace Pyon {
 #endif
   };
 
+
+
+
+/******************************************************************************/
+/*                             Class Summary                                  */
+/******************************************************************************/
+
+  /* C++ Wrapper Classes that wrap value objects (extend class ValType) */
+
+  class NoneType;
+
+  class Int;
+
+  class Bool;
+
+  class Float;
+
+  /* C++ Wrapper Classes that wrap bare objects (extend class BareType) */
+
+    template<typename T1, typename T2>
+  class Tuple;
+  
+  /* Stored Classes: BareType versions of ValType classes (specializations of 
+   * class Stored, extend class BareType ) */
+
+    template<>
+  class Stored<NoneType>;
+
+    template<>
+  class Stored<Int>;
+
+    template<>
+  class Stored<Bool>;
+
+    template<>
+  class Stored<Float>;
+
+  /* Incomplete BareType Objects (specializations of Incomplete, inherit from
+   * IncompleteSingleRef) */
+
+    template<typename T>
+  class Incomplete < Stored<T> >;
+
+    template<>
+  class Incomplete< Stored<NoneType> >;
+  
+    template<typename T1, typename T2>
+  class Incomplete< Tuple<T1,T2> >;
+
+
+
+
+/******************************************************************************/
+/*              C++ Wrapper Classes that wrap value objects                   */
+/******************************************************************************/
+
+  /* Implementation of the NoneType wrapper */
+
+  class NoneType : public ValType {
+    public:
+      typedef NoneType type;
+  };
+
+  /* Implementation of the Int wrapper */
+
+  class Int : public ValType {
+    public:
+      typedef Int type;
+      int32_t nativeElement;
+
+      Int(int32_t i) { nativeElement = i; }
+      operator int32_t() { return nativeElement; }
+  };
+
+  /* Implementation of the Bool wrapper */
+
+  class Bool : public ValType {
+    public:
+      typedef Bool type;
+      int nativeElement;
+
+      Bool(char b) { nativeElement = b; }
+      operator int() { return nativeElement; }
+  };
+
+  /* Implementation of the Float wrapper */
+
+  class Float : public ValType {
+    public:
+      typedef Float type;
+      float nativeElement;
+
+      Float(float f) { nativeElement = f; }
+      operator float() { return nativeElement; }
+  };
+
+
+
+/******************************************************************************/
+/*               C++ Wrapper Classes that wrap bare objects                   */
+/******************************************************************************/
+
+	  /* Helper struct get_return_type to select type from list based on index */
+
+    template<typename T1, typename T2, int index>
+  struct get_return_type {
+    // T1 when index=0 , T2 when index=1
+    typedef void type;
+    // Helper function that creates an object of the right type to be returned
+    static type 
+    get_return_object(Tuple<T1, T2>* tuple);
+    /* Helper function to create an incomplete bare object of the right type to 
+     * be returned */
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2> >* incompleteTuple);
+  };
+
+  /* Implementation of Tuple */
+
+  template<typename T1, typename T2>
+  class Tuple : public BareType {
+    private:
+      typedef typename AsBareType<T1>::type T1_Bare;
+      typedef typename AsBareType<T2>::type T2_Bare;
+    public:
+      // Constructors
+      Tuple<T1, T2>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        int t1Size = addPadding<T2_Bare>(T1_Bare::getSize());
+        int t2Size = T2_Bare::getSize();
+        return t1Size + t2Size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        int t1Alignment = T1_Bare::getAlignment();
+        int t2Alignment = T2_Bare::getAlignment();
+        return (t1Alignment > t2Alignment) ? t1Alignment : t2Alignment; 
+      }
+      
+      static void 
+      copy(Tuple<T1,T2> tuple, Incomplete< Tuple<T1,T2> > &incompleteTuple) { 
+          T1_Bare::copy(tuple.get<0>(), incompleteTuple.get<0>());
+          T2_Bare::copy(tuple.get<1>(), incompleteTuple.get<1>());
+      }
+      
+      static bool 
+      isPOD() { return T1::isPOD() && T2::isPOD(); }
+
+      // Member Functions
+        template<int index>
+      typename get_return_type<T1, T2, index>::type 
+      get() { return get_return_type<T1, T2, index>::get_return_object(this); }
+
+  };
+
+  /* Specialization of get_return_type helper struct */
+
+    template<typename T1, typename T2>
+  struct get_return_type<T1, T2, 0> {
+    typedef typename AsBareType<T1>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2>* tuple) {
+      return type(tuple->getBareData());
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2> >* incompleteTuple) {
+      return Incomplete<type>(incompleteTuple->getObject());
+    }
+  };
+  
+    template<typename T1, typename T2>
+  struct get_return_type<T1, T2, 1> {
+    typedef typename AsBareType<T2>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2>* tuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      return type(tuple->getBareData() + t1Size);
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2> >* incompleteTuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      return Incomplete<type>(incompleteTuple->getObject() + t1Size);
+    }
+  };
+
+
+
+
+
+
+
+/******************************************************************************/
+/*                      Incomplete BareType Objects                           */
+/******************************************************************************/
+
+  /* Implementation of Incomplete< Stored <T> > */
+  
+    template<typename T>
+  class Incomplete < Stored<T> > : public IncompleteSingleRef< Stored<T> > {
+    public:
+      Incomplete < Stored<T> >(void) : IncompleteSingleRef< Stored<T> >() {}
+      Incomplete < Stored<T> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
+      void initialize() { }
+      void create() { this->allocate(); initialize(); }
+      void operator=(const T& other) {
+        typename T::type *data = (typename T::type *) this->getObject();
+        *data = other.nativeElement; 
+      }
+  };
+
+  /* Implementation of Incomplete< Stored <NoneType> > */
+  
+    template<>
+  class Incomplete< Stored<NoneType> > : public IncompleteSingleRef< Stored<NoneType> > {
+    public:
+      Incomplete < Stored<NoneType> >(void) : IncompleteSingleRef< Stored<NoneType> >() {}
+      Incomplete < Stored<NoneType> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
+      void initialize() { }
+      void create() { this->allocate(); initialize(); }
+      void operator=(const NoneType& other) { }
+  };
+  
+
+  /* Implementation of Incomplete< Tuple<T1,T2> > */
+
+    template<typename T1, typename T2>
+  class Incomplete< Tuple<T1,T2> > : public IncompleteSingleRef< Tuple<T1,T2> > {
+    private:
+      typedef typename AsBareType<T1>::type T1_Bare;
+      typedef typename AsBareType<T2>::type T2_Bare;
+    public:
+      // Constructors
+      Incomplete< Tuple<T1,T2> >(void) : IncompleteSingleRef< Tuple<T1,T2> >() {}
+      Incomplete< Tuple<T1,T2> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2> >(_s) {}
+      
+      // Member Functions
+      void initialize() { }
+      void create() { this->allocate(); initialize(); }
+
+        template<int index>
+      Incomplete<typename get_return_type<T1, T2, index>::type> 
+      get() { return get_return_type<T1, T2, index>::get_incomplete_return_object(this); }
+
+  };
+
+
+
+
+
+
+
+/******************************************************************************/
+/*          Stored Classes: BareType versions of ValType classes              */
+/******************************************************************************/
+
+  /* Implementation of Stored<NoneType> */
+
+    template<>
+  class Stored<NoneType> : public BareType {
+    public:
+      // Constructors
+      Stored<NoneType>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return 0;}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return 1;}
+      
+      static void 
+      copy(Stored<NoneType> n, Incomplete< Stored<NoneType> >& incompleteN) { }
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+      
+      //Member Functions
+      operator NoneType() {
+        return NoneType();
+      }
+  };
+
+  /* Implementation of Stored<Int> */
+
+    template<>
+  class Stored<Int> : public BareType {
+    public:
+      // Constructors
+      Stored<Int>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return sizeof(int32_t);}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return sizeof(int32_t);}
+      
+      static void 
+      copy(Stored<Int> i, Incomplete< Stored<Int> >& incompleteI) { incompleteI = Incomplete< Stored<Int> >(i.getBareData()); }
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+
+      // Member Functions
+      operator Int() {
+        int32_t* nativePtr = (int32_t*) getBareData();
+        return Int(*nativePtr);
+      }
+  };
+
+  /* Implementation of Stored<Bool> */
+
+    template<>
+  class Stored<Bool> : public BareType {
+    public:
+      // Constructors
+      Stored<Bool>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return sizeof(char);}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return sizeof(char);}
+      
+      static void 
+      copy(Stored<Bool> b, Incomplete< Stored<Bool> >& incompleteB) { incompleteB = Incomplete< Stored<Bool> >(b.getBareData()); }
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+
+      // Member Functions
+      operator Bool() {
+        char* nativePtr = (char*) getBareData();
+        return Bool(*nativePtr);
+      }
+
+  };
+
+  /* Implementation of Stored<Float> */
+  template<>
+  class Stored<Float> : public BareType {
+    public:
+      // Constructors
+      Stored<Float>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return sizeof(float);}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return sizeof(float);}
+      
+      static void 
+      copy(Stored<Float> f, Incomplete< Stored<Float> >& incompleteF) { incompleteF = Incomplete< Stored<Float> >(f.getBareData()); }
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+
+      // Member Functions
+      operator Float() {
+        float* nativePtr = (float*) getBareData();
+        return Float(*nativePtr);
+      }
+
+  };
+
 } // end namespace
+
+#endif
+

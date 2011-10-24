@@ -30,7 +30,8 @@
 /*                                                                              */
 /* Expression   = QName                                                         */
 /*    + Type * QName                                                            */
-/*    + QName * List(Expression)                                                */
+/*    + Expression * List(Expression)                                           */
+/*    + Expression * Name                                                       */
 /*                                                                              */
 /* Function   = Declaration * ( 1 + List(Declaration) * List(Statement) )       */
 /*                                                                              */
@@ -89,7 +90,7 @@ void DeclarationList_append(Pool* p, DeclarationList* list, Declaration* declara
 Expression* Expression_objectID_create(Pool* p, QName *objectID);
 Expression* Expression_cast_create(Pool* p, Type* type, QName* qName);
 Expression* Expression_constructor_create(Pool* p, QName* qName, int argumentCount, Expression** argumentList);
-Expression* Expression_function_call_create(Pool* p, QName* qName, int argumentCount, Expression** argumentList);
+Expression* Expression_function_call_create(Pool* p, Expression* expression, int argumentCount, Expression** argumentList);
 
 Statement* Statement_assignment_create(Pool* p, Expression* lhsExpression, Expression* rhsExpression);
 Statement* Statement_expression_create(Pool* p, Expression* expression);
@@ -140,7 +141,7 @@ struct QName {
 
 // Primitive Types
 
-enum PrimType {NONE_TYPE, INT32_T, FLOAT, BOOL_TYPE};
+enum PrimType {NONE_TYPE, INT32_T, FLOAT, BOOL_TYPE, VOID};
 
 // Types
 
@@ -187,7 +188,7 @@ struct DeclarationList {
 
 // Expressions
 
-typedef enum ExpressionKind { OBJECTID , CAST , CONSTRUCTOR , FUNCTION_CALL } ExpressionKind;
+typedef enum ExpressionKind { OBJECTID , CAST , CONSTRUCTOR , FUNCTION_CALL , MEMBER_ACCESS } ExpressionKind;
 struct Expression {
   ExpressionKind kind;
   union {
@@ -202,10 +203,14 @@ struct Expression {
       Expression** argumentList; 
     } constructorInvocation;
     struct {
-      QName* qName; 
+      Expression* expression; 
       int argumentCount; 
       Expression** argumentList; 
     } functionCall;
+    struct {
+      Expression* expression; 
+      Name* name;
+    } memberAccess;
   };
   PoolMembership pool;
 };

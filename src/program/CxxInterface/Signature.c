@@ -40,7 +40,7 @@ PyonType_Tuple(int size)
 {
   PyonType *p = malloc(sizeof(PyonType));
   const PyonType **members = malloc(size * sizeof (const PyonType *));
-  *p = (PyonType){.tag = PyonNoneTypeTag};
+  *p = (PyonType){.tag = PyonTupleTypeTag};
   p->tuple.count = size;
   p->tuple.elems = members;
   return p;
