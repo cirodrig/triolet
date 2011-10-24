@@ -60,7 +60,7 @@ printPrimType(FILE* fp, PrimType primType) {
     case NONE_TYPE:
       fputs("int", fp);
       break;
-    case VOID:
+    case VOID:  
       fputs("void", fp);
       break;
     default: ERR("invalid PrimType");

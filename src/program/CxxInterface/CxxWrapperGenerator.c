@@ -18,7 +18,7 @@ printCxxFunction(FILE* fp, char* wrappedFunctionName, char* wrapperFunctionName,
   Function* wrapperFunction = createWrapperFunctionDefinition(p, wrapperFunctionName, pyonSignature, wrappedFunction);
 
   // Print ASTs
-  fputs("\n#include <PyonData.h>\n\n", fp); // TODO: make sure this is the right file
+  fputs("\n#include <PyonData.h>\n\n", fp);
   printFunction(fp, wrappedFunction);
   fputs("\n", fp);
   printFunction(fp, wrapperFunction);
@@ -58,7 +58,7 @@ createWrappedFunctionDeclaration(Pool* p, char* wrappedFunctionName, PyonSignatu
       parameterList = malloc(parameterCount*sizeof(Declaration*));
       populateWrappedParameterList(p, parameterList, pyonParameterTypes);
       break;
-    case PyonTupleTypeTag: // Bare Types
+    case PyonTupleTypeTag: case PyonListTypeTag: // Bare Types
       // Create parameter list
       parameterCount++; // One extra parameter for the bare data returned
       parameterList = malloc(parameterCount*sizeof(Declaration*));
@@ -123,7 +123,7 @@ createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignatur
     case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag: // Val Types
       returnVariableType = pyonToWrappedType(p, pyonSignature->returnType);
       break;
-    case PyonTupleTypeTag: { // Bare Types (surround wrapper type with Incomplete<>)
+    case PyonTupleTypeTag: case PyonListTypeTag: { // Bare Types (surround wrapper type with Incomplete<>)
       Type** typeList = malloc(1*sizeof(Type*));
       typeList[0] = pyonToWrapperType(p, pyonSignature->returnType);
       TmplName* tmplName = TmplName_create(p, Name_create(p, "Incomplete"), 1, typeList);
@@ -172,7 +172,7 @@ createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignatur
       StatementList_append(p, statementList, statement);
       break;
     }
-    case PyonTupleTypeTag: { // Bare Types
+    case PyonTupleTypeTag: case PyonListTypeTag: { // Bare Types
       // Step 2: invoke wrapped function
       // Step 2.0: before invoking the function, return variable must be allocated
       TmplName* returnVariableTmplName = TmplName_create(p, returnVariableName, 0, NULL);
@@ -224,7 +224,7 @@ pyonToWrappedType(Pool* p, const PyonType* pyonType) {
     case PyonNoneTypeTag:
       return Type_primType_create(p, NONE_TYPE);
       break;
-    case PyonTupleTypeTag: 
+    case PyonTupleTypeTag: case PyonListTypeTag:
     { 
       TmplName* tmplName = TmplName_create(p, Name_create(p, "PyonBarePtr"), 0, NULL);
       QName* qName = QName_tmplName_create(p, tmplName);
@@ -239,41 +239,47 @@ pyonToWrappedType(Pool* p, const PyonType* pyonType) {
 Type* 
 pyonToWrapperType(Pool* p, const PyonType* pyonType) {
   Name* name;
-  int tupleDimension;
+  int templateCount;
   Type** typeList;
-  switch (pyonType->tag) { // TODO: include namespace "Pyon::"
+  switch (pyonType->tag) {
     case PyonIntTag:
       name = Name_create(p, "Int");
-      tupleDimension = 0;
+      templateCount = 0;
       typeList = NULL;
       break;
     case PyonFloatTag:
       name = Name_create(p, "Float");
-      tupleDimension = 0;
+      templateCount = 0;
       typeList = NULL;
       break;
     case PyonBoolTag:
       name = Name_create(p, "Bool");
-      tupleDimension = 0;
+      templateCount = 0;
       typeList = NULL;
       break;
     case PyonNoneTypeTag:
       name = Name_create(p, "NoneType");
-      tupleDimension = 0;
+      templateCount = 0;
       typeList = NULL;
       break;
     case PyonTupleTypeTag:
       name = Name_create(p, "Tuple");
-      tupleDimension = pyonType->tuple.count;
-      typeList = malloc(tupleDimension*sizeof(Type*));
+      templateCount = pyonType->tuple.count;
+      typeList = malloc(templateCount*sizeof(Type*));
       int typeIndex;
-      for (typeIndex=0; typeIndex<tupleDimension; typeIndex++) {
+      for (typeIndex=0; typeIndex<templateCount; typeIndex++) {
         typeList[typeIndex] = pyonToWrapperType(p, pyonType->tuple.elems[typeIndex]);
       }
       break;
+    case PyonListTypeTag:
+      name = Name_create(p, "List");
+      templateCount = 1;
+      typeList = malloc(templateCount*sizeof(Type*));
+      typeList[0] = pyonToWrapperType(p, pyonType->list.elem);
+      break;
     default: ERR("invalid PyonTypeTag in function pyonToWrapperType(Pool*,PyonType*)");
   }
-  TmplName* tmplName = TmplName_create(p, name, tupleDimension, typeList);
+  TmplName* tmplName = TmplName_create(p, name, templateCount, typeList);
   QName* qName = QName_tmplName_create(p, tmplName);
   qName = QName_namespace_qName_create(p, Name_create(p, "Pyon"), qName);
   return Type_qName_create(p, qName);
@@ -295,7 +301,7 @@ createUnwrappingStatement(Pool* p, const PyonType* pyonType, Declaration* wrappe
     case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag:
       rhsExpression = Expression_cast_create(p, wrappedVariable->type, rhsVariableQName);
       break;
-    case PyonTupleTypeTag: {
+    case PyonTupleTypeTag: case PyonListTypeTag: {
       Expression* objectID = Expression_objectID_create(p, rhsVariableQName);
       Expression* memberAccessExpression = Expression_member_access_create(p, objectID, Name_create(p, "getBareData"));
       rhsExpression = Expression_function_call_create(p, memberAccessExpression, 0, NULL);

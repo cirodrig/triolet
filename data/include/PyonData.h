@@ -234,6 +234,9 @@ namespace Pyon {
     template<typename T1, typename T2>
   class Tuple;
   
+    template<typename T>
+  class List;
+  
   /* Stored Classes: BareType versions of ValType classes (specializations of 
    * class Stored, extend class BareType ) */
 
@@ -261,6 +264,8 @@ namespace Pyon {
     template<typename T1, typename T2>
   class Incomplete< Tuple<T1,T2> >;
 
+    template<typename T>
+  class Incomplete< List<T> >;
 
 
 
@@ -313,6 +318,8 @@ namespace Pyon {
 /******************************************************************************/
 /*               C++ Wrapper Classes that wrap bare objects                   */
 /******************************************************************************/
+
+/* ------------------------------- Tuple ------------------------------------ */
 
 	  /* Helper struct get_return_type to select type from list based on index */
 
@@ -405,6 +412,43 @@ namespace Pyon {
     }
   };
 
+/* -------------------------------- List ------------------------------------ */
+
+  template<typename T>
+  class List : public BareType {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      // Constructors
+      List<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_List_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_List_alignment;
+      }
+      
+      static void 
+      copy(List<T> list, Incomplete< List<T> > &incompleteList) { 
+          incompleteList = Incomplete< List<T> >(list.getBareData());
+      }
+      
+      static bool 
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Bare 
+      at(int index) { 
+        PyonBarePtr list_contents = pyon_List_get_contents(getBareData());
+        return T_Bare(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
+      }
+
+  };
 
 
 
@@ -462,6 +506,33 @@ namespace Pyon {
         template<int index>
       Incomplete<typename get_return_type<T1, T2, index>::type> 
       get() { return get_return_type<T1, T2, index>::get_incomplete_return_object(this); }
+
+  };
+
+  /* Implementation of Incomplete< List<T> > */
+
+    template<typename T>
+  class Incomplete< List<T> > : public IncompleteSingleRef< List<T> > {
+    private:
+      int length;
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      // Constructors
+      Incomplete< List<T> >(void) : IncompleteSingleRef< List<T> >() { this->length = 0; }
+      Incomplete< List<T> >(int length) : IncompleteSingleRef< List<T> >() { this->length = length; }
+      Incomplete< List<T> >(int length, PyonBarePtr _s) : IncompleteSingleRef< List<T> >(_s) { this->length = length; }
+      
+      // Member Functions
+      void initialize() { 
+        pyon_List_initialize( length, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() ); 
+      }
+      void create() { this->allocate(); initialize(); }
+
+      Incomplete< T_Bare > 
+      at(int index) { 
+        PyonBarePtr list_contents = pyon_List_get_contents(this->getObject());
+        return Incomplete<T_Bare>(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
+      }
 
   };
 
