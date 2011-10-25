@@ -28,6 +28,9 @@ import Type.Type
 newtype MkDict =
   MkDict {mkDict :: forall m. ReprDictMonad m => m ExpM}
 
+literalMkDict :: ExpM -> MkDict
+literalMkDict e = MkDict (return e)
+
 -- | A dictionary environment for several different data types
 data SingletonValueEnv =
   SingletonValueEnv
@@ -94,7 +97,7 @@ lookupReprDict' ty@(AnyT {}) =
     mk_any_dict ty =
       let op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_EmptyReference)
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
-      in MkDict (return call)
+      in literalMkDict call
      
 lookupReprDict' ty = withDictEnv (DictEnv.lookup ty . reprDictEnv)
 
@@ -141,27 +144,27 @@ lookupShapeDict' ty = lookupShapeDict ty >>= check
 
 -- | Add a dictionary to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.
-saveReprDict :: ReprDictMonad m => Type -> ExpM -> m a -> m a
+saveReprDict :: ReprDictMonad m => Type -> MkDict -> m a -> m a
 saveReprDict dict_type dict_exp m =
   localDictEnv (modifyReprDictEnv $ DictEnv.insert dict_pattern) m
   where
-    dict_pattern = DictEnv.monoPattern dict_type (MkDict (return dict_exp))
+    dict_pattern = DictEnv.monoPattern dict_type dict_exp
 
 -- | Add a dictionary to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.
-saveShapeDict :: ReprDictMonad m => Type -> ExpM -> m a -> m a
+saveShapeDict :: ReprDictMonad m => Type -> MkDict -> m a -> m a
 saveShapeDict dict_type dict_exp m =
   localDictEnv (modifyShapeDictEnv $ DictEnv.insert dict_pattern) m
   where
-    dict_pattern = DictEnv.monoPattern dict_type (MkDict (return dict_exp))
+    dict_pattern = DictEnv.monoPattern dict_type dict_exp
 
 -- | Add a finite indexed int to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.
-saveIndexedInt :: ReprDictMonad m => Type -> ExpM -> m a -> m a
+saveIndexedInt :: ReprDictMonad m => Type -> MkDict -> m a -> m a
 saveIndexedInt dict_type dict_exp m =
   localDictEnv (modifyIntIndexEnv $ DictEnv.insert dict_pattern) m
   where
-    dict_pattern = DictEnv.monoPattern dict_type (MkDict $ return dict_exp)
+    dict_pattern = DictEnv.monoPattern dict_type dict_exp
 
 -- | If the pattern binds a representation dictionary or int index,
 --   record the dictionary 
@@ -171,11 +174,11 @@ saveReprDictPattern (PatM (pat_var ::: ty) _) m =
   case fromVarApp ty
   of Just (op, [arg])
        | op `isPyonBuiltin` The_Repr -> 
-           saveReprDict arg (ExpM $ VarE defaultExpInfo pat_var) m
+           saveReprDict arg (literalMkDict $ ExpM $ VarE defaultExpInfo pat_var) m
        | op `isPyonBuiltin` The_ShapeDict -> 
-           saveShapeDict arg (ExpM $ VarE defaultExpInfo pat_var) m
+           saveShapeDict arg (literalMkDict $ ExpM $ VarE defaultExpInfo pat_var) m
        | op `isPyonBuiltin` The_FIInt ->
-           saveIndexedInt arg (ExpM $ VarE defaultExpInfo pat_var) m
+           saveIndexedInt arg (literalMkDict $ ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
 
 -- | Find patterns that bind representation dictionaries, and record them
@@ -196,7 +199,7 @@ getReprDict param_type = do
 withReprDict :: ReprDictMonad m => Type -> (ExpM -> m a) -> m a
 withReprDict param_type k = do
   dict <- getReprDict param_type
-  saveReprDict param_type dict (k dict)
+  saveReprDict param_type (literalMkDict dict) (k dict)
 
 createDictEnv :: FreshVarM SingletonValueEnv
 createDictEnv = do

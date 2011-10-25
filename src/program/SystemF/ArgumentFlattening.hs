@@ -293,8 +293,49 @@ data FlatArg =
 fromFlatArg (FlatArg p d) = (p, d)
 fromFlatArg (DummyArg _) = internalError "fromFlatArg: Unexpected dummy argument"
 
+-- | Add a packed argument to the environment
 assumePackedArg (FlatArg pat _) m = assumePat pat m
 assumePackedArg (DummyArg _)    m = m
+
+-- | Add a packed argument to the environment.
+--
+--   The packed argument may be needed to generate copying
+--   code, even if the argument was labeled \'deconstructed\' or \'unused\'
+--   (which would cause the argument to be eliminated).
+--
+--   Only a few type-indexed values can be used this way.  First the 
+--   type is checked to see if it may be needed.  If so, code is added
+--   to the dictionary environment to rebuild the argument.
+assumeRepackedArg (DummyArg _)    m = m
+assumeRepackedArg (FlatArg pat IdDecomp) m =
+  -- The argument is available as a function parameter
+  assumePat pat m
+
+assumeRepackedArg flat_arg@(FlatArg pat decomp) m = do
+  -- The argument is not available as a function parameter.
+  -- Reconstruct it based on available data.
+  ty <- reduceToWhnf $ patMType pat
+  case fromVarApp ty of
+    Just (op, [arg])
+      | op `isPyonBuiltin` The_Repr -> 
+          assumeBinder (patMBinder pat) $ save_dict saveReprDict arg
+        | op `isPyonBuiltin` The_ShapeDict -> 
+          assumeBinder (patMBinder pat) $ save_dict saveShapeDict arg
+        | op `isPyonBuiltin` The_FIInt ->
+          assumeBinder (patMBinder pat) $ save_dict saveIndexedInt arg
+    _ -> m
+  where
+    save_dict save ty = save ty (rebuild_dict flat_arg) m
+
+    rebuild_dict flat_arg = MkDict $ do
+      -- If the argument was dead, we don't have enough information to
+      -- rebuild it.  In that case, we should never needed the argument.
+      when (case decomp of {DeadDecomp _ -> True; _ -> False}) $
+        internalError "assumeRepackedArg: Attempted to use dead argument"
+
+      -- Since this is not a bare type, the return value can also be read from
+      Just e <- packParameterWrite flat_arg
+      return e
 
 type FlatArgs = [FlatArg]
 
@@ -473,7 +514,7 @@ flattenParameters args e = foldr flattenParameter e args
 packParametersWrite :: (ReprDictMonad m, EvalMonad m) => FlatArgs -> m [ExpM]
 packParametersWrite (arg:args) = do
   e <- packParameterWrite arg
-  es <- assumePackedArg arg $ packParametersWrite args
+  es <- assumeRepackedArg arg $ packParametersWrite args
   return (maybe id (:) e es)
 
 packParametersWrite [] = return []
@@ -1044,7 +1085,7 @@ deadValue t = do
                return expr
          (CoT BoxK, [t1, t2]) ->
            return $ ExpM $ AppE defaultExpInfo make_coercion_op [TypM t1, TypM t2] []
-         _ -> traceShow (pprType t) $ internalError "deadValue: Not implemented for this type"
+         _ -> internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
     BareK ->
