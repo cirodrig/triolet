@@ -497,7 +497,10 @@ data DefAnn =
     -- | A tag controlling how aggressively to inline.  If 'True', the
     --   function should be aggressively inlined.
   , defAnnInlineRequest :: !Bool
-    
+
+    -- | True for functions that are very cheap to re-execute.
+  , defAnnConlike :: !Bool
+
     -- | True for definitions that were created by the case-of-case
     --   transformation.  A lower inlining threshold is used for such
     --   definitions.
@@ -514,7 +517,7 @@ data DefAnn =
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn InlNormal False False False ManyUnsafe
+defaultDefAnn = DefAnn InlNormal False False False False ManyUnsafe
 
 -- | An annotation controlling when a function may be inlined.
 --

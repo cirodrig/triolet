@@ -63,6 +63,7 @@ unLoc (L _ x) = x
 -- | Attribute annotations from the source code
 data Attribute =
     AbstractAttr                    -- ^ Data type is abstract
+  | ConlikeAttr                     -- ^ Function calls are cheap to reevaluate
   | InlineAttr                      -- ^ Definition should be aggressively
                                     --   inlined
   | InlineSequentialAttr            -- ^ Definition should not be inlined until
@@ -217,7 +218,7 @@ type LDataConDecl ix = Located (DataConDecl ix)
 data Decl ix = Decl (Identifier ix) !(Entity ix)
 
 data Entity ix = 
-    VarEnt (LType ix) 
+    VarEnt (LType ix) [Attribute]
   | TypeEnt (LType ix) (Maybe BuiltinTypeFunction)
   | DataEnt (LType ix) [LDataConDecl ix] [Attribute]
   | FunEnt (Located (Fun ix)) [Attribute]

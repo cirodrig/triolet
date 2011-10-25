@@ -181,10 +181,11 @@ liftT1 t k = do
 instance TypeEnvMonad Lower where
   getTypeEnv = Lower $ asks typeEnvironment
   
-  assume v t (Lower m) = Lower $ local update m
+  assumeWithProperties v t b (Lower m) = Lower $ local update m
     where
       update env =
-        env {typeEnvironment = insertType v t $ typeEnvironment env}
+        env {typeEnvironment =
+                insertTypeWithProperties v t b $ typeEnvironment env}
 
 instance EvalMonad Lower where
   liftTypeEvalM m = Lower $ ReaderT $ \env ->

@@ -116,9 +116,10 @@ liftFreshVarAF m = AF $ ReaderT $ \env -> runFreshVarM (afVarSupply env) m
 
 instance TypeEnvMonad (AFMonad e) where
   getTypeEnv = AF $ asks afTypeEnv
-  assume v t m = AF $ local insert_type $ unAF m
+  assumeWithProperties v t b m = AF $ local insert_type $ unAF m
     where
-      insert_type env = env {afTypeEnv = insertType v t $ afTypeEnv env}
+      insert_type env =
+        env {afTypeEnv = insertTypeWithProperties v t b $ afTypeEnv env}
 
 instance ReprDictMonad (AFMonad e) where
   getVarIDs = AF $ asks afVarSupply

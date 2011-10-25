@@ -367,11 +367,11 @@ resolveDataConDecl pos (DataConDecl v ty_params ex_types args) = do
       "Bad level in range of data constructor (" ++ show pos ++ ")"
 
 resolveEntity :: Identifier Resolved -> Entity Parsed -> NR (Entity Resolved)
-resolveEntity _ (VarEnt ty) = do
+resolveEntity _ (VarEnt ty attrs) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= TypeLevel) $
     "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
-  return $ VarEnt ty'
+  return $ VarEnt ty' attrs
 
 resolveEntity r_name (TypeEnt ty Nothing) = do
   (ty', lv) <- resolveLType ty

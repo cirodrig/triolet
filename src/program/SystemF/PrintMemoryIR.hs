@@ -170,6 +170,10 @@ pprDef (Def v ann f) =
             if defAnnInlineRequest ann
             then text "inline"
             else empty
+          conlike_doc =
+            if defAnnConlike ann
+            then text "conlike"
+            else empty
           join_doc =
             if defAnnJoinPoint ann
             then text "join_point"

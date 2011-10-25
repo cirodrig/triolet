@@ -49,7 +49,7 @@ withMany f xs k = go xs k
 
 instance TypeEnvMonad (Gen Lower) where
   getTypeEnv = lift getTypeEnv
-  assume v t m = liftT (assume v t) m
+  assumeWithProperties v t b m = liftT (assumeWithProperties v t b) m
 
 -- | Called by 'assumeVar' and related functions.  If the type is a
 --   Repr dictionary passed as a boxed pointer or an IndexedInt passed as

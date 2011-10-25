@@ -6,6 +6,7 @@
 module CParser2.GenCore (createCoreTable) where
 
 import qualified Data.IntMap as IntMap
+import Data.List
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -34,6 +35,16 @@ checkModule mod@(Module decls)
       of Decl _ (FunEnt _ _) -> True
          _                   -> False
 
+-- | Extract information from an attribute list on a variable declaration
+fromVarAttrs :: [Attribute] -> Bool
+fromVarAttrs attrs =
+  -- Start with default attributes and modify given each attribute
+  foldl' interpret False attrs
+  where
+    interpret st ConlikeAttr = True
+    interpret st _ =
+      error "Unexpected attribute on type declaration"
+  
 -------------------------------------------------------------------------------
 
 toVar (ResolvedVar v _) = v
@@ -109,8 +120,10 @@ translateDataConDecl tenv data_type_con decl =
 translateDecl :: SpecTypeEnv -> Decl Resolved -> (SpecTypeEnv -> SpecTypeEnv)
 translateDecl tenv (Decl name ent) =
   case ent
-  of VarEnt ty ->
-       insertType core_name (translateType ty)
+  of VarEnt ty attrs ->
+       let conlike = fromVarAttrs attrs
+       in conlike `seq`
+          insertTypeWithProperties core_name (translateType ty) conlike
      TypeEnt ty (Just type_function) ->
        insertTypeFunction core_name (translateType ty) type_function
      TypeEnt ty Nothing ->

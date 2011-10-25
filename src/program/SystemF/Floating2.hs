@@ -165,9 +165,10 @@ runFlt m id_supply tenv = runReaderT (unFlt m) (FloatCtx id_supply tenv)
 
 instance TypeEnvMonad Flt where
   getTypeEnv = Flt (asks fcTypeEnv)
-  assume v ty (Flt m) = Flt $ local insert_type m
+  assumeWithProperties v ty b (Flt m) = Flt $ local insert_type m
     where
-      insert_type ctx = ctx {fcTypeEnv = insertType v ty $ fcTypeEnv ctx}
+      insert_type ctx =
+        ctx {fcTypeEnv = insertTypeWithProperties v ty b $ fcTypeEnv ctx}
 
 instance Supplies Flt (Ident Var) where
   fresh = Flt $ ReaderT $ \ctx -> supplyValue (fcVarSupply ctx)

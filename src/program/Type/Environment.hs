@@ -14,6 +14,7 @@ System F code after representation inference.
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, Rank2Types #-}
 module Type.Environment
        (TypeEnvMonad(..),
+        assume,
         assumeBinder,
         assumeBinders,
         EvalMonad(..),
@@ -31,6 +32,7 @@ module Type.Environment
         typeFunctionArity,
         applyTypeFunction,
         lookupType,
+        lookupTypeWithProperties,
         lookupDataType,
         lookupDataCon,
         lookupDataConWithType,
@@ -41,6 +43,7 @@ module Type.Environment
         emptyTypeEnv,
         wiredInTypeEnv,
         insertType,
+        insertTypeWithProperties,
         insertDataType,
         insertTypeFunction,
        
@@ -80,7 +83,11 @@ class Monad m => TypeEnvMonad m where
   askTypeEnv f = liftM f getTypeEnv
 
   -- | Add a variable to the type environment
-  assume :: Var -> Type -> m a -> m a
+  assumeWithProperties :: Var -> Type -> Bool -> m a -> m a
+
+-- | Add a variable to the type environment
+assume :: TypeEnvMonad m => Var -> Type -> m a -> m a
+assume v t m = assumeWithProperties v t False m
 
 assumeBinder :: TypeEnvMonad m => Binder -> m a -> m a
 assumeBinder (v ::: t) m = assume v t m
@@ -91,7 +98,7 @@ assumeBinders bs m = foldr assumeBinder m bs
 instance TypeEnvMonad m => TypeEnvMonad (MaybeT m) where
   getTypeEnv = lift getTypeEnv
   askTypeEnv f = lift (askTypeEnv f)
-  assume v t (MaybeT m) = MaybeT (assume v t m)
+  assumeWithProperties v t b (MaybeT m) = MaybeT (assumeWithProperties v t b m)
 
 -- | A monad supporting type-level computation
 class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m where
@@ -137,8 +144,9 @@ instance TypeEnvMonad TypeEvalM where
   {-# INLINE getTypeEnv #-}
   getTypeEnv = TypeEvalM (\_ tenv -> return tenv)
   
-  assume v t m =
-    TypeEvalM $ \supply tenv -> runTypeEvalM m supply (insertType v t tenv)
+  assumeWithProperties v t b m =
+    TypeEvalM $ \supply tenv ->
+    runTypeEvalM m supply (insertTypeWithProperties v t b tenv)
 
 instance EvalMonad TypeEvalM where
   liftTypeEvalM m = m
@@ -153,6 +161,15 @@ data TypeAssignment type_function =
     -- | Type of a variable
     VarTypeAssignment
     { varType :: !Type
+
+      -- | 'True' if an application of the variable is cheap to re-evaluate.
+      --   Always 'False' for non-function-typed variables and for
+      --   type variables.
+      --   The default is 'False'.
+      --
+      --   If a function is conlike, it is a hint that the function can be
+      --   inlined even if it causes the function to be executed more often.
+    , varIsConlike :: !Bool
     }
     -- | Type of a type constructor
   | TyConTypeAssignment
@@ -174,6 +191,10 @@ data TypeAssignment type_function =
     { varType :: !Type
     , tyFunType :: !type_function
     }
+
+-- | Create a 'VarTypeAssignment' with default properties.
+varTypeAssignment :: Type -> TypeAssignment a
+varTypeAssignment t = VarTypeAssignment t False
 
 data DataType =
   DataType
@@ -277,21 +298,31 @@ wiredInTypeEnv :: TypeEnvBase type_function
 wiredInTypeEnv =
   TypeEnv $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- entries]
   where
-    entries = [(intindexV, VarTypeAssignment kindT),
-               (valV, VarTypeAssignment kindT),
-               (boxV, VarTypeAssignment kindT),
-               (bareV, VarTypeAssignment kindT),
-               (outV, VarTypeAssignment kindT),
-               (sideeffectV, VarTypeAssignment kindT),
-               (writeV, VarTypeAssignment kindT),
-               (posInftyV, VarTypeAssignment intindexT),
-               (negInftyV, VarTypeAssignment intindexT)]
+    entries = [(intindexV, varTypeAssignment kindT),
+               (valV, varTypeAssignment kindT),
+               (boxV, varTypeAssignment kindT),
+               (bareV, varTypeAssignment kindT),
+               (outV, varTypeAssignment kindT),
+               (sideeffectV, varTypeAssignment kindT),
+               (writeV, varTypeAssignment kindT),
+               (posInftyV, varTypeAssignment intindexT),
+               (negInftyV, varTypeAssignment intindexT)]
 
 -- | Insert a variable type assignment
 insertType :: Var -> Type
            -> TypeEnvBase type_function -> TypeEnvBase type_function
 insertType v t (TypeEnv env) =
-  TypeEnv (IntMap.insert (fromIdent $ varID v) (VarTypeAssignment t) env)
+  TypeEnv (IntMap.insert (fromIdent $ varID v) (varTypeAssignment t) env)
+
+-- | Insert a variable type assignment 
+insertTypeWithProperties :: Var
+                         -> Type -- ^ Type of the variable
+                         -> Bool -- ^ Whether the variable is conlike
+                         -> TypeEnvBase type_function
+                         -> TypeEnvBase type_function
+insertTypeWithProperties v t conlike (TypeEnv env) =
+  let type_ass = VarTypeAssignment t conlike
+  in TypeEnv (IntMap.insert (fromIdent $ varID v) type_ass env)
 
 -- | A description of a data type that will be added to a type environment.
 data DataTypeDescr =
@@ -354,6 +385,14 @@ lookupType :: Var -> TypeEnvBase type_function -> Maybe Type
 {-# INLINE lookupType #-}
 lookupType v (TypeEnv env) =
   fmap varType $ IntMap.lookup (fromIdent $ varID v) env
+
+-- | Look up the type and other properties of an ordinary variable
+lookupTypeWithProperties :: Var -> TypeEnvBase type_function
+                         -> Maybe (Type, Bool)
+{-# INLINE lookupTypeWithProperties #-}
+lookupTypeWithProperties v (TypeEnv env) = do
+  VarTypeAssignment ty conlike <- IntMap.lookup (fromIdent $ varID v) env
+  return (ty, conlike)
 
 -- | Get all data constructors in the type environment
 getAllDataConstructors :: TypeEnv -> IntMap.IntMap DataConType
@@ -492,8 +531,8 @@ specToPureTypeEnv (TypeEnv m) =
 specToPureTypeAssignment :: SpecTypeAssignment -> Maybe PureTypeAssignment
 specToPureTypeAssignment ass =
   case ass
-  of VarTypeAssignment rt ->
-       VarTypeAssignment <$> specToPureTypeOrKind rt
+  of VarTypeAssignment rt conlike ->
+       VarTypeAssignment <$> specToPureTypeOrKind rt <*> pure conlike
      TyConTypeAssignment rt cons ->
        TyConTypeAssignment <$> specToPureKind rt <*> pure cons
      DataConTypeAssignment rt con_type ->
@@ -575,8 +614,8 @@ specToMemTypeEnv (TypeEnv m) =
 
 specToMemTypeAssignment ass =
   case ass
-  of VarTypeAssignment rt ->
-       VarTypeAssignment (specToMemType rt)
+  of VarTypeAssignment rt conlike ->
+       VarTypeAssignment (specToMemType rt) conlike
      TyConTypeAssignment rt cons ->
        TyConTypeAssignment (specToMemType rt) cons
      DataConTypeAssignment rt con_type ->
@@ -632,7 +671,7 @@ specToTypeEnv (TypeEnv m) =
 
 specToTypeAssignment ass =
   case ass
-  of VarTypeAssignment t -> VarTypeAssignment t
+  of VarTypeAssignment t conlike -> VarTypeAssignment t conlike
      TyConTypeAssignment t cons -> TyConTypeAssignment t cons
      DataConTypeAssignment t con_type -> DataConTypeAssignment t con_type
      TyFunTypeAssignment t f -> TyFunTypeAssignment t (builtinMemTypeFunction f)

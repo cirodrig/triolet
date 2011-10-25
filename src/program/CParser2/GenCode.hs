@@ -69,7 +69,12 @@ defAttributes attrs ann =
 
     insert_attribute InlineAttr ann =
       ann {SystemF.defAnnInlineRequest = True}
-    
+
+    -- TODO: This attribute is specified in two places: the type declaration, 
+    -- and here.  Eliminate this one and take the attribute from the type.
+    insert_attribute ConlikeAttr ann =
+      ann {SystemF.defAnnConlike = True}
+
     insert_attribute InlineSequentialAttr ann =
       ann {SystemF.defAnnInlinePhase = SystemF.InlSequential}
     

@@ -78,7 +78,7 @@ instance MonadWriter Dmds Df where
 
 instance TypeEnvMonad Df where
   getTypeEnv = ask
-  assume v t = local (insertType v t)
+  assumeWithProperties v t b = local (insertTypeWithProperties v t b)
 
 -- | Run multiple dataflow analyses on mutually exclusive execution paths.
 --   This kind of execution occurs in case alternatives.

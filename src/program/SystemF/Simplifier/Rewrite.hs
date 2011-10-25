@@ -78,9 +78,10 @@ instance Supplies RW (Ident Var) where
 instance TypeEnvMonad RW where
   getTypeEnv = RW (ReaderT (\env -> return $ rwTypeEnv env))
 
-  assume v t (RW m) = RW (local assume_type m)
+  assumeWithProperties v t b (RW m) = RW (local assume_type m)
     where
-      assume_type env = env {rwTypeEnv = insertType v t $ rwTypeEnv env}
+      assume_type env =
+        env {rwTypeEnv = insertTypeWithProperties v t b $ rwTypeEnv env}
 
 instance EvalMonad RW where
   liftTypeEvalM m = RW $ ReaderT $ \env ->

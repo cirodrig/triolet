@@ -150,6 +150,7 @@ attr = do
   where
     attr_table =
       [("abstract", return AbstractAttr),
+       ("conlike", return ConlikeAttr),
        ("inline", return InlineAttr),
        ("inline_sequential", return InlineSequentialAttr),
        ("inline_final", return InlineFinalAttr)]
@@ -473,11 +474,16 @@ pTypeDecl = located $ do
 
 pVarDecl :: P PLDecl
 pVarDecl = located $ do
-  -- If the second token is a colon, then this is a variable declaration 
+  -- If there is a colon after the variable and attributes,
+  -- then this is a variable declaration 
   -- Otherwise it might be some other kind of declaration
-  v <- PS.try (identifier <* match ColonTok)
+  (v, attrs) <- PS.try $ do
+    v <- identifier 
+    attrs <- attributeList
+    match ColonTok
+    return (v, attrs)
   kind <- pType
-  return $ Decl v $ VarEnt kind
+  return $ Decl v $ VarEnt kind attrs
 
 pFunDecl :: P PLDecl
 pFunDecl = do

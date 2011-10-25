@@ -95,9 +95,10 @@ instance Supplies RI (Ident Var) where
 
 instance TypeEnvMonad RI where
   getTypeEnv = RI $ asks riTypeEnv
-  assume v t m = RI $ local insert_type (unRI m)
+  assumeWithProperties v t b m = RI $ local insert_type (unRI m)
     where
-      insert_type env = env {riTypeEnv = insertType v t $ riTypeEnv env}
+      insert_type env =
+        env {riTypeEnv = insertTypeWithProperties v t b $ riTypeEnv env}
 
 instance ReprDictMonad RI where
   getVarIDs = RI $ asks riVarSupply

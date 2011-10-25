@@ -212,9 +212,10 @@ runSetup (Setup f) env = runReaderT f env
 
 instance TypeEnvMonad Setup where
   askTypeEnv f = Setup $ ReaderT $ \env -> return (f $ setupTypeEnv env)
-  assume v t m = Setup $ local insert_type $ unSetup m 
+  assumeWithProperties v t b m = Setup $ local insert_type $ unSetup m 
     where
-      insert_type env = env {setupTypeEnv = insertType v t $ setupTypeEnv env}
+      insert_type env =
+        env {setupTypeEnv = insertTypeWithProperties v t b $ setupTypeEnv env}
 
 putDmdFun :: Var -> DmdFun -> Setup ()
 putDmdFun v f = Setup $ ReaderT $ \env ->

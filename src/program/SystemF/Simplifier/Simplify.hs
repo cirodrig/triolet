@@ -158,8 +158,9 @@ instance Supplies LR VarID where
 instance TypeEnvMonad LR where
   getTypeEnv = withTypeEnv return
 
-  assume v rt m = LR $ \env ->
-    let env' = env {lrTypeEnv = insertType v rt $ lrTypeEnv env}
+  assumeWithProperties v rt b m = LR $ \env ->
+    let env' = env {lrTypeEnv =
+                       insertTypeWithProperties v rt b $ lrTypeEnv env}
     in runLR m env'
 
 instance EvalMonad LR where
@@ -351,7 +352,9 @@ assumeDefs :: DefGroup (Def SM) -> LR a -> LR a
 assumeDefs defs m = foldr assumeDefSM m (defGroupMembers defs)
 
 assumeDefSM :: Def SM -> LR a -> LR a
-assumeDefSM (Def v _ f) m = assume v (functionTypeSM f) m
+assumeDefSM (Def v ann f) m =
+  let conlike = defAnnConlike ann
+  in assumeWithProperties v (functionTypeSM f) conlike m
 
 -- | Print the known values on entry to the computation.
 --
@@ -495,154 +498,28 @@ funIsSmallerThan f n = compareCodeSize (funSize f) n
 --   with the inlined value; to ensure this, reference values are never
 --   pre-inlined.  Pre-inlining is performed only if it does not duplicate
 --   code or work.
-worthPreInlining :: TypeEnv -> Dmd -> ExpM -> Bool
-worthPreInlining tenv dmd expr =
+worthPreInlining :: TypeEnv -> Dmd -> Type -> ExpM -> Bool
+worthPreInlining tenv dmd ty expr =
   let should_inline =
         case multiplicity dmd
         of OnceSafe -> inlckTrue
-           OnceUnsafe -> inlckTrivial `inlckOr` inlckFunction
+           OnceUnsafe -> inlckTrivial `inlckOr`
+                         inlckFunction `inlckOr`
+                         (inlckBool is_function_type `inlckAnd` inlckConlike)
            _ -> inlckTrivial
   in should_inline tenv dmd expr
-
-{- Value inlining (below) is disabled; it currently
--- interacts poorly with other optimizations.
-
--- | Decide whether to inline the expression, which is the RHS of an
---   assignment, /after/ simplifying it.  The assignment is not deleted.
---   If inlining makes the assignment dead (we try to ensure that it does),
---   it will be deleted by dead code elimination.
---
---   The expression is a value, boxed, or writer expression.
---
---   If the expression should be inlined, return a 'AbsValue' holding
---   the equivalent value.  Non-writer expressions become an
---   'InlAV'.  Writer expressions become a 'DataAV' containing
---   'InlAV's.
-worthPostInlining :: TypeEnv -> Bool -> Dmd -> ExpM -> Maybe AbsValue
-worthPostInlining tenv is_writer dmd expr =
-  let should_inline =
-        case multiplicity dmd
-        of OnceSafe 
-             | is_writer -> demanded_safe
-             | otherwise -> inlckTrue
-           ManySafe ->
-             -- Inlining does not duplicate work, but may duplicate code.
-             -- Inline as long as code duplicatation is small and bounded.
-             data_only
-           OnceUnsafe ->
-             -- Inlining does not duplicate code, but may duplicate work.
-             -- Inline as long as work duplication is small and bounded.
-             data_and_functions
-           ManyUnsafe -> 
-             -- Inline as long as code and work duplication are both 
-             -- small and bounded.
-             demanded_data_only
-           _ -> inlckFalse
-  in if should_inline tenv dmd expr
-     then data_value is_writer expr
-     else Nothing
   where
-    -- The expression will be inlined; convert it into a known value.
-    -- Non-writer fields are simply inlined.
-    data_value False expr = Just $ InlAV expr
-    
-    -- Writer fields are converted to readable data constructor values
-    data_value True expr =
-      case unpackVarAppM expr
-      of Just (op, ty_args, args)
-           | op `isPyonBuiltin` the_store ->
-               -- Behave like 'rwStoreApp'.
-               -- Allow the store to cancel with a later load.
-               let [source] = args
-               in Just $ bigAV $
-                  WriterAV $ bigAV $
-                  StoredValue Value $ InlAV source
+    is_function_type = case ty of {FunT {} -> True; _ -> False}
 
-           | op `isPyonBuiltin` the_storeBox ->
-               -- Behave like 'rwStoreBoxApp'.
-               -- Allow the store to cancel with a later load.
-               let [source] = args
-               in Just $ bigAV $
-                  WriterAV $ bigAV $
-                  StoredValue Boxed $ InlAV source
-
-           | op `isPyonBuiltin` The_copy ->
-               -- When using the value, read the source value directly
-               let [_, source] = args
-               in Just $ bigAV $ WriterAV $ InlAV source
-           | Just (tycon, dcon) <- lookupDataConWithType op tenv ->
-               let (field_types, _) =
-                     instantiateDataConTypeWithExistentials dcon ty_args
-
-                   is_writer_field (ValRT ::: _) = False
-                   is_writer_field (BoxRT ::: _) = False
-                   is_writer_field (ReadRT ::: _) = True
-
-                   fields = [data_value (is_writer_field fld) arg
-                            | (fld, arg) <- zip field_types args]
-               in if length args /= length field_types
-                  then internalError "worthPostInlining"
-                  else dataConValue defaultExpInfo tycon dcon
-                       (map TypM ty_args) fields
-         _ -> Nothing
-
-    demanded_safe =
-      inlckTrivial `inlckOr`
-      inlckFunction `inlckOr`
-      inlckConstructor demanded_safe `inlckOr`
-      inlckDataMovement inlckTrue demanded_safe
-    
-    data_only =
-      inlckTrivial `inlckOr` inlckConstructor data_only
-    
-    data_and_functions =
-      inlckTrivial `inlckOr`
-      inlckFunction `inlckOr`
-      inlckConstructor data_and_functions
-    
-    demanded_data_only =
-      inlckTrivial `inlckOr`
-      inlckDemanded `inlckAnd` demanded_constructor
-      where
-        demanded_constructor =
-          inlckConstructor demanded_data_only `inlckOr`
-          inlckDataMovement demanded_data_only demanded_data_only
-
--- | Decide whether a local variable assignment is worth inlining.
---   The expression initializes the local variable.
---   We can only handle data constructor expressions; refuse to inline other
---   expressions.  Convert the expression
---   to a writer by removing the destination argument, then call
---   'worthPostInlining'.
-worthPostInliningLocal tenv dmd lhs_var rhs_value =
-  case unpackDataConAppM tenv rhs_value
-  of Just (data_con, ty_args, args) 
-       | null args -> err
-       | otherwise ->
-           let args' = init args
-               destination_arg = last args
-           in case destination_arg
-              of ExpM (VarE _ v) | v == lhs_var ->
-                   -- The expected pattern has been matched.  Rebuild the
-                   -- expression sans its last argument.
-                   let op = ExpM $ VarE defaultExpInfo (dataConCon data_con)
-                       writer_exp =
-                         ExpM $ AppE defaultExpInfo op (map TypM ty_args) args'
-                   in worthPostInlining tenv True dmd writer_exp
-                 _ -> err
-
-     -- We can't inline other expressions
-     _ -> Nothing
-  where
-    err = internalError "worthPostInliningLocal: Unexpected expression"
--}
-  
 -- | A test performed to decide whether to inline an expression
 type InlineCheck = TypeEnv -> Dmd -> ExpM -> Bool
 
 inlckTrue, inlckFalse :: InlineCheck
 inlckTrue _ _ _  = True
 inlckFalse _ _ _ = False
+
+inlckBool :: Bool -> InlineCheck
+inlckBool b _ _ _ = b
 
 inlckOr :: InlineCheck -> InlineCheck -> InlineCheck
 infixr 2 `inlckOr`
@@ -661,46 +538,12 @@ inlckFunction :: InlineCheck
 inlckFunction _ _ (ExpM (LamE {})) = True
 inlckFunction _ _ _ = False
 
--- | Is the expression a data constructor application?
---
---   If so, apply the given check to its fields.
-inlckConstructor :: InlineCheck -> InlineCheck
-inlckConstructor ck tenv dmd expression =
-  case unpackDataConAppM tenv expression
-  of Just (dcon, _, _, args) ->
-       -- This is a data constructor application.
-       -- Test its fields.
-       let field_demands =
-             case specificity dmd
-             of Decond _ spcs -> map (Dmd (multiplicity dmd)) spcs
-                _ -> replicate (length args) $ Dmd (multiplicity dmd) Used
-       in and $ zipWith (ck tenv) field_demands args
-     Nothing -> False
-
--- | Is the expression demanded at least as much as being inspected?
---
---   If it's demanded, then the head of the expression will probably be
---   eliminated after it's inlined.
-inlckDemanded :: InlineCheck
-inlckDemanded _ dmd _ =
-  case specificity dmd
-  of Decond {} -> True
-     Inspected -> True
-     _         -> False
-
--- | Is the expression a data movement expression?
---
---   If so, check its arguments.
-inlckDataMovement :: InlineCheck -- ^ Test other arguments
-                  -> InlineCheck -- ^ Test stored data argument
-                  -> InlineCheck
-inlckDataMovement ptr_ck data_check tenv dmd expression =
-  case unpackVarAppM expression
-  of Just (op, _, args)
-       | op `isPyonBuiltin` The_copy ->
-           let [repr, src] = args
-           in ptr_ck tenv (Dmd (multiplicity dmd) Used) repr &&
-              ptr_ck tenv (Dmd (multiplicity dmd) Used) src
+-- | Is the expression a duplicatable term?
+inlckConlike :: InlineCheck
+inlckConlike tenv dmd (ExpM (AppE _ (ExpM (VarE _ op)) _ args)) =
+  case lookupTypeWithProperties op tenv
+  of Just (_, conlike) | conlike == True ->
+       all ((inlckTrivial `inlckOr` inlckFunction) tenv dmd) args
      _ -> False
 
 -- | Given a function and its arguments, create an expression equivalent to
@@ -1575,8 +1418,9 @@ rwLet inf (PatSM bind@(PatM (bind_var ::: _) _)) val simplify_body =
     -- Check if we should inline the RHS _before_ rewriting it
     try_pre_inline = do
       tenv <- getTypeEnv
+      rhs_type <- reduceToWhnf (patMType bind)
       subst_val <- applySubstitution val
-      if worthPreInlining tenv (patMDmd bind) subst_val
+      if worthPreInlining tenv (patMDmd bind) rhs_type subst_val
         then do
           -- The variable is used exactly once or is trivial; inline it.
           -- Since substitution will eliminate the variable before the

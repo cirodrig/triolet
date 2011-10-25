@@ -540,10 +540,11 @@ instance Supplies Specialize (Ident Var) where
 
 instance TypeEnvMonad Specialize where
   getTypeEnv = Specialize $ asks typeEnvironment
-  assume v t (Specialize m) = Specialize $ local add_type m
+  assumeWithProperties v t b (Specialize m) = Specialize $ local add_type m
     where
       add_type env =
-        env {typeEnvironment = insertType v t $ typeEnvironment env}
+        env {typeEnvironment =
+                insertTypeWithProperties v t b $ typeEnvironment env}
 
 instance EvalMonad Specialize where
   liftTypeEvalM m = Specialize $ ReaderT $ \env ->
