@@ -152,6 +152,7 @@ attr = do
       [("abstract", return AbstractAttr),
        ("conlike", return ConlikeAttr),
        ("inline", return InlineAttr),
+       ("inline_dimensionality", return InlineDimensionalityAttr),
        ("inline_sequential", return InlineSequentialAttr),
        ("inline_final", return InlineFinalAttr)]
 

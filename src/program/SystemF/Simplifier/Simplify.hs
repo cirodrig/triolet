@@ -82,6 +82,8 @@ functionTypeSM (FunSM (Fun {funTyParams = ty_params
 data SimplifierPhase =
     GeneralSimplifierPhase
 
+  | DimensionalitySimplifierPhase
+
     -- | After parallelization, the sequential phase
     --   converts loops to sequential form
   | SequentialSimplifierPhase
@@ -325,12 +327,21 @@ phasePermitsInlining phase def =
           case def_phase
           of InlNormal     -> True 
              InlWrapper    -> True
+             InlDimensionality -> False
+             InlSequential -> False
+             InlFinal      -> False
+        DimensionalitySimplifierPhase ->
+          case def_phase
+          of InlNormal     -> True
+             InlWrapper    -> True
+             InlDimensionality -> True
              InlSequential -> False
              InlFinal      -> False
         SequentialSimplifierPhase ->
           case def_phase
           of InlNormal     -> True 
              InlWrapper    -> True
+             InlDimensionality -> True
              InlSequential -> True
              InlFinal      -> False
         FinalSimplifierPhase ->
@@ -505,7 +516,7 @@ worthPreInlining tenv dmd ty expr =
         of OnceSafe -> inlckTrue
            OnceUnsafe -> inlckTrivial `inlckOr`
                          inlckFunction `inlckOr`
-                         (inlckBool is_function_type `inlckAnd` inlckConlike)
+                         inlckConlike
            _ -> inlckTrivial
   in should_inline tenv dmd expr
   where
@@ -545,6 +556,8 @@ inlckConlike tenv dmd (ExpM (AppE _ (ExpM (VarE _ op)) _ args)) =
   of Just (_, conlike) | conlike == True ->
        all ((inlckTrivial `inlckOr` inlckFunction) tenv dmd) args
      _ -> False
+
+inlckConlike tenv dmd _ = False
 
 -- | Given a function and its arguments, create an expression equivalent to
 --   the function applied to those arguments.  Then, simplify the new
@@ -2321,6 +2334,7 @@ rewriteAtPhase phase mod = rewriteLocalExpr phase rules mod
     rules =
       case phase
       of GeneralSimplifierPhase -> generalRewrites
+         DimensionalitySimplifierPhase -> generalRewrites
          SequentialSimplifierPhase -> sequential_rewrites
          FinalSimplifierPhase -> sequential_rewrites
       where

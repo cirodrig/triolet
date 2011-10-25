@@ -331,8 +331,10 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin The_convertToBoxed, rwConvertToBoxed)
             , (pyonBuiltin The_darr1_reduce, rwDarr1Reduce)
             , (pyonBuiltin The_darr1_reduce1, rwDarr1Reduce1)
+            , (pyonBuiltin The_darr2_reduce, rwDarr2Reduce)
             , (pyonBuiltin The_arr1D_build, rwArr1DBuild)
             , (pyonBuiltin The_arr2D_build, rwArr2DBuild)
+            , (pyonBuiltin The_view1ToDarr1, rwView1ToDarr1)
             -- , (pyonBuiltin The_range, rwRange)
             -- , (pyonBuiltin The_TraversableDict_list_traverse, rwTraverseList)
             --, (pyonBuiltin The_TraversableDict_list_build, rwBuildList)
@@ -557,6 +559,7 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
 
 rwConvertToBoxed _ _ _ = return Nothing
 
+
 -- | Convert a reduction on a @mk_darr1@ to a primitive reduction.
 --   The result is basically the same as if the function were inlined.
 --   It's done as a rewrite rule because we want to \"inline\" only if
@@ -571,6 +574,16 @@ rwDarr1Reduce inf [size_index, ty]
              exp = appE inf op [size_index, ty]
                    (repr : count : reducer : init : producer : other_args)
          in return $ Just exp
+
+     AppE _ (ExpM (VarE _ op_var)) ty_args args
+       | op_var `isPyonBuiltin` The_darr2_flatten ->
+         let [size_y, size_x, _, _] = ty_args
+             [count_y, count_x, darr2] = args
+             op = ExpM $ VarE inf $ pyonBuiltin The_darr2_reduce
+             exp = appE inf op [size_y, size_x, ty]
+                   (repr : count_y : count_x : reducer : init : darr2 : other_args)
+         in return $ Just exp
+
      _ -> return Nothing
 
 rwDarr1Reduce _ _ _ = return Nothing
@@ -592,6 +605,25 @@ rwDarr1Reduce1 inf [size_index, ty]
      _ -> return Nothing
 
 rwDarr1Reduce1 _ _ _ = return Nothing
+
+-- | Convert a reduction on a @mk_darr2@ to a primitive reduction.
+--   The result is basically the same as if the function were inlined.
+--   It's done as a rewrite rule because we want to \"inline\" only if
+--   the argument is a data constructor.
+rwDarr2Reduce :: RewriteRule
+rwDarr2Reduce inf [size_y, size_x, ty]
+  (repr : count_y : count_x : reducer : init : darr : other_args) =
+  case fromExpM darr
+  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+       | con `isPyonBuiltin` The_mk_darr2 ->
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim2_reduce
+             exp = appE inf op [size_y, size_x, ty]
+                   (repr : count_y : count_x : reducer : init : producer : other_args)
+         in return $ Just exp
+
+     _ -> return Nothing
+
+rwDarr2Reduce _ _ _ = return Nothing
 
 -- | Convert a 1D array creation on a @mk_darr1@ to a loop.
 --   The result is basically the same as if the function were inlined.
@@ -628,6 +660,15 @@ rwArr2DBuild inf [size_index_y, size_index_x, ty]
      _ -> return Nothing
 
 rwArr2DBuild _ _ _ = return Nothing
+
+-- | Eliminate an identity transformation 
+rwView1ToDarr1 :: RewriteRule
+rwView1ToDarr1 inf [_, _] (vw : user : _ : other_args)
+  | Just (op, [size, _], [count, darr]) <- unpackVarAppM vw,
+    op `isPyonBuiltin` The_darr1ToView1 =
+      return $ Just $ ExpM $ AppE inf user [TypM size] (count : darr : other_args)
+
+rwView1ToDarr1 _ _ _ = return Nothing
 
 {-
 -- | Convert 'range' into an explicitly indexed variant

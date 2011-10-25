@@ -462,7 +462,7 @@ view1ToDarr1 @(a b : bare)
   (elim : (N : intindex) -> FIInt N -> darr1 N a -> Writer b)
   (elim_empty : Writer b)
   (ret : OutPtr b)
-  -> IEffect b attribute(inline) =
+  -> IEffect b attribute(inline, inline_dimensionality) =
   case vw of {
     mk_view1 @a @(lo hi : intindex)
              (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
@@ -488,13 +488,13 @@ view1ToDarr1 @(a b : bare)
 darr1ToView1 @(N : intindex) @(a : bare)
   (size : FIInt N)
   (darr : darr1 N a)
-  -> view1 a attribute(inline) =
+  -> view1 a attribute(inline, inline_dimensionality) =
   case darr of mk_darr1 @N @a (f : int -> Writer a).
   mk_view1 @a @0 @N zero_ii (iInt @N size) f;
 
 
 viewToSequence @(a : bare) (repr : Repr a) (vw : view1 a)
-  -> Sequence a attribute(inline) =
+  -> Sequence a attribute(inline, inline_dimensionality) =
   case boxed @(StoredBox (Sequence a))
     (view1ToDarr1 @a @(StoredBox (Sequence a)) vw
      (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a)
@@ -508,7 +508,7 @@ viewToSequence @(a : bare) (repr : Repr a) (vw : view1 a)
 
 
 sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
-  -> view1 a attribute(inline) =
+  -> view1 a attribute(inline, inline_dimensionality) =
   -- Write the entire sequence to a list
   case boxed @(list a) (Sequence_list_build @a repr sq)
   of boxed @(list a) (ls : list a).
@@ -1332,39 +1332,47 @@ ShapeDict_dim2_flatten @(a : bare) (s : Stream dim2 a)
     (inlo : IInt Nlo) (inhi : IInt Nhi)
     (f : int -> int -> Writer a).
   let fmlo : FIInt Mlo = fromIndInt @Mlo imlo in
-  case fmlo of fiInt @Mlo (mlo_i : int).
   let fnlo : FIInt Nlo = fromIndInt @Nlo inlo in
-  case fnlo of fiInt @Nlo (nlo_i : int).
   case inhi of {
     iInt @Nhi (fnhi : FIInt Nhi).
-      -- Flatten to a 1D stream
+      -- Flatten a 2D stream that is finite in the X dimension
+      case fmlo of fiInt @Mlo (mlo_i : int).
+      case fnlo of fiInt @Nlo (nlo_i : int).
       case fnhi of fiInt @Nhi (nhi_i : int).
       let size_n : int = nhi_i -# nlo_i in
 
       letfun
-        k @(size_index : intindex) (size_ii : IInt size_index)
-          -> Stream dim1 a =
-
-          viewStream @a
-          (mk_view1 @a @0 @size_index zero_ii size_ii
-           (\ (i : int) -> Writer a.
-             -- Compute Y and X indices from the linearized index
-             let y : int = mlo_i +# i //# size_n in
-             let x : int = nlo_i +# i %# size_n in
-             f y x))
+        flattened_f (y : int) (x : int) (ret : OutPtr a) -> IEffect a =
+        f (mlo_i +# y) (nlo_i +# x) ret
       in
       case imhi of {
         iInt @Mhi (fmhi : FIInt Mhi).
+          -- Finite height and width
+
           case fmhi of fiInt @Mhi (mhi_i : int).
           let size_m : int = mhi_i -# mlo_i in
           let size : int = size_n *# size_m in
-
           case defineIntIndex size of
-            someIInt @(size_index : intindex) (size_fii : FIInt size_index).
-            k @size_index (iInt @size_index size_fii)
+            someIInt @(MN : intindex) (size_mn : FIInt MN).
+
+          let type delta_M = minus_i Mhi Mlo in
+          let type delta_N = minus_i Nhi Nlo in
+
+          viewStream @a
+          (darr1ToView1 @MN @a
+           size_mn
+           (darr2_flatten @delta_M @delta_N @MN @a
+            (minus_fii @Mhi @Mlo fmhi fmlo)
+            (minus_fii @Nhi @Nlo fnhi fnlo)
+            (mk_darr2 @delta_M @delta_N @a flattened_f)))
 
       ; iPosInfty @Mhi.
-          k @pos_infty (iPosInfty @pos_infty)
+          -- Infinite height, finite width
+          viewStream @a
+          (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
+           (primitive_dim2_flatten @pos_infty @(minus_i Nhi Nlo) @a
+            (minus_fii @Nhi @Nlo fnhi fnlo)
+            flattened_f))
 
       ; iNegInfty @Mhi.
           except @(Stream dim1 a)
@@ -1373,6 +1381,8 @@ ShapeDict_dim2_flatten @(a : bare) (s : Stream dim2 a)
   ; iPosInfty @Nhi.
       -- Create a view spanning the N dimension only,
       -- since the extent in the N dimension is infinite
+      case fmlo of fiInt @Mlo (mlo_i : int).
+      case fnlo of fiInt @Nlo (nlo_i : int).
       viewStream @a
       (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
        (\ (i : int) -> Writer a. f mlo_i (i +# nlo_i)))
@@ -2759,6 +2769,69 @@ Sequence_fold @(a acc : bare)
 	  convertToBare @acc repr_acc accumulator ret
       }
   in go state (convertToBoxed @acc repr_acc (copy @acc repr_acc init)) ret;
+
+
+darr2_flatten @(M N MN : intindex) @(a : bare)
+  (size_m : FIInt M)
+  (size_n : FIInt N)
+  (darr : darr2 M N a)
+  -> darr1 MN a
+  attribute(inline, inline_final) =
+  case darr of mk_darr2 @M @N @a (f : int -> int -> Writer a).
+  case size_n of fiInt @N (width : int).
+
+  mk_darr1 @MN @a (primitive_dim2_flatten @M @N @a size_n f);
+
+
+darr2_reduce @(M N : intindex) @(a : bare)
+  (repr : Repr a)
+  (size_y : FIInt M)
+  (size_x : FIInt N)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (src : darr2 M N a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  case src of mk_darr2 @M @N @a (g : int -> int -> Writer a).
+  primitive_dim2_reduce @M @N @a repr size_y size_x f init g ret;
+
+
+primitive_dim2_flatten @(M N : intindex) @(a : bare)
+  (size_n : FIInt N)
+  (f : int -> int -> Writer a)
+  (i : int)
+  -> Writer a
+  attribute(conlike, inline, inline_final) =
+
+  -- Compute Y and X indices from the linearized index
+  case size_n of fiInt @N (size_n_i : int).
+  let y : int = i //# size_n_i in
+  let x : int = i %# size_n_i in
+  f y x;
+
+
+primitive_dim2_reduce @(M N : intindex) @(a : bare)
+  (repr : Repr a)
+  (size_y : FIInt M)
+  (size_x : FIInt N)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (g : int -> int -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_sequential) =
+
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+
+  for @M @a repr (iInt @M size_y) init
+  (\ (j : int) (acc : a) (ret : OutPtr a) -> IEffect a.
+   for @N @a repr (iInt @N size_x) acc
+   (\ (i : int) (acc : a) (ret : OutPtr a) -> IEffect a.
+    case boxed @a (g j i) of boxed @a (x : a).
+    f acc x ret)
+   ret)
+  ret;
 
 
 primitive_dim2_generate @(M N : intindex) @(a : bare)

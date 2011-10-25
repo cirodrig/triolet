@@ -66,6 +66,8 @@ data Attribute =
   | ConlikeAttr                     -- ^ Function calls are cheap to reevaluate
   | InlineAttr                      -- ^ Definition should be aggressively
                                     --   inlined
+  | InlineDimensionalityAttr         -- ^ Definition should not be inlined until
+                                    --   the fixed-dimensionality compilation phase
   | InlineSequentialAttr            -- ^ Definition should not be inlined until
                                     --   the sequential compilation phase
   | InlineFinalAttr                 -- ^ Definition should not be inlined until

@@ -418,10 +418,11 @@ view1ToDarr1 : (a : bare) -> (b : bare)
 	    -> Writer b
 	    -> Writer b;
 
-darr1ToView1 : (N : intindex) -> (a : bare)
-	    -> FIInt N
-	    -> darr1 N a
-	    -> view1 a;
+darr1ToView1 :
+    (N : intindex) -> (a : bare)
+ -> FIInt N
+ -> darr1 N a
+ -> view1 a;
 
 view2ToDarr2 : (a : bare) -> (b : bare)
 	    -> view2 a
@@ -1226,9 +1227,44 @@ Sequence_fold : (a acc : bare)
 	      -> Sequence a
 	      -> Writer acc;
 
+darr2_flatten :
+    (M N MN : intindex) -> (a : bare)
+ -> FIInt M
+ -> FIInt N
+ -> darr2 M N a
+ -> darr1 MN a;
+
+darr2_reduce : (M N : intindex) -> (a : bare)
+            -> Repr a -> FIInt M -> FIInt N
+            -> (a -> a -> Writer a) -> a -> darr2 M N a
+            -> Writer a;
+
+darr2_reduce1 : (M N : intindex) -> (a : bare)
+             -> Repr a -> FIInt M -> FIInt N
+             -> (a -> a -> Writer a) -> darr2 M N a
+             -> Writer a;
+
+primitive_dim2_reduce :
+    (M N : intindex) -> (a : bare)
+ -> Repr a -> FIInt M -> FIInt N
+ -> (a -> a -> Writer a) -> a -> (int -> int -> Writer a)
+ -> Writer a;
+
+primitive_dim2_reduce1 :
+    (M N : intindex) -> (a : bare)
+ -> Repr a -> FIInt M -> FIInt N
+ -> (a -> a -> Writer a) -> (int -> int -> Writer a)
+ -> Writer a;
+
 primitive_dim2_generate :
     (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
  -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
+
+primitive_dim2_flatten attribute(conlike) :
+    (M N : intindex) -> (a : bare)
+ -> FIInt N
+ -> (int -> int -> Writer a)
+ -> (int -> Writer a);
 
 fun_reduce_Stream : (a : bare)
           	 -> Repr a

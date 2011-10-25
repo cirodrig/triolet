@@ -227,9 +227,20 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
   repr_mod <- iterateM (highLevelOptimizations False SystemF.GeneralSimplifierPhase) 4 repr_mod
   
+  putStrLn ""
+  putStrLn "Before loop dimension analysis"
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+
+  repr_mod <- highLevelOptimizations True SystemF.DimensionalitySimplifierPhase repr_mod
+  repr_mod <- highLevelOptimizations True SystemF.DimensionalitySimplifierPhase repr_mod
+
+  putStrLn ""
+  putStrLn "Before parallelizing"
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+
   -- Parallelize outer loops
   repr_mod <-
-    if lookupCompileFlag DoParallelization compile_flags  
+    if lookupCompileFlag DoParallelization compile_flags
     then do repr_mod <- SystemF.parallelLoopRewrite repr_mod
             highLevelOptimizations False SystemF.GeneralSimplifierPhase repr_mod
     else return repr_mod
