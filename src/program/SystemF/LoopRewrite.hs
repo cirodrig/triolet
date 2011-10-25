@@ -67,6 +67,7 @@ parLoopOperator v =
             pyonBuiltin The_parallel_dim1_reduce,
             pyonBuiltin The_parallel_dim1_reduce1,
             pyonBuiltin The_parallel_dim1_generate,
+            pyonBuiltin The_parallel_dim2_reduce,
             pyonBuiltin The_parallel_dim2_generate
            ] 
   
@@ -83,6 +84,7 @@ otherLoopOperator v =
             pyonBuiltin The_primitive_dim1_reduce,
             pyonBuiltin The_primitive_dim1_reduce1,
             pyonBuiltin The_primitive_dim1_generate,
+            pyonBuiltin The_primitive_dim2_reduce,
             pyonBuiltin The_primitive_dim2_generate
             ]
 
@@ -136,6 +138,8 @@ replaceWithParallelApp inf op_var ty_args args = ReaderT $ \env ->
          pyonBuiltin The_parallel_dim1_generate)
       , (pyonBuiltin The_primitive_dim2_generate,
          pyonBuiltin The_parallel_dim2_generate)
+      , (pyonBuiltin The_primitive_dim2_reduce,
+         pyonBuiltin The_parallel_dim2_reduce)
       , (pyonBuiltin The_doall,
          pyonBuiltin The_parallel_doall)
       ]

@@ -296,6 +296,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_for) |])
   , (PyonName module_prim "blocked_reduce",
      Right [| pyonBuiltin (SystemF.The_blocked_reduce) |])
+  , (PyonName module_prim "blocked_reduce2",
+     Right [| pyonBuiltin (SystemF.The_blocked_reduce2) |])
   , (PyonName module_prim "blocked_doall",
      Right [| pyonBuiltin (SystemF.The_blocked_doall) |])
   , (PyonName module_prim "blocked_doall2",

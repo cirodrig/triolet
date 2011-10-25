@@ -326,7 +326,7 @@ function blocked_reduce
   FinIndInt {count} = size;
 
   // Main computation is written in C++
-  pointer primcall pyon_C_blocked_reduce(reduce_data, init, count);
+  owned primcall pyon_C_blocked_reduce(reduce_data, init, count);
 };
 
 procedure blocked_reduce_accumulate_range
@@ -341,6 +341,32 @@ procedure blocked_reduce_accumulate_range
 
 procedure blocked_reduce_reduce
   (pointer dat, owned x, owned y) -> owned {
+  owned call (dat @! BlockedReduceData.reducer) (x, y);
+};
+
+function blocked_reduce2
+  (FinIndInt size_y, FinIndInt size_x, owned reducer, owned init, owned generator) -> owned
+{
+  data BlockedReduceData reduce_data;
+  reduce_data @! BlockedReduceData.initial_value = init;
+  reduce_data @! BlockedReduceData.generator = generator;
+  reduce_data @! BlockedReduceData.reducer = reducer;
+  FinIndInt {count_y} = size_y;
+  FinIndInt {count_x} = size_x;
+
+  owned primcall pyon_C_blocked_reduce2 (reduce_data, init, count_y, count_x);
+};
+
+// Functions called from the C side of the library
+procedure blocked_reduce2_accumulate_range
+  (pointer dat, owned acc, int start_y, int end_y, int start_x, int end_x) -> owned
+{
+  lsizey = FinIndInt {end_y - start_y};
+  lsizex = FinIndInt {end_x - start_x};
+  owned call (dat @! BlockedReduceData.generator) (start_y, lsizey, start_x, lsizex, acc);
+};
+
+procedure blocked_reduce2_reduce (pointer dat, owned x, owned y) -> owned {
   owned call (dat @! BlockedReduceData.reducer) (x, y);
 };
 

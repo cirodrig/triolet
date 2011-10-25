@@ -88,6 +88,19 @@ extern procedure pyon.internal.prim.blocked_reduce_accumulate_range
 extern procedure pyon.internal.prim.blocked_reduce_reduce
   "blocked_reduce_reduce" (pointer, owned, owned) -> owned;
 
+extern function pyon.internal.prim.blocked_reduce2
+  (FinIndInt, FinIndInt, owned, owned, owned) -> owned;
+
+// C implementation of blocked_reduce
+import procedure pyon_C_blocked_reduce2
+  (owned, owned, owned, int, int) -> pointer;
+
+// Functions called from the C side of the library
+extern procedure pyon.internal.prim.blocked_reduce2_accumulate_range
+  "blocked_reduce2_accumulate_range" (pointer, owned, int, int, int, int) -> owned;
+extern procedure pyon.internal.prim.blocked_reduce2_reduce
+  "blocked_reduce2_reduce" (pointer, owned, owned) -> owned;
+
 extern function pyon.internal.prim.blocked_doall
   (FinIndInt, owned) -> ();
 

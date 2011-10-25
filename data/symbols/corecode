@@ -3416,14 +3416,9 @@ parallel_dim1_reduce @(N : intindex) @(a : bare)
       (lb : int) (range_count : FIInt M) (acc : BoxedType a) -> BoxedType a =
       case boxed @a (convertToBare @a repr acc) of boxed @a (uacc : a).
       convertToBoxed @a repr
-      (for @M @a repr (iInt @M range_count) uacc
-       (\ (range_i : int) (acc : a) (acc_ret : OutPtr a) -> IEffect a.
-
-         -- Actual index is lb + range_i
-         let i : int = lb +# range_i in
-
-         case boxed @a (g i) of boxed @a (x : a).
-         f acc x acc_ret))
+      (primitive_dim1_reduce @M @a repr range_count f uacc
+       (\ (i : int) (local_ret : OutPtr a) -> IEffect a.
+        g (lb +# i) local_ret))
 
   ; boxed_f (x : BoxedType a) (y : BoxedType a) -> BoxedType a =
       case boxed @a (convertToBare @a repr x) of boxed @a (ux : a).
@@ -3479,6 +3474,41 @@ parallel_dim1_reduce1 @(N : intindex) @(a : bare)
     -- If 'nothing' is returned, then the range was empty.  This is an error.
   ; nothing @a. except @(IEffect a) 
   };
+
+
+parallel_dim2_reduce @(M N : intindex) @(a : bare)
+  (repr : Repr a) (count_y : FIInt M) (count_x : FIInt N)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (g : int -> int -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_sequential) =
+
+  letfun {
+    -- Sequentially reduce on the interval
+    -- [lb_y, lb_y + range_count_y) * [lb_x, lb_x + range_count_x)
+    do_range @(M N : intindex)
+      (lb_y : int) (range_count_y : FIInt M)
+      (lb_x : int) (range_count_x : FIInt N)
+      (acc : BoxedType a) -> BoxedType a =
+
+      case boxed @a (convertToBare @a repr acc) of boxed @a (uacc : a).
+      convertToBoxed @a repr
+      (primitive_dim2_reduce @M @N @a repr range_count_y range_count_x f uacc
+       (\ (y : int) (x : int) (local_ret : OutPtr a) -> IEffect a.
+        g (lb_y +# y) (lb_x +# x) local_ret))
+
+  ; boxed_f (x : BoxedType a) (y : BoxedType a) -> BoxedType a =
+      case boxed @a (convertToBare @a repr x) of boxed @a (ux : a).
+      case boxed @a (convertToBare @a repr y) of boxed @a (uy : a).
+      convertToBoxed @a repr (f ux uy)
+  } in
+  let boxed_init : BoxedType a = convertToBoxed @a repr (copy @a repr init) in
+
+  convertToBare @a repr
+  (blocked_reduce2 @M @N @(BoxedType a)
+   count_y count_x boxed_f boxed_init do_range) ret;
 
 
 parallel_dim2_generate @(M N : intindex) @(a : bare)

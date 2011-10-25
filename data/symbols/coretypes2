@@ -1763,6 +1763,11 @@ parallel_doall2 : (M N : intindex)
      -> (int -> int -> IEffect b)
      -> IEffect a;
 
+parallel_dim2_reduce :
+    (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
+ -> (a -> a -> Writer a) -> a -> (int -> int -> Writer a)
+ -> Writer a;
+
 parallel_dim2_generate :
     (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
  -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
@@ -1775,6 +1780,18 @@ blocked_reduce :
  -> (acc -> acc -> acc) -- Reducer
  -> acc			-- Initial value
  -> ((M : intindex) -> int -> FIInt M -> acc -> acc)
+    -- ^ Generate and combine a value on a part of the domain
+ -> acc;
+
+-- Blocked 2D parallel reduction
+blocked_reduce2 :
+    (M N : intindex)
+ -> (acc : box)
+ -> FIInt M		-- Size of range
+ -> FIInt N		-- Size of range
+ -> (acc -> acc -> acc) -- Reducer
+ -> acc			-- Initial value
+ -> ((M N : intindex) -> int -> FIInt M -> int -> FIInt N -> acc -> acc)
     -- ^ Generate and combine a value on a part of the domain
  -> acc;
 
