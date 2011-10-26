@@ -1227,8 +1227,7 @@ mkBinaryIntType =
 
 mkGlobalVar name typ con = do
   scm <- typ
-  let exp pos = TIRecExp $ SystemF.ExpSF $
-                SystemF.VarE (SystemF.mkExpInfo pos) con
+  let exp pos = VarTE (SystemF.mkExpInfo pos) con
   let ass = polymorphicAssignment scm exp
   predefinedVariable (Just $ builtinLabel name) ass
 

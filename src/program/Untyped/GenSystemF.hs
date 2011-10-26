@@ -211,46 +211,46 @@ setPlaceholderElaboration ph exp
       putMVar (phExpResolution ph) exp
   | otherwise = internalError "Not a placeholder"
 
-delayType :: SystemF.TypSF -> TIType
+delayType :: Type.Type.Type -> TIType
 delayType t = DelayedType (return t)
 
-mkWildP :: TIType -> SystemF.Pat TI
+mkWildP :: TIType -> TIPat
 mkWildP ty = TIWildP ty
 
-mkVarP :: Var -> TIType -> SystemF.Pat TI 
+mkVarP :: Var -> TIType -> TIPat
 mkVarP v ty = TIVarP v ty
 
-mkTupleP :: [SystemF.Pat TI] -> SystemF.Pat TI
+mkTupleP :: [TIPat] -> TIPat
 mkTupleP fs = TITupleP fs
 
 mkVarE :: SourcePos -> Var -> TIExp
-mkVarE pos v = TIExp $ SystemF.VarE (mkExpInfo pos) v
+mkVarE pos v = VarTE (mkExpInfo pos) v
 
 mkConE :: SourcePos -> Var -> [TIType] -> [TIType] -> [TIExp] -> TIExp
 mkConE pos c ty_args ex_types fields =
   let con = TIConInst c ty_args ex_types
-  in TIExp $ SystemF.ConE (mkExpInfo pos) con fields
+  in ConTE (mkExpInfo pos) con fields
 
 mkLitE :: SourcePos -> Untyped.Lit -> TIExp
 mkLitE pos l =
-  TIExp $ case l
-          of Untyped.IntL n      -> sf_literal $ SystemF.IntL n sf_int_type
-             Untyped.FloatL n    -> sf_literal $ SystemF.FloatL n sf_float_type
-             Untyped.BoolL True  -> sf_constructor SystemF.The_True
-             Untyped.BoolL False -> sf_constructor SystemF.The_False
-             Untyped.NoneL       -> sf_constructor SystemF.The_None
+  case l
+  of Untyped.IntL n      -> sf_literal $ SystemF.IntL n sf_int_type
+     Untyped.FloatL n    -> sf_literal $ SystemF.FloatL n sf_float_type
+     Untyped.BoolL True  -> sf_constructor SystemF.The_True
+     Untyped.BoolL False -> sf_constructor SystemF.The_False
+     Untyped.NoneL       -> sf_constructor SystemF.The_None
   where
     sf_literal l =
-      SystemF.LitE (mkExpInfo pos) l
+      LitTE (mkExpInfo pos) l
     sf_constructor c =
       let con = TIConInst (SystemF.pyonBuiltin c) [] []
-      in SystemF.ConE (mkExpInfo pos) con []
+      in ConTE (mkExpInfo pos) con []
 
     sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_int)
     sf_float_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_float)
 
 mkAppE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
-mkAppE pos oper ts args = TIExp $ SystemF.AppE (mkExpInfo pos) oper ts args
+mkAppE pos oper ts args = AppTE (mkExpInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
@@ -258,7 +258,7 @@ mkUndefinedE pos ty =
 
 mkCoerceE :: SourcePos -> TIType -> TIType -> TIExp -> TIExp
 mkCoerceE pos from_ty to_ty e =
-  TIExp $ SystemF.CoerceE (mkExpInfo pos) from_ty to_ty e
+  CoerceTE (mkExpInfo pos) from_ty to_ty e
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
@@ -266,24 +266,24 @@ mkIfE pos cond tr fa =
         TIDeConInst (SystemF.pyonBuiltin SystemF.The_True) [] []
       false_decon =
         TIDeConInst (SystemF.pyonBuiltin SystemF.The_False) [] []
-      true_alt = TIAlt $ SystemF.Alt true_decon [] tr
-      false_alt = TIAlt $ SystemF.Alt false_decon [] fa
-  in TIExp $ SystemF.CaseE (mkExpInfo pos) cond [true_alt, false_alt]
+      true_alt = TIAlt true_decon [] tr
+      false_alt = TIAlt false_decon [] fa
+  in CaseTE (mkExpInfo pos) cond [true_alt, false_alt]
 
 -- | Create a call of a polymorphic function with no constraint arguments.
 mkPolyCallE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
 mkPolyCallE pos oper [] [] = oper
 mkPolyCallE pos oper ty_args args = mkAppE pos oper ty_args args
 
-mkLetE :: SourcePos -> SystemF.Pat TI -> TIExp -> TIExp -> TIExp
-mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (mkExpInfo pos) lhs rhs body 
+mkLetE :: SourcePos -> TIPat -> TIExp -> TIExp -> TIExp
+mkLetE pos lhs rhs body = LetTE (mkExpInfo pos) lhs rhs body 
 
-mkFunE :: SourcePos -> SystemF.Fun TI -> TIExp
-mkFunE pos fun = TIExp $ SystemF.LamE (mkExpInfo pos) fun
+mkFunE :: SourcePos -> TIFun -> TIExp
+mkFunE pos fun = LamTE (mkExpInfo pos) fun
 
-mkLetrecE :: SourcePos -> [SystemF.Def TI] -> TIExp -> TIExp
+mkLetrecE :: SourcePos -> [TIDef] -> TIExp -> TIExp
 mkLetrecE pos defs body =
-  TIExp $ SystemF.LetfunE (mkExpInfo pos) (SystemF.Rec defs) body
+  LetfunTE (mkExpInfo pos) (SystemF.Rec defs) body
 
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
 mkDictE pos cls inst_type scs methods =
@@ -333,10 +333,10 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
   (placeholders, alt_body) <-
     instanceExpression pos ty_params constraint method_var
       
-  let alt = TIAlt $
-            SystemF.Alt (TIDeConInst (clsDictCon cls) [convertHMType inst_type] []) parameters alt_body
+  let alt = TIAlt (TIDeConInst (clsDictCon cls) [convertHMType inst_type] [])
+            parameters alt_body
 
-  return (placeholders, TIExp $ SystemF.CaseE (mkExpInfo pos) dict [alt])
+  return (placeholders, CaseTE (mkExpInfo pos) dict [alt])
 
 -- | Create a placeholder for a recursive variable.  The variable is assumed
 -- to have a monomorphic type, which is later generalized.
@@ -358,33 +358,32 @@ mkDictPlaceholder pos p = do
   actual <- newEmptyMVar
   return $ DictPH (mkExpInfo pos) p actual
 
-mkFunction :: SourcePos -> [TyCon] -> [SystemF.Pat TI] -> TIType -> TIExp 
-           -> IO (SystemF.Fun TI)
+mkFunction :: SourcePos -> [TyCon] -> [TIPat] -> TIType -> TIExp -> IO TIFun
 mkFunction pos ty_params params ret_type body = do
   ty_params' <- mapM convertTyParam ty_params
-  return $ TIFun $ SystemF.Fun (mkExpInfo pos) ty_params' params ret_type body
+  return $ TIFun (mkExpInfo pos) ty_params' params ret_type body
   where
-    convertTyParam :: TyCon -> IO (SystemF.TyPat TI)
+    convertTyParam :: TyCon -> IO TITyPat
     convertTyParam ty_param = do
       v <- tyVarToSystemF ty_param
       let k = convertKind $ tyConKind ty_param
       return $ TITyPat v k
 
-mkExport :: SourcePos -> ExportSpec -> SystemF.Fun TI -> SystemF.Export TI
-mkExport pos spec f = SystemF.Export pos spec f
+mkExport :: SourcePos -> ExportSpec -> TIFun -> TIExport
+mkExport pos spec f = TIExport pos spec f
 
 -------------------------------------------------------------------------------
 -- Conversion to System F
 
 convertKind :: Kind -> TIType
-convertKind k = delayType $ SystemF.TypSF $ convertKind' k
+convertKind k = delayType $ convertKind' k
 
 -- The base kind translates to a boxed type
 convertKind' Star = Type.Type.boxT
 convertKind' (k1 :-> k2) = mkArrowType (convertKind' k1) (convertKind' k2)
 
 convertHMType :: HMType -> TIType
-convertHMType ty = DelayedType $ fmap SystemF.TypSF $ convertHMType' ty 
+convertHMType ty = DelayedType $ convertHMType' ty 
                    
 convertHMType' ty = do
   ty' <- canonicalizeHead ty
@@ -444,7 +443,7 @@ mkForallType :: Var -> Type.Type.Type -> Type.Type.Type -> Type.Type.Type
 mkForallType v dom rng = Type.Type.AllT (v Type.Type.::: dom) rng
 
 convertPredicate :: Predicate -> TIType
-convertPredicate prd = DelayedType $ fmap SystemF.TypSF $ convertPredicate' prd 
+convertPredicate prd = DelayedType $ convertPredicate' prd 
 
 convertPredicate' (IsInst ty cls) = do
   ty' <- convertHMType' ty
@@ -465,10 +464,10 @@ convertTyScheme (TyScheme qvars cst ty) = DelayedType $ do
   ty' <- convertHMType' ty
   let constrained_type = mkFunctionType cst' ty'
       parametric_type = foldr mkFun constrained_type (zip qvars qvars')
-  return $ SystemF.TypSF parametric_type
+  return parametric_type
   where
-    mkFun (v, gluon_v) ty =
-      mkForallType gluon_v (convertKind' (tyConKind v)) ty
+    mkFun (v, sf_v) ty =
+      mkForallType sf_v (convertKind' (tyConKind v)) ty
 
 -- | Create an instance of a polymorphic variable
 --   with placeholders for all constraints
@@ -509,12 +508,8 @@ conInstanceExpression pos ty_params constraint con con_type = do
         -- Create a constructor application
         let params = zipWith mkVarP parameter_vars $ map convertHMType domain
         let body = mkConE pos con types [] (map (mkVarE pos) parameter_vars)
-        return $ mkFunE pos $ TIFun $
-          SystemF.Fun { SystemF.funInfo = mkExpInfo pos
-                      , SystemF.funTyParams = []
-                      , SystemF.funParams = params
-                      , SystemF.funReturn = convertHMType range
-                      , SystemF.funBody = body}
+        return $ mkFunE pos $
+          TIFun (mkExpInfo pos) [] params (convertHMType range) body
 
     -- Expand a function type into domain and range
     expand_type t = do

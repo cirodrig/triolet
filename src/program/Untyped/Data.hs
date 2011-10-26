@@ -16,11 +16,13 @@ import Text.PrettyPrint.HughesPJ
 import Common.Identifier
 import Common.Label
 import Common.SourcePos
-import SystemF.Syntax as SystemF
+import qualified SystemF.Syntax as SF
+import SystemF.Syntax (ExpInfo, DefGroup, ConInst, DeConInst)
 import Untyped.Kind
 import {-# SOURCE #-} Untyped.Syntax as Untyped
-import qualified Type.Type as SystemF
-import qualified Type.Var as SystemF
+import qualified Type.Type as SF
+import qualified Type.Var as SF
+import Export
 
 -- | The value bound to a variable in the parser.
 --
@@ -111,7 +113,7 @@ type TyVarSet = Set.Set TyCon
 data TyConDescr =
   TyConDescr
   { -- | The System F constructor
-    tcSystemFValue :: SystemF.TypSF
+    tcSystemFValue :: SF.TypSF
 
     -- | If the type constructor is a type function, this is a reference
     --   to the function.
@@ -129,7 +131,7 @@ data TyCon =
     -- unified with
   , tcRep  :: !(Maybe (IORef TyVarRep))
     -- | The System F equivalent of a type variable
-  , tcSystemFVariable :: IORef (Maybe SystemF.Var)
+  , tcSystemFVariable :: IORef (Maybe SF.Var)
     -- | For type constructors, information about the type constructor; 
     --   for variables, Nothing.
   , tcConInfo :: !(Maybe TyConDescr)
@@ -176,7 +178,7 @@ data ClassSig =
   { clsParam :: TyCon
   , clsConstraint :: Constraint
   , clsName :: String
-  , clsTypeCon :: !SystemF.Var    -- ^ Dictionary or family type constructor
+  , clsTypeCon :: !SF.Var    -- ^ Dictionary or family type constructor
   }
 
 -- | A type class.
@@ -191,17 +193,17 @@ data ClassSig =
 data Class =
   Class
   { clsSignature :: !ClassSig
-  , clsDictCon :: SystemF.Var     -- ^ Class dictionary constructor
+  , clsDictCon :: SF.Var     -- ^ Class dictionary constructor
   , clsMethods :: [ClassMethod]
   , clsInstances :: [Instance]
   }
 
-mkClass :: String -> TyCon -> Constraint -> SystemF.Var -> SystemF.Var
+mkClass :: String -> TyCon -> Constraint -> SF.Var -> SF.Var
         -> [ClassMethod] -> [Instance] -> Class
 mkClass name tc cst cls_con inst_con methods instances =
   Class (ClassSig tc cst name cls_con) inst_con methods instances 
 
-mkTyFamily :: String -> TyCon -> Constraint -> SystemF.Var
+mkTyFamily :: String -> TyCon -> Constraint -> SF.Var
            -> [TyFamilyInstance]
            -> TyFamily
 mkTyFamily name tc cst fun_con instances =
@@ -245,14 +247,14 @@ data Instance =
   { insSignature :: !InstanceSig
     -- | If given, this global constructor is the instance's predefined value.
     -- The constructor is parameterized over the qvars and constraint.
-  , insCon :: !(Maybe SystemF.Var)
+  , insCon :: !(Maybe SF.Var)
   , insMethods :: [InstanceMethod]
   }
 
 -- | Each instance method is defined as some constructor in System F
-newtype InstanceMethod = InstanceMethod {inmName :: SystemF.Var}
+newtype InstanceMethod = InstanceMethod {inmName :: SF.Var}
 
-mkInstance :: TyVars -> Constraint -> ClassSig -> HMType -> Maybe SystemF.Var
+mkInstance :: TyVars -> Constraint -> ClassSig -> HMType -> Maybe SF.Var
            -> [InstanceMethod]
            -> Instance
 mkInstance qvars cst cls ty con methods =
@@ -310,58 +312,67 @@ data TypeAssignment =
   , _instantiateTypeAssignment :: !(SourcePos -> IO (Placeholders, TyVarSet, Constraint, HMType, TIExp))
   }
 
--- | Internal type inference representation of System F
-data TI deriving(Typeable)
+-------------------------------------------------------------------------------
+-- Type-inferred code.
+--
+-- This code is a modified copy of the code in "SystemF.Syntax".
+-- The modifications change the representation of types and add placeholder
+-- expressions.
 
--- | Type inferred expressions, which may contain placeholders
-data instance SystemF.Exp TI =
-    -- | A placeholder for a recursive variable
-    RecVarPH
-    { phExpInfo :: SystemF.ExpInfo
+-- | Type-inferred expressions
+data TIExp =
+    -- Expressions that translate directly to System F
+
+    VarTE !ExpInfo !SF.Var
+  | LitTE !ExpInfo !SF.Lit
+  | ConTE !ExpInfo !TIConInst [TIExp]
+  | AppTE !ExpInfo TIExp [TIType] [TIExp]
+  | LamTE !ExpInfo TIFun
+  | LetTE !ExpInfo TIPat TIExp TIExp
+  | LetfunTE !ExpInfo (DefGroup TIDef) TIExp
+  | CaseTE !ExpInfo TIExp [TIAlt]
+  | CoerceTE !ExpInfo TIType TIType TIExp 
+    
+    -- Placeholder expressoins
+
+  | RecVarPH
+    { phExpInfo :: !ExpInfo
     , phExpVariable :: Untyped.Variable
     , phExpTyVar :: TyCon
     , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
     }
     -- | A placeholder for a class dictionary
   | DictPH
-    { phExpInfo :: SystemF.ExpInfo
+    { phExpInfo :: !ExpInfo
     , phExpPredicate :: Predicate
     , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
     }
-    -- | A non-placeholder expression
-  | TIExp !TIExp'
-    
-    -- | An expression that was written directly in System F
-    --
-    -- This kind of expression only comes from built-in terms.
-  | TIRecExp SystemF.ExpSF
 
-data instance SystemF.Pat TI =
+data TIPat =
     TIWildP TIType
-  | TIVarP SystemF.Var TIType
-  | TITupleP [SystemF.Pat TI]
+  | TIVarP SF.Var TIType
+  | TITupleP [TIPat]
 
-data instance SystemF.TyPat TI = TITyPat SystemF.Var TIType
+data TITyPat = TITyPat SF.Var TIType
 
-newtype instance SystemF.Alt TI = TIAlt (SystemF.BaseAlt TI)
-newtype instance SystemF.Fun TI = TIFun (SystemF.BaseFun TI)
-data instance SystemF.CInst TI =
-  TIConInst SystemF.Var [TIType] [TIType]
+data TIFun =
+  TIFun !ExpInfo [TITyPat] [TIPat] TIType TIExp
 
-data instance SystemF.DeCInst TI =
-  TIDeConInst SystemF.Var [TIType] [SystemF.TyPat TI]
+data TIDef =
+  TIDef SF.Var SF.DefAnn TIFun
 
--- | A type inference System F expression
-type TIExp = SystemF.Exp TI
-
--- | Other expressions use regular System F constructors
-type TIExp' = SystemF.BaseExp TI
+data TIAlt =
+  TIAlt !TIDeConInst [TIPat] TIExp
 
 -- | A Placeholder is a RecVarPH or DictPH term
 type Placeholder = TIExp
 type Placeholders = [Placeholder]
 
 -- | Types are not evaluated until type inference completes
-newtype instance SystemF.Typ TI = DelayedType (IO SystemF.TypSF)
+newtype TIType = DelayedType (IO SF.Type)
 
-type TIType = SystemF.Typ TI
+data TIConInst = TIConInst !SF.Var [TIType] [TIType]
+
+data TIDeConInst = TIDeConInst !SF.Var [TIType] [TITyPat]
+
+data TIExport = TIExport !SourcePos ExportSpec TIFun

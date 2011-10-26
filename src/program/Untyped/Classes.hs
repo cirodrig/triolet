@@ -758,7 +758,7 @@ createCoercionValue :: SourcePos -> HMType -> HMType -> IO TIExp
 createCoercionValue pos t1 t2 = do
   let t1' = convertHMType t1
       t2' = convertHMType t2
-  let op = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos)
+  let op = VarTE (SystemF.mkExpInfo pos)
            (SystemF.pyonBuiltin SystemF.The_unsafeMakeCoercion)
   return $ mkPolyCallE pos op [t1', t2'] []
 

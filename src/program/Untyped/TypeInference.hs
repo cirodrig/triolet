@@ -301,9 +301,9 @@ addRecVarsToEnvironment vars k = do
   Inf $ \_ -> return ([], Set.fromList tyvars, [], (x, tyvars))
 
 -- | An assignment of named proof objects to predicates
-type ProofBinding = [(Predicate, SystemF.Pat TI)]
+type ProofBinding = [(Predicate, TIPat)]
 
-lookupProofParam :: Predicate -> ProofBinding -> IO (Maybe (SystemF.Pat TI))
+lookupProofParam :: Predicate -> ProofBinding -> IO (Maybe TIPat)
 lookupProofParam p ((p', pat):bs) = uEqual p p' >>= continue
   where
     continue False = lookupProofParam p bs
@@ -314,8 +314,8 @@ lookupProofParam _ [] = return Nothing
 generalizeDefGroup :: Bool
                    -> SourcePos
                    -> [Variable]
-                   -> Inf [(SourcePos, Maybe [TyCon], SystemF.Fun TI, HMType)]
-                   -> ([SystemF.Fun TI] -> Inf a) -> Inf a
+                   -> Inf [(SourcePos, Maybe [TyCon], TIFun, HMType)]
+                   -> ([TIFun] -> Inf a) -> Inf a
 generalizeDefGroup is_top_level
                    source_pos
                    defgroup_vars 
@@ -462,20 +462,18 @@ resolvePlaceholders proof_env rec_env placeholders =
 makePolymorphicFunction :: ProofBinding -- ^ Names of proof objects
                         -> SourcePos    -- ^ Function definition location
                         -> TyScheme     -- ^ Function's type scheme
-                        -> SystemF.Fun TI -- ^ First-order part of function
-                        -> IO (SystemF.Fun TI) -- ^ Polymorphic function
-makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
-  | not $ null $ SystemF.funTyParams fo_function =
-      internalError "makePolymorphicFunction"
-  | otherwise = do
+                        -> TIFun    -- ^ First-order part of function
+                        -> IO TIFun -- ^ Polymorphic function
+makePolymorphicFunction
+  proofs pos (TyScheme qvars cst fot)
+  fo_function@(TIFun fun_info [] fo_params ret_type body) = do
       -- Convert type parameters
       ty_params <- mapM convertTyParam qvars
       -- Convert dictionary parameters
       prd_params <- mapM getProofParam cst
       
-      let params = prd_params ++ SystemF.funParams fo_function
-      return $ TIFun $ fo_function { SystemF.funTyParams = ty_params
-                                   , SystemF.funParams = params}
+      let params = prd_params ++ fo_params
+      return $ TIFun fun_info ty_params params ret_type body
       {- This is the old code, which produced nested functions.
       -- Instead, we add parameters to the first-order function.
   | null cst = 
@@ -493,10 +491,6 @@ makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
           info = SystemF.funInfo fo_function
       return $ TIFun $ SystemF.Fun info ty_params prd_params return_type fun_body-}
   where
-    addTypeParameters f = do
-      ty_params <- mapM convertTyParam qvars
-      return $ TIFun $ fo_function {SystemF.funTyParams = ty_params}
-      
     convertTyParam ty_param = do
       v <- tyVarToSystemF ty_param
       let k = convertKind $ tyConKind ty_param
@@ -508,6 +502,10 @@ makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
         Nothing -> do
           internalError "Cannot find proof variable"
         Just p  -> return p
+
+makePolymorphicFunction _ _ _ _ =
+  -- The argument function must not have type parameters
+  internalError "makePolymorphicFunction"
 
 constraintToProofEnvironment :: Constraint 
                              -> IO (ProofEnvironment, ProofBinding)
@@ -522,7 +520,7 @@ constraintToProofEnvironment cst = mapAndUnzipM convert cst
           pat = mkVarP v (convertPredicate prd) 
       return ((prd, exp), (prd, pat))
 
-inferDefGroup :: Bool -> [FunctionDef] -> ([SystemF.Def TI] -> Inf a) -> Inf a
+inferDefGroup :: Bool -> [FunctionDef] -> ([TIDef] -> Inf a) -> Inf a
 inferDefGroup is_top_level defs k =
   let source_pos = getSourcePos $ head defs
       defgroup_vars = [v | FunctionDef v _ <- defs]
@@ -547,7 +545,7 @@ inferDefGroup is_top_level defs k =
       sfvar <- case varSystemFVariable v
                of Just sfvar -> return sfvar 
                   Nothing -> internalError "Variable has no System F translation"
-      return $ SystemF.mkDef sfvar function
+      return $ TIDef sfvar (SystemF.defaultDefAnn) function
 
 -- | Infer an expression's type and parameter-passing convention
 inferExpressionType :: Expression -> Inf (TIExp, HMType)
@@ -638,7 +636,7 @@ inferExpressionTypes :: [Expression] -> Inf ([TIExp], [HMType])
 inferExpressionTypes = mapAndUnzipM inferExpressionType
 
 -- | Infer the type of a lambda function.  The function has no type variables.
-inferLambdaType :: Function -> Inf (SystemF.Fun TI, HMType)
+inferLambdaType :: Function -> Inf (TIFun, HMType)
 inferLambdaType f@(Function { funQVars = qvars
                             , funParameters = params
                             , funReturnType = rt
@@ -651,7 +649,7 @@ inferFunctionFirstOrderType :: SourcePos
                             -> [Pattern]
                             -> Expression
                             -> Maybe HMType
-                            -> Inf (SystemF.Fun TI, HMType)
+                            -> Inf (TIFun, HMType)
 inferFunctionFirstOrderType pos params body annotated_return_type =
   addParametersToEnvironment params $ \sf_params param_types -> do
     
@@ -672,7 +670,7 @@ inferFunctionFirstOrderType pos params body annotated_return_type =
 -- The System F parameters and their types are passed to the local scope.
 addParametersToEnvironment
   :: [Pattern]
-  -> ([SystemF.Pat TI] -> [HMType] -> Inf a)
+  -> ([TIPat] -> [HMType] -> Inf a)
   -> Inf a
 addParametersToEnvironment (p:ps) k =
   addParameterToEnvironment p $ \pat ty ->
@@ -682,7 +680,7 @@ addParametersToEnvironment (p:ps) k =
 addParametersToEnvironment [] k = k [] []
 
 addParameterToEnvironment :: Pattern 
-                          -> (SystemF.Pat TI -> HMType -> Inf a) 
+                          -> (TIPat -> HMType -> Inf a) 
                           -> Inf a
 addParameterToEnvironment pattern k =
   case pattern
@@ -712,7 +710,7 @@ addParameterToEnvironment pattern k =
 
 -- | Infer the type of an export statement.  Generate a function that wraps
 -- the variable.
-inferExportType :: Export -> Inf (SystemF.Export TI)
+inferExportType :: Export -> Inf TIExport
 inferExportType (Export { exportAnnotation = ann
                         , exportSpec = espec
                         , exportVariable = var
@@ -771,10 +769,10 @@ inferExportType (Export { exportAnnotation = ann
             _ -> internalError "Unexpected type coercion in export expression"
           return inst_exp
 
-inferModuleTypes :: Module -> Inf (SystemF.Module TI)
+inferModuleTypes :: Module -> Inf (ModuleName, [SystemF.DefGroup TIDef], [TIExport])
 inferModuleTypes (Module module_name defss exports) = do
   (defss', exports') <- inferDefGroups defss
-  return $ SystemF.Module module_name [] defss' exports'
+  return (module_name, defss', exports')
   where
     inferDefGroups (defs:defss) =
       inferDefGroup True defs $ \defs' -> do
