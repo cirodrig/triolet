@@ -76,12 +76,12 @@ assumeVar is_exported v rt k = do
   tenv <- getTypeEnv
   rtype <- lowerType tenv rt 
   case rtype of
-    Just t -> assumeVariableWithType is_exported v t $ \ll_var ->
+    Just t -> assumeVariableWithType is_exported v rt t $ \ll_var ->
       assumeSingletonValue rt ll_var (k ll_var)
     Nothing -> internalError "assumeVar: Unexpected representation"
 
-assumeTyParam :: TypeEnvMonad m => TyPatTM -> m a -> m a
-assumeTyParam (TyPatTM a kind) m = assume a (fromTypTM kind) m
+assumeTyParam :: TypeEnvMonad m => TyPatM -> m a -> m a
+assumeTyParam (TyPatM b) m = assumeBinder b m
 
 assumeTyParams ps m = foldr assumeTyParam m ps
 
@@ -176,35 +176,39 @@ bindPattern (PatM (v ::: ty) _) (RetVal value) m = do
     bindAtom1 ll_var (LL.ValA [value])
     m
 
-lowerExpToVal :: ExpTM -> GenLower LL.Val
+lowerExpToVal :: ExpM -> GenLower LL.Val
 lowerExpToVal expression = do
   rv <- lowerExp expression
   case rv of RetVal val -> return val
              NoVal -> internalError "lowerExpToVal"
 
-lowerExp :: ExpTM -> GenLower RetVal
-lowerExp (ExpTM (TypeAnn ty expression)) =
-  case expression
-  of VarE _ v -> lowerVar ty v
-     LitE _ l -> lowerLit ty l
+lowerExp :: ExpM -> GenLower RetVal
+lowerExp expression =
+  case fromExpM expression
+  of VarE _ v -> lowerVar v
+     LitE _ l -> lowerLit l
      ConE _ con args -> lowerCon con args
-     AppE _ op ty_args args -> lowerApp ty op ty_args args
-     LamE _ f -> lowerLam ty f
-     LetE _ binder rhs body -> lowerLet ty binder rhs body
-     LetfunE _ defs body -> lowerLetrec ty defs body
-     CaseE _ scr alts -> lowerCase ty scr alts
-     ExceptE _ _ -> lowerExcept ty
+     AppE _ op ty_args args -> do
+       ty <- lift $ inferExpType expression
+       lowerApp ty op ty_args args
+     LamE _ f -> lowerLam f
+     LetE _ binder rhs body -> lowerLet binder rhs body
+     LetfunE _ defs body -> lowerLetrec defs body
+     CaseE _ scr alts -> do 
+       ty <- lift $ inferExpType expression
+       lowerCase ty scr alts
+     ExceptE _ ty -> lowerExcept ty
      -- Coercions are lowered to a no-op
      CoerceE _ _ _ e -> lowerExp e
 
-lowerVar _ v =
+lowerVar v =
   case LL.lowerIntrinsicOp v
   of Just lower_var -> do xs <- lower_var []
                           return $ listToRetVal xs
      Nothing -> lift $ do ll_v <- lookupVar v
                           return $ RetVal (LL.VarV ll_v)
 
-lowerLit _ lit =
+lowerLit lit =
   case lit
   of IntL n ty ->
        case fromVarApp ty
@@ -220,7 +224,7 @@ lowerLit _ lit =
 -- | Lower a data constructor application.  Generate code to construct a value.
 
 -- Lower arguments, then pack the result values into a record value
-lowerCon (CInstTM (TupleCon _)) args = do
+lowerCon (CInstM (TupleCon _)) args = do
   arg_values <- mapM lowerExpToVal args
   let record_type = LL.constStaticRecord $
                     map (LL.valueToFieldType . LL.valType) arg_values
@@ -228,7 +232,7 @@ lowerCon (CInstTM (TupleCon _)) args = do
                LL.PackA record_type arg_values
   return $ RetVal tuple_val
 
-lowerCon (CInstTM (VarCon op ty_args ex_types)) args = do
+lowerCon (CInstM (VarCon op ty_args ex_types)) args = do
   tenv <- lift getTypeEnv
   let Just op_data_con = lookupDataCon op tenv
   arg_vals <- mapM lowerExpToVal args
@@ -241,8 +245,8 @@ lowerCon (CInstTM (VarCon op ty_args ex_types)) args = do
 --   are lowered to a function call.
 --
 --   Type applications are erased, so if there are  with no arguments are 
-lowerApp :: Type -> ExpTM -> [TypTM] -> [ExpTM] -> GenLower RetVal
-lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
+lowerApp :: Type -> ExpM -> [TypM] -> [ExpM] -> GenLower RetVal
+lowerApp rt (ExpM (VarE _ op_var)) ty_args args
   | op_var `isPyonBuiltin` The_toEffTok =
     -- The function 'toEffTok' is handled specially because its argument
     -- expression doesn't yield a value.
@@ -251,7 +255,7 @@ lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
     in do NoVal <- lowerExp arg
           return $ RetVal (LL.LitV LL.UnitL)
 
-lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
+lowerApp rt (ExpM (VarE _ op_var)) ty_args args
   | Just mk_code <- LL.lowerIntrinsicOp op_var = do
       -- Lower the intrinsic operation
       xs <- mk_code =<< mapM lowerExpToVal args
@@ -270,36 +274,34 @@ lowerApp rt op ty_args args = do
                LL.closureCallA (fromRetVal op') args'
     return $ listToRetVal retvals
 
-lowerLam _ f = do
+lowerLam f = do
   f' <- emitLambda =<< lift (lowerFun f)
   return $ RetVal (LL.VarV f')
 
-lowerLet _ binder rhs body =
-  case binder
-  of TypedMemVarP {} -> do
-       rhs_code <- lowerExp rhs
-       bindPattern (fromPatTM binder) rhs_code $ lowerExp body
+lowerLet binder rhs body = do
+  rhs_code <- lowerExp rhs
+  bindPattern binder rhs_code $ lowerExp body
 
-lowerLetrec _ defs body =
+lowerLetrec defs body =
   lowerDefGroupG defs $ \defs' -> do
     emitLetrec defs'
     lowerExp body
 
 lowerCase return_type scr alts = do
-  let ExpTM (TypeAnn scrutinee_type _) = scr
+  scrutinee_type <- lift $ inferExpType scr
   scr_val <- lowerExpToVal scr
   compileCase return_type scrutinee_type scr_val (map lowerAlt alts)
 
-lowerAlt (AltTM (TypeAnn return_type alt)) =
+lowerAlt (AltM alt) =
   let con = case altCon alt
-            of DeCInstTM (VarDeCon v _ _) -> VarTag v
-               DeCInstTM (TupleDeCon _)   -> TupleTag
-  in (con, lowerAltBody return_type alt)
+            of DeCInstM (VarDeCon v _ _) -> VarTag v
+               DeCInstM (TupleDeCon _)   -> TupleTag
+  in (con, lowerAltBody alt)
 
-lowerAltBody return_type alt field_values =
+lowerAltBody alt field_values =
   -- Bind the field values and generate the body
-  let params = map fromPatTM $ altParams alt
-  in assumeBinders (deConExTypes (case altCon alt of DeCInstTM x -> x)) $
+  let params = altParams alt
+  in assumeBinders (deConExTypes (case altCon alt of DeCInstM x -> x)) $
      bindPatterns (zip params field_values) $
      lowerExp $ altBody alt
 
@@ -335,27 +337,27 @@ lowerExcept return_type = do
         to_value_type (LL.PrimField pt) = LL.PrimType pt
         to_value_type (LL.RecordField rt) = LL.RecordType rt
 
-lowerFun :: FunTM -> Lower LL.Fun
-lowerFun (FunTM (TypeAnn _ fun)) =
+lowerFun :: FunM -> Lower LL.Fun
+lowerFun (FunM fun) =
   assumeTyParams (funTyParams fun) $
   withMany lower_param (funParams fun) $ \params -> do
     tenv <- getTypeEnv
-    returns <- lowerType tenv $ fromTypTM $ funReturn fun
+    returns <- lowerType tenv $ fromTypM $ funReturn fun
     genClosureFun params (maybeToList returns) $ lower_body (funBody fun)
   where
-    lower_param (TypedMemVarP (v ::: ty)) k = assumeVar False v ty k
+    lower_param pat k = assumeVar False (patMVar pat) (patMType pat) k
     
     lower_body body = do
       ret_val <- lowerExp body
       return (LL.ReturnE $ LL.ValA $ retValToList ret_val)
 
-lowerDefGroupG :: DefGroup (Def (Typed Mem))
+lowerDefGroupG :: DefGroup (Def Mem)
                -> (LL.Group LL.FunDef -> GenLower a)
                -> GenLower a
 lowerDefGroupG defs = liftT1 (lowerDefGroup defs)
 
 -- | Lower a local definition group.
-lowerDefGroup :: DefGroup (Def (Typed Mem))
+lowerDefGroup :: DefGroup (Def Mem)
               -> (LL.Group LL.FunDef -> Lower a)
               -> Lower a
 lowerDefGroup defgroup k = 
@@ -372,16 +374,16 @@ lowerDefGroup defgroup k =
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v annotation f@(FunTM (TypeAnn return_type _))) k
+    assume_variable (Def v annotation f) k
       -- Local functions cannot be exported
       | defAnnExported annotation =
           internalError "lowerDefGroup: Cannot export a local function"
       | otherwise =
-          assumeVar False v return_type k
+          assumeVar False v (functionType f) k
 
 -- | Lower a global definition group.
 --   The definitions and a list of exported functions are returned.
-lowerGlobalDefGroup :: DefGroup (Def (Typed Mem))
+lowerGlobalDefGroup :: DefGroup (Def Mem)
                     -> (LL.Group LL.FunDef -> [(LL.Var, ExportSig)] -> Lower a)
                     -> Lower a
 lowerGlobalDefGroup defgroup k = 
@@ -401,7 +403,7 @@ lowerGlobalDefGroup defgroup k =
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v annotation f@(FunTM (TypeAnn return_type _))) k =
+    assume_variable (Def v annotation f) k =
       -- Decide whether the function is exported
       let is_exported = defAnnExported annotation
           
@@ -409,10 +411,10 @@ lowerGlobalDefGroup defgroup k =
           k' v
             | is_exported = k (v, Nothing)
             | otherwise = k (v, Just (v, PyonExportSig))
-      in assumeVar is_exported v return_type k'
+      in assumeVar is_exported v (functionType f) k'
 
 lowerExport :: ModuleName
-            -> Export (Typed Mem)
+            -> Export Mem
             -> Lower (LL.FunDef, (LL.Var, ExportSig))
 lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
   fun' <- lowerFun fun
@@ -425,7 +427,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
        CPlusPlus -> define_cxx_fun tenv fun'
   return (fun_def, (LL.definiendum fun_def, export_sig))
   where
-    fun_type = case fun of FunTM (TypeAnn fun_type _) -> fun_type
+    fun_type = functionType fun
 
     define_c_fun tenv fun = do
       -- Create export signature
@@ -454,8 +456,8 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       return (LL.Def v wrapped_fun, CXXExportSig cxx_export_sig)
 
 lowerModuleCode :: ModuleName 
-                -> [DefGroup (Def (Typed Mem))]
-                -> [Export (Typed Mem)]
+                -> [DefGroup (Def Mem)]
+                -> [Export Mem]
                 -> Lower ([LL.Group LL.FunDef], [(LL.Var, ExportSig)])
 lowerModuleCode module_name defss exports = lower_definitions defss
   where
@@ -469,7 +471,7 @@ lowerModuleCode module_name defss exports = lower_definitions defss
       let (functions, signatures) = unzip ll_exports
       return ([LL.Rec functions], signatures)
 
-lowerModule :: Module (Typed Mem) -> IO LL.Module
+lowerModule :: Module Mem -> IO LL.Module
 lowerModule (Module { modName = mod_name
                     , modImports = imports
                     , modDefs = globals

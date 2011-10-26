@@ -252,10 +252,11 @@ lookupVar v = Lower $ ReaderT $ \env ->
 
 assumeVariableWithType :: Bool                -- ^ Whether variable is exported
                        -> Var                 -- ^ System F variable
+                       -> Type                -- ^ System F type
                        -> LL.ValueType        -- ^ Low-level type
                        -> (LL.Var -> Lower a) -- ^ Use of low-level variable
                        -> Lower a
-assumeVariableWithType is_exported v ty k = do
+assumeVariableWithType is_exported v sf_ty ty k = do
   new_v <-
     if is_exported
     then case varName v
@@ -265,10 +266,10 @@ assumeVariableWithType is_exported v ty k = do
     else LL.newVar (varName v) ty
   add_to_env new_v (k new_v)
   where  
-    add_to_env new_v (Lower m) = Lower $ local update m
+    add_to_env new_v (Lower m) = assume v sf_ty (Lower (local update m))
       where
-        update env = env {varMap = IntMap.insert (fromIdent $ varID v) new_v $ 
-                                   varMap env}
+        update env =
+          env {varMap = IntMap.insert (fromIdent $ varID v) new_v $ varMap env}
 
 {-
 -- | Add a type variable to the type environment

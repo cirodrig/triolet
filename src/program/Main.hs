@@ -288,8 +288,10 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   putStrLn "Optimized"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
 
-  tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
-  ll_mod <- SystemF.lowerModule tc_repr_mod
+  when debugMode $ void $ do
+    SystemF.TypecheckMem.typeCheckModule repr_mod
+
+  ll_mod <- SystemF.lowerModule repr_mod
   
   {- This is the old optimization sequence
   print "Generating memory IR"
