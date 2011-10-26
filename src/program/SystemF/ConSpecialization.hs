@@ -12,6 +12,14 @@ A big benefit occurs when constructor specialization generates some functions
 that have a single callsite.  Those functions can be inlined after
 specialization.
 
+* When to run
+
+Constructor specialization should run between iterations of the rewriter, 
+so that it increases inlining opportunities in the rewriter.
+
+It does not require demand information, so it's better to run it before
+demand analysis.
+
 * Problem breakdown
 
 Constructor specialization performs a pass over the program to detect
