@@ -69,7 +69,9 @@ builtinTypeFunctions =
   ]
 
 -- | The integers extended with @+infinity@ and @-infinity@
-data ExtInt = Fin Integer | NegInf | PosInf
+data ExtInt = Fin Integer | NegInf | PosInf deriving(Eq)
+
+fin0 = Fin 0
 
 toExtInt ty = do
   ty' <- reduceToWhnf ty
@@ -90,23 +92,47 @@ fromExtInt NegInf = VarT negInftyV
 fromExtInt PosInf = VarT posInftyV
 
 binaryIntTF :: Var
+            -> Maybe ExtInt     -- ^ Left unit
+            -> Maybe ExtInt     -- ^ Right unit
             -> (ExtInt -> ExtInt -> Maybe ExtInt)
             -> TypeFunction
 {-# INLINE binaryIntTF #-}
-binaryIntTF operator f = typeFunction 2 $ \args ->
+binaryIntTF operator left_unit right_unit f = typeFunction 2 $ \args ->
   let can't_reduce = varApp operator args
   in case args
-     of [arg1, arg2] ->
-          toExtInt' arg1 can't_reduce $ \aff1 ->
-          toExtInt' arg2 can't_reduce $ \aff2 ->
-          return $! case f aff1 aff2
-                    of Just aff -> fromExtInt aff
-                       Nothing -> can't_reduce
+     of [arg1, arg2] -> do
+          maff1 <- toExtInt arg1
+
+          case maff1 of
+            Nothing ->
+              -- First argument is unknown.  Is the second argument a unit? 
+              case right_unit
+              of Nothing -> return can't_reduce
+                 Just u -> do
+                   -- Is the second argument a unit?
+                   maff2 <- toExtInt arg2
+                   case maff2 of
+                     Just aff2 | aff2 == u ->
+                       return arg2
+                     _ ->
+                       return can't_reduce
+
+            Just aff1 ->
+              -- Is the first argument a unit?
+              case left_unit
+              of Just u | u == aff1 ->
+                   return arg2
+                 _ ->
+                   -- Attempt to evaluate
+                   toExtInt' arg2 can't_reduce $ \aff2 ->
+                   return $! case f aff1 aff2
+                             of Just aff -> fromExtInt aff
+                                Nothing -> can't_reduce
         _ -> return can't_reduce
 
 -- | Subtract type-level integers.
 --   This function works the same in System F and Mem.
-minusTF = binaryIntTF (pyonBuiltin The_minus_i) function
+minusTF = binaryIntTF (pyonBuiltin The_minus_i) (Just fin0) (Just fin0) function
   where
     function (Fin x) (Fin y) = Just (Fin (x - y))
     function (Fin _) NegInf  = Just PosInf
@@ -118,7 +144,7 @@ minusTF = binaryIntTF (pyonBuiltin The_minus_i) function
 
 -- | Add type-level integers.
 --   This function works the same in System F and Mem.
-plusTF = binaryIntTF (pyonBuiltin The_plus_i) function
+plusTF = binaryIntTF (pyonBuiltin The_plus_i) (Just fin0) (Just fin0) function
   where
     function (Fin x) (Fin y) = Just (Fin (x + y))
     function (Fin _) NegInf  = Just NegInf
@@ -130,7 +156,7 @@ plusTF = binaryIntTF (pyonBuiltin The_plus_i) function
 
 -- | Take the minimum of type-level integers.
 --   This function works the same in System F and Mem.
-minTF = binaryIntTF (pyonBuiltin The_min_i) function
+minTF = binaryIntTF (pyonBuiltin The_min_i) (Just PosInf) (Just PosInf) function
   where
     function (Fin x) (Fin y) = Just (Fin (min x y))
     function _       NegInf  = Just NegInf
@@ -140,7 +166,7 @@ minTF = binaryIntTF (pyonBuiltin The_min_i) function
 
 -- | Take the maximum of type-level integers.
 --   This function works the same in System F and Mem.
-maxTF = binaryIntTF (pyonBuiltin The_max_i) function
+maxTF = binaryIntTF (pyonBuiltin The_max_i) (Just NegInf) (Just NegInf) function
   where
     function (Fin x) (Fin y) = Just (Fin (max x y))
     function _       PosInf  = Just PosInf
