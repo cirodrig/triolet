@@ -134,6 +134,10 @@ typeCheckType ty =
 
      AnyT k -> return k
      IntT _ -> return intindexT
+     CoT k ->
+       -- Kind of a coercion is k -> k -> val
+       let kind = fromBaseKind k
+       in return (kind `FunT` kind `FunT` valT)
      UTupleT ks
        | all valid_unboxed_tuple_field ks ->
            return $ funType (map fromBaseKind ks) valT
