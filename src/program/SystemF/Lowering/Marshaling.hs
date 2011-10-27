@@ -41,25 +41,16 @@ computeReprDict :: Type -> GenLower LL.Val
 computeReprDict ty =
   case fromVarApp ty
   of Just (op, args)
-       | op `isPyonBuiltin` The_list -> do
-           let [element_type] = args
-           let list_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_list)
-           element_dict <- computeReprDict element_type
-           emitAtom1 owned_type $
-             LL.closureCallA list_repr_ctor [element_dict]
-       | op `isPyonBuiltin` The_array2 -> do
-           let [element_type] = args
-           let mat_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_array2)
-           element_dict <- computeReprDict element_type
-           emitAtom1 owned_type $
-             LL.closureCallA mat_repr_ctor [element_dict]
-       | op `isPyonBuiltin` The_PyonTuple2 -> do
-           let [t1, t2] = args
-               tuple_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_PyonTuple2)
-           dict1 <- computeReprDict t1
-           dict2 <- computeReprDict t2
-           emitAtom1 owned_type $
-             LL.closureCallA tuple_repr_ctor [dict1, dict2]
+       | op `isPyonBuiltin` The_list ->
+           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_list)
+       | op `isPyonBuiltin` The_array2 ->
+           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array2)
+       | op `isPyonBuiltin` The_PyonTuple2 ->
+           polymorphic_repr 2 args (LL.llBuiltin LL.the_fun_repr_PyonTuple2)
+       | op `isPyonBuiltin` The_PyonTuple3 ->
+           polymorphic_repr 3 args (LL.llBuiltin LL.the_fun_repr_PyonTuple3)
+       | op `isPyonBuiltin` The_PyonTuple4 ->
+           polymorphic_repr 4 args (LL.llBuiltin LL.the_fun_repr_PyonTuple4)
        | op `isPyonBuiltin` The_int ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_int
        | op `isPyonBuiltin` The_float ->
@@ -69,7 +60,15 @@ computeReprDict ty =
        | otherwise -> lookupReprDict ty return
   where
     owned_type = LL.PrimType LL.OwnedType
-           
+
+    -- Create a polymorphic representation dictionary.  Use all type arguments'
+    -- representations as parameters.
+    polymorphic_repr n args dict_op = do
+      when (length args /= n) $
+        internalError "computeReprDict: Wrong number of type parameters"
+      dicts <- mapM computeReprDict args
+      emitAtom1 owned_type $ LL.closureCallA (LL.VarV dict_op) dicts
+
 -------------------------------------------------------------------------------
 -- Parameter marshaling
 
@@ -481,6 +480,14 @@ getCxxExportType tenv ty =
        | con `isPyonBuiltin` The_bool -> PyonBoolET
        | con `isPyonBuiltin` The_PyonTuple2 ->
            if length args /= 2
+           then type_error
+           else TupleET $ map (getCxxExportType tenv) args
+       | con `isPyonBuiltin` The_PyonTuple3 ->
+           if length args /= 3
+           then type_error
+           else TupleET $ map (getCxxExportType tenv) args
+       | con `isPyonBuiltin` The_PyonTuple4 ->
+           if length args /= 4
            then type_error
            else TupleET $ map (getCxxExportType tenv) args
        | con `isPyonBuiltin` The_list ->
