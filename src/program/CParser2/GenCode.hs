@@ -239,9 +239,9 @@ translateFun pos f = do
       body <- translateExp $ fBody f
       return $ SystemF.FunM $
         SystemF.Fun { SystemF.funInfo = SystemF.mkExpInfo pos
-                    , SystemF.funTyParams = map SystemF.TyPatM ty_binders
+                    , SystemF.funTyParams = map SystemF.TyPat ty_binders
                     , SystemF.funParams = map SystemF.patM val_binders
-                    , SystemF.funReturn = SystemF.TypM range
+                    , SystemF.funReturn = range
                     , SystemF.funBody = body}
 
 -- | Translate an AST expression to a System F expression.
@@ -263,7 +263,7 @@ translateExp (L pos expression) =
        es' <- mapM translateExp es
        types <- lift $ mapM SystemF.TypecheckMem.inferExpType es'
        let con = SystemF.TupleCon types
-       return $ SystemF.ExpM $ SystemF.ConE inf (SystemF.CInstM con) es'
+       return $ SystemF.ExpM $ SystemF.ConE inf con es'
      TAppE op arg ->
        let (op', args) = uncurryTypeApp op [arg]
        in translateApp inf op' args []
@@ -300,7 +300,7 @@ translateExp (L pos expression) =
        ft <- translateType from_t
        tt <- translateType to_t
        body' <- translateExp body
-       return $ SystemF.ExpM $ SystemF.CoerceE inf (SystemF.TypM ft) (SystemF.TypM tt) body'
+       return $ SystemF.ExpM $ SystemF.CoerceE inf ft tt body'
   where
     int_type = Type.VarT $ pyonBuiltin The_int
     inf = SystemF.mkExpInfo pos
@@ -318,7 +318,7 @@ translateApp inf op ty_args args = do
       translateAppWithOperator inf op_exp ty_args args
 
 translateAppWithOperator inf op_exp ty_args args = do
-  arg_types <- mapM (liftM SystemF.TypM . translateType) ty_args
+  arg_types <- mapM translateType ty_args
   arg_exps <- mapM translateExp args
   return $ SystemF.ExpM $ SystemF.AppE inf op_exp arg_types arg_exps
 
@@ -341,7 +341,7 @@ translateCon inf type_con data_con op ty_args args
           other_args = drop n_args args
       con_args' <- mapM translateExp con_args
       let con = SystemF.VarCon op con_ty_args con_ex_args 
-          con_exp = SystemF.ExpM $ SystemF.ConE inf (SystemF.CInstM con) con_args'
+          con_exp = SystemF.ExpM $ SystemF.ConE inf con con_args'
 
       -- If any arguments remain, apply them
       if null other_args
@@ -373,7 +373,7 @@ translateAlt (Alt (ConPattern con ty_args ex_types fields) body) = do
     liftT (assumeBinders val_binders) $ do
       body' <- translateExp body
       return $ SystemF.AltM $
-        SystemF.Alt { SystemF.altCon = SystemF.DeCInstM new_con
+        SystemF.Alt { SystemF.altCon = new_con
                     , SystemF.altParams = map SystemF.patM val_binders
                     , SystemF.altBody = body'}
 
@@ -383,7 +383,7 @@ translateAlt (Alt (TuplePattern fields) body) = do
   liftT (assumeBinders val_binders) $ do
     body' <- translateExp body
     return $ SystemF.AltM $
-      SystemF.Alt { SystemF.altCon = SystemF.DeCInstM new_con
+      SystemF.Alt { SystemF.altCon = new_con
                   , SystemF.altParams = map SystemF.patM val_binders
                   , SystemF.altBody = body'}
 

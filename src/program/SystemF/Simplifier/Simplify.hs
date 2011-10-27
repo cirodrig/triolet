@@ -74,8 +74,8 @@ isTrivialExp _                = False
 functionTypeSM (FunSM (Fun {funTyParams = ty_params
                            , funParams = params
                            , funReturn = ret})) =
-  forallType [b | TyPatSM (TyPatM b) <- ty_params] $
-  funType (map (patMType . fromPatSM) params) (fromTypSM ret)
+  forallType [b | TyPat b <- ty_params] $
+  funType (map (patMType . fromPatSM) params) ret
 
 -- | Different features of the simplifier are enabled
 --   depending on the stage of compilation.
@@ -480,12 +480,12 @@ expSize (ExpM expression) =
     alt_size (AltM (Alt decon params body)) =
       decon_size decon `mappend` codeSize (length params) `mappend` expSize body
     
-    con_size (CInstM con) = codeSize (length $ conTypes con)
+    con_size con = codeSize (length $ conTypes con)
 
-    decon_size (DeCInstM (VarDeCon _ ty_args ex_types)) =
+    decon_size (VarDeCon _ ty_args ex_types) =
       codeSize (length ty_args + length ex_types)
 
-    decon_size (DeCInstM (TupleDeCon ty_args)) =
+    decon_size (TupleDeCon ty_args) =
       codeSize (length ty_args)
 
 
@@ -567,7 +567,7 @@ inlckConlike tenv dmd _ = False
 --   followed by the function body.  The expression is not actually created;
 --   instead, the appropriate rewrite methods are called to simplify the
 --   expression that would have been created.
-betaReduce :: ExpInfo -> FunM -> [TypM] -> [ExpSM] -> LR (ExpM, AbsCode)
+betaReduce :: ExpInfo -> FunM -> [Type] -> [ExpSM] -> LR (ExpM, AbsCode)
 betaReduce inf fun ty_args args = do
   -- This wrapper is here to make it easier to print debugging information
   -- before beta reduction
@@ -612,7 +612,7 @@ betaReduce' inf (FunM fun) ty_args args
     -- Substitution of types for type parameters
     type_subst =
       Substitute.fromList [(tv, t)
-                          | (TyPatM (tv ::: _), TypM t) <-
+                          | (TyPat (tv ::: _), t) <-
                               zip (funTyParams fun) ty_args]
 
     oversaturated_app args params body = do
@@ -707,14 +707,13 @@ flattenInsideLambda expression = do
     LamE inf (FunSM (Fun f_inf [] s_params ret body)) -> do
       let params = map fromPatSM s_params
           param_vars = map patMVar params
-          return_type = fromTypSM ret
 
       -- Flatten the function body
       ctx_body <-
         assumePatMs params $
         flattenExp body >>=
-        anchorVarList param_vars (return return_type)
-      let rebuild_fun e = ExpM $ LamE inf (FunM (Fun f_inf [] params (TypM return_type) e))
+        anchorVarList param_vars (return ret)
+      let rebuild_fun e = ExpM $ LamE inf (FunM (Fun f_inf [] params ret e))
       return $ mapContext rebuild_fun ctx_body
     _ -> flattenExp' expression fresh_expression
 
@@ -726,12 +725,12 @@ flattenInsideLambda expression = do
 --
 --   If the kind is \"bare\", leave it where it is, but flatten inside the
 --   expression if it's a lambda expression.
-flattenConExp inf (CInstSM con) args = do
+flattenConExp inf con args = do
   tenv <- getTypeEnv
   (field_types, _) <- conType con
   let field_kinds = conFieldKinds tenv con
   args' <- mergeList =<< mapM flatten_arg (zip3 args field_types field_kinds)
-  return $ mapContext (\xs -> ExpM $ ConE inf (CInstM con) xs) args'
+  return $ mapContext (\xs -> ExpM $ ConE inf con xs) args'
   where
     flatten_arg (arg, ty, BareK) = flattenInsideLambda arg
     flatten_arg (arg, ty, ValK) = float_field arg ty
@@ -832,8 +831,7 @@ flattenCaseExp inf scr alts = do
 flattenAppExp inf op ty_args args = do
   ctx_op <- flattenExp op
   ctx_args <- flattenExps args
-  let ty_args' = map (TypM . fromTypSM) ty_args
-  mergeWith (\op' args' -> ExpM $ AppE inf op' ty_args' args') ctx_op ctx_args
+  mergeWith (\op' args' -> ExpM $ AppE inf op' ty_args args') ctx_op ctx_args
 
 -- | Restructure an expression.  Find subexpressions that have local bindings
 --   and float those bindings outward.  Bindings are only floated out from 
@@ -941,18 +939,18 @@ eliminateUselessCopying expression = do
     can't_eliminate = return expression
 
     -- Get the kind of the data type being matched
-    alt_kind tenv (AltSM (Alt {altCon = DeCInstSM (VarDeCon var _ _)})) =
+    alt_kind tenv (AltSM (Alt {altCon = VarDeCon var _ _})) =
       case lookupDataConWithType var tenv
       of Just (type_con, _) -> dataTypeKind type_con
     
-    alt_kind _ (AltSM (Alt {altCon = DeCInstSM (TupleDeCon {})})) = ValK
+    alt_kind _ (AltSM (Alt {altCon = TupleDeCon {}})) = ValK
 
     -- Try to detect and simplify the pattern
     -- @case boxed E of boxed x. copy x@
     eliminate_unbox_and_copy tenv scrutinee alts = do
       scrutinee' <- freshenHead scrutinee
       case scrutinee' of
-        ConE _ (CInstSM (VarCon op [ty_arg] [])) [initializer]
+        ConE _ (VarCon op [ty_arg] []) [initializer]
           | op `isPyonBuiltin` The_boxed ->
              case alts
              of [AltSM (Alt _ [field] body)] -> do
@@ -998,7 +996,7 @@ eliminateUselessCopying expression = do
     -- Compare fields of a pattern to fields of a data constructor expression
     -- to determine whether they match.  The constructor part has already been
     -- observed to match.
-    compare_pattern_to_expression (DeCInstSM decon) alt_fields (CInstSM con) exp_fields =
+    compare_pattern_to_expression decon alt_fields con exp_fields =
       case (decon, con)
       of (VarDeCon alt_op alt_ty_args alt_ex_types,
           VarCon exp_op exp_ty_args exp_ex_types) -> do
@@ -1122,6 +1120,11 @@ rwExp expression =
 
     debug _ _ = id
 
+    {- debug l e m = do
+      ret@(e', _) <- m
+      shadowing <- traceShow (text "R" <+> pprExp e') $ checkForShadowingExpHere e'
+      shadowing `seq` return ret -}
+
     {-debug l e m = do
       e' <- applySubstitution e
       traceShow (text l <+> pprExp e') m-}
@@ -1203,7 +1206,7 @@ restructureLamExp inf fun@(FunSM (Fun fun_inf ty_params params ret body))
                      (body_op' : first_args')
                     then return Nothing
                     else let reduced_body =
-                               appE body_inf body_op' (map (TypM . fromTypSM) body_ty_args) first_args'
+                               appE body_inf body_op' body_ty_args first_args'
                          in return $ Just reduced_body
 
                 _ -> return Nothing
@@ -1211,17 +1214,17 @@ restructureLamExp inf fun@(FunSM (Fun fun_inf ty_params params ret body))
   | otherwise = return Nothing
 
 
-rwCon :: ExpInfo -> CInstSM -> [ExpSM] -> LR (ExpM, AbsCode)
-rwCon inf (CInstSM con) args = do
+rwCon :: ExpInfo -> ConInst -> [ExpSM] -> LR (ExpM, AbsCode)
+rwCon inf con args = do
   -- Simplify fields
   (args', arg_values) <- clearCurrentReturnParameter $ mapAndUnzipM rwExp args
 
   -- Interpret the constructor's value
   new_val <- interpretComputation' $ interpretCon con arg_values
-  let new_exp = ExpM $ ConE inf (CInstM con) args'
+  let new_exp = ExpM $ ConE inf con args'
   return (new_exp, new_val)
 
-rwApp :: BaseExp SM -> ExpInfo -> ExpSM -> [TypSM] -> [ExpSM]
+rwApp :: BaseExp SM -> ExpInfo -> ExpSM -> [Type] -> [ExpSM]
       -> LR (ExpM, AbsCode)
 rwApp original_expression inf op ty_args args = do
   (op', ty_args', args') <- preUncurryApp inf op ty_args args
@@ -1245,7 +1248,7 @@ preUncurryApp inf op ty_args args = do
 rwAppOperator inf op ty_args args = clearCurrentReturnParameter $ do
   (op', op_val) <- rwExp op
   let modified_expression = AppE inf (deferEmptySubstitution op') ty_args args
-  rwAppWithOperator inf op' op_val (map fromTypSM ty_args) args
+  rwAppWithOperator inf op' op_val ty_args args
 
 -- | Rewrite an application, depending on what the operator is.
 --   The operator has been simplified, but the arguments have not.
@@ -1267,12 +1270,12 @@ postUncurryApp inf op op_val ty_args args =
        | null ty_args -> do
            inner_op_value <- makeExpValue inner_op
            continue inner_op inner_op_value
-             (map fromTypM inner_ty_args)
+             inner_ty_args
              (map deferEmptySubstitution inner_args ++ args)
        | null inner_args -> do
            inner_op_value <- makeExpValue inner_op
            continue inner_op inner_op_value
-             (map fromTypM inner_ty_args ++ ty_args) args
+             (inner_ty_args ++ ty_args) args
      _ -> return (op, op_val, ty_args, args)
   where
     continue op op_value ty_args args =
@@ -1299,7 +1302,7 @@ rwAppWithOperator' inf op op_val ty_args args =
             | otherwise -> do
                 -- Try to apply a rewrite rule
                 tenv <- getTypeEnv
-                rewritten <- rewriteAppInSimplifier inf op_var (map TypM ty_args) args
+                rewritten <- rewriteAppInSimplifier inf op_var ty_args args
                 case rewritten of
                   Just new_expr -> do
                     consumeFuel     -- A term has been rewritten
@@ -1318,13 +1321,12 @@ rwAppWithOperator' inf op op_val ty_args args =
       -- Compute the application's value, and detect if it raises an exception
       new_value <- interpretComputation' $ applyCode op_val ty_args arg_values
 
-      let new_exp = appE inf op (map TypM ty_args) args'
+      let new_exp = appE inf op ty_args args'
       return (new_exp, new_value)
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
-    inline_function_call funm =
-      betaReduce inf funm (map TypM ty_args) args
+    inline_function_call funm = betaReduce inf funm ty_args args
 
 -- | Attempt to statically evaluate a copy.
 rwCopyApp inf copy_op ty args = debug $ do
@@ -1354,7 +1356,7 @@ rwCopyApp inf copy_op ty args = debug $ do
             -- Rebuild the copy expression with simplified arguments
             let rebuilt_args =
                   repr' : src' : fmap fst (maybeToList maybe_dst_result)
-                new_exp = appE inf copy_op [TypM ty] rebuilt_args
+                new_exp = appE inf copy_op [ty] rebuilt_args
             in return (new_exp, new_value)
 
       let create_initializer = do
@@ -1406,7 +1408,7 @@ copyStoredValue inf val_type repr arg m_dst = do
 
       -- Deconstruct the original value
       stored_decon = VarDeCon (pyonBuiltin The_stored) [val_type] []
-      alt = AltM $ Alt { altCon = DeCInstM stored_decon
+      alt = AltM $ Alt { altCon = stored_decon
                        , altParams = [setPatMDmd (Dmd OnceSafe Used) $
                                       patM (tmpvar ::: val_type)]
                        , altBody = result_value}
@@ -1527,7 +1529,7 @@ rwCase inf scrut alts = do
 --
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
 rwCase1 tenv inf scrut alts
-  | [alt@(AltSM (Alt {altCon = DeCInstSM (VarDeCon op _ _)}))] <- alts,
+  | [alt@(AltSM (Alt {altCon = VarDeCon op _ _}))] <- alts,
     op `isPyonBuiltin` The_boxed = do
       let AltSM (Alt _ [binder] body) = alt
       rwLetViaBoxed inf scrut binder (substAndRwExp body)
@@ -1544,7 +1546,7 @@ rwCase1 tenv inf scrut alts
       consumeFuel
 
       -- Rename the scrutinee and get constructor fields
-      ConE _ (CInstSM scrut_con) scrut_args <- freshenHead scrut
+      ConE _ scrut_con scrut_args <- freshenHead scrut
       let alt = findAlternative alts scrut_con
           field_kinds = conFieldKinds tenv scrut_con
           ex_types = conExTypes scrut_con
@@ -1603,7 +1605,7 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
     -- Attempt to deconstruct an expression of the form
     -- @boxed (t) (case e of ...)@ where the case statement has multiple
     -- branches.
-    decon_scrutinee_case expr@(ExpM (ConE _ (CInstM con) [arg]))
+    decon_scrutinee_case expr@(ExpM (ConE _ con [arg]))
       | is_boxed_con,
         Just (scr, alts) <- from_deconstructable_case arg =
           return $ Just (ty_arg, scr, alts)
@@ -1635,7 +1637,7 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
 
         -- The data constructor's type argument
         ty_arg =
-          case con of VarCon _ [t] _ -> TypM t
+          case con of VarCon _ [t] _ -> t
 
         from_deconstructable_case expression =
           case expression
@@ -1663,7 +1665,7 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
 
       -- Construct a new case alternative
       let decon = VarDeCon (pyonBuiltin The_boxed) [patMType pat] []
-      return $ AltM $ Alt (DeCInstM decon) [pat] body'
+      return $ AltM $ Alt decon [pat] body'
       
     -- The scrutinee has been simplified.  Propagate its value into the case 
     -- statement.
@@ -1695,7 +1697,7 @@ makeDataExpWithAbsValue tenv expression expression_value =
             Just $ ConAppAndValue dcon (zip args field_values)
           _ ->
             -- Unknown values
-            Just $ ConAppAndValue (fromCInstM con) [(arg, topCode) | arg <- args]
+            Just $ ConAppAndValue con [(arg, topCode) | arg <- args]
      _ ->
        Nothing
 
@@ -1767,7 +1769,7 @@ rwCase2 inf alts scrut' scrut_val = do
   where
     is_product_case tenv =
       case alts
-      of (AltSM (Alt {altCon = DeCInstSM con}) : _) ->
+      of (AltSM (Alt {altCon = con}) : _) ->
            case con
            of TupleDeCon {} -> True
               VarDeCon v _ _ ->
@@ -1792,7 +1794,7 @@ findAlternative alts con =
   where
     con_summary = summarizeConstructor con
 
-    match_con (AltSM (Alt {altCon = DeCInstSM c})) =
+    match_con (AltSM (Alt {altCon = c})) =
       summarizeDeconstructor c == con_summary
 
 -- | Eliminate the existential type part of a case alternative.
@@ -1812,7 +1814,7 @@ eliminateCaseExTypes ex_args (AltSM alt) k
         subst_body <- substitute subst' (altBody alt)
         k params' subst_body
   where
-    ex_types = deConExTypes $ fromDeCInstSM $ altCon alt
+    ex_types = deConExTypes $ altCon alt
     ex_type_subst =
       Substitute.fromList [(v, ty) | (v ::: _, ty) <- zip ex_types ex_args]
 
@@ -1955,12 +1957,12 @@ postCaseInspectorBinding (param, initializer) body =
 
 rwAlt :: Bool                   -- ^ Whether to propagate exceptions
       -> Maybe Var              -- ^ Scrutinee, if it's just a variable
-      -> Maybe ([TypM], [AbsCode]) -- ^ Deconstruted scrutinee value
+      -> Maybe ([Type], [AbsCode]) -- ^ Deconstruted scrutinee value
       -> AltSM                        -- ^ Alternative to rewrite
       -> LR AltM
 rwAlt propagate_exceptions scr m_values (AltSM alt) = do
   tenv <- getTypeEnv
-  let decon = fromDeCInstSM $ altCon alt
+  let decon = altCon alt
       -- Clear demand information because number of uses
       -- may increase or decrease after simplifying
       params = map (setPatMDmd unknownDmd . fromPatSM) $ altParams alt
@@ -1975,7 +1977,7 @@ rwAlt propagate_exceptions scr m_values (AltSM alt) = do
   assume_scrutinee $
     assume_params (deConExTypes decon) (zip values params) $ do
     (body', _) <- rewrite_expression (altBody alt)
-    return $ AltM $ Alt (DeCInstM decon) params body'
+    return $ AltM $ Alt decon params body'
   
   where
     -- Rewrite the body expression.  If it will raise an exception,
@@ -2028,7 +2030,7 @@ rwAlt propagate_exceptions scr m_values (AltSM alt) = do
 --   have not been simplified.  They will be simplified during this
 --   transformation. 
 rwCaseOfCase :: ExpInfo
-             -> Maybe TypM      -- ^ If a 'boxed' constructor was
+             -> Maybe Type      -- ^ If a 'boxed' constructor was
                                 --   applied to the inner case statement,
                                 --   this is the constructor's type argument.
                                 --   Otherwise this is Nothing.
@@ -2058,8 +2060,8 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
       let boxed_body =
             case result_is_boxed
             of Nothing -> altBody branch
-               Just (TypM t) -> let con = VarCon (pyonBuiltin The_boxed) [t] []
-                                in ExpM $ ConE inf (CInstM con) [altBody branch]
+               Just t -> let con = VarCon (pyonBuiltin The_boxed) [t] []
+                         in ExpM $ ConE inf con [altBody branch]
           body' = ExpM $ CaseE inf boxed_body moveable_alts
       in return $ AltM (branch {altBody = body'})
 
@@ -2137,12 +2139,12 @@ constructBranchContinuationFunction
       inferExpType =<< applySubstitution body
   
   -- Construct a function
-  let ty_params = map (TyPatSM . TyPatM) ex_types 
-      fun = FunSM $ Fun inf ty_params params (TypSM return_type) body
+  let ty_params = map TyPat ex_types 
+      fun = FunSM $ Fun inf ty_params params return_type body
   return fun
   where
     -- These will become the parameters and body of the returned function
-    ex_types = deConExTypes $ fromDeCInstSM $ altCon alt
+    ex_types = deConExTypes $ altCon alt
     params = maybeToList m_dummy_param ++
              altParams alt ++
              maybeToList m_return_param
@@ -2152,7 +2154,7 @@ constructBranchContinuationFunction
 --   with a function call.
 constructBranchContinuationAlt
   inf m_return_param m_return_arg m_dummy_param
-  (AltSM (Alt (DeCInstSM decon) params _)) callee = do
+  (AltSM (Alt decon params _)) callee = do
 
   unless (isJust m_return_param && isJust m_return_arg ||
           isNothing m_return_param && isNothing m_return_arg) $
@@ -2165,14 +2167,14 @@ constructBranchContinuationAlt
   params' <- mapM (rename_param decon_rn) params
 
   -- Construct the new case alternative
-  let call_ty_args = map (TypM . VarT . binderVar) $ deConExTypes decon'
+  let call_ty_args = map (VarT . binderVar) $ deConExTypes decon'
       decon_args = [ExpM $ VarE inf (patMVar p) | p <- params']
       dummy_arg = case m_dummy_param
                   of Nothing -> []
                      Just _ -> [conE inf (VarCon (pyonBuiltin The_None) [] []) []]
       call_args = dummy_arg ++ decon_args ++ maybeToList m_return_arg
       call = ExpM $ AppE inf (ExpM $ VarE inf callee) call_ty_args call_args
-  return $ AltM $ Alt (DeCInstM decon') params' call
+  return $ AltM $ Alt decon' params' call
   where
     -- Apply the given renaming to the pattern, and rename the pattern
     -- variable.
@@ -2184,14 +2186,14 @@ constructBranchContinuationAlt
           dmd = Dmd OnceSafe Used
       return $ setPatMDmd dmd $ patM (new_var ::: ty)
 
-rwCoerce inf (TypSM from_t) (TypSM to_t) body = do
+rwCoerce inf from_t to_t body = do
   -- Are the types equal in this context?
   types_equal <- compareTypes from_t to_t
   if types_equal
     then rwExp body             -- Coercion is not necessary
     else do
       (body', _) <- rwExp body
-      return (ExpM $ CoerceE inf (TypM from_t) (TypM to_t) body', topCode)
+      return (ExpM $ CoerceE inf from_t to_t body', topCode)
 
 rwFun :: FunSM -> LR (FunM, AbsCode)
 
@@ -2199,7 +2201,7 @@ rwFun :: FunSM -> LR (FunM, AbsCode)
 rwFun f = rwFun' f
 
 rwFun' (FunSM f) =
-  assumeTyPatMs ty_params $ assumePatterns params $ 
+  assumeTyPats ty_params $ assumePatterns params $ 
   set_return_parameter $ do
     body_result <- catchException $ rwExp (funBody f)
     
@@ -2212,12 +2214,12 @@ rwFun' (FunSM f) =
              Nothing ->
                (ExpM $ ExceptE defaultExpInfo return_type, ExceptAC)
     let aval = funValue ty_params params body_computation
-        new_fun = FunM $ Fun (funInfo f) ty_params params' (TypM return_type) body'
+        new_fun = FunM $ Fun (funInfo f) ty_params params' return_type body'
     return (new_fun, aval)
   where
-    ty_params = map fromTyPatSM $ funTyParams f
+    ty_params = funTyParams f
     params = map fromPatSM $ funParams f
-    return_type = fromTypSM $ funReturn f
+    return_type = funReturn f
 
     -- If the function has a return parameter, record that fact.
     -- It has a return parameter if the function's type is

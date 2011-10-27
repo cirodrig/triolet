@@ -86,7 +86,7 @@ hrFun recurse allow_exceptions (FunM f) =
 etaReduceFunction recurse allow_exceptions f out_param params =
   let strip_arg = Just (patMVar out_param, patMType out_param)
       mbody = etaReduceExp recurse allow_exceptions strip_arg $ funBody f
-      ret_type = patMType out_param `FunT` fromTypM (funReturn f)
+      ret_type = patMType out_param `FunT` funReturn f
   in case mbody
      of Just body ->
           -- If any references to the parameter variable remain, then
@@ -95,7 +95,7 @@ etaReduceFunction recurse allow_exceptions f out_param params =
           then Nothing
           else Just $ f { funParams = params
                         , funBody = body
-                        , funReturn = TypM ret_type}
+                        , funReturn = ret_type}
         Nothing -> Nothing
 
 -- | Don't eta-reduce a function.  If eta-reduction is being performed
@@ -255,7 +255,7 @@ etaExpandExp (ExpM expression) = ExpM <$>
 etaExpandFun (FunM f) =
   -- Does this function return a value whose type has the form
   -- @OutPtr t -> s@?
-  case fromTypM $ funReturn f
+  case funReturn f
   of FunT ret_dom ret_rng ->
        case fromVarApp ret_dom
        of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr ->
@@ -275,7 +275,7 @@ etaExpandFun (FunM f) =
                      [ExpM $ VarE defaultExpInfo out_var]
 
       return $ FunM $ f { funParams = funParams f ++ [new_param]
-                        , funReturn = TypM return_type
+                        , funReturn = return_type
                         , funBody   = app_body}
 
     no_eta_expand = do

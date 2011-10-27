@@ -2,8 +2,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 module SystemF.IncrementalSubstitution
        (SM,
-        Typ(..), CInst(..), DeCInst(..), TyPat(..), Pat(..), Alt(..), Fun(..),
-        TypSM, PatSM, ExpSM, AltSM, FunSM, CInstSM, DeCInstSM,
+        Pat(..), Alt(..), Fun(..),
+        PatSM, ExpSM, AltSM, FunSM,
         substitutePatSM, substitutePatSMs,
         deferSubstitution,
         deferEmptySubstitution,
@@ -31,19 +31,12 @@ import Type.Substitute(substitute, freshen, Substitutable(..))
 -- | Type index for a 'Mem' expression wrapped in a substitution
 data SM
 
-type TypSM = Typ SM
 type PatSM = Pat SM
 type ExpSM = Exp SM
 type AltSM = Alt SM
 type FunSM = Fun SM
-type CInstSM = CInst SM
-type DeCInstSM = DeCInst SM
 
 -- Types, patterns, and constructor instances are eagerly substituted
-newtype instance Typ SM = TypSM {fromTypSM :: Type}
-newtype instance CInst SM = CInstSM {fromCInstSM :: ConInst}
-newtype instance DeCInst SM = DeCInstSM {fromDeCInstSM :: DeConInst}
-newtype instance TyPat SM = TyPatSM {fromTyPatSM :: TyPatM}
 newtype instance Pat SM = PatSM {fromPatSM :: PatM}
 
 -- Functions and case alternatives contain un-substituted expressions
@@ -74,24 +67,24 @@ instance Substitutable (Fun SM) where
   substituteWorker s (FunSM fun) = 
     -- Push the substitution down to the body of the function.  Defer further
     -- processing.
-    substituteTyPatMs s (map fromTyPatSM $ funTyParams fun) $ \s' ty_params ->
+    substituteTyPats s (funTyParams fun) $ \s' ty_params ->
     substitutePatSMs s' (funParams fun) $ \s'' params -> do
-      ret <- substitute (typeSubst s'') $ fromTypSM $ funReturn fun
+      ret <- substitute (typeSubst s'') $ funReturn fun
       body <- substitute s'' $ funBody fun
       return $ FunSM $ Fun { funInfo = funInfo fun
-                           , funTyParams = castTyPats ty_params
+                           , funTyParams = ty_params
                            , funParams = params
-                           , funReturn = TypSM ret
+                           , funReturn = ret
                            , funBody = body}
 
 instance Substitutable (Alt SM) where
   type Substitution (Alt SM) = Subst
   substituteWorker s (AltSM (Alt decon params body)) =
-    substituteDeConInst (typeSubst s) (fromDeCInstSM decon) $ \type_subst decon' ->
+    substituteDeConInst (typeSubst s) decon $ \type_subst decon' ->
     let s' = setTypeSubst type_subst s
     in substitutePatSMs s' params $ \s'' params' -> do
       body' <- substitute s'' body
-      return $ AltSM $ Alt (DeCInstSM decon') params' body'
+      return $ AltSM $ Alt decon' params' body'
 
 -- | Apply a substitution to an 'ExpM'.  The actual substitution is
 --   performed later.
@@ -104,27 +97,18 @@ deferEmptySubstitution = deferSubstitution emptySubst
 deferExp :: ExpM -> ExpSM
 deferExp e = ExpSM emptySubst e
 
-castType :: TypM -> TypSM
-castType (TypM t) = TypSM t
-
 castPat :: PatM -> PatSM
 castPat = PatSM
 
 castPats = map castPat
 
-castTyPat :: TyPatM -> TyPat SM
-castTyPat = TyPatSM
-
-castTyPats = map castTyPat
-
 deferFun :: FunM -> FunSM
 deferFun (FunM (Fun inf ty_args args ret body)) =
-  FunSM $
-  Fun inf (castTyPats ty_args) (castPats args) (castType ret) (deferExp body)
+  FunSM $ Fun inf ty_args (castPats args) ret (deferExp body)
 
 deferAlt :: AltM -> AltSM
-deferAlt (AltM (Alt (DeCInstM decon) params body)) =
-  AltSM $ Alt (DeCInstSM decon) (castPats params) (deferExp body)
+deferAlt (AltM (Alt decon params body)) =
+  AltSM $ Alt decon (castPats params) (deferExp body)
 
 -- | Apply a substitution to an 'ExpSM'.  The actual substitution is
 --   performed later.
@@ -144,10 +128,10 @@ deferInnerTerms (ExpM expression) =
   case expression
   of VarE inf v -> VarE inf v
      LitE inf l -> LitE inf l
-     ConE inf (CInstM con) args ->
-       ConE inf (CInstSM con) (map deferExp args)
+     ConE inf con args ->
+       ConE inf con (map deferExp args)
      AppE inf op ts es ->
-       AppE inf (deferExp op) (map castType ts) (map deferExp es)
+       AppE inf (deferExp op) ts (map deferExp es)
      LamE inf f ->
        LamE inf (deferFun f)
      LetE inf p val body ->
@@ -159,7 +143,7 @@ deferInnerTerms (ExpM expression) =
      ExceptE inf ty ->
        ExceptE inf ty
      CoerceE inf t1 t2 e ->
-       CoerceE inf (castType t1) (castType t2) (deferExp e)
+       CoerceE inf t1 t2 (deferExp e)
 
 -- | Substitute the head term
 freshenHead :: EvalMonad m => ExpSM -> m (BaseExp SM)
@@ -173,15 +157,15 @@ freshenHead (ExpSM s (ExpM expression)) = liftTypeEvalM $
             Just (SubstitutedVar e) -> freshenAndDeferInnerTerms e
             Nothing                 -> freshenAndDeferInnerTerms (ExpM expression)
        LitE inf l -> return $ LitE inf l
-       ConE inf (CInstM con) args -> do
+       ConE inf con args -> do
          con' <- substitute (typeSubst s) con
          let args' = map (deferSubstitution s) args
-         return $ ConE inf (CInstSM con') args'
+         return $ ConE inf con' args'
        AppE inf op ts es -> do
          ts' <- substitute (typeSubst s) ts
          let op' = deferSubstitution s op
          let es' = map (deferSubstitution s) es
-         return $ AppE inf op' (map castType ts') es'
+         return $ AppE inf op' ts' es'
        LamE inf f -> do
          f' <- freshenFun s f
          return $ LamE inf f'
@@ -201,28 +185,28 @@ freshenHead (ExpSM s (ExpM expression)) = liftTypeEvalM $
        ExceptE inf ty -> do
          ty' <- substitute (typeSubst s) ty
          return $ ExceptE inf ty'
-       CoerceE inf (TypM t1) (TypM t2) e -> do
+       CoerceE inf t1 t2 e -> do
          t1' <- substitute (typeSubst s) t1
          t2' <- substitute (typeSubst s) t2
          let e' = deferSubstitution s e
-         return $ CoerceE inf (TypSM t1') (TypSM t2') e'
+         return $ CoerceE inf t1' t2' e'
 
 freshenFun :: EvalMonad m => Subst -> FunM -> m FunSM
 freshenFun s (FunM fun) = liftTypeEvalM $
-  substituteTyPatMs s (funTyParams fun) $ \s' ty_params ->
+  substituteTyPats s (funTyParams fun) $ \s' ty_params ->
   substitutePatMs s' (funParams fun) $ \s'' params -> do
     ret <- substitute (typeSubst s'') $ funReturn fun
     return $ FunSM $ Fun { funInfo = funInfo fun
-                         , funTyParams = castTyPats ty_params
+                         , funTyParams = ty_params
                          , funParams = castPats params
-                         , funReturn = castType ret
+                         , funReturn = ret
                          , funBody = deferSubstitution s'' $ funBody fun}
 
 freshenAlt :: EvalMonad m => Subst -> AltM -> m AltSM
-freshenAlt s (AltM (Alt (DeCInstM decon) params body)) =
+freshenAlt s (AltM (Alt decon params body)) =
   substituteDeConInst (typeSubst s) decon $ \ts' decon' ->
   substitutePatMs (setTypeSubst ts' s) params $ \s' params' ->
-  return $ AltSM $ Alt { altCon = DeCInstSM decon'
+  return $ AltSM $ Alt { altCon = decon'
                        , altParams = castPats params'
                        , altBody = deferSubstitution s' body}
 
@@ -239,10 +223,10 @@ applySubstitution (ExpSM s e) = substitute s e
 applySubstitutionFun :: EvalMonad m => FunSM -> m FunM
 applySubstitutionFun (FunSM (Fun inf ty_params params ret body)) = do
   body' <- applySubstitution body
-  return $ FunM $ Fun inf (map fromTyPatSM ty_params) (map fromPatSM params) (TypM $ fromTypSM ret) body'
+  return $ FunM $ Fun inf ty_params (map fromPatSM params) ret body'
 
 applySubstitutionAlt :: EvalMonad m => AltSM -> m AltM
-applySubstitutionAlt (AltSM (Alt (DeCInstSM decon) params body)) = do
+applySubstitutionAlt (AltSM (Alt decon params body)) = do
   body' <- applySubstitution body
-  return $ AltM $ Alt (DeCInstM decon) (map fromPatSM params) body'
+  return $ AltM $ Alt decon (map fromPatSM params) body'
   

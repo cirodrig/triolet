@@ -18,8 +18,8 @@ module SystemF.Rename
         freshenPatM,
         renamePatMs,
         freshenPatMs,
-        renameTyPatM,
-        renameTyPatMs,
+        renameTyPat,
+        renameTyPats,
         renameDeConInst,
         freshenDeConInst,
         renameDefGroup,
@@ -27,8 +27,8 @@ module SystemF.Rename
         defGroupFreeVariables,
         substitutePatM,
         substitutePatMs,
-        substituteTyPatM,
-        substituteTyPatMs,
+        substituteTyPat,
+        substituteTyPats,
         substituteDeConInst,
         substituteDefGroup,
         checkForShadowingExp,
@@ -168,12 +168,12 @@ renameMany _ rn [] k = k rn []
 
 -- | Apply a renaming to a type pattern. If necessary, rename the pattern
 --   variable to avoid name shadowing.
-renameTyPatM :: Renaming -> TyPatM -> (Renaming -> TyPatM -> a) -> a
-renameTyPatM rn (TyPatM binder) k =
+renameTyPat :: Renaming -> TyPat -> (Renaming -> TyPat -> a) -> a
+renameTyPat rn (TyPat binder) k =
   Rename.renameBinder rn binder $ \rn' binder' ->
-  k rn' (TyPatM binder')
+  k rn' (TyPat binder')
 
-renameTyPatMs = renameMany renameTyPatM
+renameTyPats = renameMany renameTyPat
 
 -- | Apply a renaming to a pattern.  If necessary, rename the pattern
 --   variable to avoid name shadowing.
@@ -276,18 +276,18 @@ substituteTypeBinders :: EvalMonad m =>
 substituteTypeBinders = renameMany substituteTypeBinder
 
 -- | Apply a substitution to a type pattern
-substituteTyPatM :: EvalMonad m =>
-                    Subst -> TyPatM
-                 -> (Subst -> TyPatM -> m a)
-                 -> m a
-substituteTyPatM s (TyPatM binder) k =
-  substituteTypeBinder s binder $ \s' binder' -> k s' (TyPatM binder')
+substituteTyPat :: EvalMonad m =>
+                   Subst -> TyPat
+                -> (Subst -> TyPat -> m a)
+                -> m a
+substituteTyPat s (TyPat binder) k =
+  substituteTypeBinder s binder $ \s' binder' -> k s' (TyPat binder')
 
-substituteTyPatMs :: EvalMonad m =>
-                     Subst -> [TyPatM]
-                  -> (Subst -> [TyPatM] -> m a)
-                  -> m a
-substituteTyPatMs = renameMany substituteTyPatM
+substituteTyPats :: EvalMonad m =>
+                    Subst -> [TyPat]
+                 -> (Subst -> [TyPat] -> m a)
+                 -> m a
+substituteTyPats = renameMany substituteTyPat
   
 -- | Apply a substitution to a binder that binds a value to a variable.
 --
@@ -450,12 +450,6 @@ instance Substitutable Specificity where
        Inspected -> return spc
        Unused -> return spc
 
-instance Renameable (Typ Mem) where
-  rename rn (TypM t) = TypM $ rename rn t
-  freeVariables (TypM t) = freeVariables t
-
-deriving instance Renameable (CInst Mem)
-
 instance Renameable ConInst where
   rename rn (VarCon con ty_args ex_types) =
     let ty_args' = rename rn ty_args
@@ -522,12 +516,12 @@ instance Renameable (Exp Mem) where
          freeVariables t1 `Set.union` freeVariables t2 `Set.union` freeVariables e
 
 instance Renameable (Alt Mem) where
-  rename rn (AltM (Alt (DeCInstM con) params body)) =
+  rename rn (AltM (Alt con params body)) =
     renameDeConInst rn con $ \rn' con' ->
     renamePatMs rn' params $ \rn'' params' ->
-    AltM $ Alt (DeCInstM con') params' (rename rn'' body)
+    AltM $ Alt con' params' (rename rn'' body)
 
-  freeVariables (AltM (Alt (DeCInstM decon) params body)) =
+  freeVariables (AltM (Alt decon params body)) =
     deConFreeVariables decon $
     let uses_fv = freeVariables (map patMDmd params) 
         params_fv = Rename.bindersFreeVariables (map patMBinder params) $
@@ -536,7 +530,7 @@ instance Renameable (Alt Mem) where
 
 instance Renameable (Fun Mem) where
   rename rn (FunM fun) =
-    renameTyPatMs rn (funTyParams fun) $ \rn' ty_params -> 
+    renameTyPats rn (funTyParams fun) $ \rn' ty_params -> 
     renamePatMs rn' (funParams fun) $ \rn'' params ->
     let ret = rename rn'' $ funReturn fun
         body = rename rn'' $ funBody fun
@@ -547,20 +541,12 @@ instance Renameable (Fun Mem) where
                   , funBody = body}
 
   freeVariables (FunM fun) =
-    Rename.bindersFreeVariables [p | TyPatM p <- funTyParams fun] $
+    Rename.bindersFreeVariables [p | TyPat p <- funTyParams fun] $
     let uses_fv = freeVariables (map patMDmd $ funParams fun)
         params_fv = Rename.bindersFreeVariables (map patMBinder $ funParams fun) $
                     freeVariables (funBody fun) `Set.union`
                     freeVariables (funReturn fun)
     in Set.union uses_fv params_fv
-
-instance Substitutable (Typ Mem) where
-  type Substitution (Typ Mem) = TypeSubst
-  substituteWorker s (TypM t) = TypM `liftM` substituteWorker s t
-
-instance Substitutable (CInst Mem) where
-  type Substitution (CInst Mem) = TypeSubst
-  substituteWorker s (CInstM x) = CInstM `liftM` substituteWorker s x
 
 instance Substitutable ConInst where
   type Substitution ConInst = TypeSubst
@@ -610,24 +596,24 @@ instance Substitutable (Exp Mem) where
        ExceptE inf ty -> do
          ty' <- substitute (typeSubst s) ty
          return $ ExpM $ ExceptE inf ty'
-       CoerceE inf (TypM t1) (TypM t2) e -> do
+       CoerceE inf t1 t2 e -> do
          t1' <- substitute (typeSubst s) t1
          t2' <- substitute (typeSubst s) t2
          e' <- substitute s e
-         return $ ExpM $ CoerceE inf (TypM t1') (TypM t2') e'
+         return $ ExpM $ CoerceE inf t1' t2' e'
 
 instance Substitutable (Alt Mem) where
   type Substitution (Alt Mem) = Subst
-  substituteWorker s (AltM (Alt (DeCInstM con) params body)) =
+  substituteWorker s (AltM (Alt con params body)) =
     substituteDeConInst (typeSubst s) con $ \ts' con' ->
     substitutePatMs (setTypeSubst ts' s) params $ \s' params' -> do
       body' <- substitute s' body
-      return $ AltM $ Alt (DeCInstM con') params' body'
+      return $ AltM $ Alt con' params' body'
 
 instance Substitutable (Fun Mem) where
   type Substitution (Fun Mem) = Subst
   substituteWorker s (FunM fun) =
-    substituteTyPatMs s (funTyParams fun) $ \s' ty_params ->
+    substituteTyPats s (funTyParams fun) $ \s' ty_params ->
     substitutePatMs s' (funParams fun) $ \s'' params -> do
       body <- substitute s'' $ funBody fun
       ret <- substitute (typeSubst s'') $ funReturn fun
@@ -650,12 +636,12 @@ checkForShadowingExpSet in_scope e =
   case fromExpM e
   of VarE {} -> ()
      LitE {} -> ()
-     ConE _ (CInstM con) args ->
+     ConE _ con args ->
        checkForShadowingConSet in_scope con `seq`
        continues args
      AppE _ op ty_args args ->
        continue op `seq`
-       (foldr seq () $ map (checkForShadowingSet in_scope . fromTypM) ty_args) `seq`
+       (foldr seq () $ map (checkForShadowingSet in_scope) ty_args) `seq`
        continues args
      LamE _ f ->
        checkForShadowingFunSet in_scope f
@@ -672,8 +658,8 @@ checkForShadowingExpSet in_scope e =
      ExceptE _ ty ->
        checkForShadowingSet in_scope ty
      CoerceE _ t1 t2 body ->
-       checkForShadowingSet in_scope (fromTypM t1) `seq`
-       checkForShadowingSet in_scope (fromTypM t2) `seq`
+       checkForShadowingSet in_scope t1 `seq`
+       checkForShadowingSet in_scope t2 `seq`
        continue body
   where
     continue e = checkForShadowingExpSet in_scope e
@@ -714,8 +700,8 @@ checkForShadowingDeConSet in_scope con =
 
 checkForShadowingFunSet :: CheckForShadowing FunM
 checkForShadowingFunSet in_scope (FunM (Fun _ typarams params return body)) =
-  let ty_vars = [a | TyPatM (a ::: _) <- typarams]
-      kinds = [k | TyPatM (_ ::: k) <- typarams]
+  let ty_vars = map tyPatVar typarams
+      kinds = map tyPatKind typarams
       ty_scope = inserts ty_vars in_scope
       param_vars = map patMVar params
       param_types = map patMType params
@@ -724,16 +710,16 @@ checkForShadowingFunSet in_scope (FunM (Fun _ typarams params return body)) =
      assertVarsAreUndefined in_scope ty_vars `seq`
      (foldr seq () $ map (checkForShadowingSet ty_scope) param_types) `seq` 
      assertVarsAreUndefined ty_scope param_vars `seq`
-     checkForShadowingSet body_scope (fromTypM return) `seq`
+     checkForShadowingSet body_scope return `seq`
      checkForShadowingExpSet body_scope body
   where
     insert v scope = IntSet.insert (fromIdent $ varID v) scope
     inserts vs scope = foldr insert scope vs
 
 checkForShadowingAltSet :: CheckForShadowing AltM
-checkForShadowingAltSet in_scope (AltM (Alt (DeCInstM decon) params body)) =
-  let ex_vars = [a | a ::: _ <- deConExTypes decon]
-      kinds = deConTyArgs decon ++ [t | _ ::: t <- deConExTypes decon]
+checkForShadowingAltSet in_scope (AltM (Alt decon params body)) =
+  let ex_vars = map binderVar $ deConExTypes decon
+      kinds = deConTyArgs decon ++ map binderType (deConExTypes decon)
       ty_scope = inserts ex_vars in_scope
       param_vars = map patMVar params
       param_types = map patMType params

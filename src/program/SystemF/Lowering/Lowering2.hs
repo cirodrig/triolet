@@ -80,8 +80,8 @@ assumeVar is_exported v rt k = do
       assumeSingletonValue rt ll_var (k ll_var)
     Nothing -> internalError "assumeVar: Unexpected representation"
 
-assumeTyParam :: TypeEnvMonad m => TyPatM -> m a -> m a
-assumeTyParam (TyPatM b) m = assumeBinder b m
+assumeTyParam :: TypeEnvMonad m => TyPat -> m a -> m a
+assumeTyParam (TyPat b) m = assumeBinder b m
 
 assumeTyParams ps m = foldr assumeTyParam m ps
 
@@ -224,7 +224,7 @@ lowerLit lit =
 -- | Lower a data constructor application.  Generate code to construct a value.
 
 -- Lower arguments, then pack the result values into a record value
-lowerCon (CInstM (TupleCon _)) args = do
+lowerCon (TupleCon _) args = do
   arg_values <- mapM lowerExpToVal args
   let record_type = LL.constStaticRecord $
                     map (LL.valueToFieldType . LL.valType) arg_values
@@ -232,7 +232,7 @@ lowerCon (CInstM (TupleCon _)) args = do
                LL.PackA record_type arg_values
   return $ RetVal tuple_val
 
-lowerCon (CInstM (VarCon op ty_args ex_types)) args = do
+lowerCon (VarCon op ty_args ex_types) args = do
   tenv <- lift getTypeEnv
   let Just op_data_con = lookupDataCon op tenv
   arg_vals <- mapM lowerExpToVal args
@@ -245,7 +245,7 @@ lowerCon (CInstM (VarCon op ty_args ex_types)) args = do
 --   are lowered to a function call.
 --
 --   Type applications are erased, so if there are  with no arguments are 
-lowerApp :: Type -> ExpM -> [TypM] -> [ExpM] -> GenLower RetVal
+lowerApp :: Type -> ExpM -> [Type] -> [ExpM] -> GenLower RetVal
 lowerApp rt (ExpM (VarE _ op_var)) ty_args args
   | op_var `isPyonBuiltin` The_toEffTok =
     -- The function 'toEffTok' is handled specially because its argument
@@ -294,14 +294,14 @@ lowerCase return_type scr alts = do
 
 lowerAlt (AltM alt) =
   let con = case altCon alt
-            of DeCInstM (VarDeCon v _ _) -> VarTag v
-               DeCInstM (TupleDeCon _)   -> TupleTag
+            of VarDeCon v _ _ -> VarTag v
+               TupleDeCon _   -> TupleTag
   in (con, lowerAltBody alt)
 
 lowerAltBody alt field_values =
   -- Bind the field values and generate the body
   let params = altParams alt
-  in assumeBinders (deConExTypes (case altCon alt of DeCInstM x -> x)) $
+  in assumeBinders (deConExTypes (altCon alt)) $
      bindPatterns (zip params field_values) $
      lowerExp $ altBody alt
 
@@ -342,7 +342,7 @@ lowerFun (FunM fun) =
   assumeTyParams (funTyParams fun) $
   withMany lower_param (funParams fun) $ \params -> do
     tenv <- getTypeEnv
-    returns <- lowerType tenv $ fromTypM $ funReturn fun
+    returns <- lowerType tenv $ funReturn fun
     genClosureFun params (maybeToList returns) $ lower_body (funBody fun)
   where
     lower_param pat k = assumeVar False (patMVar pat) (patMType pat) k

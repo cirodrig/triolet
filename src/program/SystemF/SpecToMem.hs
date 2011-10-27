@@ -38,11 +38,9 @@ convertType ty
          AnyT k -> AnyT (convertKind k)
          CoT k -> CoT k
 
-convertTypM (TypM t) = TypM (convertType t)
-
 convertBinder (v ::: k) = (v ::: convertKind k)
 
-convertTyParam (TyPatM (v ::: k)) = TyPatM (v ::: convertKind k)
+convertTyParam (TyPat (v ::: k)) = TyPat (v ::: convertKind k)
 
 convertParam :: PatM -> PatM
 convertParam (PatM (v ::: t) _) = patM (v ::: convertType t)
@@ -56,7 +54,7 @@ convertExp (ExpM expression) =
        ExpM $ ConE inf (convert_constructor con) (map convertExp args)
      AppE inf op ty_args args ->
        ExpM $ AppE inf
-       (convertExp op) (map convertTypM ty_args) (map convertExp args)
+       (convertExp op) (map convertType ty_args) (map convertExp args)
      LamE inf f ->
        ExpM $ LamE inf (convertFun f)
      LetE inf b rhs body ->
@@ -67,11 +65,11 @@ convertExp (ExpM expression) =
        ExpM $ CaseE inf (convertExp scr) (map convertAlt alts)
      ExceptE inf ty ->
        ExpM $ ExceptE inf (convertType ty)
-     CoerceE inf (TypM from_t) (TypM to_t) b ->
-       ExpM $ CoerceE inf (TypM $ convertType from_t) (TypM $ convertType to_t)
+     CoerceE inf from_t to_t b ->
+       ExpM $ CoerceE inf (convertType from_t) (convertType to_t)
        (convertExp b)
   where
-    convert_constructor (CInstM decon) = CInstM $
+    convert_constructor decon =
       case decon
       of VarCon con_var ty_args ex_types ->
            VarCon con_var (map convertType ty_args) (map convertType ex_types)
@@ -84,7 +82,7 @@ convertAlt (AltM alt) =
              , altParams = map convertParam $ altParams alt
              , altBody = convertExp $ altBody alt}
   where
-    convert_constructor (DeCInstM decon) = DeCInstM $
+    convert_constructor decon =
       case decon
       of VarDeCon con_var ty_args ex_types ->
            VarDeCon con_var (map convertType ty_args) (map convertBinder ex_types)
@@ -95,7 +93,7 @@ convertFun :: FunM -> FunM
 convertFun (FunM f) =
   FunM $ f { funTyParams = map convertTyParam $ funTyParams f
            , funParams = map convertParam $ funParams f
-           , funReturn = convertTypM $ funReturn f
+           , funReturn = convertType $ funReturn f
            , funBody = convertExp $ funBody f}
 
 convertDef :: Def Mem -> Def Mem

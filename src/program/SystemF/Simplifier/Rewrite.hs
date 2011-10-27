@@ -97,7 +97,7 @@ liftFreshVarM m = RW $ ReaderT $ \env -> runFreshVarM (rwIdentSupply env) m
 --
 -- > case x of stored t (y : t). y
 load :: TypeEnv
-     -> TypM                    -- ^ Value type to load
+     -> Type                    -- ^ Value type to load
      -> RW ExpM                 -- ^ Expression to load
      -> RW ExpM
 load tenv ty val =
@@ -115,7 +115,7 @@ load tenv ty val =
 -- >      of referenced ay. $(make_body n sz ay)
 caseOfList :: TypeEnv
            -> RW ExpM           -- ^ List to inspect
-           -> TypM              -- ^ Type of list element
+           -> Type              -- ^ Type of list element
            -> (Var -> Var -> Var -> RW ExpM)
               -- ^ Function from (list size index, list size, array reference)
               --   to expression
@@ -130,7 +130,7 @@ caseOfList tenv scrutinee list_type mk_body =
   where
     -- Create the type (array n list_type)
     array_type size_index =
-      TypM $ varApp (pyonBuiltin The_arr) [VarT size_index, fromTypM list_type]
+      varApp (pyonBuiltin The_arr) [VarT size_index, list_type]
 
 -- | Create a case expression to inspect a matrix.
 --
@@ -151,12 +151,12 @@ caseOfMatrix tenv scrutinee elt_type mk_body =
   where
     -- Create the type (array m (array n elt_type))
     array_type size_y_index size_x_index =
-      TypM $ varApp (pyonBuiltin The_arr) [VarT size_y_index,
-                                             varApp (pyonBuiltin The_arr) [VarT size_x_index, fromTypM elt_type]]
+      varApp (pyonBuiltin The_arr) [VarT size_y_index,
+                                    varApp (pyonBuiltin The_arr) [VarT size_x_index, elt_type]]
 
 caseOfTraversableDict :: TypeEnv
                       -> RW ExpM
-                      -> TypM
+                      -> Type
                       -> (Var -> Var -> RW ExpM)
                       -> RW ExpM
 caseOfTraversableDict tenv scrutinee container_type mk_body =
@@ -185,7 +185,7 @@ caseOfFinIndInt :: TypeEnv
                 -> RW ExpM
 caseOfFinIndInt tenv scrutinee int_index mk_body =
   caseE scrutinee
-  [mkAlt tenv (pyonBuiltin The_fiInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin The_fiInt) [int_index] $
    \ [] [intvalue] -> mk_body intvalue]
 
 caseOfIndInt :: TypeEnv
@@ -196,11 +196,11 @@ caseOfIndInt :: TypeEnv
              -> RW ExpM
 caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt tenv (pyonBuiltin The_iInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin The_iInt) [int_index] $
    \ [] [fin] -> mk_finite fin,
-   mkAlt tenv (pyonBuiltin The_iPosInfty) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin The_iPosInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf,
-   mkAlt tenv (pyonBuiltin The_iNegInfty) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin The_iNegInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf]
 
 caseOfIndInt' :: TypeEnv
@@ -211,18 +211,18 @@ caseOfIndInt' :: TypeEnv
               -> RW ExpM
 caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt tenv (pyonBuiltin The_iInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin The_iInt) [int_index] $
    \ [] [fin] -> caseOfFinIndInt tenv (varE fin) int_index mk_finite,
-   mkAlt tenv (pyonBuiltin The_iPosInfty) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin The_iPosInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf,
-   mkAlt tenv (pyonBuiltin The_iNegInfty) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin The_iNegInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf]
 
 -- | Create a list where each array element is a function of its index only
 --
 --   If no return pointer is given, a writer function is generated.
-defineList :: TypM             -- Array element type
-           -> TypM             -- Array size type index
+defineList :: Type             -- Array element type
+           -> Type             -- Array size type index
            -> RW ExpM    -- Array size
            -> RW ExpM    -- Array element representation
            -> Maybe (RW ExpM)     -- Optional return pointer
@@ -232,17 +232,17 @@ defineList elt_type size_ix size elt_repr rptr writer =
   varAppE (pyonBuiltin The_make_list)
   [elt_type, size_ix]
   ([size,
-    varAppE (pyonBuiltin The_referenced) [TypM array_type]
+    varAppE (pyonBuiltin The_referenced) [array_type]
     [defineArray elt_type size_ix size elt_repr writer]] ++
    maybeToList rptr)
   where
     array_type =
-      varApp (pyonBuiltin The_arr) [fromTypM size_ix, fromTypM elt_type]
+      varApp (pyonBuiltin The_arr) [size_ix, elt_type]
 
 -- | Create a writer function for an array where each array element
 --   is a function of its index only.
-defineArray :: TypM             -- Array element type
-            -> TypM             -- Array size type index (FinIntIndex)
+defineArray :: Type             -- Array element type
+            -> Type             -- Array size type index (FinIntIndex)
             -> RW ExpM   -- Array size
             -> RW ExpM   -- Array element representation
             -> (Var -> RW ExpM -> RW ExpM) -- Element writer code
@@ -252,10 +252,10 @@ defineArray elt_type size_ix size elt_repr writer =
   (\ [] -> return ([outType array_type], initEffectType array_type))
   (\ [] [out_ptr] ->
     varAppE (pyonBuiltin The_doall)
-    [size_ix, TypM array_type, elt_type]
+    [size_ix, array_type, elt_type]
     [size,
      lamE $ mkFun []
-     (\ [] -> return ([intType], initEffectType $ fromTypM elt_type))
+     (\ [] -> return ([intType], initEffectType elt_type))
      (\ [] [index_var] ->
        let out_expr =
              varAppE (pyonBuiltin The_subscript_out) [size_ix, elt_type]
@@ -263,13 +263,13 @@ defineArray elt_type size_ix size elt_repr writer =
        in writer index_var out_expr)])
   where
     array_type =
-      varApp (pyonBuiltin The_arr) [fromTypM size_ix, fromTypM elt_type]
+      varApp (pyonBuiltin The_arr) [size_ix, elt_type]
 
 intType = VarT (pyonBuiltin The_int)
 storedIntType = storedType intType
 
-shapeOfType :: TypM -> TypM
-shapeOfType (TypM t) = TypM $ varApp (pyonBuiltin The_shape) [t]
+shapeOfType :: Type -> Type
+shapeOfType t = varApp (pyonBuiltin The_shape) [t]
 
 array1Shape :: Type -> Type
 array1Shape size =
@@ -289,7 +289,7 @@ minIntIndex a b = varApp (pyonBuiltin The_min_i) [a, b]
 -- Rewrite rules
 
 -- Given the arguments to an application, try to create a rewritten term
-type RewriteRule = ExpInfo -> [TypM] -> [ExpM] -> RW (Maybe ExpM)
+type RewriteRule = ExpInfo -> [Type] -> [ExpM] -> RW (Maybe ExpM)
 
 -- | A set of rewrite rules
 data RewriteRuleSet =
@@ -439,7 +439,7 @@ rewriteApp :: RewriteRuleSet
            -> IntIndexEnv
            -> IdentSupply Var
            -> TypeEnv
-           -> ExpInfo -> Var -> [TypM] -> [ExpSM]
+           -> ExpInfo -> Var -> [Type] -> [ExpSM]
            -> IO (Maybe ExpM)
 rewriteApp ruleset int_env id_supply tenv inf op_var ty_args args =
   case Map.lookup op_var $ rewriteRules ruleset
@@ -462,7 +462,7 @@ rewriteApp ruleset int_env id_supply tenv inf op_var ty_args args =
 --   case statement, if the type is known.  Also, cancel applications of
 --   'convertToBare' with 'convertToBoxed'.
 rwConvertToBare :: RewriteRule
-rwConvertToBare inf [TypM bare_type] [repr, arg] 
+rwConvertToBare inf [bare_type] [repr, arg] 
   | Just (op, _, [_, arg']) <- unpackVarAppM arg,
     op `isPyonBuiltin` The_convertToBoxed =
       -- Cancel applications of these constructors 
@@ -501,9 +501,9 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
       tenv <- getTypeEnv
       caseE (return arg)
         [mkAlt tenv (pyonBuiltin The_boxed)
-         [TypM whnf_type]
+         [whnf_type]
          (\ [] [unboxed_ref] ->
-           varAppE (pyonBuiltin The_copy) [TypM whnf_type]
+           varAppE (pyonBuiltin The_copy) [whnf_type]
            [return repr, varE unboxed_ref])]
 
 rwConvertToBare inf [ty] [repr, arg, ret] = do
@@ -518,7 +518,7 @@ rwConvertToBare inf [ty] [repr, arg, ret] = do
 rwConvertToBare _ _ _ = return Nothing
 
 rwConvertToBoxed :: RewriteRule
-rwConvertToBoxed inf [TypM bare_type] [repr, arg] 
+rwConvertToBoxed inf [bare_type] [repr, arg] 
   | Just (op, _, [_, arg']) <- unpackVarAppM arg,
     op `isPyonBuiltin` The_convertToBare = 
       -- Cancel applications of these constructors 
@@ -547,11 +547,11 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
     -- Bind it to a temporary value, then deconstruct it.
     deconstruct_stored_box boxed_type = do
       tenv <- getTypeEnv
-      localE (TypM bare_type) (return arg)
+      localE bare_type (return arg)
         (\arg_val ->
           caseE (varE arg_val) 
           [mkAlt tenv (pyonBuiltin The_storedBox)
-           [TypM boxed_type]
+           [boxed_type]
            (\ [] [boxed_ref] -> varE boxed_ref)])
     
     construct_boxed whnf_type = do
@@ -568,7 +568,7 @@ rwDarr1Reduce :: RewriteRule
 rwDarr1Reduce inf [size_index, ty]
   (repr : count : reducer : init : darr : other_args) =
   case fromExpM darr
-  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+  of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr1 ->
          let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_reduce
              exp = appE inf op [size_index, ty]
@@ -596,7 +596,7 @@ rwDarr1Reduce1 :: RewriteRule
 rwDarr1Reduce1 inf [size_index, ty]
   (repr : count : reducer : darr : other_args) =
   case fromExpM darr
-  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+  of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr1 ->
          let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_reduce1
              exp = appE inf op [size_index, ty]
@@ -614,7 +614,7 @@ rwDarr2Reduce :: RewriteRule
 rwDarr2Reduce inf [size_y, size_x, ty]
   (repr : count_y : count_x : reducer : init : darr : other_args) =
   case fromExpM darr
-  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+  of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr2 ->
          let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim2_reduce
              exp = appE inf op [size_y, size_x, ty]
@@ -633,7 +633,7 @@ rwArr1DBuild :: RewriteRule
 rwArr1DBuild inf [size_index, ty]
   (repr : count : darr : other_args) =
   case fromExpM darr
-  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+  of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr1 ->
          let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_generate
              exp = appE inf op [size_index, ty]
@@ -651,7 +651,7 @@ rwArr2DBuild :: RewriteRule
 rwArr2DBuild inf [size_index_y, size_index_x, ty]
   (repr : count_y : count_x : darr : other_args) =
   case fromExpM darr
-  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+  of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr2 ->
          let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim2_generate
              exp = appE inf op [size_index_y, size_index_x, ty]
@@ -666,7 +666,7 @@ rwView1ToDarr1 :: RewriteRule
 rwView1ToDarr1 inf [_, _] (vw : user : _ : other_args)
   | Just (op, [size, _], [count, darr]) <- unpackVarAppM vw,
     op `isPyonBuiltin` The_darr1ToView1 =
-      return $ Just $ ExpM $ AppE inf user [TypM size] (count : darr : other_args)
+      return $ Just $ ExpM $ AppE inf user [size] (count : darr : other_args)
 
 rwView1ToDarr1 _ _ _ = return Nothing
 
@@ -1233,9 +1233,9 @@ rwDefineIntIndex :: RewriteRule
 rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
   let IntL m _ = lit
       fin_int = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin The_fiInt))
-                [TypM $ IntT m] [integer_value]
+                [IntT m] [integer_value]
       package = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin The_someIInt))
-                [TypM $ IntT m] [fin_int]
+                [IntT m] [fin_int]
   in return $! Just $! package
 
 rwDefineIntIndex _ _ _ = return Nothing

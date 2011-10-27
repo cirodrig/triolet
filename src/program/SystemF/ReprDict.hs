@@ -96,7 +96,7 @@ lookupReprDict' ty@(AnyT {}) =
   where
     mk_any_dict ty =
       let op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_EmptyReference)
-          call = ExpM $ AppE defaultExpInfo op [TypM ty] []
+          call = ExpM $ AppE defaultExpInfo op [ty] []
       in literalMkDict call
      
 lookupReprDict' ty = withDictEnv (DictEnv.lookup ty . reprDictEnv)
@@ -303,7 +303,7 @@ createDict_Tuple2 :: Var -> Var -> TypeSubst -> MkDict
 createDict_Tuple2 param_var1 param_var2 subst = MkDict $
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 ->
-  return $ ExpM $ AppE defaultExpInfo dict_oper [TypM param1, TypM param2]
+  return $ ExpM $ AppE defaultExpInfo dict_oper [param1, param2]
   [dict1, dict2]
   where
     param1 = getParamType param_var1 subst
@@ -319,7 +319,7 @@ createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $
   withReprDict param2 $ \dict2 ->
   withReprDict param3 $ \dict3 ->
   return $ ExpM $ AppE defaultExpInfo dict_oper
-      [TypM param1, TypM param2, TypM param3]
+      [param1, param2, param3]
       [dict1, dict2, dict3]
   where
     param1 = getParamType pv1 subst
@@ -337,7 +337,7 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
   withReprDict param3 $ \dict3 ->
   withReprDict param4 $ \dict4 ->
   return $ ExpM $ AppE defaultExpInfo dict_oper
-      [TypM param1, TypM param2, TypM param3, TypM param4]
+      [param1, param2, param3, param4]
       [dict1, dict2, dict3, dict4]
   where
     param1 = getParamType pv1 subst
@@ -352,7 +352,7 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
 createDict_list :: Var -> TypeSubst -> MkDict
 createDict_list param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_list)
@@ -360,7 +360,7 @@ createDict_list param_var subst = MkDict $
 createDict_referenced :: Var -> TypeSubst -> MkDict
 createDict_referenced param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Referenced)
@@ -368,7 +368,7 @@ createDict_referenced param_var subst = MkDict $
 createDict_Maybe :: Var -> TypeSubst -> MkDict
 createDict_Maybe param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Maybe)
@@ -376,7 +376,7 @@ createDict_Maybe param_var subst = MkDict $
 createDict_complex :: Var -> TypeSubst -> MkDict
 createDict_complex param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Complex)
@@ -385,7 +385,7 @@ createDict_array :: Var -> Var -> TypeSubst -> MkDict
 createDict_array param_var1 param_var2 subst = MkDict $
   withReprDict param2 $ \dict2 -> do
     index <- lookupIndexedInt' param1
-    return $ ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
+    return $ ExpM $ AppE defaultExpInfo oper [param1, param2]
       [index, dict2]
   where
     param1 = getParamType param_var1 subst
@@ -397,7 +397,7 @@ createDict_array param_var1 param_var2 subst = MkDict $
 
 createDict_storedBox :: Var -> TypeSubst -> MkDict
 createDict_storedBox param_var subst = MkDict $ do
-  return $ ExpM $ AppE defaultExpInfo oper [TypM param] []
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Box)
@@ -423,13 +423,13 @@ createBoxedDictPattern con arity = do
         param_types = [getParamType v subst | v <- param_vars]
         dict_type = varApp con param_types
         op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Box)
-        expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
+        expr = ExpM $ AppE defaultExpInfo op [dict_type] []
 
 createDict_index param_var subst = MkDict $ do
   -- The Repr object for an @index sh@ is stored in the @ShapeDict sh@.  
   -- Look it up in the shape dictionary if it's not in the environment.
   shape_dict <- lookupShapeDict' param
-  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [shape_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] [shape_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_shapeIndexRepr)
@@ -438,7 +438,7 @@ createDict_slice param_var subst = MkDict $ do
   -- The Repr object for a @slice sh@ is stored in the @ShapeDict sh@.  
   -- Look it up in the shape dictionary if it's not in the environment.
   shape_dict <- lookupShapeDict' param
-  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [shape_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] [shape_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_shapeSliceRepr)
@@ -447,7 +447,7 @@ createInt_min param_var1 param_var2 subst = MkDict $ do
   int1 <- lookupIndexedInt' param1
   int2 <- lookupIndexedInt' param2
   return $ ExpM $
-    AppE defaultExpInfo oper [TypM param1, TypM param2] [int1, int2]
+    AppE defaultExpInfo oper [param1, param2] [int1, int2]
   where
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
@@ -458,7 +458,7 @@ createInt_minus param_var1 param_var2 subst = MkDict $ do
   int1 <- lookupIndexedInt' param1
   int2 <- lookupIndexedInt' param2
   return $ ExpM $
-    AppE defaultExpInfo oper [TypM param1, TypM param2] [int1, int2]
+    AppE defaultExpInfo oper [param1, param2] [int1, int2]
   where
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst

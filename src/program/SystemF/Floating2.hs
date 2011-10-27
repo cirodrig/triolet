@@ -69,7 +69,7 @@ isFloatableFunctionArg (ExpM expression) =
   case expression
   of VarE {} -> return True
      LitE {} -> return True
-     ConE _ (CInstM con) args -> isFloatableData con args
+     ConE _ con args -> isFloatableData con args
      AppE _ (ExpM (VarE _ op_var)) _ args -> isFloatableFunction op_var args
      _ -> return False
 
@@ -222,7 +222,7 @@ floatExp expression =
        
        -- If constructing a known-safe singleton type, float the constructor
        -- outward as far as possible
-       if isDictionaryConInst $ fromCInstM con
+       if isDictionaryConInst con
          then do
            ty <- inferExpType expression
            joinInContext new_exp $ asLetContext ty
@@ -301,7 +301,7 @@ floatCaseExp inf scr alts =
   of ExpM (VarE {}) -> do
        tenv <- getTypeEnv
        case alts of
-         [AltM (Alt (DeCInstM decon) params body)] -> do
+         [AltM (Alt decon params body)] -> do
            floatable <- isFloatableDecon decon 
            if floatable
              then float decon params body
@@ -329,7 +329,7 @@ floatCaseExp inf scr alts =
                     assumePatMs params' $
                     floatExp body'
         return $
-          caseContext False inf scr (DeCInstM decon') params' [] ctx_body
+          caseContext False inf scr decon' params' [] ctx_body
 
 -- When floating let expressions, we take care to ensure that floating in the
 -- body is not restricted.  Consider the expression
@@ -360,10 +360,10 @@ floatLetExp inf pat rhs body = do
     make_let rhs' body' = ExpM $ LetE inf pat rhs' body'
 
 floatAlt :: AltM -> Flt (Contexted AltM)
-floatAlt (AltM (Alt (DeCInstM decon) params body)) = do
+floatAlt (AltM (Alt decon params body)) = do
   ctx_body <- enterScope' (deConExTypes decon) params (inferExpType body) $
               floatExp body
-  return $ mapContext (\e -> AltM $ Alt (DeCInstM decon) params e) ctx_body
+  return $ mapContext (\e -> AltM $ Alt decon params e) ctx_body
 
 -- | Perform floating in a function.
 --
@@ -374,20 +374,20 @@ floatFun :: [Binder] -> FunM -> Flt (Contexted FunM)
 floatFun fun_binders (FunM f@(Fun inf ty_params params return_type body)) = do
   fun_body <-
     enterScopeOfVars fun_binders get_return_type $
-    enterScope' [p | TyPatM p <- ty_params] params get_return_type $
+    enterScope' [p | TyPat p <- ty_params] params get_return_type $
     floatExp body
   return $ mapContext (\e -> FunM $ f {funBody = e}) fun_body
   where
-    get_return_type = return $ fromTypM return_type
+    get_return_type = return return_type
 
 -- | Perform floating in a top-level function.  Nothing is floated out of
 --   the function.
 floatTopLevelFun :: FunM -> Flt FunM
 floatTopLevelFun (FunM f@(Fun inf ty_params params return_type body)) =
-  assumeBinders [p | TyPatM p <- ty_params] $ 
+  assumeBinders [p | TyPat p <- ty_params] $ 
   assumePatMs params $ do
     ctx_body <- floatExp body
-    body <- contextExpression ctx_body (fromTypM return_type)
+    body <- contextExpression ctx_body return_type
     return $ FunM (f {funBody = body})
 
 -- | Perform floating in a top-level definition group

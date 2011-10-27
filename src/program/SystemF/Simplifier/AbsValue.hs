@@ -367,9 +367,9 @@ substitutePatMs :: EvalMonad m =>
                    AbsSubst -> [PatM] -> (AbsSubst -> [PatM] -> m a) -> m a
 substitutePatMs = renameMany substitutePatM
 
-substituteTyPatM s (TyPatM binder) k =
+substituteTyPatM s (TyPat binder) k =
   Substitute.substituteBinder (typeSubst s) binder $ \ts' binder' ->
-  k (s {typeSubst = ts'}) (TyPatM binder')
+  k (s {typeSubst = ts'}) (TyPat binder')
 
 substituteTyPatMs = renameMany substituteTyPatM
 
@@ -461,11 +461,11 @@ substituteFun s (FunM f) =
     body <- substituteExp s'' (funBody f)
     return $ FunM $ Fun (funInfo f) ty_params params ret body
 
-substituteAlt s (AltM (Alt (DeCInstM decon) params body)) =
+substituteAlt s (AltM (Alt decon params body)) =
   substituteDeConInst s decon $ \s' decon' ->
   substitutePatMs s' params $ \s'' params' -> do
     body' <- substituteExp s body
-    return $ AltM (Alt (DeCInstM decon') params' body')
+    return $ AltM (Alt decon' params' body')
 
 substituteAbsValue s value =
   case value
@@ -661,7 +661,7 @@ applyAbsFun (AbsFun ty_params params body) ty_args args
     type_error = internalError "applyAbsFun: Type error detected"
 
 -- | Construct an abstract value for a function
-funValue :: [TyPatM] -> [PatM] -> AbsComputation -> AbsCode
+funValue :: [TyPat] -> [PatM] -> AbsComputation -> AbsCode
 funValue typarams params body =
   -- If value of body is 'Top' or 'Return Top', then approximate the
   -- function as 'Top'.
@@ -674,7 +674,7 @@ funValue typarams params body =
   case body
   of TopAC -> topCode
      ReturnAC val | TopAV <- codeValue val -> topCode
-     _ -> valueCode $ FunAV (AbsFun [b | TyPatM b <- typarams] params body)
+     _ -> valueCode $ FunAV (AbsFun [b | TyPat b <- typarams] params body)
 
 -- | Given a data value and its type, construct the value of the
 -- corresponding initializer function.
@@ -852,7 +852,7 @@ concretizeFun fun_type (AbsFun ty_params params body) =
     return_type = unpackFunctionType fun_type ty_params params
     make_function e =
       ExpM $ LamE defaultExpInfo $
-      FunM $ Fun defaultExpInfo (map TyPatM ty_params) params (TypM return_type) e
+      FunM $ Fun defaultExpInfo (map TyPat ty_params) params return_type e
 
 unpackFunctionType fun_type ty_params params =
   do_typarams Rename.empty fun_type ty_params params

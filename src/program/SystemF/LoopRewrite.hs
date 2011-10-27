@@ -89,7 +89,7 @@ otherLoopOperator v =
             ]
 
 -- | Use rewrite rules on an application
-useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)
+useRewriteRules :: ExpInfo -> Var -> [Type] -> [ExpM] -> LRW (Maybe ExpM)
 useRewriteRules inf op_var ty_args args = ReaderT $ \env ->
   rewriteApp parallelizingRewrites (intIndexEnv (dictEnv env)) (varSupply env) (typeEnv env)
   inf op_var ty_args (map deferEmptySubstitution args)
@@ -99,7 +99,7 @@ useRewriteRules inf op_var ty_args args = ReaderT $ \env ->
 --
 --   The function must have a known parallel form, and it must be
 --   applied to all input arguments (output arguments are not required).
-replaceWithParallelApp :: ExpInfo -> Var -> [TypM] -> [ExpM]
+replaceWithParallelApp :: ExpInfo -> Var -> [Type] -> [ExpM]
                        -> LRW (Maybe ExpM)
 replaceWithParallelApp inf op_var ty_args args = ReaderT $ \env ->
   return $! do

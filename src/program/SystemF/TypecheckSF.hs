@@ -2,18 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables, TypeFamilies, EmptyDataDecls,
              FlexibleInstances, DeriveDataTypeable, TypeSynonymInstances #-}
 module SystemF.TypecheckSF
-       (Typed,
-        TypeAnn(..),
-        HasType(..),
-        Typ(..),
-        Exp(..),
-        Alt(..),
-        Fun(..),
-        Pat(..),
-        TyPat(..),
-        TypTSF, ExpTSF, AltTSF, FunTSF, PatTSF,
-        fromTypTSF,
-        functionType,
+       (functionType,
         typeCheckModule,
         inferExpType)
 where
@@ -48,46 +37,8 @@ import Type.Type
 import qualified Type.Rename as Rename
 import Type.Compare
 
-newtype instance Typ (Typed SF) = TypTSF (TypeAnn Type)
-newtype instance Exp (Typed SF) = ExpTSF (TypeAnn (BaseExp TSF))
-newtype instance Alt (Typed SF) = AltTSF (TypeAnn (BaseAlt TSF))
-newtype instance Fun (Typed SF) = FunTSF (TypeAnn (BaseFun TSF))
-newtype instance CInst (Typed SF) = CInstTSF ConInst
-newtype instance DeCInst (Typed SF) = DeCInstTSF DeConInst
-
-data instance Pat (Typed SF) =
-    TypedWildP TypTSF
-  | TypedVarP Var TypTSF
-  | TypedTupleP [Pat (Typed SF)]
-
-data instance TyPat (Typed SF) = TyPatTSF Var TypTSF
-
-type TSF = Typed SF
-
-type TypTSF = Typ TSF
-type ExpTSF = Exp TSF
-type AltTSF = Alt TSF
-type FunTSF = Fun TSF
-type PatTSF = Pat TSF
-type TyPatTSF = TyPat TSF
-
-instance HasType TypTSF where
-  getTypeAnn (TypTSF x) = typeAnnotation x
-
-instance HasType ExpTSF where
-  getTypeAnn (ExpTSF x) = typeAnnotation x
-
-instance HasType AltTSF where
-  getTypeAnn (AltTSF x) = typeAnnotation x
-
-instance HasType FunTSF where
-  getTypeAnn (FunTSF x) = typeAnnotation x
-
-fromTypTSF :: TypTSF -> Type 
-fromTypTSF (TypTSF (TypeAnn _ t)) = t
-
-tyPatType :: TyPat SF -> Type
-tyPatType (TyPatSF (_ ::: t)) = t
+tyPatType :: TyPat -> Type
+tyPatType (TyPat (_ ::: t)) = t
 
 patType :: PatSF -> Type
 patType (WildP t)  = t
@@ -99,26 +50,28 @@ patType (TupleP ps) = let con = VarT $ pyonTupleTypeCon (length ps)
 functionType :: FunSF -> Type 
 functionType (FunSF (Fun { funTyParams = ty_params
                          , funParams = params
-                         , funReturn = TypSF ret
+                         , funReturn = ret
                          })) =
-  forallType [b | TyPatSF b <- ty_params] $
+  forallType [b | TyPat b <- ty_params] $
   funType [patType p | p <- params] ret
 
 -------------------------------------------------------------------------------
 
-assumePat :: PatSF -> (PatTSF -> TCM b) -> TCM b
+assumePat :: PatSF -> TCM b -> TCM b
 assumePat p k =
   case p
-  of WildP p_ty -> k . TypedWildP =<< typeInferType (TypSF p_ty)
+  of WildP p_ty -> typeInferType p_ty >> k
      VarP v p_ty -> do
-       p_ty' <- typeInferType (TypSF p_ty)
-       assume v p_ty $ k (TypedVarP v p_ty')
-     TupleP pats -> withMany assumePat pats $ \pats' -> k (TypedTupleP pats')
+       typeInferType p_ty
+       assume v p_ty k
+     TupleP pats -> assumePats pats k
 
-assumeTyPat :: TyPat SF -> (TyPat TSF -> TCM b) -> TCM b
-assumeTyPat (TyPatSF (v ::: t)) k = do
-  t' <- typeInferType (TypSF t)
-  assume v t $ k (TyPatTSF v t')
+assumePats pats m = foldr assumePat m pats
+
+assumeTyPat :: TyPat -> TCM b -> TCM b
+assumeTyPat (TyPat (v ::: t)) k = do
+  t' <- typeInferType t
+  assume v t k
 
 -- Assume a function definition.  Do not check the function definition's body.
 assumeDef :: Def SF -> TCM a -> TCM a
@@ -126,25 +79,22 @@ assumeDef (Def v _ fun) = assume v (functionType fun)
 
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
-typeInferType :: TypSF -> TCM TypTSF
-typeInferType (TypSF ty) = do
-  k <- typeCheckType ty
-  return (TypTSF (TypeAnn k ty))
+typeInferType :: Type -> TCM Kind
+typeInferType = typeCheckType
 
-typeInferExp :: ExpSF -> TCM ExpTSF
+typeInferExp :: ExpSF -> TCM Type
 typeInferExp (ExpSF expression) =
     case expression
     of VarE {expInfo = inf, expVar = v} ->
          typeInferVarE inf v
-       ConE inf (CInstSF op) args ->
+       ConE inf op args ->
          typeInferConE inf op args
        LitE {expInfo = inf, expLit = l} ->
          typeInferLitE inf l
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
          typeInferAppE (ExpSF expression) inf op ts args
        LamE {expInfo = inf, expFun = f} -> do
-         ti_fun <- typeInferFun f
-         return $ ExpTSF $ TypeAnn (getTypeAnn ti_fun) (LamE inf ti_fun)
+         typeInferFun f
        LetE {expInfo = inf, expBinder = pat, expValue = e, expBody = body} ->
          typeInferLetE inf pat e body
        LetfunE {expInfo = inf, expDefs = defs, expBody = body} ->
@@ -153,23 +103,22 @@ typeInferExp (ExpSF expression) =
          typeInferCaseE inf scr alts
          
 -- To infer a variable's type, just look it up in the environment
-typeInferVarE :: ExpInfo -> Var -> TCM ExpTSF
+typeInferVarE :: ExpInfo -> Var -> TCM Type
 typeInferVarE inf var = do
   tenv <- getTypeEnv
   when (isJust $ lookupDataCon var tenv) $
     internalError $ "typeInferVarE: Data constructor used as variable: " ++ show var
 
-  ty <- lookupVar var
-  return $ ExpTSF $ TypeAnn ty (VarE inf var)
+  lookupVar var
 
 -- Use the type that was attached to the literal value, but also verify that
 -- it's a valid type
-typeInferLitE :: ExpInfo -> Lit -> TCM ExpTSF
+typeInferLitE :: ExpInfo -> Lit -> TCM Type
 typeInferLitE inf l = do
   -- Check that type is valid
   let literal_type = literalType l
   checkLiteralType l
-  return $ ExpTSF $ TypeAnn literal_type (LitE inf l)
+  return literal_type
 
 typeInferConE inf con@(VarCon op ty_args ex_types) args = do
   let pos = getSourcePos inf
@@ -177,37 +126,30 @@ typeInferConE inf con@(VarCon op ty_args ex_types) args = do
   op_type <- lookupVar op
   
   -- Apply to type arguments
-  ti_ty_args <- mapM (typeInferType . TypSF) ty_args
-  ti_ex_types <- mapM (typeInferType . TypSF) ex_types
-  inst_type <- computeInstantiatedType pos op_type (ti_ty_args ++ ti_ex_types)
+  ty_arg_kinds <- mapM typeInferType ty_args
+  ex_type_kinds <- mapM typeInferType ex_types
+  inst_type <- computeInstantiatedType pos op_type (zip ty_arg_kinds ty_args ++ zip ex_type_kinds ex_types)
 
   -- Apply to other arguments
-  ti_args <- mapM typeInferExp args
-  result_type <- computeAppliedType pos inst_type (map getTypeAnn ti_args)
-  
-  let new_exp = ConE inf (CInstTSF con) ti_args
-  return $ ExpTSF $ TypeAnn result_type new_exp
+  arg_types <- mapM typeInferExp args
+  computeAppliedType pos inst_type arg_types
 
 typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf
-  ti_op <- typeInferExp op
-  let op_type = getTypeAnn ti_op
+  op_type <- typeInferExp op
 
   -- Apply to type arguments
-  ti_ty_args <- mapM typeInferType ty_args
-  inst_type <- computeInstantiatedType pos op_type ti_ty_args
+  ty_arg_kinds <- mapM typeInferType ty_args
+  inst_type <- computeInstantiatedType pos op_type (zip ty_arg_kinds ty_args)
 
   -- Apply to other arguments
-  ti_args <- mapM typeInferExp args
-  result_type <- computeAppliedType pos inst_type (map getTypeAnn ti_args)
-  
-  let new_exp = AppE inf ti_op ti_ty_args ti_args
-  return $ ExpTSF $ TypeAnn result_type new_exp
+  arg_types <- mapM typeInferExp args
+  computeAppliedType pos inst_type arg_types
 
-computeInstantiatedType :: SourcePos -> Type -> [TypTSF] -> TCM Type
+computeInstantiatedType :: SourcePos -> Type -> [(Kind, Type)] -> TCM Type
 computeInstantiatedType inf op_type_ all_args = go op_type_ all_args
   where
-    go op_type (TypTSF (TypeAnn arg_kind arg) : args) = do
+    go op_type ((arg_kind, arg) : args) = do
       -- Apply operator to argument
       app_type <- typeOfTypeApp op_type arg_kind arg
       case app_type of
@@ -240,91 +182,72 @@ computeAppliedType pos op_type arg_types =
        parens (pprType arg_t) $$
        pprType op_type $$ vcat [text ">" <+> pprType t | t <- arg_types])
 
-typeInferFun :: FunSF -> TCM FunTSF
+typeInferFun :: FunSF -> TCM Type
 typeInferFun fun@(FunSF (Fun { funInfo = info
                              , funTyParams = ty_params
                              , funParams = params
                              , funReturn = return_type
                              , funBody = body})) =
-  assumeTyParams $ \new_ty_params -> assumeParams $ \new_params -> do
-    ti_body <- typeInferExp body
-    ti_return_type <- typeInferType return_type
+  assumeTyParams $ assumePats params $ do
+    body_type <- typeInferExp body
+    typeInferType return_type
     
     -- Inferred type must match return type
     checkType (text "Return type mismatch") (getSourcePos info)
-      (fromTypSF return_type) (getTypeAnn ti_body)
+      return_type body_type
     
     -- Create the function's type
-    let ty = functionType fun
-    
-    let new_fun =
-          Fun { funInfo = info
-              , funTyParams = new_ty_params
-              , funParams = new_params
-              , funReturn = ti_return_type
-              , funBody = ti_body
-              }
-    return $ FunTSF $ TypeAnn ty new_fun
+    return $ functionType fun
   where
-    assumeTyParams = withMany assumeTyPat ty_params
-    assumeParams = withMany assumePat params
+    assumeTyParams m = foldr assumeTyPat m ty_params
 
-typeInferLetE :: ExpInfo -> PatSF -> ExpSF -> ExpSF -> TCM ExpTSF
+typeInferLetE :: ExpInfo -> PatSF -> ExpSF -> ExpSF -> TCM Type
 typeInferLetE inf pat expression body = do
   ti_exp <- typeInferExp expression
   
   -- Expression type must match pattern type
   checkType (text "Let binder doesn't match type of right-hand side") (getSourcePos inf)
-    (getTypeAnn ti_exp) (patType pat)
+    ti_exp (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
-  assumePat pat $ \pat' -> do
-    ti_body <- typeInferExp body
-    let new_exp = LetE inf pat' ti_exp ti_body
-    return $ ExpTSF $ TypeAnn (getTypeAnn ti_body) new_exp
+  assumePat pat $ typeInferExp body
 
-typeInferLetfunE :: ExpInfo -> DefGroup (Def SF) -> ExpSF -> TCM ExpTSF
+typeInferLetfunE :: ExpInfo -> DefGroup (Def SF) -> ExpSF -> TCM Type
 typeInferLetfunE inf defs body =
-  typeCheckDefGroup defs $ \defs' -> do
-    ti_body <- typeInferExp body
-    let new_exp = LetfunE inf defs' ti_body
-    return $ ExpTSF $ TypeAnn (getTypeAnn ti_body) new_exp
+  typeCheckDefGroup defs $ typeInferExp body
 
-typeInferCaseE :: ExpInfo -> ExpSF -> [AltSF] -> TCM ExpTSF
+typeInferCaseE :: ExpInfo -> ExpSF -> [AltSF] -> TCM Type
 typeInferCaseE inf scr alts = do
   let pos = getSourcePos inf
 
   -- Get the scrutinee's type
-  ti_scr <- typeInferExp scr
-  let scr_type = getTypeAnn ti_scr
-  
+  scr_type <- typeInferExp scr
+
   when (null alts) $ typeError "Empty case statement"
 
   -- Match against each alternative
-  ti_alts <- mapM (typeCheckAlternative pos scr_type) alts
+  alt_types <- mapM (typeCheckAlternative pos scr_type) alts
 
   -- All alternatives must match
-  let alt_subst_types = map getTypeAnn ti_alts
-      msg = text "Case alternatives return different types"
-  zipWithM (checkType msg pos) alt_subst_types (tail alt_subst_types)
+  let msg = text "Case alternatives return different types"
+  zipWithM (checkType msg pos) alt_types (tail alt_types)
 
   -- The expression's type is the type of an alternative
-  let result_type = getTypeAnn $ head ti_alts
-  return $! ExpTSF $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
+  return $! head alt_types
 
-typeCheckAlternative :: SourcePos -> Type -> Alt SF -> TCM AltTSF
-typeCheckAlternative pos scr_type (AltSF (Alt (DeCInstSF con) fields body)) = do
+typeCheckAlternative :: SourcePos -> Type -> Alt SF -> TCM Type
+typeCheckAlternative pos scr_type (AltSF (Alt con fields body)) = do
   -- Data constructors are always constructor variables
   let VarDeCon con_var types ex_fields = con
       existential_vars = [v | v ::: _ <- ex_fields]
 
   -- Process arguments
-  arg_vals <- mapM (typeInferType . TypSF) types
+  type_kinds <- mapM typeInferType types
 
   -- Apply constructor to type arguments
   con_ty <- tcLookupDataCon con_var
   (_, arg_types, con_scr_type) <-
-    let argument_types = [(ty, kind) | TypTSF (TypeAnn kind ty) <- arg_vals]
+    let argument_types = zip types type_kinds
         existential_types = [(v, kind) | v ::: kind <- ex_fields]
     in instantiatePatternType pos con_ty argument_types existential_types
 
@@ -337,19 +260,17 @@ typeCheckAlternative pos scr_type (AltSF (Alt (DeCInstSF con) fields body)) = do
 
     -- Verify that fields have the expected types
     check_number_of_fields arg_types fields
-    fields' <- zipWithM (checkAltParam pos) arg_types fields
+    zipWithM_ (checkAltParam pos) arg_types fields
 
     -- Match the resulting type against the function type
     -- field1 -> field2 -> ... -> scr_type
-    ti_body <- bindParamTypes fields' $ typeInferExp body
+    ret_type <- bindParamTypes fields $ typeInferExp body
 
     -- The existential type must not escape
-    let ret_type = getTypeAnn ti_body
     when (ret_type `typeMentionsAny` Set.fromList existential_vars) $
       typeError "Existential variable escapes"
 
-    let new_alt = Alt (DeCInstTSF con) fields' ti_body
-    return $ AltTSF $ TypeAnn ret_type new_alt
+    return ret_type
   where
     check_number_of_fields atypes fs
       | length atypes /= length fields =
@@ -359,47 +280,44 @@ typeCheckAlternative pos scr_type (AltSF (Alt (DeCInstSF con) fields body)) = do
 
 bindParamTypes params m = foldr bind_param_type m params
   where
-    bind_param_type (TypedVarP param param_ty) m =
-      assume param (fromTypTSF param_ty) m
+    bind_param_type (VarP param param_ty) m =
+      assume param param_ty m
 
 -- | Verify that the given paramater matches the expected parameter
 checkAltParam pos expected_type (VarP field_var given_type) = do
-  gt <- typeInferType (TypSF given_type)
+  typeInferType given_type
   let msg = text "Wrong type in field of pattern"
-  checkType msg pos expected_type (fromTypTSF gt)
-  return (TypedVarP field_var gt)
+  checkType msg pos expected_type given_type
 
-typeCheckDefGroup :: DefGroup (Def SF) -> (DefGroup (Def TSF) -> TCM b) -> TCM b
+typeCheckDefGroup :: DefGroup (Def SF) -> TCM b -> TCM b
 typeCheckDefGroup defgroup k = 
   case defgroup
-  of Rec {} ->
-       assumeDefs defgroup (k =<< mapM typeCheckDef defgroup)
-     NonRec {} ->
-       (assumeDefs defgroup . k) =<< mapM typeCheckDef defgroup
+  of NonRec def -> do
+       typeCheckDef def
+       assumeDefs defgroup k
+     Rec defs -> assumeDefs defgroup $ do
+       mapM_ typeCheckDef defs
+       k
   where
     -- To typecheck a definition, check the function it contains
-    typeCheckDef def = mapMDefiniens typeInferFun def
+    typeCheckDef def = typeInferFun $ definiens def
 
-typeCheckExport :: Export SF -> TCM (Export TSF) 
+typeCheckExport :: Export SF -> TCM ()
 typeCheckExport (Export pos spec f) = do
-  f' <- typeInferFun f
-  return $ Export pos spec f'
+  typeInferFun f
+  return ()
 
 typeCheckModule (Module module_name [] defs exports) = do
   global_type_env <- readInitGlobalVarIO the_systemFTypes
   withTheNewVarIdentSupply $ \varIDs -> do
     let typecheck = typeCheckDefGroups defs exports
-    (defs', exports') <- runTypeEvalM typecheck varIDs global_type_env
-    return $ Module module_name [] defs' exports'
+    runTypeEvalM typecheck varIDs global_type_env
   where
     typeCheckDefGroups (defs:defss) exports = 
-      typeCheckDefGroup defs $ \defs' -> do
-        (defss', exports') <- typeCheckDefGroups defss exports
-        return (defs' : defss', exports')
+      typeCheckDefGroup defs $ typeCheckDefGroups defss exports
       
     typeCheckDefGroups [] exports = do 
-      exports' <- mapM typeCheckExport exports
-      return ([], exports')
+      mapM_ typeCheckExport exports
 
 typeCheckModule (Module {modImports = _:_}) =
   internalError "typeCheckModule: Import list is not empty"
@@ -417,7 +335,7 @@ inferExpType id_supply tenv expression =
       case fromExpSF expression
       of LamE _ f -> return $ functionType f
          LetE _ pat e body ->
-           assumePat pat $ \_ -> infer_exp body
+           assumePat pat $ infer_exp body
          LetfunE _ defs body ->
            assumeDefs defs $ infer_exp body
          CaseE _ _ (alt : _) ->
@@ -425,9 +343,9 @@ inferExpType id_supply tenv expression =
          ExceptE _ rt ->
            return rt
          _ ->
-           fmap getTypeAnn $ typeInferExp expression
+           typeInferExp expression
 
     infer_alt (AltSF alt) =
       assumeBinders (getAltExTypes alt) $
-      withMany assumePat (altParams alt) $ \_ ->
+      assumePats (altParams alt) $
       infer_exp $ altBody alt

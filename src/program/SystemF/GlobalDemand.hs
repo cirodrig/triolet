@@ -261,7 +261,7 @@ setupDefGroup group m = do
 
 makeDmdFun :: Maybe Var -> FunM -> Run () -> Setup DmdFun
 makeDmdFun m_name (FunM fun) evaluator =
-  assumeTyPatMs (funTyParams fun) $ assumePatMs (funParams fun) $ do
+  assumeTyPats (funTyParams fun) $ assumePatMs (funParams fun) $ do
     -- Create variables representing parameters and return values.
     -- Initialize with the demand analysis results that are annotated
     -- onto the function.
@@ -300,7 +300,7 @@ makeDmdFun m_name (FunM fun) evaluator =
 
 makeEvaluator :: FunM -> DmdFun -> Setup (Run ())
 makeEvaluator (FunM fun) dmd_fun = do
-  compute <- assumeTyPatMs (funTyParams fun) $
+  compute <- assumeTyPats (funTyParams fun) $
              assumePatMs (funParams fun) $
              setupExp (funBody fun)
   let recompute = do
@@ -323,7 +323,7 @@ setupFun m_name fun = do
 --   So, we analyze the function conservatively.
 setupLambdaFun :: FunM -> Setup (Run ())
 setupLambdaFun (FunM f) = 
-  assumeTyPatMs (funTyParams f) $
+  assumeTyPats (funTyParams f) $
   assumePatMs (funParams f) $ do
     eval_body <- setupExp (funBody f)
     return $ eval_body Used
@@ -493,12 +493,12 @@ evalCase scr alts dmd = do
 --   value is the demand imposed on the scrutinee.
 setupAlt :: AltM -> Setup (Specificity -> Run Specificity)
 setupAlt (AltM alt) =
-  assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $ assumePatMs (altParams alt) $ do
+  assumeBinders (deConExTypes $ altCon alt) $ assumePatMs (altParams alt) $ do
     eval_body <- setupExp $ altBody alt
 
     return $ evalAlt (altCon alt) (altParams alt) eval_body
 
-evalAlt (DeCInstM mono_con) params eval_body dmd = do
+evalAlt mono_con params eval_body dmd = do
   ((), param_demands) <- getDemandPats params $ eval_body dmd
   return $ Decond mono_con param_demands
 

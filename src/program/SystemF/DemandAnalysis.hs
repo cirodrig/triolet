@@ -197,8 +197,8 @@ withTyBinder pat@(v ::: ty) m = do
 
 withTyBinders = withManyBinders withTyBinder
 
-withTyPat :: TyPatM -> Df a -> Df (TyPatM, a)
-withTyPat pat@(TyPatM (v ::: ty)) m = do
+withTyPat :: TyPat -> Df a -> Df (TyPat, a)
+withTyPat pat@(TyPat (v ::: ty)) m = do
   dfType ty
   x <- maskDemand v $ assume v ty m
   return (pat, x)
@@ -241,8 +241,8 @@ dmdExpWorker is_initializer spc expressionM@(ExpM expression) =
      CaseE inf scr alts -> dmdCaseE spc inf scr alts
      ExceptE _ ty -> dfType ty >> return expressionM
      CoerceE inf t1 t2 e -> do
-       dfType $ fromTypM t1
-       dfType $ fromTypM t2
+       dfType t1
+       dfType t2
        e' <- dmdExp spc e
        return $ ExpM $ CoerceE inf t1 t2 e'
   where
@@ -256,7 +256,7 @@ dmdExpWorker is_initializer spc expressionM@(ExpM expression) =
 
 dmdConE inf con args = do
   tenv <- ask
-  let field_kinds = conFieldKinds tenv (fromCInstM con)
+  let field_kinds = conFieldKinds tenv con
   args' <- zipWithM compute_uses field_kinds args
 
   return $ ExpM $ ConE inf con args'
@@ -339,7 +339,7 @@ dmdCaseE result_spc inf scrutinee alts = do
   -- If there's only one alternative and none of its fields are used, then
   -- eliminate the entire case statement
   case alts' of
-    [AltM alt'] | null (deConExTypes $ fromDeCInstM $ altCon alt') &&
+    [AltM alt'] | null (deConExTypes $ altCon alt') &&
                   all isDeadPattern (altParams alt') ->
       return $ altBody alt'
     _ -> do
@@ -350,7 +350,7 @@ dmdCaseE result_spc inf scrutinee alts = do
 -- | Construct the specificity for a case scrutinee, based on how its value
 --   is bound by a case alternative
 altSpecificity :: AltM -> Specificity
-altSpecificity (AltM alt) = Decond (fromDeCInstM $ altCon alt) fields
+altSpecificity (AltM alt) = Decond (altCon alt) fields
   where
     fields = map (specificity . patMDmd) $ altParams alt
 
@@ -365,15 +365,15 @@ altListSpecificity _   = Inspected
 -- | Do demand analysis on a case alternative.  Return the demand on the
 --   scrutinee.
 dmdAlt :: Specificity -> AltM -> Df (AltM, Specificity)
-dmdAlt result_spc (AltM (Alt (DeCInstM (VarDeCon con ty_args ex_types)) params body)) = do
+dmdAlt result_spc (AltM (Alt (VarDeCon con ty_args ex_types) params body)) = do
   mapM_ dfType ty_args
   (typats', (pats', body')) <-
     withTyBinders ex_types $ withParams params $ dmdExp result_spc body
 
-  let new_alt = AltM $ Alt (DeCInstM (VarDeCon con ty_args typats')) pats' body'
+  let new_alt = AltM $ Alt (VarDeCon con ty_args typats') pats' body'
   return (new_alt, altSpecificity new_alt)
 
-dmdAlt result_spc (AltM (Alt decon@(DeCInstM (TupleDeCon _)) params body)) = do
+dmdAlt result_spc (AltM (Alt decon@(TupleDeCon _) params body)) = do
   (pats', body') <-
     withParams params $ dmdExp result_spc body
 
@@ -387,7 +387,7 @@ dmdFun is_initializer (FunM f) = do
     underLambda is_initializer $
     withTyPats (funTyParams f) $
     withParams (funParams f) $ do
-      dfType $ fromTypM $ funReturn f
+      dfType $ funReturn f
       dmdExp Used (funBody f)
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 

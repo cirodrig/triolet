@@ -160,7 +160,7 @@ mapOverTailExps f expression =
      _ -> f expression
   where
     map_alt (AltM alt) =
-      assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $
+      assumeBinders (deConExTypes $ altCon alt) $
       assumePats (altParams alt) $ do
         body <- mapOverTailExps f $ altBody alt
         return $ AltM (alt {altBody = body})
@@ -249,7 +249,7 @@ unpacksToAValue _ (FlatRet _ (DeadDecomp _)) = True
 -- | Flatten a decomposition.  Decomposed type parameters and fields are
 --   transformed and collected by a monoid.
 flattenDecomp :: Monoid a =>
-                 (TyPatM -> a)  -- ^ Extract value from a type parameter
+                 (TyPat -> a)  -- ^ Extract value from a type parameter
               -> (PatM -> a)    -- ^ Extract value from a field
               -> a              -- ^ Value of an identity decomposition
               -> Decomp         -- ^ Decomposition to flatten
@@ -259,7 +259,7 @@ flattenDecomp typaram field x decomp = go x decomp
     go x IdDecomp = x
     go _ (DeadDecomp _) = mempty
     go _ (DeconDecomp decon fields) =
-      mconcat $ map (typaram . TyPatM) (deConExTypes decon) ++
+      mconcat $ map (typaram . TyPat) (deConExTypes decon) ++
                 [go (field p) d | (p, d) <- map fromFlatArg fields]
 
 -- | Flatten a decomposition that doesn't introduce type parameters
@@ -395,7 +395,7 @@ packedParameter (FlatArg pat _) = Just pat
 packedParameter (DummyArg _)    = Nothing
 
 -- | Get the flattened argument list from a flattened parameter
-flattenedParameter :: FlatArg -> ([TyPatM], [PatM])
+flattenedParameter :: FlatArg -> ([TyPat], [PatM])
 flattenedParameter (FlatArg pat decomp) =
   flattenDecomp put_typat put_pat (put_pat pat) decomp
   where
@@ -405,14 +405,14 @@ flattenedParameter (FlatArg pat decomp) =
 flattenedParameter (DummyArg pat) = ([], [pat])
 
 -- | Get the flattened argument list from a sequence of flattened parameters
-flattenedParameters :: FlatArgs -> ([TyPatM], [PatM])
+flattenedParameters :: FlatArgs -> ([TyPat], [PatM])
 flattenedParameters xs = mconcat $ map flattenedParameter xs
 
-flattenedParameterValue :: FlatArg -> ([TypM], [ExpM])
+flattenedParameterValue :: FlatArg -> ([Type], [ExpM])
 flattenedParameterValue (FlatArg pat decomp) =
   flattenDecomp put_typat put_pat (put_pat pat) decomp
   where
-    put_typat (TyPatM (a ::: _)) = ([TypM (VarT a)], [])
+    put_typat (TyPat (a ::: _)) = ([VarT a], [])
     put_pat p = ([], [ExpM $ VarE defaultExpInfo (patMVar p)])
 
 flattenedParameterValue (DummyArg _) =
@@ -420,7 +420,7 @@ flattenedParameterValue (DummyArg _) =
 
 -- | Get the flattened parameter values from a sequence of flattened
 --   parameters.  Each value is a type variable or variable expression.
-flattenedParameterValues :: FlatArgs -> ([TypM], [ExpM])
+flattenedParameterValues :: FlatArgs -> ([Type], [ExpM])
 flattenedParameterValues xs = mconcat $ map flattenedParameterValue xs
 
 -- | Information about a list of decomposed return parameters.
@@ -444,14 +444,14 @@ flattenReturnDecomp f decomp =
 
 -- | Get the flattened return type.  Only valid if
 --   @flattenedReturnsBySideEffect flat_ret == False@.
-flattenedReturnType :: TypeEnv -> FlatRet -> TypM
+flattenedReturnType :: TypeEnv -> FlatRet -> Type
 flattenedReturnType tenv flat_ret =
   let flat_type = frType flat_ret
       flat_decomp = frDecomp flat_ret
   in case flattenReturnDecomp patMType flat_decomp
-     of Just [t] -> TypM t
-        Just ts  -> TypM $ unboxedTupleType tenv ts
-        Nothing  -> TypM flat_type
+     of Just [t] -> t
+        Just ts  -> unboxedTupleType tenv ts
+        Nothing  -> flat_type
 
 -- | Get the parameter list to use to bind the flattened return values
 flattenedReturnParameters :: FlatRet -> Maybe [PatM]
@@ -468,7 +468,7 @@ flattenedReturnValue flat_ret =
   case flattenReturnDecomp var_exp $ frDecomp flat_ret
   of Just [e] -> fst e
      Just es  -> let (values, types) = unzip es
-                 in ExpM $ ConE defaultExpInfo (CInstM (TupleCon types)) values
+                 in ExpM $ ConE defaultExpInfo (TupleCon types) values
      Nothing  -> internalError "flattenedReturnValue"
   where
     var_exp pat = (ExpM $ VarE defaultExpInfo (patMVar pat), patMType pat)
@@ -486,7 +486,7 @@ bindFlattenedReturn inf patterns source_exp body =
   let pattern_types = map patMType patterns
       decon = TupleDeCon pattern_types
   in ExpM $ CaseE defaultExpInfo source_exp
-     [AltM $ Alt (DeCInstM decon) patterns body]
+     [AltM $ Alt decon patterns body]
 
 -------------------------------------------------------------------------------
 -- * Value packing and unpacking transformations
@@ -502,7 +502,7 @@ flattenParameter (FlatArg pat decomp) body =
      DeconDecomp decon fields ->
        let pattern_exp = ExpM $ VarE defaultExpInfo (patMVar pat)
            body' = flattenParameters fields body
-           alt = AltM $ Alt (DeCInstM decon) (map faPattern fields) body'
+           alt = AltM $ Alt decon (map faPattern fields) body'
        in ExpM $ CaseE defaultExpInfo pattern_exp [alt]
      DeadDecomp _ -> body
 
@@ -551,7 +551,7 @@ packParameterWrite' pat flat_arg =
          BareK -> do
            -- Insert a copy operation
            dict <- getReprDict ty
-           return $ appE defaultExpInfo copy_op [TypM ty] [dict, src]
+           return $ appE defaultExpInfo copy_op [ty] [dict, src]
          _ ->
            return src
     
@@ -679,7 +679,7 @@ deconReturn decon dc_fields decon_initializers decon_patterns expression =
 
       -- Attempt to deconstruct the tail expression
       case tail_exp of
-        ExpM (ConE inf (CInstM con) fields)
+        ExpM (ConE inf con fields)
           | summarizeDeconstructor decon /= summarizeConstructor con ->
             internalError "deconReturn: Unexpected data constructor"
           | otherwise ->
@@ -695,7 +695,7 @@ deconReturn decon dc_fields decon_initializers decon_patterns expression =
       consumer_exp <- decon_patterns
 
       -- Deconstruct the expression result
-      let match = AltM $ Alt (DeCInstM decon) (map faPattern dc_fields) consumer_exp
+      let match = AltM $ Alt decon (map faPattern dc_fields) consumer_exp
           case_of scrutinee = ExpM $ CaseE defaultExpInfo scrutinee [match]
 
       -- Bind the expression result
@@ -804,7 +804,7 @@ packReturn flat_ret orig_exp =
           DeconDecomp _ _ ->
             -- This can occur when returning something isomorphic to the
             -- unit value.  In this case, we should return a zero-tuple.
-            return $ ExpM $ ConE defaultExpInfo (CInstM (TupleCon [])) []
+            return $ ExpM $ ConE defaultExpInfo (TupleCon []) []
 
      Just patterns -> do
        -- Return value was deconstructed (DeconDecomp).
@@ -819,7 +819,7 @@ packReturn flat_ret orig_exp =
 --
 --   We use this for abstracting over output pointers.
 lambdaAbstractReturn :: (ReprDictMonad m, TypeEnvMonad m) =>
-                        TypM    -- ^ Expression's return type
+                        Type    -- ^ Expression's return type
                      -> PatM    -- ^ Parameter to abstract over
                      -> ExpM    -- ^ Expression
                      -> m ExpM  -- ^ Create a new expression
@@ -1084,7 +1084,7 @@ deadValue t = do
                let expr = ExpM $ ConE defaultExpInfo (dead_indint_op p) args
                return expr
          (CoT BoxK, [t1, t2]) ->
-           return $ ExpM $ AppE defaultExpInfo make_coercion_op [TypM t1, TypM t2] []
+           return $ ExpM $ AppE defaultExpInfo make_coercion_op [t1, t2] []
          _ -> internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
@@ -1092,25 +1092,25 @@ deadValue t = do
       return dead_bare
     _ -> internalError "deadValue: Unexpected kind"
   where
-    dead_box = ExpM $ AppE defaultExpInfo dead_box_op [TypM t] []
-    dead_bare = ExpM $ AppE defaultExpInfo dead_bare_op [TypM t] []
+    dead_box = ExpM $ AppE defaultExpInfo dead_box_op [t] []
+    dead_bare = ExpM $ AppE defaultExpInfo dead_bare_op [t] []
     dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadBox)
     dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadRef)
-    dead_proof_op p = CInstM (VarCon (pyonBuiltin The_deadProof) [p] [])
-    dead_finindint_op i = CInstM (VarCon (pyonBuiltin The_fiInt) [i] [])
-    dead_indint_op i = CInstM (VarCon (pyonBuiltin The_iInt) [i] [])
+    dead_proof_op p = VarCon (pyonBuiltin The_deadProof) [p] []
+    dead_finindint_op i = VarCon (pyonBuiltin The_fiInt) [i] []
+    dead_indint_op i = VarCon (pyonBuiltin The_iInt) [i] []
     make_coercion_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_unsafeMakeCoercion)
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>
-              PlanMode -> Specificity -> TypM -> m FlatRet
-planReturn mode spc (TypM ty) = do
+              PlanMode -> Specificity -> Type -> m FlatRet
+planReturn mode spc ty = do
   (whnf_type, decomp) <- planFlattening mode ty spc
   return $ FlatRet whnf_type decomp
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming a return-by-value function only.
 planValueReturn :: (ReprDictMonad m, EvalMonad m) =>
-                   TypM -> m PlanRet
+                   Type -> m PlanRet
 planValueReturn ty = liftM PlanRetValue $ planReturn mode Used ty
   where
     mode = PlanMode LiberalSmall Don'tUnpackExistentials
@@ -1125,7 +1125,7 @@ planOutputReturn pat = do
         case fromVarApp $ patMType pat
         of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr -> arg
            _ -> internalError "planOutputReturn: Expecting an output pointer"
-  flat_ret <- planReturn mode Used $ TypM return_type
+  flat_ret <- planReturn mode Used return_type
 
   -- Only perform decomposition if everything was converted to a value
   let real_ret =
@@ -1210,26 +1210,26 @@ planRetFlatRet (PlanRetWriter _ fr) = fr
 -- | Get the original return parameter and return
 --   type of a return flattening plan.
 --   They are used in the wrapper function.
-planRetOriginalInterface :: PlanRet -> ([PatM], TypM)
+planRetOriginalInterface :: PlanRet -> ([PatM], Type)
 planRetOriginalInterface (PlanRetValue fr) =
-  ([], TypM $ frType fr)
+  ([], frType fr)
 
 planRetOriginalInterface (PlanRetWriter p fr) =
   -- The return type is an effect type
   let ret_type = varApp (pyonBuiltin The_IEffect) [frType fr]
-  in ([p], TypM ret_type)
+  in ([p], ret_type)
 
 -- | Get the flattened return parameter and return type
 --   of a return flattening plan.
 --   They are used in the worker function.
-planRetFlattenedInterface :: TypeEnv -> PlanRet -> ([PatM], TypM)
+planRetFlattenedInterface :: TypeEnv -> PlanRet -> ([PatM], Type)
 planRetFlattenedInterface tenv (PlanRetValue fr) =
   ([], flattenedReturnType tenv fr)
 
 planRetFlattenedInterface tenv (PlanRetWriter p fr) =
   case frDecomp fr
   of IdDecomp ->
-       ([p], TypM $ varApp (pyonBuiltin The_IEffect) [frType fr])
+       ([p], varApp (pyonBuiltin The_IEffect) [frType fr])
      DeadDecomp {} ->
        -- Dead return values aren't handled currently
        internalError "planRetFlattenedInterface"
@@ -1241,7 +1241,7 @@ type PlanArgs = FlatArgs
 
 data FunctionPlan =
   FunctionPlan
-  { originalTyParams :: [TyPatM]
+  { originalTyParams :: [TyPat]
   , flatParams       :: PlanArgs
   , flatReturn       :: PlanRet
   }
@@ -1266,7 +1266,7 @@ printPlan f (FunctionPlan ty_params args ret) = do
          return r
   print $ nest 4 $ pprDecomp $ frDecomp flat_ret
   
-originalFunctionInterface :: FunctionPlan -> ([TyPatM], [PatM], TypM)
+originalFunctionInterface :: FunctionPlan -> ([TyPat], [PatM], Type)
 originalFunctionInterface p =
   let -- Output parameters and return types depend on whether the function
       -- returns by value
@@ -1279,7 +1279,7 @@ originalFunctionInterface p =
   in (originalTyParams p, params, return_type)
 
 flattenedFunctionInterface :: TypeEnv -> FunctionPlan
-                           -> ([TyPatM], [PatM], TypM)
+                           -> ([TyPat], [PatM], Type)
 flattenedFunctionInterface tenv p =
   let (output_params, return_type) =
         planRetFlattenedInterface tenv $ flatReturn p
@@ -1295,7 +1295,7 @@ flattenedFunctionInterface tenv p =
      else (ty_params, params, return_type)
 
 planFunction :: FunM -> AF FunctionPlan
-planFunction (FunM f) = assumeTyPatMs (funTyParams f) $ do
+planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
   -- Partition parameters into input and output parameters
   tenv <- getTypeEnv
   let (input_params, output_params) = partitionParameters tenv $ funParams f
@@ -1341,7 +1341,7 @@ mkWrapperFunction plan annotation wrapper_name worker_name = do
                            , funBody = wrapper_body}
   return $ mkWrapperDef annotation wrapper_name wrapper
   where
-    make_wrapper_body = assumeTyPatMs (originalTyParams plan) $ do
+    make_wrapper_body = assumeTyPats (originalTyParams plan) $ do
       -- Call the worker function and re-pack its arguments
       tenv <- getTypeEnv
       worker_call_exp <- worker_call tenv
@@ -1361,7 +1361,7 @@ mkWrapperFunction plan annotation wrapper_name worker_name = do
     -- function arguments.
     worker_call tenv =
       let orig_ty_args =
-            [TypM (VarT a) | TyPatM (a ::: _) <- originalTyParams plan]
+            [VarT a | TyPat (a ::: _) <- originalTyParams plan]
           (new_ty_args, input_args) =
             flattenedParameterValues (flatParams plan)
           (output_params, return_type) =
@@ -1400,7 +1400,7 @@ mkWorkerFunction plan annotation worker_name original_body = do
                           , funBody = worker_body}
   return $ mkWorkerDef annotation worker_name worker
   where
-    create_worker_body = assumeTyPatMs (originalTyParams plan) $ do
+    create_worker_body = assumeTyPats (originalTyParams plan) $ do
       -- If the function returned by reference, then lambda-abstract over 
       -- the original return parameter
       abstracted_body <-
@@ -1408,7 +1408,7 @@ mkWorkerFunction plan annotation worker_name original_body = do
         of PlanRetValue _ -> return original_body
            PlanRetWriter p fr ->
              let original_ret_type =
-                   TypM $ varApp (pyonBuiltin The_IEffect) [frType fr]
+                   varApp (pyonBuiltin The_IEffect) [frType fr]
              in lambdaAbstractReturn original_ret_type p original_body
 
       -- Repack the return value
@@ -1466,7 +1466,7 @@ flattenFunctionArguments def = do
   when False $ liftIO $ printPlan fun_name plan
 
   -- Flatten inside the function body
-  body <- assumeTyPatMs (funTyParams fun) $ assumePats (funParams fun) $ do
+  body <- assumeTyPats (funTyParams fun) $ assumePats (funParams fun) $ do
     flattenInExp $ funBody fun
   
   -- Construct wrapper if it's beneficial
@@ -1483,7 +1483,7 @@ flattenFunctionArguments def = do
 --   function's arguments
 flattenInFun :: FunM -> AF FunM
 flattenInFun (FunM f) =
-  assumeTyPatMs (funTyParams f) $ assumePats (funParams f) $ do
+  assumeTyPats (funTyParams f) $ assumePats (funParams f) $ do
     fun_body <- flattenInExp $ funBody f
     return $ FunM $ f {funBody = fun_body}
 
@@ -1535,7 +1535,7 @@ flattenInExp expression =
 
 flattenInAlt :: AltM -> AF AltM
 flattenInAlt (AltM alt) =
-  assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $
+  assumeBinders (deConExTypes $ altCon alt) $
   assumePats (altParams alt) $ do
     body' <- flattenInExp (altBody alt)
     return $ AltM $ alt {altBody = body'}

@@ -152,7 +152,7 @@ newRigidTyVar k lab = do
   return $! TyCon id lab k Nothing sfvar Nothing
 
 -- | Create a type constructor
-mkTyCon :: Label -> Kind -> SystemF.TypSF -> IO TyCon
+mkTyCon :: Label -> Kind -> Type.Type.Type -> IO TyCon
 mkTyCon name kind value = do
   id <- newTyConID
   let var = error "Type constructor is not a variable"
@@ -167,7 +167,7 @@ newTyFun name kind value = do
   id <- newTyConID
   let var = error "Type function is not a variable"
       con_descr = TyConDescr
-                  { tcSystemFValue = SystemF.TypSF $ Type.Type.VarT $
+                  { tcSystemFValue = Type.Type.VarT $
                                      clsTypeCon $ tfSignature value
                   , tcTypeFunction = Just value
                   }
@@ -591,7 +591,7 @@ tyVarToSystemF c
           writeIORef ref (Just v)
           return v
       
-tyConToSystemF :: TyCon -> IO SystemF.TypSF
+tyConToSystemF :: TyCon -> IO Type.Type.Type
 tyConToSystemF c
   | isTyVar c = fail "Expecting a constructor"
   | otherwise = return $ case tcConInfo c

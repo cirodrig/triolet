@@ -113,7 +113,7 @@ type TyVarSet = Set.Set TyCon
 data TyConDescr =
   TyConDescr
   { -- | The System F constructor
-    tcSystemFValue :: SF.TypSF
+    tcSystemFValue :: SF.Type
 
     -- | If the type constructor is a type function, this is a reference
     --   to the function.

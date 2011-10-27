@@ -468,7 +468,7 @@ instance Monoid Coercion where
 --   The argument is the @val@ type.
 toStoredCoercion :: Type -> Coercion
 toStoredCoercion ty = Coercion $ \k e ->
-  k (ExpM $ ConE defaultExpInfo (CInstM stored_con) [e])
+  k (ExpM $ ConE defaultExpInfo stored_con [e])
   where
     stored_con = VarCon (pyonBuiltin The_stored) [ty] []
 
@@ -481,7 +481,7 @@ fromStoredCoercion ty = Coercion $ \k e -> do
   
   -- Create a case statement
   let decon = VarDeCon (pyonBuiltin The_stored) [ty] []
-  let alt = AltM $ Alt { altCon = DeCInstM decon
+  let alt = AltM $ Alt { altCon = decon
                        , altParams = [patM (val_var ::: ty)]
                        , altBody = expr}
       cas = ExpM $ CaseE defaultExpInfo e [alt]
@@ -492,7 +492,7 @@ fromStoredCoercion ty = Coercion $ \k e -> do
 toBoxedTypeCoercion :: Type -> Coercion
 toBoxedTypeCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
-  k (ExpM $ AppE defaultExpInfo box_op [TypM ty] [dict, e])
+  k (ExpM $ AppE defaultExpInfo box_op [ty] [dict, e])
   where
     box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_convertToBoxed)
 
@@ -501,7 +501,7 @@ toBoxedTypeCoercion ty = Coercion $ \k e -> do
 toBareTypeCoercion :: Type -> Coercion
 toBareTypeCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
-  k (ExpM $ AppE defaultExpInfo bare_op [TypM ty] [dict, e])
+  k (ExpM $ AppE defaultExpInfo bare_op [ty] [dict, e])
   where
     bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_convertToBare)
 
@@ -510,7 +510,7 @@ toBareTypeCoercion ty = Coercion $ \k e -> do
 copyCoercion :: Type -> Coercion
 copyCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
-  k (ExpM $ AppE defaultExpInfo copy_op [TypM ty] [dict, e])
+  k (ExpM $ AppE defaultExpInfo copy_op [ty] [dict, e])
   where
     copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_copy)
 
@@ -531,8 +531,8 @@ writeLocalCoercion ty = Coercion $ \k e -> do
   read_var <- newAnonymousVar ObjectLevel
   (expr, x) <- k (ExpM $ VarE defaultExpInfo read_var)
   
-  let rhs = ExpM $ ConE defaultExpInfo (CInstM box_con) [e]
-      expr_alt = AltM $ Alt { altCon = DeCInstM box_decon
+  let rhs = ExpM $ ConE defaultExpInfo box_con [e]
+      expr_alt = AltM $ Alt { altCon = box_decon
                             , altParams = [patM (read_var ::: ty)]
                             , altBody = expr}
       body = ExpM $ CaseE defaultExpInfo
@@ -580,8 +580,8 @@ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
         body <- coerceExpToReturnType return_type e_rng call
 
         -- Create a lambda function
-        let fun_ty_args = [TyPatM d | d <- e_tydom]
-            fun_ret = TypM e_rng
+        let fun_ty_args = [TyPat d | d <- e_tydom]
+            fun_ret = e_rng
             fun =
               FunM $ Fun defaultExpInfo fun_ty_args e_params fun_ret body
         return $ ExpM $ LamE defaultExpInfo fun
@@ -829,7 +829,7 @@ resultOfCoercion from_type to_type app_result =
       let fun = FunM $ Fun { funInfo = defaultExpInfo
                            , funTyParams = []
                            , funParams = fun_params
-                           , funReturn = TypM result_type
+                           , funReturn = result_type
                            , funBody = fun_body}
       return $ ExpM $ LamE defaultExpInfo fun
       where
@@ -856,10 +856,10 @@ resultOfTypeApp result_type type_arg (FunAppResult base_exp _ co _) =
         -- if possible
         apply_type :: ExpM -> ExpM
         apply_type (ExpM (AppE inf op ty_args [])) =
-          ExpM $ AppE inf op (ty_args ++ [TypM type_arg]) []
+          ExpM $ AppE inf op (ty_args ++ [type_arg]) []
         
         apply_type e =
-          ExpM $ AppE defaultExpInfo e [TypM type_arg] []
+          ExpM $ AppE defaultExpInfo e [type_arg] []
 
 resultOfTypeApp result_type type_arg (VarConExpectingTypes con ty_args data_con _) =
   -- Does the result of type application have all type arguments?
@@ -1005,10 +1005,10 @@ applyToArg operator arg_type =
 -------------------------------------------------------------------------------
 -- Conversion of IR data structures
 
-reprTyPat :: TyPat SF -> (TyPatM -> RI a) -> RI a
-reprTyPat (TyPatSF (v ::: kind)) k =
+reprTyPat :: TyPat -> (TyPat -> RI a) -> RI a
+reprTyPat (TyPat (v ::: kind)) k =
   let kind' = cvtKind kind
-  in assumeTypeKinds v kind kind' $ k (TyPatM (v ::: kind'))
+  in assumeTypeKinds v kind kind' $ k (TyPat (v ::: kind'))
 
 reprLocalPat :: PatSF -> (PatM -> RI a) -> RI a
 reprLocalPat (VarP v t) k = do
@@ -1021,8 +1021,8 @@ reprParam (VarP v t) k = do
   let pattern = patM (v ::: t')
   saveReprDictPattern pattern $ assumeValueTypes v t t' $ k pattern
 
-reprRet :: TypSF -> RI TypM
-reprRet (TypSF t) = fmap (TypM . fst) $ cvtNormalizeReturnType t
+reprRet :: Type -> RI Type
+reprRet t = fmap fst $ cvtNormalizeReturnType t
 
 -- | Convert an expression's representation
 reprExp :: ExpSF -> RI (ExpM, Type)
@@ -1059,7 +1059,7 @@ reprExp expression =
        (t', _) <- cvtNormalizeNaturalType t
        return (ExpM $ ExceptE inf t', t')
 
-     CoerceE inf (TypSF from_t) (TypSF to_t) body -> do
+     CoerceE inf from_t to_t body -> do
        -- The two types involved in the coercion may have different
        -- natural kinds.  Ensure that the types are converted to the _same_
        -- canonical kind.
@@ -1072,10 +1072,10 @@ reprExp expression =
        
        -- The new return type is the boxed version of to_t
        to_t' <- cvtCanonicalReturnType to_t
-       return (ExpM $ CoerceE inf (TypM from_t') (TypM to_t') co_body, to_t')
+       return (ExpM $ CoerceE inf from_t' to_t' co_body, to_t')
 
 reprCon inf op args = do
-  let CInstSF (VarCon con ty_args []) = op
+  let VarCon con ty_args [] = op
 
   -- Compute representations of arguments
   repr_ty_args <- mapM cvtNormalizeCanonicalType ty_args
@@ -1086,7 +1086,7 @@ reprCon inf op args = do
 
 reprApp inf op ty_args args = do
   (op', op_type) <- reprExp op
-  repr_ty_args <- mapM (cvtNormalizeCanonicalType . fromTypSF) ty_args
+  repr_ty_args <- mapM cvtNormalizeCanonicalType ty_args
   args' <- mapM reprExp args
 
   -- Compute result type and coerce arguments
@@ -1108,7 +1108,7 @@ reprCase original_exp inf scr alts = do
 --   the return type.
 reprAlt :: Type -> AltSF -> RI AltM
 reprAlt return_type (AltSF alt) = do
-  let DeCInstSF (VarDeCon op ty_args ex_types) = altCon alt 
+  let VarDeCon op ty_args ex_types = altCon alt 
   con_type <- riLookupDataCon op
 
   -- Convert type arguments and coerce to match the data type
@@ -1130,7 +1130,7 @@ reprAlt return_type (AltSF alt) = do
       -- Coerce the body's result
       co_body <- coerceExpToReturnType body_type return_type body
 
-      return $ AltM $ Alt { altCon = DeCInstM (VarDeCon op ty_args ex_types)
+      return $ AltM $ Alt { altCon = VarDeCon op ty_args ex_types
                           , altParams = map patM params
                           , altBody = co_body}
   where
@@ -1160,7 +1160,7 @@ reprFun (FunSF f) =
     ret <- reprRet (funReturn f)
     
     -- Coerce body to match the return type
-    co_body <- coerceExpToReturnType body_type (fromTypM ret) body
+    co_body <- coerceExpToReturnType body_type ret body
     
     return $ FunM (Fun { funInfo = funInfo f
                        , funTyParams = ty_params

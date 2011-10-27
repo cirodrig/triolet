@@ -257,7 +257,7 @@ ctxExpression ctx return_type body = go ctx
       ExpM $ ExceptE defaultExpInfo return_type
 
     alt alt_body (AltBinders decon params) =
-      AltM $ Alt (DeCInstM decon) params alt_body
+      AltM $ Alt decon params alt_body
 
     go (LetCtx inf pat rhs : ctx') =
       ExpM $ LetE inf pat rhs (go ctx')
@@ -346,13 +346,13 @@ letContext keep_demands inf pat rhs body =
 
 -- | Add a @case@ term to the outside of the given context
 caseContext :: Bool             -- ^ Whether to preserve demand annotations
-            -> ExpInfo -> ExpM -> DeCInstM -> [PatM] -> [AltM]
+            -> ExpInfo -> ExpM -> DeConInst -> [PatM] -> [AltM]
             -> Contexted a -> Contexted a
-caseContext keep_demands inf scr (DeCInstM decon) params ex_alts body =
+caseContext keep_demands inf scr decon params ex_alts body =
   let fix_demands = if keep_demands then id else clearDemand
       ex_binders =
         [AltBinders decon (map fix_demands pats)
-        | AltM (Alt (DeCInstM decon) pats _) <- ex_alts]
+        | AltM (Alt decon pats _) <- ex_alts]
       normal_binder = AltBinders decon (map fix_demands params)
   in addContextItem (CaseCtx inf scr normal_binder ex_binders) body
 
@@ -392,7 +392,7 @@ asCaseContext keep_demands (ExpM (CaseE inf scr alts)) =
   let (exc_alts, normal_alts) = partition isExceptingAlt alts
       exc_binders = map from_exc_alt exc_alts
   in case normal_alts
-     of [AltM (Alt (DeCInstM decon) params body)] -> 
+     of [AltM (Alt decon params body)] -> 
           let ctx = [CaseCtx inf scr (AltBinders decon (map fix_demands params)) exc_binders]
           in Just $ ApplyContext { _ctxFree = ctxFreeVariables ctx
                                  , _ctxContext = ctx
@@ -401,7 +401,7 @@ asCaseContext keep_demands (ExpM (CaseE inf scr alts)) =
   where
     fix_demands = if keep_demands then id else clearDemand
 
-    from_exc_alt (AltM (Alt (DeCInstM decon) params _)) =
+    from_exc_alt (AltM (Alt decon params _)) =
       AltBinders decon (map fix_demands params)
 
 asCaseContext _ _ = Nothing
@@ -446,11 +446,11 @@ pprContext show_body (ApplyContext {_ctxContext = c, _ctxBody = b}) =
       text "let" <+> hang decon_doc 4 (vcat $ map exception other_alts)
       where
         decon_doc =
-          hang (pprPatternMatch (AltM (Alt (DeCInstM decon) pats undefined)) <+> text "=") 4
+          hang (pprPatternMatch (AltM (Alt decon pats undefined)) <+> text "=") 4
           (pprExp scr)
         exception (AltBinders decon pats) =
           text "except if" <+>
-          pprPatternMatch (AltM (Alt (DeCInstM decon) pats undefined))
+          pprPatternMatch (AltM (Alt decon pats undefined))
 
     show_context (LetfunCtx _ defs) =
       text "letrec" <+> pprDefGroup defs

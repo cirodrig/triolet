@@ -392,8 +392,7 @@ convertHMType' ty = do
       v <- tyVarToSystemF c
       return $ Type.Type.VarT v
             | otherwise -> do
-      sf_ty <- tyConToSystemF c
-      return (SystemF.fromTypSF sf_ty)
+      tyConToSystemF c
       
     -- Function types should only appear within an AppTy term
     FunTy _ -> fail "Unexpected function type constructor"
@@ -422,7 +421,7 @@ convertHMType' ty = do
     TFunAppTy op ts -> do
       sf_op <- tyConToSystemF op
       sf_ts <- mapM convertHMType' ts
-      return $ Type.Type.typeApp (SystemF.fromTypSF sf_op) sf_ts
+      return $ Type.Type.typeApp sf_op sf_ts
 
     AnyTy k -> return $ Type.Type.AnyT $ convertKind' k
 

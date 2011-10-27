@@ -16,9 +16,6 @@ import Type.Var
 import Builtins.Builtins
 import SystemF.Syntax
 
-pprTyp :: TypSF -> Doc
-pprTyp (TypSF t) = pprType t
-
 pprPat :: PatSF -> Doc
 pprPat = pprPatFlags defaultPrintFlags
 
@@ -72,9 +69,9 @@ pprPatFlags flags pat =
      VarP v ty -> pprVarFlags flags v <+> colon <+> pprType ty
      TupleP ps -> tuple $ map (pprPatFlags flags) ps
 
-pprTyPatFlags :: PrintFlags -> TyPat SF -> Doc
-pprTyPatFlags flags (TyPatSF (v ::: ty)) =
-  pprVar v <+> colon <+> pprTyp (TypSF ty)
+pprTyPatFlags :: PrintFlags -> TyPat -> Doc
+pprTyPatFlags flags (TyPat (v ::: ty)) =
+  pprVar v <+> colon <+> pprType ty
 
 pprExpFlags :: PrintFlags -> ExpSF -> Doc
 pprExpFlags flags expression = pprExpFlagsPrec flags precOuter expression
@@ -101,7 +98,7 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
   of VarE {expVar = v} ->
          pprVarFlags flags v
      LitE {expLit = l} -> pprLit l
-     ConE _ (CInstSF (VarCon op ty_args ex_types)) args ->
+     ConE _ (VarCon op ty_args ex_types) args ->
        let op_doc = pprVar op
            tDoc = [text "@" <> pprType t | t <- ty_args]
            eDoc = [text "&" <> pprType t | t <- ex_types]
@@ -109,7 +106,7 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
        in hang op_doc 4 (tuple (tDoc ++ eDoc ++ aDoc))
      AppE {expOper = e, expTyArgs = ts, expArgs = es} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
-             tDoc = [text "@" <> pprTyp t | t <- ts]
+             tDoc = [text "@" <> pprType t | t <- ts]
              aDoc = map (pprExpFlagsPrec flags precOuter) es
          in hang eDoc 4 (tuple (tDoc ++ aDoc))
      LamE {expFun = f} ->
@@ -132,14 +129,14 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
        let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$
                  text "of" <+> vcat (map (pprAltFlags flags) alts)
        in parenthesize precOuter doc prec
-     CoerceE inf (TypSF from_t) (TypSF to_t) b ->
+     CoerceE inf from_t to_t b ->
        let coercion_doc = pprType from_t <+> text "=>" <+> pprType to_t
            b_doc = pprExpFlagsPrec flags precOuter b 
        in hang (text "coerce" <+> parens coercion_doc) 4 b_doc
   where
-    is_true (DeCInstSF (VarDeCon op _ _)) = op `isPyonBuiltin` The_True
+    is_true (VarDeCon op _ _) = op `isPyonBuiltin` The_True
     is_true _ = False
-    is_false (DeCInstSF (VarDeCon op _ _)) = op `isPyonBuiltin` The_False
+    is_false (VarDeCon op _ _) = op `isPyonBuiltin` The_False
     is_false _ = False
 
 pprIf flags cond tr fa =
@@ -154,7 +151,7 @@ pprIf flags cond tr fa =
 pprAltFlags :: PrintFlags -> AltSF -> Doc
 pprAltFlags flags (AltSF (Alt con params body)) = 
   let pattern =
-        case fromDeCInstSF con
+        case con
         of VarDeCon op ty_args ex_types ->
              let ty_args_doc = map (text "@" <>) $ map pprType ty_args
                  params_doc = [parens $ pprPatFlags flags p | p <- params]
@@ -179,7 +176,7 @@ pprFunParameters isLambda flags (FunSF fun) = sep param_doc
       -- Value parameters
       map (parens . pprPatFlags flags) (funParams fun) ++
       -- Return type
-      [introduce_return_type $ pprTyp (funReturn fun)]
+      [introduce_return_type $ pprType (funReturn fun)]
 
     introduce_return_type t
       | isLambda  = nest (-3) $ text "->" <+> t

@@ -21,8 +21,8 @@ module SystemF.Syntax
      joinHeapMap, outerJoinHeapMap,
      
      -- * Representation of code
-     Typ(..), Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
-     CInst(..), DeCInst(..),
+     Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
+     tyPatVar, tyPatKind,
 
      -- ** Annotations on expressions
      ExpInfo,
@@ -64,7 +64,7 @@ module SystemF.Syntax
      
      -- ** System F types
      SF,
-     TypSF, PatSF, ExpSF, AltSF, FunSF, CInst, DeCInstSF,
+     PatSF, ExpSF, AltSF, FunSF,
 
      -- * Utility functions
      isValueExp,
@@ -205,24 +205,14 @@ instance HasSourcePos ExpInfo where
 -- data format; different indices are used in different stages of the
 -- compiler to customize the data structures.
 
-data family Typ a               -- A type; can be a wrapper around 'Type'
 data family Pat a               -- A pattern binding
-data family TyPat a             -- A pattern binding for types
 data family Exp a               -- An expression
 data family Alt a               -- A case alternative
 data family Fun a               -- A function
-data family CInst a             -- A constructor instantiated to a type
-data family DeCInst a           -- A constructor pattern instantiated to a type
-
-instance Typeable1 Typ where
-  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Typ") []
 
 instance Typeable1 Pat where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Pat") []
           
-instance Typeable1 TyPat where
-  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.TyPat") []
-
 instance Typeable1 Exp where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Exp") []
 
@@ -232,30 +222,18 @@ instance Typeable1 Alt where
 instance Typeable1 Fun where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Fun") []
 
-instance Typeable1 CInst where
-  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.CInst") []
-
-instance Typeable1 DeCInst where
-  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.DeCInst") []
-
 -- | The System F code representation
 data SF
 
-type TypSF = Typ SF
 type PatSF = Pat SF
 type ExpSF = Exp SF
 type AltSF = Alt SF
 type FunSF = Fun SF
-type CInstSF = CInst SF
-type DeCInstSF = DeCInst SF
 
-newtype instance Typ SF = TypSF {fromTypSF :: Type}
 -- Pat SF is a data type
 newtype instance Exp SF = ExpSF {fromExpSF :: BaseExp SF}
 newtype instance Alt SF = AltSF {fromAltSF :: BaseAlt SF}
 newtype instance Fun SF = FunSF {fromFunSF :: BaseFun SF}
-newtype instance CInst SF = CInstSF {fromCInstSF :: ConInst}
-newtype instance DeCInst SF = DeCInstSF {fromDeCInstSF :: DeConInst}
 
 -- | Patterns
 data instance Pat SF =
@@ -264,7 +242,13 @@ data instance Pat SF =
   | TupleP [PatSF]                -- ^ Tuple pattern
 
 -- | Type-level patterns
-newtype instance TyPat SF = TyPatSF Binder
+newtype TyPat = TyPat Binder
+
+tyPatVar :: TyPat -> Var
+tyPatVar (TyPat (v ::: _)) = v
+
+tyPatKind :: TyPat -> Type
+tyPatKind (TyPat (_ ::: t)) = t
 
 -- | Expressions
 data BaseExp s =
@@ -282,7 +266,7 @@ data BaseExp s =
     --   Data constructor applications produce a value or initializer function.
   | ConE
     { expInfo      :: ExpInfo
-    , expCon       :: !(CInst s)
+    , expCon       :: !ConInst
     , expArgs      :: [Exp s]
     }
     {- Subsumed by ConE
@@ -296,7 +280,7 @@ data BaseExp s =
   | AppE
     { expInfo   :: ExpInfo
     , expOper   :: Exp s
-    , expTyArgs :: [Typ s]
+    , expTyArgs :: [Type]
     , expArgs   :: [Exp s]
     }
     -- | Lambda expression
@@ -331,18 +315,18 @@ data BaseExp s =
     -- | A type coercion
   | CoerceE
     { expInfo :: ExpInfo
-    , expArgType :: Typ s       -- ^ Type of body
-    , expRetType :: Typ s       -- ^ Type of coerced result
+    , expArgType :: Type        -- ^ Type of body
+    , expRetType :: Type        -- ^ Type of coerced result
     , expBody :: Exp s
     }
 
 data BaseAlt s =
-  Alt { altCon :: !(DeCInst s)
+  Alt { altCon :: !DeConInst
       , altParams :: [Pat s]
       , altBody :: Exp s
       }
 
-getAltExTypes alt = deConExTypes $ fromDeCInstSF $ altCon alt
+getAltExTypes alt = deConExTypes $ altCon alt
 
 -- | A summary of a data constructor.  For constructors of the same data type,
 --   two summaries are equal iff they were created from the same constructor
@@ -426,9 +410,9 @@ instance HasSourcePos (BaseExp s) where
 
 data BaseFun s =
   Fun { funInfo       :: ExpInfo
-      , funTyParams   :: [TyPat s]   -- ^ Type parameters
+      , funTyParams   :: [TyPat]     -- ^ Type parameters
       , funParams     :: [Pat s]     -- ^ Object parameters
-      , funReturn     :: Typ s       -- ^ Return type
+      , funReturn     :: Type        -- ^ Return type
       , funBody       :: Exp s
       }
 
@@ -613,7 +597,7 @@ isValueExp (ExpSF expression) =
        
 unpackPolymorphicCall :: ExpSF -> Maybe (ExpSF, [Type], [ExpSF])
 unpackPolymorphicCall (ExpSF (AppE {expOper = op, expTyArgs = ts, expArgs = xs})) =
-  Just (op, map fromTypSF ts, xs)
+  Just (op, ts, xs)
 
 unpackPolymorphicCall _ = Nothing
 

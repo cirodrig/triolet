@@ -3,7 +3,6 @@ module SystemF.PrintMemoryIR
        (pprLit,
         pprDmd,
         pprSpecificity,
-        pprTypM,
         pprTyPat,
         pprPat,
         pprPatternMatch,
@@ -70,10 +69,8 @@ pprSpecificity (Read (HeapMap m)) =
     cells = [text "()" <+> text "|->" <+> pprSpecificity s | (v, s) <- m]
 pprSpecificity Unused = text "0"
 
-pprTypM (TypM t) = pprType t
-
-pprTyPat :: TyPat Mem -> Doc
-pprTyPat (TyPatM (v ::: t)) = pprVar v <+> text ":" <+> pprType t
+pprTyPat :: TyPat -> Doc
+pprTyPat (TyPat (v ::: t)) = pprVar v <+> text ":" <+> pprType t
 
 pprPat :: PatM -> Doc
 pprPat (PatM (v ::: pt) uses) =
@@ -86,7 +83,7 @@ pprExpPrec (ExpM expression) =
   case expression
   of VarE _ v -> hasAtomicPrec $ pprVar v
      LitE _ l -> hasAtomicPrec $ pprLit l
-     ConE _ (CInstM (VarCon op ty_args ex_types)) args ->
+     ConE _ (VarCon op ty_args ex_types) args ->
        let op_doc = text "<" <> pprVar op <> text ">"
            ty_args_doc = pprTyArgs ty_args
            ex_types_doc = pprExTypeArgs ex_types
@@ -94,12 +91,12 @@ pprExpPrec (ExpM expression) =
        in hang op_doc appIndent (sep $ ty_args_doc ++ ex_types_doc ++ args_doc)
           `hasPrec` appPrec
 
-     ConE _ (CInstM (TupleCon _)) args ->
+     ConE _ (TupleCon _) args ->
        hasAtomicPrec $ pprParenList (map pprExp args)
 
      AppE _ op ty_args args ->
        let op_doc = pprExpPrec op ?+ appPrec
-           ty_args_doc = [text "@" <> pprTypePrec t ?+ appPrec | TypM t <- ty_args]
+           ty_args_doc = [text "@" <> pprTypePrec t ?+ appPrec | t <- ty_args]
            args_doc = [pprExpPrec arg ?+ appPrec | arg <- args]
        in hang op_doc appIndent (sep $ ty_args_doc ++ args_doc) `hasPrec` appPrec
 
@@ -126,19 +123,19 @@ pprExpPrec (ExpM expression) =
      ExceptE _ rt ->
        text "except" <+> pprType rt `hasPrec` stmtPrec
      CoerceE _ from_t to_t body ->
-       let coercion_doc = pprType (fromTypM from_t) <+> text "=>" <+> pprType (fromTypM to_t)
+       let coercion_doc = pprType from_t <+> text "=>" <+> pprType to_t
            b_doc = pprExp body
        in hang (text "coerce" <+> parens coercion_doc) letIndent b_doc `hasPrec` appPrec
 
 
-pprPatternMatch (AltM (Alt (DeCInstM (VarDeCon con ty_args ex_types)) params _)) =
+pprPatternMatch (AltM (Alt (VarDeCon con ty_args ex_types) params _)) =
   let con_doc = pprVar con
       args_doc = pprTyArgs ty_args
       ex_types_doc = pprExTypeBinders ex_types
       params_doc = map (parens . pprPat) params
   in hang con_doc appIndent (sep $ args_doc ++ ex_types_doc ++ params_doc)
 
-pprPatternMatch (AltM (Alt (DeCInstM (TupleDeCon _)) params _)) =
+pprPatternMatch (AltM (Alt (TupleDeCon _) params _)) =
   pprParenList (map pprPat params)
 
 pprAlt altm@(AltM alt) =
@@ -150,7 +147,7 @@ pprFun f = unparenthesized $ pprFunPrec f
 pprFunPrec (FunM fun) =
   let ty_params_doc = map pprTyPat $ funTyParams fun
       params_doc = map pprPat $ funParams fun
-      return_doc = pprTypePrec (fromTypM $ funReturn fun) ?+ funPrec
+      return_doc = pprTypePrec (funReturn fun) ?+ funPrec
       body_doc = pprExpPrec (funBody fun) ? stmtPrec
       sig_doc = sep [pprParenList (ty_params_doc ++ params_doc),
                      nest (-3) $ text "->" <+> return_doc]

@@ -19,25 +19,22 @@ import qualified Untyped.Data as U
 import Untyped.Data(TIType, TIConInst, TIDeConInst, TITyPat, TIPat, TIExp,
                     TIFun, TIDef, TIAlt, TIExport)
 
-evTypSF :: TIType -> IO TypSF
-evTypSF (U.DelayedType m) = fmap TypSF m
-
 evType :: TIType -> IO Type
 evType (U.DelayedType m) = m
 
-evTyParam :: TITyPat -> IO (TyPat SF)
+evTyParam :: TITyPat -> IO TyPat
 evTyParam (U.TITyPat v t) = do
   t' <- evType t
-  return (TyPatSF (v ::: t'))
+  return (TyPat (v ::: t'))
 
 evPat :: TIPat -> IO PatSF
 evPat (U.TIWildP t)   = WildP `liftM` evType t
 evPat (U.TIVarP v t)  = VarP v `liftM` evType t
 evPat (U.TITupleP ps) = TupleP `liftM` mapM evPat ps
 
-evCon :: TIConInst -> IO (CInst SF)
+evCon :: TIConInst -> IO ConInst
 evCon (U.TIConInst con ty_args ex_types) =
-  CInstSF <$> (VarCon con <$> mapM evType ty_args <*> mapM evType ex_types)
+  VarCon con <$> mapM evType ty_args <*> mapM evType ex_types
 
 evExp :: TIExp -> IO ExpSF
 evExp expression =
@@ -49,7 +46,7 @@ evExp expression =
      U.ConTE info con args ->
        ExpSF <$> (ConE info <$> evCon con <*> mapM evExp args)
      U.AppTE info op ts args ->
-       ExpSF <$> (AppE info <$> evExp op <*> mapM evTypSF ts <*> mapM evExp args)
+       ExpSF <$> (AppE info <$> evExp op <*> mapM evType ts <*> mapM evExp args)
      U.LamTE info f -> 
        ExpSF <$> (LamE info <$> evFun f)
      U.LetTE info p r b ->
@@ -59,7 +56,7 @@ evExp expression =
      U.CaseTE info scr alts ->
        ExpSF <$> (CaseE info <$> evExp scr <*> mapM evAlt alts)
      U.CoerceTE info from_t to_t b ->
-       ExpSF <$> (CoerceE info <$> evTypSF from_t <*> evTypSF to_t <*> evExp b)
+       ExpSF <$> (CoerceE info <$> evType from_t <*> evType to_t <*> evExp b)
      U.RecVarPH {} -> getPlaceholderElaboration expression
      U.DictPH {} -> getPlaceholderElaboration expression
 
@@ -72,7 +69,7 @@ evAlt (U.TIAlt decon params body) = do
 evDecon (U.TIDeConInst con ty_args ex_types) = do 
   ty_args' <- mapM evType ty_args
   ex_types' <- mapM evTyParam ex_types
-  return $ DeCInstSF $ VarDeCon con ty_args' [b | TyPatSF b <- ex_types']
+  return $ VarDeCon con ty_args' [b | TyPat b <- ex_types']
 
 -- | Get the expression that was stored for a placeholder, and evaluate it
 getPlaceholderElaboration ph = do
@@ -83,7 +80,7 @@ getPlaceholderElaboration ph = do
 evFun :: TIFun -> IO FunSF
 evFun (U.TIFun inf ty_params params rt body) =
   FunSF <$> (Fun inf <$> mapM evTyParam ty_params <*> mapM evPat params <*>
-             evTypSF rt <*> evExp body)
+             evType rt <*> evExp body)
 
 evDef :: TIDef -> IO (Def SF)
 evDef (U.TIDef v ann f) = Def v ann <$> evFun f

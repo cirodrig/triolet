@@ -48,15 +48,15 @@ assumeAndAnnotatePat (PatM (v ::: ty) _) k = do
 
 assumeAndAnnotatePats pats m = foldr assumeAndAnnotatePat m pats
 
-assumeAndAnnotateTyPat :: TyPat Mem -> TCM b -> TCM b
-assumeAndAnnotateTyPat (TyPatM (v ::: t)) k = do
+assumeAndAnnotateTyPat :: TyPat -> TCM b -> TCM b
+assumeAndAnnotateTyPat (TyPat (v ::: t)) k = do
   typeCheckType t               -- Verify that kind is well-formed
   assume v t k
 
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
-typeInferType :: TypM -> TCM Kind
-typeInferType (TypM ty) = typeCheckType ty
+typeInferType :: Type -> TCM Kind
+typeInferType = typeCheckType
 
 typeInferExp :: ExpM -> TCM Type
 typeInferExp (ExpM expression) =
@@ -101,8 +101,8 @@ typeInferLitE inf l = do
   checkLiteralType l
   return literal_type
 
-typeInferConE :: ExpM -> ExpInfo -> CInstM -> [ExpM] -> TCM Type
-typeInferConE orig_exp inf (CInstM con) args = do
+typeInferConE :: ExpM -> ExpInfo -> ConInst -> [ExpM] -> TCM Type
+typeInferConE orig_exp inf con args = do
   (field_types, result_type) <- typeInferCon con
 
   -- Verify that argument types match
@@ -163,10 +163,10 @@ typeInferAppE orig_expr inf op ty_args args = do
 
 -- | Compute the type of the result of applying an operator to some
 --   type arguments.
-computeInstantiatedType :: SourcePos -> Type -> [(Kind, TypM)] -> TCM Type
+computeInstantiatedType :: SourcePos -> Type -> [(Kind, Type)] -> TCM Type
 computeInstantiatedType inf op_type args_ = go op_type args_
   where
-    go op_type ((arg_kind, TypM arg) : args) = do
+    go op_type ((arg_kind, arg) : args) = do
       app_type <- typeOfTypeApp op_type arg_kind arg
       case app_type of
         Just result_type -> go result_type args
@@ -213,7 +213,7 @@ typeInferFun fun@(FunM (Fun { funInfo = info
     -- Inferred type must match return type
     new_ret_type <- typeInferType return_type
     checkType (text "Return type mismatch") (getSourcePos info)
-      (fromTypM return_type) ti_body
+      return_type ti_body
     
   -- Create the function's type
   return $ functionType fun
@@ -284,7 +284,7 @@ typeInferDeCon pos decon@(TupleDeCon types) = do
   return (types, tuple_type)
 
 typeCheckAlternative :: SourcePos -> Type -> AltM -> TCM Type
-typeCheckAlternative pos scr_type alt@(AltM (Alt (DeCInstM con) fields body)) = do
+typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
   -- Check constructor type
   (field_types, expected_scr_type) <- typeInferDeCon pos con
   
@@ -351,9 +351,9 @@ typeInferCoerceE inf from_t to_t body = do
   
   -- Body type must match the coercion's input type
   checkType (text "Argument of coercion has wrong type")
-    (getSourcePos inf) (fromTypM from_t) body_type
+    (getSourcePos inf) from_t body_type
   
-  return (fromTypM to_t)
+  return to_t
   
 typeCheckDefGroup :: DefGroup (Def Mem) -> TCM b -> TCM b
 typeCheckDefGroup defgroup do_body = 
@@ -399,7 +399,7 @@ inferExpType expression =
     -- but their definitions are skipped.
     infer_exp expression =
       case fromExpM expression
-      of ConE _ (CInstM con) _ ->
+      of ConE _ con _ ->
            inferConAppType con
          AppE _ op ty_args args ->
            inferAppTypeQuickly op ty_args args
@@ -413,12 +413,12 @@ inferExpType expression =
            infer_alt alt
          ExceptE _ rt ->
            return rt
-         CoerceE {expRetType = TypM rt} ->
+         CoerceE {expRetType = rt} ->
            return rt
          _ ->
            typeInferExp expression
 
-    infer_alt (AltM (Alt (DeCInstM con) params body)) =
+    infer_alt (AltM (Alt con params body)) =
       assumeBinders (deConExTypes con) $ assumePatMs params $ infer_exp body
 
     debug = traceShow (text "inferExpType" <+> pprExp expression)
@@ -430,7 +430,7 @@ inferAppTypeQuickly op ty_args args = do
   inst_op_type <- apply_types tenv op_type ty_args
   apply_arguments inst_op_type args
   where
-    apply_types tenv op_type (TypM arg:args) = do
+    apply_types tenv op_type (arg:args) = do
       let kind = typeKind tenv arg
       m_app_type <- typeOfTypeApp op_type kind arg
       case m_app_type of
@@ -478,7 +478,7 @@ inferConAppType (TupleCon ty_args) = do
 --   types.  If the application is not well-typed, an exception is raised.
 inferAppType :: EvalMonad m =>
                 Type            -- ^ Operator type
-             -> [TypM]          -- ^ Type arguments
+             -> [Type]          -- ^ Type arguments
              -> [Type]          -- ^ Operand types
              -> m Type
 inferAppType op_type ty_args arg_types =
@@ -491,7 +491,7 @@ inferAppType op_type ty_args arg_types =
     debug = traceShow (text "inferAppType" <+> types)
       where
         types = pprType op_type $$
-                vcat (map ((text "@" <+>) . pprType . fromTypM) ty_args) $$
+                vcat (map ((text "@" <+>) . pprType) ty_args) $$
                 vcat (map ((text ">" <+>) . pprType) arg_types)
 
 -- | Get the parameter types and result type of a data constructor application.

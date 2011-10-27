@@ -111,10 +111,10 @@ debug doc x = if debuggingEnabled then traceShow doc x else x
 data DecisionFun lab a =
   DecisionFun 
   { dfunInfo      :: ExpInfo
-  , dfunTyParams  :: [TyPatM]
+  , dfunTyParams  :: [TyPat]
   , dfunParams    :: [PatM]
   , dfunOutParams :: [PatM]
-  , dfunReturn    :: TypM
+  , dfunReturn    :: Type
   , dfunBody      :: DecisionTree lab a
   }
 
@@ -152,7 +152,7 @@ type CreatedSpecializationsMap = IntMap.IntMap CreatedSpecializations
 --   Output parameters are saved separately because they are not changed 
 --   by speicalization and they must remain at the end of the list.
 --   end of the parameter list
-data CallPattern = CallPattern [TypM] [CallPatternArg] [ExpM]
+data CallPattern = CallPattern [Type] [CallPatternArg] [ExpM]
 
 -- | A pattern of known values passed as arguments to a function call.
 data CallPatternArg =
@@ -174,7 +174,7 @@ mkCallParamTable patterns params =
 --   in a decision tree.  These bindings come from the original function
 --   and whatever additional bindings introduced by tree nodes.
 --   Output parameters are not included in the binding context.
-type BindingContext = ([TyPatM], [PatM])
+type BindingContext = ([TyPat], [PatM])
 
 -- | Decide whether the given value matches the decision branch.
 --   If so, return the variable binding produced by matching the argument with
@@ -187,7 +187,7 @@ matchBranch arg_value branch@(DecisionBranch _ decon pats _) =
   of ConArg con field_values
        | summarizeConstructor con == summarizeDeconstructor decon ->
            let env = mkCallParamTable pats field_values
-               ctx = (map TyPatM (deConExTypes decon), pats)
+               ctx = (map TyPat (deConExTypes decon), pats)
            in Just (env, ctx)
      _ -> Nothing
 
@@ -271,7 +271,7 @@ functionDecisionTree tenv (FunM (Fun inf ty_params params ret body)) =
     -- Add the function's type parameters to the type environment
     local_tenv = foldr insert_typaram_type tenv ty_params
       where
-        insert_typaram_type (TyPatM (a ::: k)) type_env = 
+        insert_typaram_type (TyPat (a ::: k)) type_env = 
           insertType a k type_env
 
 expToDecisionTree tenv exp =
@@ -289,7 +289,7 @@ expToDecisionTree tenv exp =
     -- If there's only one alternative, count the number of data constructors
     -- that the data type has
     not_single_constructor_type [AltM alt] =
-      case fromDeCInstM $ altCon alt
+      case altCon alt
       of VarDeCon con _ _ ->
            case lookupDataConWithType con tenv
            of Just (dtype, _) ->
@@ -298,7 +298,7 @@ expToDecisionTree tenv exp =
                 internalError "expToDecisionTree"
          TupleDeCon _ -> False  -- Tuples have one data constructor
 
-altToDecisionBranch tenv (AltM (Alt (DeCInstM decon) params body)) =
+altToDecisionBranch tenv (AltM (Alt decon params body)) =
   DecisionBranch False decon params $ expToDecisionTree tenv body
 
 -- | Convert an annotated decision tree to a function.
@@ -341,13 +341,13 @@ decisionBranchToAlt properties bindings out_params branch = do
     if create_function
     then make_function alt_body
     else return (alt_body, Nothing)
-  let alt = AltM (Alt (DeCInstM decon) params code)
+  let alt = AltM (Alt decon params code)
       new_branch = DecisionBranch label decon params alt_body_tree
   return (alt, new_branch)
   where
     DecisionBranch create_function decon params tree = branch
     local_bindings =
-      (map TyPatM (deConExTypes decon), params) `mappend` bindings
+      (map TyPat (deConExTypes decon), params) `mappend` bindings
     (mlabel, annotation, function_inf, return_type) = properties
 
     -- Create a new function with 'alt_body' as its function body
@@ -375,7 +375,7 @@ specializedCallExp :: ExpInfo -> Var -> BindingContext -> [PatM] -> ExpM
 specializedCallExp inf fname (ty_params, in_params) out_params =
   appE inf (ExpM $ VarE inf fname) ty_args args
   where
-    ty_args = [TypM (VarT v) | TyPatM (v ::: _) <- ty_params]
+    ty_args = [VarT v | TyPat (v ::: _) <- ty_params]
     args = [ExpM $ VarE defaultExpInfo (patMVar p)
            | p <- in_params ++ out_params]
 
@@ -387,7 +387,7 @@ specializeCall (CallPattern ty_args in_args out_args) f
   | Just body_exp <- specialized_expression = do
       let -- Substitute types in the reconstructed expression
           type_subst = Substitute.fromList
-                       [(a, t) | (TyPatM (a ::: _), TypM t) <-
+                       [(a, t) | (TyPat (a ::: _), t) <-
                                    zip (dfunTyParams f) ty_args]
           subst = SystemF.Rename.Subst type_subst SystemF.Rename.emptyV
           
@@ -475,7 +475,7 @@ specializeFromDecisionTree bindings binding_ctx out_params (Case v branches) = d
   -- Translate the 'Case' decision to a case expression
   let make_case subexpression =
         let scrutinee_expr = ExpM $ VarE defaultExpInfo v
-            alt = AltM $ Alt (DeCInstM decon) field_patterns subexpression
+            alt = AltM $ Alt decon field_patterns subexpression
         in ExpM $ CaseE defaultExpInfo scrutinee_expr [alt]
 
   -- Convert the rest of the tree to an expression.  Emit a 'case' statement
@@ -495,7 +495,7 @@ specializeFromDecisionTree bindings binding_ctx out_params (Case v branches) = d
          binding_ctx' out_params
 
 -- | Convert the arguments of an 'AppE' to a 'CallPattern'.
-computeCallPattern :: EvalMonad m => [TypM] -> [ExpM] -> m CallPattern
+computeCallPattern :: EvalMonad m => [Type] -> [ExpM] -> m CallPattern
 computeCallPattern ts es = do
   -- Separate arguments into input and output arguments
   e_types <- mapM inferExpType es
@@ -509,7 +509,7 @@ computeCallPattern ts es = do
 
 callPatternArg tenv expression =
   case fromExpM expression
-  of ConE _ (CInstM con) args
+  of ConE _ con args
        | isValueConstructor con ->
          -- The argument is a constructor application term
          ConArg con $ map (callPatternArg tenv) args
@@ -638,13 +638,13 @@ specializeApp inf op ty_args args =
       return $ ExpM $ AppE inf op' ty_args args'
 
 specializeAlt (AltM alt) =
-  assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $
+  assumeBinders (deConExTypes $ altCon alt) $
   assumePatMs (altParams alt) $ do
     body <- specializeExp (altBody alt)
     return $ AltM $ alt {altBody = body}
   
 specializeFun (FunM f) =
-  assumeTyPatMs (funTyParams f) $
+  assumeTyPats (funTyParams f) $
   assumePatMs (funParams f) $ do
     body <- specializeExp (funBody f)
     return $ FunM $ f {funBody = body}
@@ -856,13 +856,13 @@ specializeCallsExp spcl_map expression =
 specializeCallsExps spcl_map es = mapM (specializeCallsExp spcl_map) es
                                                
 specializeCallsAlt spcl_map (AltM alt) =
-  assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $
+  assumeBinders (deConExTypes $ altCon alt) $
   assumePatMs (altParams alt) $ do
     body <- specializeCallsExp spcl_map (altBody alt)
     return $ AltM $ alt {altBody = body}
 
 specializeCallsFun spcl_map (FunM f) =
-  assumeTyPatMs (funTyParams f) $
+  assumeTyPats (funTyParams f) $
   assumePatMs (funParams f) $ do
     body <- specializeCallsExp spcl_map (funBody f)
     return $ FunM $ f {funBody = body}

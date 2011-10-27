@@ -34,7 +34,7 @@ f @@ g = appTy f g
 -- | Create an 'untyped' type constructor that corresponds to the given
 -- System F type constructor
 builtinTyCon name kind sf_con =
-  let y = SystemF.TypSF (Type.Type.VarT sf_con)
+  let y = Type.Type.VarT sf_con
   in mkTyCon (builtinLabel name) kind y
 
 shapeType ty = TFunAppTy (tiBuiltin the_con_shape) [ty]

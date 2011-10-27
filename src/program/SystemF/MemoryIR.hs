@@ -8,10 +8,6 @@ into memory.  Each variable binding gets extra information.
 module SystemF.MemoryIR
        (Mem,
         Mentions(..),
-        Typ(..),
-        TyPat(..),
-        tyPatMVar,
-        tyPatMKind,
         Pat(PatM),
         patM,
         patMVar,
@@ -25,13 +21,11 @@ module SystemF.MemoryIR
         Exp(..),
         Alt(..),
         Fun(..),
-        CInst(..),
-        DeCInst(..),
-        TypM, PatM, TyPatM, ExpM, AltM, FunM, CInstM, DeCInstM,
+        PatM, ExpM, AltM, FunM,
         appE, conE,
         unpackVarAppM, unpackDataConAppM, isDataConAppM,
         assumePatM, assumePatMs,
-        assumeTyPatM, assumeTyPatMs,
+        assumeTyPat, assumeTyPats,
         assumeDef,
         assumeDefGroup,
         functionType,
@@ -49,8 +43,6 @@ import Type.Var
 import Type.Eval
 
 data Mem
-
-newtype instance Typ Mem = TypM {fromTypM :: Type}
 
 -- | A variable binding in a program.
 --   Bindings are annotated with demand information.
@@ -103,34 +95,21 @@ setPatMDmd m pat = pat {_patMUses = m}
 isDeadPattern :: PatM -> Bool
 isDeadPattern pat = multiplicity (patMDmd pat) == Dead
 
-newtype instance TyPat Mem  = TyPatM Binder
 newtype instance Exp Mem = ExpM {fromExpM :: BaseExp Mem}
 newtype instance Alt Mem = AltM {fromAltM :: BaseAlt Mem}
 newtype instance Fun Mem = FunM {fromFunM :: BaseFun Mem}
-newtype instance CInst Mem = CInstM {fromCInstM :: ConInst}
-newtype instance DeCInst Mem = DeCInstM {fromDeCInstM :: DeConInst}
 
-type TypM = Typ Mem
 type PatM = Pat Mem
-type TyPatM = TyPat Mem
 type ExpM = Exp Mem
 type AltM = Alt Mem
 type FunM = Fun Mem
-type CInstM = CInst Mem
-type DeCInstM = DeCInst Mem
 
-appE :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> ExpM
+appE :: ExpInfo -> ExpM -> [Type] -> [ExpM] -> ExpM
 appE _ op [] [] = op
 appE inf op type_args args = ExpM (AppE inf op type_args args)
 
 conE :: ExpInfo -> ConInst -> [ExpM] -> ExpM
-conE inf op args = ExpM (ConE inf (CInstM op) args)
-
-tyPatMVar :: TyPatM -> Var
-tyPatMVar (TyPatM (v ::: _)) = v
-
-tyPatMKind :: TyPatM -> Type
-tyPatMKind (TyPatM (_ ::: t)) = t
+conE inf op args = ExpM (ConE inf op args)
 
 {- Obsolete; 'BaseAlt' is isomorphic to this tuple type now
 -- | Construct a case alternative given a 'MonoCon' and the other required 
@@ -155,7 +134,7 @@ unpackVarAppM :: ExpM -> Maybe (Var, [Type], [ExpM])
 unpackVarAppM (ExpM (AppE { expOper = ExpM (VarE _ op)
                           , expTyArgs = ts
                           , expArgs = xs})) =
-  Just (op, map fromTypM ts, xs)
+  Just (op, ts, xs)
 
 unpackVarAppM (ExpM (VarE { expVar = op })) =
   Just (op, [], [])
@@ -168,7 +147,7 @@ unpackVarAppM _ = Nothing
 unpackDataConAppM :: TypeEnv -> ExpM
                   -> Maybe (DataConType, [Type], [Type], [ExpM])
 unpackDataConAppM tenv (ExpM (ConE inf con args)) =
-  case fromCInstM con of
+  case con of
     VarCon op ty_args ex_types -> 
       let Just dcon = lookupDataCon op tenv
       in Just (dcon, ty_args, ex_types, args)
@@ -193,11 +172,11 @@ assumePatM pat m = assumeBinder (patMBinder pat) m
 assumePatMs :: TypeEnvMonad m => [PatM] -> m a -> m a
 assumePatMs pats m = foldr assumePatM m pats
 
-assumeTyPatM :: TypeEnvMonad m => TyPatM -> m a -> m a
-assumeTyPatM (TyPatM b) m = assumeBinder b m
+assumeTyPat :: TypeEnvMonad m => TyPat -> m a -> m a
+assumeTyPat (TyPat b) m = assumeBinder b m
 
-assumeTyPatMs :: TypeEnvMonad m => [TyPatM] -> m a -> m a
-assumeTyPatMs pats m = foldr assumeTyPatM m pats
+assumeTyPats :: TypeEnvMonad m => [TyPat] -> m a -> m a
+assumeTyPats pats m = foldr assumeTyPat m pats
 
 assumeDef :: forall m a. TypeEnvMonad m => Def Mem -> m a -> m a
 {-# INLINE assumeDef #-}
@@ -222,9 +201,9 @@ assumeDefGroup g group_m body_m =
 functionType :: FunM -> Type 
 functionType (FunM (Fun { funTyParams = ty_params
                         , funParams = params
-                        , funReturn = TypM ret
+                        , funReturn = ret
                         })) =
-  forallType [b | TyPatM b <- ty_params] $
+  forallType [b | TyPat b <- ty_params] $
   funType (map patMType params) ret
 
 -- | Partition a list of parameters into input and output parameters.

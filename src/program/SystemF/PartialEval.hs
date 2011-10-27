@@ -79,7 +79,7 @@ uncurryUnpackPolymorphicCall e = unpackPolymorphicCall (uncurryCall e)
 unpackPolymorphicCallAndBindings :: ExpSF
                                  -> Maybe ([(ExpInfo, PatSF, ExpSF)],
                                            ExpSF,
-                                           [TypSF],
+                                           [Type],
                                            [ExpSF])
 unpackPolymorphicCallAndBindings expression =
   case fromExpSF expression
@@ -92,7 +92,7 @@ unpackPolymorphicCallAndBindings expression =
             Just ((inf, pat, val) : bindings, op, ty_args, args)
           Nothing -> Nothing
      _ -> case uncurryUnpackPolymorphicCall expression
-          of Just (op, ty_args, args) -> Just ([], op, map TypSF ty_args, args)
+          of Just (op, ty_args, args) -> Just ([], op, ty_args, args)
              Nothing -> Nothing
 
 applyBindings :: [(ExpInfo, PatSF, ExpSF)] -> ExpSF -> ExpSF
@@ -109,7 +109,7 @@ isSimpleExp expression =
   case fromExpSF expression
   of VarE {} -> True
      LitE {} -> True
-     ConE _ (CInstSF (VarCon v _ _)) _ -> isDictionaryDataCon v
+     ConE _ (VarCon v _ _) _ -> isDictionaryDataCon v
      ConE {} -> False
      AppE {} -> False
      LamE {} -> False
@@ -299,7 +299,7 @@ eliminateCase pos scrutinee alternatives =
     
     match_alternative scrutinee_con (AltSF alt) =
       case altCon alt
-      of DeCInstSF (VarDeCon c _ _) -> c == scrutinee_con
+      of VarDeCon c _ _ -> c == scrutinee_con
          _ -> False
 
 pevalAlt :: AltSF -> PE AltSF

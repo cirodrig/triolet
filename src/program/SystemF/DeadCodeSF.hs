@@ -45,10 +45,6 @@ deconstructTupleExp expression =
 
 -------------------------------------------------------------------------------
 
--- | Mention all variables in a type
-edcScanType :: TypSF -> GetMentionsSet ()
-edcScanType (TypSF t) = edcType t
-
 -- | Find mentioned variables in an export declaration
 edcExport :: Export SF -> GetMentionsSet (Export SF)
 edcExport export = do
@@ -61,11 +57,11 @@ edcMaskPat :: PatSF -> GetMentionsSet a -> GetMentionsSet (PatSF, a)
 edcMaskPat pat m =
   case pat
   of WildP t -> do
-       edcScanType (TypSF t)
+       edcType t
        x <- m
        return (pat, x)
      VarP v t -> do
-       edcScanType (TypSF t)
+       edcType t
        (mentioned, x) <- maskAndCheck v m
 
        -- If not mentioned, replace this pattern with a wildcard
@@ -96,13 +92,13 @@ edcMaskPats (pat:pats) m = do
 edcMaskPats [] m = do x <- m
                       return ([], x)
 
-edcMaskTyPat :: TyPat SF -> GetMentionsSet a -> GetMentionsSet (TyPat SF, a)
-edcMaskTyPat pat@(TyPatSF (v ::: ty)) m = do
-  edcScanType (TypSF ty)
+edcMaskTyPat :: TyPat -> GetMentionsSet a -> GetMentionsSet (TyPat, a)
+edcMaskTyPat pat@(TyPat (v ::: ty)) m = do
+  edcType ty
   x <- mask v m
   return (pat, x)
 
-edcMaskTyPats :: [TyPat SF] -> GetMentionsSet a -> GetMentionsSet ([TyPat SF], a)
+edcMaskTyPats :: [TyPat] -> GetMentionsSet a -> GetMentionsSet ([TyPat], a)
 edcMaskTyPats (pat:pats) m = do
   (pat', (pats', x)) <- edcMaskTyPat pat $ edcMaskTyPats pats m
   return (pat':pats', x)
@@ -136,7 +132,7 @@ edcFun (FunSF function@(Fun { funTyParams = tps
   (tps', (ps', b')) <-
     edcMaskTyPats tps $
     edcMaskPats ps $ do
-      edcScanType return_type
+      edcType return_type
       edcExp body
   return $ FunSF $ function {funTyParams = tps', funParams = ps', funBody = b'}
 
@@ -174,8 +170,8 @@ edcExp expression@(ExpSF base_expression) =
 
 -- | Dead code elimination for a case alternative
 edcAlt (AltSF alt) = do
-  let DeCInstSF con = altCon alt
-  mapM_ (edcScanType . TypSF) $ deConTyArgs con
+  let con = altCon alt
+  mapM_ edcType $ deConTyArgs con
   -- Mask out variables bound by the alternative and simplify the body
   let local_vars = [v | VarP v _ <- altParams alt] ++
                    [v | v ::: _ <- deConExTypes con]
