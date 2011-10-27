@@ -41,11 +41,7 @@ tyPatType :: TyPat -> Type
 tyPatType (TyPat (_ ::: t)) = t
 
 patType :: PatSF -> Type
-patType (WildP t)  = t
 patType (VarP _ t) = t
-patType (TupleP ps) = let con = VarT $ pyonTupleTypeCon (length ps)
-                          field_types = map patType ps
-                      in typeApp con field_types
 
 functionType :: FunSF -> Type 
 functionType (FunSF (Fun { funTyParams = ty_params
@@ -60,11 +56,9 @@ functionType (FunSF (Fun { funTyParams = ty_params
 assumePat :: PatSF -> TCM b -> TCM b
 assumePat p k =
   case p
-  of WildP p_ty -> typeInferType p_ty >> k
-     VarP v p_ty -> do
+  of VarP v p_ty -> do
        typeInferType p_ty
        assume v p_ty k
-     TupleP pats -> assumePats pats k
 
 assumePats pats m = foldr assumePat m pats
 

@@ -122,13 +122,8 @@ isSimpleExp expression =
 -- side effects.  Any values that cannot be added to the environment will be
 -- ignored.
 bindValue :: PatSF -> ExpSF -> PE a -> PE a
-bindValue (WildP _)   _ m = m
 bindValue (VarP v _)  e m | isSimpleExp e = local (Map.insert v e) m
                           | otherwise     = m
-bindValue (TupleP ps) e m =
-  case deconstructTupleExp e
-  of Nothing -> m               -- Cannot bind this value
-     Just es -> catEndo (zipWith bindValue ps es) m
 
 -------------------------------------------------------------------------------
 

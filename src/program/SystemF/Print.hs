@@ -65,9 +65,7 @@ pprLit (FloatL f _) = text (show f)
 pprPatFlags :: PrintFlags -> PatSF -> Doc
 pprPatFlags flags pat = 
   case pat
-  of WildP ty  -> text "_" <+> colon <+> pprType ty
-     VarP v ty -> pprVarFlags flags v <+> colon <+> pprType ty
-     TupleP ps -> tuple $ map (pprPatFlags flags) ps
+  of VarP v ty -> pprVarFlags flags v <+> colon <+> pprType ty
 
 pprTyPatFlags :: PrintFlags -> TyPat -> Doc
 pprTyPatFlags flags (TyPat (v ::: ty)) =

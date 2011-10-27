@@ -53,40 +53,15 @@ edcExport export = do
 
 -- | Run the computation in a scope where the pattern is bound.
 -- Return a new pattern and the result of the computation.
-edcMaskPat :: PatSF -> GetMentionsSet a -> GetMentionsSet (PatSF, a)
-edcMaskPat pat m =
-  case pat
-  of WildP t -> do
-       edcType t
-       x <- m
-       return (pat, x)
-     VarP v t -> do
-       edcType t
-       (mentioned, x) <- maskAndCheck v m
-
-       -- If not mentioned, replace this pattern with a wildcard
-       let new_pat = if isJust mentioned then pat else WildP t
-       return (pat, x)
-     TupleP ps -> do
-       (pats', x) <- edcMaskPats ps m
-
-       -- If all patterns are wildcards, then use a single wildcard pattern
-       let new_pat = if all isWildcard pats'
-                     then let con = pyonTupleTypeCon (length pats')
-                              ty = varApp con $ map wildcardType pats'
-                          in WildP ty
-                     else TupleP pats'
-       return (new_pat, x)
-  where
-    isWildcard (WildP _) = True
-    isWildcard _ = False
-
-    wildcardType (WildP t) = t
-    wildcardType _ = error "Not a wildcard pattern"
+edcMaskPat :: PatSF -> GetMentionsSet a -> GetMentionsSet (PatSF, Bool, a)
+edcMaskPat pat@(VarP v t) m = do
+  edcType t
+  (mentioned, x) <- maskAndCheck v m
+  return (pat, isJust mentioned, x)
 
 edcMaskPats :: [PatSF] -> GetMentionsSet a -> GetMentionsSet ([PatSF], a)
 edcMaskPats (pat:pats) m = do
-  (pat', (pats', x)) <- edcMaskPat pat $ edcMaskPats pats m
+  (pat', _, (pats', x)) <- edcMaskPat pat $ edcMaskPats pats m
   return (pat':pats', x)
 
 edcMaskPats [] m = do x <- m
@@ -194,46 +169,9 @@ edcLetE info lhs rhs body =
       -- Structural recursion.  Try to eliminate some or all of the
       -- pattern-bound variables using knowledge of what variables are
       -- referenced in the expression body.
-      (lhs', body') <- edcMaskPat lhs $ edcExp body
+      (lhs', lhs_mentioned, body') <- edcMaskPat lhs $ edcExp body
 
-      -- Decompose/eliminate bindings.
-      let bindings = eliminate_bindings lhs' rhs
-
-      -- Recurse in RHS.
-      bindings' <- forM bindings $ \(sub_lhs, sub_rhs) -> do
-        sub_rhs' <- edcExp sub_rhs
-        return (sub_lhs, sub_rhs')
-
-      -- Reconstruct the let expression
-      return $ reconstruct_let body' bindings'
-
-    -- Given a list of bindings, create some let expressions
-    reconstruct_let body bindings = foldr make_let body bindings
-      where
-        make_let (lhs, rhs) body =
-          ExpSF $ LetE { expInfo = info
-                       , expBinder = lhs
-                       , expValue = rhs
-                       , expBody = body}
-
-    -- Given the pattern and expression from a let-binding, decompose it into
-    -- simpler let-bindings.  Discard unused bindings.
-    --
-    -- For example,
-    --
-    -- > let (_, a, (_, b)) = (1, foo(), (3, 4)) in ...
-    --
-    -- becomes
-    --
-    -- > let a = foo() in let b = 4 in ...
-    eliminate_bindings lhs body =
-      case lhs
-      of -- If a value is not bound to anything,
-         -- then this code can be eliminated.
-         WildP _ -> []
-         TupleP ps -> 
-           case deconstructTupleExp body
-           of Nothing -> [(lhs, body)] -- Cannot deconstruct this pattern 
-              Just fs -> concat $ zipWith eliminate_bindings ps fs
-         -- Otherwise, no change
-         _ -> [(lhs, body)]
+      -- If LHS is not mentioned, remove the binding from the program.
+      if not lhs_mentioned then return body' else do
+        rhs' <- edcExp rhs
+        return $ ExpSF $ LetE info lhs' rhs' body'

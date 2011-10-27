@@ -236,10 +236,7 @@ newtype instance Alt SF = AltSF {fromAltSF :: BaseAlt SF}
 newtype instance Fun SF = FunSF {fromFunSF :: BaseFun SF}
 
 -- | Patterns
-data instance Pat SF =
-    WildP Type                    -- ^ Wildcard pattern
-  | VarP Var Type                 -- ^ Variable pattern binding
-  | TupleP [PatSF]                -- ^ Tuple pattern
+data instance Pat SF = VarP Var Type
 
 -- | Type-level patterns
 newtype TyPat = TyPat Binder
