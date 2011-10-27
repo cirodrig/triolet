@@ -50,7 +50,6 @@ import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
 import qualified LowLevel.GenerateCXXHeader as LowLevel
-import qualified LowLevel.Inlining as LowLevel
 import qualified LowLevel.Inlining2
 import qualified LowLevel.JoinPoints as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel

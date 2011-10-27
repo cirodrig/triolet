@@ -34,7 +34,7 @@ import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
-import LowLevel.Inlining
+import LowLevel.Inlining2
 import LowLevel.Rename
 import LowLevel.Print
 import LowLevel.Syntax
@@ -228,9 +228,7 @@ slurpExports exported gdefs
 
 mkPreImport :: GlobalDef -> PreImport
 mkPreImport (GlobalFunDef (Def v f)) =
-  let f_val = if funIsInlinable f && funSmallEnoughForInlining f
-              then Just f
-              else Nothing
+  let f_val = if shouldInline f then Just f else Nothing
   in Def v (PreImportFun (funType f) f_val)
 
 mkPreImport (GlobalDataDef (Def v dat)) =

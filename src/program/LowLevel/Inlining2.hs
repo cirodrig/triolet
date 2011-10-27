@@ -1,6 +1,6 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, BangPatterns #-}
-module LowLevel.Inlining2(inlineModule)
+module LowLevel.Inlining2(shouldInline, inlineModule)
 where
 
 import Control.Applicative
@@ -204,7 +204,7 @@ lookupInlinedFunction v =
 -- | Consider the function for inlining.  If it's small enough, then inline it.
 considerForInlining :: Var -> Fun -> NumReturns -> Inl s a -> Inl s a
 considerForInlining v f num_returns m
-  | willInline f = local (insert v (f, num_returns)) m
+  | shouldInline f = local (insert v (f, num_returns)) m
   | otherwise = m
   where
     insert v x env =
@@ -217,8 +217,8 @@ considerForInlining v f num_returns m
       (pprFun f)
 
 -- Make this function NOINLINE so it can be CSE'd.
-{-# NOINLINE willInline #-}
-willInline f = funIsInlinable f && worthInlining f
+{-# NOINLINE shouldInline #-}
+shouldInline f = funIsInlinable f && worthInlining f
 
 -- | Return True if the function is judged /profitable/ to inline.
 worthInlining f
@@ -508,7 +508,7 @@ inlineGroup (NonRec (Def v f)) do_body = do
   -- If the function is a join point and will be inlined,
   -- then delete the function definition.  It will not be referenced
   -- after inlining.
-  let delete_definition = willInline f' && funConvention f' == JoinCall
+  let delete_definition = shouldInline f' && funConvention f' == JoinCall
 
   -- Rename the bound variable and perform inlining in the body 
   renameParameter v $ \v' -> do
@@ -586,9 +586,9 @@ makeImportsInlinable imports =
   where
     get_imported_function impent =
       case impent
-      of ImportClosureFun _ (Just f) | willInline f ->
+      of ImportClosureFun _ (Just f) | shouldInline f ->
            Just (fromIdent $ varID $ importVar impent, (f, countReturns f))
-         ImportPrimFun _ _ (Just f) | willInline f ->
+         ImportPrimFun _ _ (Just f) | shouldInline f ->
            Just (fromIdent $ varID $ importVar impent, (f, countReturns f))
          _ -> Nothing
 

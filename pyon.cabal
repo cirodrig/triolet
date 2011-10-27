@@ -158,7 +158,6 @@ Executable pyon
     LowLevel.CodeTypes
     LowLevel.CSE
     LowLevel.InitializeBuiltins
-    LowLevel.Inlining
     LowLevel.Inlining2
     LowLevel.InterfaceFile
     LowLevel.Build
