@@ -27,7 +27,6 @@ import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.GlobalDemand as SystemF
-import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import qualified SystemF.TypecheckSF
@@ -189,10 +188,7 @@ compilePyonToPyonMem compile_flags path text = do
   -- System F transformations
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   sf_mod <- SystemF.DeadCodeSF.eliminateDeadCode sf_mod
-  sf_mod <- SystemF.eliminatePatternMatching sf_mod
 
-  -- Re-run partial evaluation to simplify the specialized code.
-  sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   putStrLn ""
   putStrLn "System F"
   print $ SystemF.pprModule sf_mod

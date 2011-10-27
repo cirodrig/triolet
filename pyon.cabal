@@ -113,7 +113,6 @@ Executable pyon
     SystemF.DeadCode
     SystemF.DeadCodeSF
     SystemF.DictEnv
-    SystemF.ElimPatternMatching
     SystemF.EtaReduce
     SystemF.Floating2
     SystemF.GlobalDemand

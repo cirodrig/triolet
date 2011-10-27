@@ -66,7 +66,7 @@ edcMaskPat pat m =
 
        -- If not mentioned, replace this pattern with a wildcard
        let new_pat = if isJust mentioned then pat else WildP t
-       return (new_pat, x)
+       return (pat, x)
      TupleP ps -> do
        (pats', x) <- edcMaskPats ps m
 
