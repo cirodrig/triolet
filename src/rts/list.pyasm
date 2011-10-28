@@ -453,6 +453,12 @@ procedure pyon_Array1_get_contents (pointer arr) -> pointer {
   arr @! PyonArray1.contents;
 };
 
+procedure pyon_Array1_get_bounds (pointer arr) -> PyonTuple2(int, int)
+{
+  PyonTuple2(int, int) {arr @! PyonArray1.bound_min,
+                        arr @! PyonArray1.bound_end};
+};
+
 
 data pointer pyon_Array2_size = sizeof PyonArray2;
 data pointer pyon_Array2_alignment = alignof PyonArray2;
@@ -477,6 +483,14 @@ procedure pyon_Array2_get_contents (pointer arr) -> pointer {
   arr @! PyonArray2.contents;
 };
 
+procedure pyon_Array2_get_bounds (pointer arr) -> PyonTuple4(int, int, int, int)
+{
+  PyonTuple4(int, int, int, int)
+  {arr @! PyonArray2.bound_ymin,
+   arr @! PyonArray2.bound_yend,
+   arr @! PyonArray2.bound_xmin,
+   arr @! PyonArray2.bound_xend};
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Exported to C for the C interface

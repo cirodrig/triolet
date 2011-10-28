@@ -113,6 +113,13 @@ namespace Pyon {
   extern "C" PyonBarePtr
   pyon_Array1_get_contents(PyonBarePtr array) __attribute__((pure));
 
+  struct Array1Bounds {
+    int32_t min;
+    int32_t end;
+  };
+  extern "C" Array1Bounds
+  pyon_Array1_get_bounds(PyonBarePtr array) __attribute__((pure));
+
   extern "C" const PyonUInt pyon_Array2_size;
   extern "C" const PyonUInt pyon_Array2_alignment;
   extern "C" void
@@ -126,6 +133,14 @@ namespace Pyon {
   extern "C" PyonBarePtr
   pyon_Array2_get_contents(PyonBarePtr array) __attribute__((pure));
   
+  struct Array2Bounds {
+    int32_t ymin;
+    int32_t yend;
+    int32_t xmin;
+    int32_t xend;
+  };
+  extern "C" Array2Bounds
+  pyon_Array2_get_bounds(PyonBarePtr array) __attribute__((pure));
 }
 
 #endif
