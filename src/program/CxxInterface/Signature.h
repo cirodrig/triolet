@@ -12,7 +12,8 @@ typedef enum PyonTypeTag {
   PyonBoolTag,                  /* Pyon type "bool" */
   PyonNoneTypeTag,              /* Pyon type "NoneType" */
   PyonTupleTypeTag,             /* Some Pyon tuple type */
-  PyonListTypeTag               /* Pyon type "list a" */
+  PyonListTypeTag,              /* Pyon type "list a" */
+  PyonArrayTypeTag              /* Pyon N-dimensional array */
 } PyonTypeTag;
 
 /* A Pyon type */
@@ -26,6 +27,10 @@ struct PyonType {
     struct {
       const PyonType *elem;     /* Type of a list element */
     } list;
+    struct {
+      int dimensionality;       /* Number of array dimensions */
+      const PyonType *elem;     /* Type of an array element */
+    } array;
   };
 };
 
@@ -36,6 +41,7 @@ const PyonType *PyonType_Bool(void);
 const PyonType *PyonType_NoneType(void);
 const PyonType *PyonType_Tuple(int size);
 const PyonType *PyonType_List(const PyonType *);
+const PyonType *PyonType_Array(int, const PyonType *);
 const PyonType *PyonType_duplicate(const PyonType *);
 
 /* Destroy a PyonType instance */

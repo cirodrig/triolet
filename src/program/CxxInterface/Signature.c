@@ -56,6 +56,17 @@ PyonType_List(const PyonType *elem)
   return p;
 }
 
+/* Create an array type.  Steals ownership of 'elem'. */
+const PyonType *
+PyonType_Array(int dim, const PyonType *elem)
+{
+  PyonType *p = malloc(sizeof(PyonType));
+  *p = (PyonType){.tag = PyonArrayTypeTag};
+  p->array.dimensionality = dim;
+  p->array.elem = elem;
+  return p;
+}
+
 const PyonType *
 PyonType_duplicate(const PyonType *p)
 {
@@ -74,6 +85,9 @@ PyonType_duplicate(const PyonType *p)
       return t;
     }
   case PyonListTypeTag: return PyonType_List(PyonType_duplicate(p->list.elem));
+  case PyonArrayTypeTag:
+    return PyonType_Array(p->array.dimensionality,
+                          PyonType_duplicate(p->array.elem));
   default:
     fprintf(stderr, "PyonType_duplicate: Invalid argument\n");
     exit(-1);
@@ -100,6 +114,10 @@ PyonType_destroy(const PyonType *p)
     }
   case PyonListTypeTag:
     PyonType_destroy(p->list.elem);
+    free((void *)p);
+    return;
+  case PyonArrayTypeTag:
+    PyonType_destroy(p->array.elem);
     free((void *)p);
     return;
   default:

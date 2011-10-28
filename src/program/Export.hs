@@ -34,14 +34,11 @@ data ExportDataType =
     TupleET [ExportDataType]
 
     -- | A Pyon list.
-    --   The list contents can have any monomorphic type.  It's an error
-    --   for the type to mention type variables other than constructors.
   | ListET ExportDataType
 
-    -- | A Pyon matrix.
-    --   The matrix contents can have any monomorphic type.  It's an error
-    --   for the type to mention type variables other than constructors.
-  | MatrixET ExportDataType
+    -- | A Pyon array.
+    --   The array dimensionality is given as a parameter.
+  | ArrayET !Int ExportDataType
 
     -- | A C array.  The array is passed as a pointer.  The array
     -- size is passed as an additional parameter.
@@ -68,6 +65,9 @@ instance Show ExportDataType where
        ListET ty ->
          showParen (prec >= 10) $ 
          showString "ListET (" . shows ty . showChar ')'
+       ArrayET n ty ->
+         showParen (prec >= 10) $ 
+         showString "ArrayET " . shows n . showString " (" . shows ty . showChar ')'
        CSizeArrayET et ->
          showString "CSizeArrayET " . showsPrec 10 et
        FunctionET params ret ->
