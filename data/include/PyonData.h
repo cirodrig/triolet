@@ -231,9 +231,15 @@ namespace Pyon {
 
   /* C++ Wrapper Classes that wrap bare objects (extend class BareType) */
 
-    template<typename T1, typename T2>
+    template<typename T1, typename T2, typename T3 = void, typename T4 = void>
   class Tuple;
   
+    template<typename T1, typename T2, typename T3>
+  class Tuple<T1,T2,T3,void>;
+
+    template<typename T1, typename T2>
+  class Tuple<T1,T2,void,void>;
+
     template<typename T>
   class List;
   
@@ -261,6 +267,12 @@ namespace Pyon {
     template<>
   class Incomplete< Stored<NoneType> >;
   
+    template<typename T1, typename T2, typename T3, typename T4>
+  class Incomplete< Tuple<T1,T2,T3,T4> >;
+
+    template<typename T1, typename T2, typename T3>
+  class Incomplete< Tuple<T1,T2,T3> >;
+
     template<typename T1, typename T2>
   class Incomplete< Tuple<T1,T2> >;
 
@@ -319,12 +331,274 @@ namespace Pyon {
 /*               C++ Wrapper Classes that wrap bare objects                   */
 /******************************************************************************/
 
-/* ------------------------------- Tuple ------------------------------------ */
+/* ----------------------- Tuple with 4 elements ---------------------------- */
 
 	  /* Helper struct get_return_type to select type from list based on index */
 
-    template<typename T1, typename T2, int index>
+    template<int index, typename T1, typename T2, typename T3 = void, typename T4 = void>
   struct get_return_type {
+    // T1 when index=0 , T2 when index=1 , T3 when index=2 , T4 when index=2
+    typedef void type;
+    // Helper function that creates an object of the right type to be returned
+    static type 
+    get_return_object(Tuple<T1, T2, T3, T4>* tuple);
+    /* Helper function to create an incomplete bare object of the right type to 
+     * be returned */
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple);
+  };
+
+  /* Implementation of Tuple */
+
+  template<typename T1, typename T2, typename T3, typename T4>
+  class Tuple : public BareType {
+    private:
+      typedef typename AsBareType<T1>::type T1_Bare;
+      typedef typename AsBareType<T2>::type T2_Bare;
+      typedef typename AsBareType<T3>::type T3_Bare;
+      typedef typename AsBareType<T4>::type T4_Bare;
+    public:
+      // Constructors
+      Tuple<T1, T2, T3, T4>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        int t1Size = addPadding<T2_Bare>(T1_Bare::getSize());
+        int t2Size = addPadding<T3_Bare>(T2_Bare::getSize());
+        int t3Size = addPadding<T4_Bare>(T3_Bare::getSize());
+        int t4Size = T4_Bare::getSize();
+        return t1Size + t2Size + t3Size + t4Size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        int t1Alignment = T1_Bare::getAlignment();
+        int t2Alignment = T2_Bare::getAlignment();
+        int t3Alignment = T3_Bare::getAlignment();
+        int t4Alignment = T4_Bare::getAlignment();
+        int max = (t1Alignment > t2Alignment) ? t1Alignment : t2Alignment;
+        max = (max > t3Alignment) ? max : t3Alignment;
+        max = (max > t4Alignment) ? max : t4Alignment;
+        return max; 
+      }
+      
+      static void 
+      copy(Tuple<T1,T2,T3,T4> tuple, Incomplete< Tuple<T1,T2,T3,T4> > &incompleteTuple) { 
+          T1_Bare::copy(tuple.get<0>(), incompleteTuple.get<0>());
+          T2_Bare::copy(tuple.get<1>(), incompleteTuple.get<1>());
+          T3_Bare::copy(tuple.get<2>(), incompleteTuple.get<2>());
+          T4_Bare::copy(tuple.get<3>(), incompleteTuple.get<3>());
+      }
+      
+      static bool 
+      isPOD() { return T1::isPOD() && T2::isPOD() && T3::isPOD() && T4::isPOD(); }
+
+      // Member Functions
+        template<int index>
+      typename get_return_type<index, T1, T2, T3, T4>::type 
+      get() { return get_return_type<index, T1, T2, T3, T4>::get_return_object(this); }
+
+  };
+
+  /* Specialization of get_return_type helper struct */
+
+    template<typename T1, typename T2, typename T3, typename T4>
+  struct get_return_type<0, T1, T2, T3, T4> {
+    typedef typename AsBareType<T1>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
+      return type(tuple->getBareData());
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
+      return Incomplete<type>(incompleteTuple->getObject());
+    }
+  };
+  
+    template<typename T1, typename T2, typename T3, typename T4>
+  struct get_return_type<1, T1, T2, T3, T4> {
+    typedef typename AsBareType<T2>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      return type(tuple->getBareData() + t1Size);
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      return Incomplete<type>(incompleteTuple->getObject() + t1Size);
+    }
+  };
+  
+    template<typename T1, typename T2, typename T3, typename T4>
+  struct get_return_type<2, T1, T2, T3, T4> {
+    typedef typename AsBareType<T3>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
+      return type(tuple->getBareData() + t1Size + t2Size);
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
+      return Incomplete<type>(incompleteTuple->getObject() + t1Size + t2Size);
+    }
+  };
+
+    template<typename T1, typename T2, typename T3, typename T4>
+  struct get_return_type<3, T1, T2, T3, T4> {
+    typedef typename AsBareType<T4>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
+      int t3Size = addPadding< typename AsBareType<T4>::type >(AsBareType<T3>::type::getSize());
+      return type(tuple->getBareData() + t1Size + t2Size + t3Size);
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
+      int t3Size = addPadding< typename AsBareType<T4>::type >(AsBareType<T3>::type::getSize());
+      return Incomplete<type>(incompleteTuple->getObject() + t1Size + t2Size + t3Size);
+    }
+  };
+
+/* ----------------------- Tuple with 3 elements ---------------------------- */
+
+	  /* Helper struct get_return_type to select type from list based on index */
+
+    template<int index, typename T1, typename T2, typename T3>
+  struct get_return_type<index,T1,T2,T3,void> {
+    // T1 when index=0 , T2 when index=1 , T3 when index=2
+    typedef void type;
+    // Helper function that creates an object of the right type to be returned
+    static type 
+    get_return_object(Tuple<T1, T2, T3>* tuple);
+    /* Helper function to create an incomplete bare object of the right type to 
+     * be returned */
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3> >* incompleteTuple);
+  };
+
+  /* Implementation of Tuple */
+
+  template<typename T1, typename T2, typename T3>
+  class Tuple<T1,T2,T3,void> : public BareType {
+    private:
+      typedef typename AsBareType<T1>::type T1_Bare;
+      typedef typename AsBareType<T2>::type T2_Bare;
+      typedef typename AsBareType<T3>::type T3_Bare;
+    public:
+      // Constructors
+      Tuple<T1, T2, T3>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        int t1Size = addPadding<T2_Bare>(T1_Bare::getSize());
+        int t2Size = addPadding<T3_Bare>(T2_Bare::getSize());
+        int t3Size = T3_Bare::getSize();
+        return t1Size + t2Size + t3Size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        int t1Alignment = T1_Bare::getAlignment();
+        int t2Alignment = T2_Bare::getAlignment();
+        int t3Alignment = T3_Bare::getAlignment();
+        int max = (t1Alignment > t2Alignment) ? t1Alignment : t2Alignment;
+        max = (max > t3Alignment) ? max : t3Alignment;
+        return max; 
+      }
+      
+      static void 
+      copy(Tuple<T1,T2,T3> tuple, Incomplete< Tuple<T1,T2,T3> > &incompleteTuple) { 
+          T1_Bare::copy(tuple.get<0>(), incompleteTuple.get<0>());
+          T2_Bare::copy(tuple.get<1>(), incompleteTuple.get<1>());
+          T3_Bare::copy(tuple.get<2>(), incompleteTuple.get<2>());
+      }
+      
+      static bool 
+      isPOD() { return T1::isPOD() && T2::isPOD() && T3::isPOD(); }
+
+      // Member Functions
+        template<int index>
+      typename get_return_type<index, T1, T2, T3>::type 
+      get() { return get_return_type<index, T1, T2, T3>::get_return_object(this); }
+
+  };
+
+  /* Specialization of get_return_type helper struct */
+
+    template<typename T1, typename T2, typename T3>
+  struct get_return_type<0, T1, T2, T3, void> {
+    typedef typename AsBareType<T1>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2, T3>* tuple) {
+      return type(tuple->getBareData());
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3> >* incompleteTuple) {
+      return Incomplete<type>(incompleteTuple->getObject());
+    }
+  };
+  
+    template<typename T1, typename T2, typename T3>
+  struct get_return_type<1, T1, T2, T3, void> {
+    typedef typename AsBareType<T2>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2, T3>* tuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      return type(tuple->getBareData() + t1Size);
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3> >* incompleteTuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      return Incomplete<type>(incompleteTuple->getObject() + t1Size);
+    }
+  };
+  
+    template<typename T1, typename T2, typename T3>
+  struct get_return_type<2, T1, T2, T3, void> {
+    typedef typename AsBareType<T3>::type type;
+
+    static type 
+    get_return_object(Tuple<T1, T2, T3>* tuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
+      return type(tuple->getBareData() + t1Size + t2Size);
+    }
+
+    static Incomplete<type> 
+    get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3> >* incompleteTuple) {
+      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
+      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
+      return Incomplete<type>(incompleteTuple->getObject() + t1Size + t2Size);
+    }
+  };
+
+/* ----------------------- Tuple with 2 elements ---------------------------- */
+
+	  /* Helper struct get_return_type to select type from list based on index */
+
+    template<int index, typename T1, typename T2>
+  struct get_return_type<index,T1,T2,void,void> {
     // T1 when index=0 , T2 when index=1
     typedef void type;
     // Helper function that creates an object of the right type to be returned
@@ -339,13 +613,13 @@ namespace Pyon {
   /* Implementation of Tuple */
 
   template<typename T1, typename T2>
-  class Tuple : public BareType {
+  class Tuple<T1,T2,void,void> : public BareType {
     private:
       typedef typename AsBareType<T1>::type T1_Bare;
       typedef typename AsBareType<T2>::type T2_Bare;
     public:
       // Constructors
-      Tuple<T1, T2>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      Tuple<T1,T2>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -373,15 +647,15 @@ namespace Pyon {
 
       // Member Functions
         template<int index>
-      typename get_return_type<T1, T2, index>::type 
-      get() { return get_return_type<T1, T2, index>::get_return_object(this); }
+      typename get_return_type<index, T1, T2>::type 
+      get() { return get_return_type<index, T1, T2>::get_return_object(this); }
 
   };
 
   /* Specialization of get_return_type helper struct */
 
     template<typename T1, typename T2>
-  struct get_return_type<T1, T2, 0> {
+  struct get_return_type<0, T1, T2, void, void> {
     typedef typename AsBareType<T1>::type type;
 
     static type 
@@ -396,7 +670,7 @@ namespace Pyon {
   };
   
     template<typename T1, typename T2>
-  struct get_return_type<T1, T2, 1> {
+  struct get_return_type<1, T1, T2, void, void> {
     typedef typename AsBareType<T2>::type type;
 
     static type 
@@ -411,6 +685,7 @@ namespace Pyon {
       return Incomplete<type>(incompleteTuple->getObject() + t1Size);
     }
   };
+
 
 /* -------------------------------- List ------------------------------------ */
 
@@ -486,6 +761,52 @@ namespace Pyon {
       void operator=(const NoneType& other) { }
   };
   
+  /* Implementation of Incomplete< Tuple<T1,T2,T3,T4> > */
+
+    template<typename T1, typename T2, typename T3, typename T4>
+  class Incomplete< Tuple<T1,T2,T3,T4> > : public IncompleteSingleRef< Tuple<T1,T2,T3,T4> > {
+    private:
+      typedef typename AsBareType<T1>::type T1_Bare;
+      typedef typename AsBareType<T2>::type T2_Bare;
+      typedef typename AsBareType<T3>::type T3_Bare;
+      typedef typename AsBareType<T4>::type T4_Bare;
+    public:
+      // Constructors
+      Incomplete< Tuple<T1,T2,T3,T4> >(void) : IncompleteSingleRef< Tuple<T1,T2,T3,T4> >() {}
+      Incomplete< Tuple<T1,T2,T3,T4> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2,T3,T4> >(_s) {}
+      
+      // Member Functions
+      void initialize() { }
+      void create() { this->allocate(); initialize(); }
+
+        template<int index>
+      Incomplete<typename get_return_type<index, T1, T2, T3, T4>::type> 
+      get() { return get_return_type<index, T1, T2, T3, T4>::get_incomplete_return_object(this); }
+
+  };
+
+  /* Implementation of Incomplete< Tuple<T1,T2,T3> > */
+
+    template<typename T1, typename T2, typename T3>
+  class Incomplete< Tuple<T1,T2,T3> > : public IncompleteSingleRef< Tuple<T1,T2,T3> > {
+    private:
+      typedef typename AsBareType<T1>::type T1_Bare;
+      typedef typename AsBareType<T2>::type T2_Bare;
+      typedef typename AsBareType<T3>::type T3_Bare;
+    public:
+      // Constructors
+      Incomplete< Tuple<T1,T2,T3> >(void) : IncompleteSingleRef< Tuple<T1,T2,T3> >() {}
+      Incomplete< Tuple<T1,T2,T3> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2,T3> >(_s) {}
+      
+      // Member Functions
+      void initialize() { }
+      void create() { this->allocate(); initialize(); }
+
+        template<int index>
+      Incomplete<typename get_return_type<index, T1, T2, T3>::type> 
+      get() { return get_return_type<index, T1, T2, T3>::get_incomplete_return_object(this); }
+
+  };
 
   /* Implementation of Incomplete< Tuple<T1,T2> > */
 
@@ -504,8 +825,8 @@ namespace Pyon {
       void create() { this->allocate(); initialize(); }
 
         template<int index>
-      Incomplete<typename get_return_type<T1, T2, index>::type> 
-      get() { return get_return_type<T1, T2, index>::get_incomplete_return_object(this); }
+      Incomplete<typename get_return_type<index, T1, T2>::type> 
+      get() { return get_return_type<index, T1, T2>::get_incomplete_return_object(this); }
 
   };
 

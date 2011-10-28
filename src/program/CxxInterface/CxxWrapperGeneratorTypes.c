@@ -8,14 +8,24 @@
 
 void 
 finalize_Name (Name *name) {
+  if(name->isDynamic) { free(name->nameString); }
 }
 
 DEFINE_POOL_DESCRIPTOR(Name);
 
 Name* 
-Name_create(Pool* p, char* nameString){
+Name_create_static(Pool* p, char* nameString){
   Name *name = Pool_malloc(p, &Name_alloc);
   name->nameString = nameString;
+  name->isDynamic = 0;
+  return name;
+}
+
+Name* 
+Name_create_dynamic(Pool* p, char* nameString){
+  Name *name = Pool_malloc(p, &Name_alloc);
+  name->nameString = nameString;
+  name->isDynamic = 1;
   return name;
 }
 
@@ -29,6 +39,11 @@ finalize_TmplName (TmplName *tmplName) {
 }
 
 DEFINE_POOL_DESCRIPTOR(TmplName);
+
+TmplName* 
+TmplName_create_zero_types(Pool* p, Name* name){
+  return TmplName_create(p, name, 0, NULL);
+}
 
 TmplName* 
 TmplName_create(Pool* p, Name* name, int typeCount, Type** typeList){

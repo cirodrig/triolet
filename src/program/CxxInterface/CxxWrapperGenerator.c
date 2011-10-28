@@ -28,73 +28,43 @@ printCxxFunction(FILE* fp, char* wrappedFunctionName, char* wrapperFunctionName,
 
 }
 
-void 
-populateWrappedParameterList(Pool* p, Declaration** parameterList, const PyonTypes* pyonParameterTypes) {
-
-  int parameterCount = pyonParameterTypes->count;
-  int parameterIndex;
-  for (parameterIndex=0; parameterIndex<parameterCount; parameterIndex++){
-    Type* parameterType = pyonToWrappedType(p, pyonParameterTypes->elems[parameterIndex]);
-    parameterList[parameterIndex] = Declaration_local_create(p, parameterType, newVariableName(p));
-  }
-
-}
-
 Function* 
 createWrappedFunctionDeclaration(Pool* p, char* wrappedFunctionName, PyonSignature* pyonSignature) {
 
-  // Extract return type
-  Type* returnType = pyonToWrappedType(p, pyonSignature->returnType);
-
   // Declare parameter data
-  const PyonTypes *pyonParameterTypes = pyonSignature->parameterTypes;
-  int parameterCount = pyonParameterTypes->count;
+  int parameterCount = pyonSignature->parameterTypes->count;
   Declaration** parameterList;
 
   // Separate treatment of functions with val type and bare type return values (bare types have one extra parameter for returnung data and return type void)
-  switch (pyonSignature->returnType->tag) {
-    case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag: // Val Types
-      // Create parameter list
+  switch (pyonTypeKind(pyonSignature->returnType)) {
+    case ValTypeTag: // Val Types
       parameterList = malloc(parameterCount*sizeof(Declaration*));
-      populateWrappedParameterList(p, parameterList, pyonParameterTypes);
+      populateWrappedParameterList(p, parameterList, pyonSignature->parameterTypes);
       break;
-    case PyonTupleTypeTag: case PyonListTypeTag: // Bare Types
-      // Create parameter list
+    case BareTypeTag: // Bare Types
       parameterCount++; // One extra parameter for the bare data returned
       parameterList = malloc(parameterCount*sizeof(Declaration*));
-      populateWrappedParameterList(p, parameterList, pyonParameterTypes);
-      // Manage returned data
-      parameterList[parameterCount-1] = Declaration_local_create(p, returnType, newVariableName(p)); // Add last parameter for returned data
-      returnType = Type_primType_create(p, VOID); // Change return type to void
+      populateWrappedParameterList(p, parameterList, pyonSignature->parameterTypes);
+      Type* returnParameterType = pyonToWrappedParamType(p, pyonSignature->returnType); // Get final parameter type
+      parameterList[parameterCount-1] = Declaration_local_create(p, returnParameterType, newVariableName(p)); // Add final parameter to list
       break;
     default: ERR("invalid PyonTypeTag in function createWrappedFunctionDeclaration(Pool*, char*, PyonSignature*)");
   }
 
   // Create function signature
+  Type* returnType = pyonToWrappedReturnType(p, pyonSignature->returnType);
   Type* signatureType = Type_function_create(p, returnType, parameterCount, parameterList);
-  Declaration* signature = Declaration_extern_c_create(p, signatureType, Name_create(p, wrappedFunctionName));
+  Declaration* signature = Declaration_extern_c_create(p, signatureType, Name_create_dynamic(p, strdup(wrappedFunctionName)));
 
   return Function_declaration_create(p, signature);
 
 }
 
-void 
-populateArgumentList(Pool* p, Expression** argumentList, Declaration** wrappedParameterList, int parameterCount) {
-  int parameterIndex;
-  for (parameterIndex=0; parameterIndex<parameterCount; parameterIndex++){
-    TmplName* argumentTmplName = TmplName_create(p, wrappedParameterList[parameterIndex]->name, 0, NULL);
-    QName* argumentObjectID = QName_tmplName_create(p, argumentTmplName);
-    Expression* argument = Expression_objectID_create(p, argumentObjectID);
-    argumentList[parameterIndex] = argument;
-  }
-}
-
-
 Function* 
 createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignature* pyonSignature, Function* wrappedFunction) {
   
   // Extract return type
-  Type* returnType = pyonToWrapperType(p, pyonSignature->returnType);
+  Type* returnType = pyonToWrapperParamAndReturnType(p, pyonSignature->returnType);
   
   // Extract parameters
   const PyonTypes *pyonParameterTypes = pyonSignature->parameterTypes;
@@ -103,37 +73,21 @@ createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignatur
   Declaration** wrapperParameterList = malloc(parameterCount*sizeof(Declaration*));
   int parameterIndex;
   for (parameterIndex=0; parameterIndex<parameterCount; parameterIndex++){
-    Type* parameterType = pyonToWrapperType(p, pyonParameterTypes->elems[parameterIndex]);
+    Type* parameterType = pyonToWrapperParamAndReturnType(p, pyonParameterTypes->elems[parameterIndex]);
     wrapperParameterList[parameterIndex] = Declaration_local_create(p, parameterType, newVariableName(p));
   }
   
   // Create signature
   Type* signatureType = Type_function_create(p, returnType, parameterCount, wrapperParameterList);
-  Declaration* signature = Declaration_local_create(p, signatureType, Name_create(p, wrapperFunctionName));
+  Declaration* signature = Declaration_local_create(p, signatureType, Name_create_dynamic(p, strdup(wrapperFunctionName)));
 
   // Create declaration list
   DeclarationList* declarationList = DeclarationList_create(p);
   for (parameterIndex=0; parameterIndex<parameterCount; parameterIndex++){
-    DeclarationList_append(p, declarationList, wrappedParameterList[parameterIndex]);
+    DeclarationList_append(p, declarationList, wrappedParameterList[parameterIndex]); // Reuse wrapped parameter list since the types will be the same
   }
-  // Separate return varibale treatment of functions with val type and bare type return values
   Name* returnVariableName = newVariableName(p);
-  Type* returnVariableType;
-  switch (pyonSignature->returnType->tag) {
-    case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag: // Val Types
-      returnVariableType = pyonToWrappedType(p, pyonSignature->returnType);
-      break;
-    case PyonTupleTypeTag: case PyonListTypeTag: { // Bare Types (surround wrapper type with Incomplete<>)
-      Type** typeList = malloc(1*sizeof(Type*));
-      typeList[0] = pyonToWrapperType(p, pyonSignature->returnType);
-      TmplName* tmplName = TmplName_create(p, Name_create(p, "Incomplete"), 1, typeList);
-      QName* qName = QName_tmplName_create(p, tmplName);
-      qName = QName_namespace_qName_create(p, Name_create(p, "Pyon"), qName);
-      returnVariableType = Type_qName_create(p, qName);
-      break;
-    }
-    default: ERR("invalid PyonTypeTag in function createWrapperFunctionDefinition(Pool*, char*, PyonSignature*, Function*)");
-  }
+  Type* returnVariableType = pyonToWrapperReturnDeclarationType(p, pyonSignature->returnType);
   DeclarationList_append(p, declarationList, Declaration_local_create(p, returnVariableType, returnVariableName));
   
   // Create statement list
@@ -145,15 +99,13 @@ createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignatur
     StatementList_append(p, statementList, unwrappingStatement);
   }
   // Separate function invocation treatment of functions with val type and bare type return values
-  switch (pyonSignature->returnType->tag) {
-    case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag: { // Val Types
+  switch (pyonTypeKind(pyonSignature->returnType)) {
+    case ValTypeTag: { // Val Types
       // Step 2: invoke wrapped function
       // Step 2.1: generate the return variable expression for the left hand side (note: also used in return expression of step 3)
-      TmplName* returnVariableTmplName = TmplName_create(p, returnVariableName, 0, NULL);
-      QName *returnVariableObjectID = QName_tmplName_create(p, returnVariableTmplName);
-      Expression* returnVariableExpression = Expression_objectID_create(p, returnVariableObjectID);
+      Expression* returnVariableExpression = nameToObjectIDExpression(p, returnVariableName);
       // Step 2.2: generate function invokation for the right hand side
-      TmplName* functionTmplName = TmplName_create(p, wrappedFunction->signature->name, 0, NULL);
+      TmplName* functionTmplName = TmplName_create_zero_types(p, wrappedFunction->signature->name);
       QName *functionQName = QName_tmplName_create(p, functionTmplName);
       Expression** argumentList = malloc(parameterCount*sizeof(Expression*));
       populateArgumentList(p, argumentList, wrappedParameterList, parameterCount);
@@ -172,23 +124,21 @@ createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignatur
       StatementList_append(p, statementList, statement);
       break;
     }
-    case PyonTupleTypeTag: case PyonListTypeTag: { // Bare Types
+    case BareTypeTag: { // Bare Types
       // Step 2: invoke wrapped function
       // Step 2.0: before invoking the function, return variable must be allocated
-      TmplName* returnVariableTmplName = TmplName_create(p, returnVariableName, 0, NULL);
-      QName *returnVariableObjectID = QName_tmplName_create(p, returnVariableTmplName);
-      Expression* returnVariableExpression = Expression_objectID_create(p, returnVariableObjectID);
-      Expression* memberAccessExpression = Expression_member_access_create(p, returnVariableExpression, Name_create(p, "allocate"));
+      Expression* returnVariableExpression = nameToObjectIDExpression(p, returnVariableName);
+      Expression* memberAccessExpression = Expression_member_access_create(p, returnVariableExpression, Name_create_static(p, "allocate"));
       Expression* allocateExpression = Expression_function_call_create(p, memberAccessExpression, 0, NULL);
       Statement* statement = Statement_expression_create(p, allocateExpression);
       StatementList_append(p, statementList, statement);
       // Step 2.1: no left hand side
       // Step 2.2: generate function invokation for the right hand side
-      TmplName* functionTmplName = TmplName_create(p, wrappedFunction->signature->name, 0, NULL);
+      TmplName* functionTmplName = TmplName_create_zero_types(p, wrappedFunction->signature->name);
       QName *functionQName = QName_tmplName_create(p, functionTmplName);
       Expression** argumentList = malloc( (parameterCount+1) * sizeof(Expression*) ); // One extra parameter for returned bare data
       populateArgumentList(p, argumentList, wrappedParameterList, parameterCount);
-      memberAccessExpression = Expression_member_access_create(p, returnVariableExpression, Name_create(p, "getObject")); // Final parameter is returnVariable.getBareData()
+      memberAccessExpression = Expression_member_access_create(p, returnVariableExpression, Name_create_static(p, "getObject")); // Final parameter is returnVariable.getBareData()
       argumentList[parameterCount] = Expression_function_call_create(p, memberAccessExpression, 0, NULL); // Add final parameter to list
       Expression* functionQNameExpression = Expression_objectID_create(p, functionQName);
       Expression* functionInvocationExpression = Expression_function_call_create(p, functionQNameExpression, parameterCount + 1, argumentList); // One extra parameter
@@ -196,7 +146,7 @@ createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignatur
       statement = Statement_expression_create(p, functionInvocationExpression);
       StatementList_append(p, statementList, statement);
       // Step 3: invoke freeze() and return
-      memberAccessExpression = Expression_member_access_create(p, returnVariableExpression, Name_create(p, "freeze"));
+      memberAccessExpression = Expression_member_access_create(p, returnVariableExpression, Name_create_static(p, "freeze"));
       Expression* returnExpression = Expression_function_call_create(p, memberAccessExpression, 0, NULL);
       statement = Statement_return_create(p, returnExpression);
       StatementList_append(p, statementList, statement);
@@ -209,8 +159,36 @@ createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignatur
   
 }
 
+Statement*
+createUnwrappingStatement(Pool* p, const PyonType* pyonType, Declaration* wrappedVariable, Declaration* wrapperVariable) {
+
+  // Left hand side (lhs)
+  Expression* lhsExpression = nameToObjectIDExpression(p, wrappedVariable->name);
+
+  // Right hand side (rhs)
+  TmplName* rhsVariableTmplName = TmplName_create_zero_types(p, wrapperVariable->name);
+  QName* rhsVariableQName = QName_tmplName_create(p, rhsVariableTmplName);
+  Expression* rhsExpression;
+  switch (pyonTypeKind(pyonType)) {
+    case ValTypeTag:
+      rhsExpression = Expression_cast_create(p, wrappedVariable->type, rhsVariableQName);
+      break;
+    case BareTypeTag: {
+      Expression* objectID = Expression_objectID_create(p, rhsVariableQName);
+      Expression* memberAccessExpression = Expression_member_access_create(p, objectID, Name_create_static(p, "getBareData"));
+      rhsExpression = Expression_function_call_create(p, memberAccessExpression, 0, NULL);
+      break;
+    }
+    default: ERR("invalid PyonTypeTag in function createUnwrappingStatement(Pool*,PyonType*,Declaration*,Declaration*)");
+  }
+
+  // lhs = rhs
+  return Statement_assignment_create(p, lhsExpression, rhsExpression);
+
+}
+
 Type* 
-pyonToWrappedType(Pool* p, const PyonType* pyonType) {
+pyonToWrappedValType(Pool* p, const PyonType* pyonType) {
   switch (pyonType->tag) {
     case PyonIntTag:
       return Type_primType_create(p, INT32_T);
@@ -224,95 +202,119 @@ pyonToWrappedType(Pool* p, const PyonType* pyonType) {
     case PyonNoneTypeTag:
       return Type_primType_create(p, NONE_TYPE);
       break;
-    case PyonTupleTypeTag: case PyonListTypeTag:
-    { 
-      TmplName* tmplName = TmplName_create(p, Name_create(p, "PyonBarePtr"), 0, NULL);
-      QName* qName = QName_tmplName_create(p, tmplName);
-      qName = QName_namespace_qName_create(p, Name_create(p, "Pyon"), qName);
-      return Type_qName_create(p, qName);
+    default: ERR("invalid PyonTypeTag in function pyonToWrappedValType(Pool*,PyonType*)");
+  }
+}
+
+Type* pyonToWrappedParamType(Pool* p, const PyonType* pyonType) {
+  switch(pyonTypeKind(pyonType)) {
+    case ValTypeTag:
+      return pyonToWrappedValType(p, pyonType);
+      break;
+    case BareTypeTag:
+      return createTmplNameInNamespace (p, TmplName_create_zero_types(p, Name_create_static(p, "PyonBarePtr")));
+      break;
+    default: ERR("invalid TypeKindTag in function pyonToWrappedParamType(Pool*, PyonType*)");
+  }
+}
+
+Type* pyonToWrappedReturnType(Pool* p, const PyonType* pyonType) {
+  switch(pyonTypeKind(pyonType)) {
+    case ValTypeTag:
+      return pyonToWrappedValType(p, pyonType);
+      break;
+    case BareTypeTag:
+      return Type_primType_create(p, VOID);
+      break;
+    default: ERR("invalid TypeKindTag in function pyonToWrappedReturnType(Pool*, PyonType*)");
+  }
+}
+
+Type* pyonToWrapperParamAndReturnType(Pool* p, const PyonType* pyonType) {
+  return pyonToWrapperType(p, pyonType);
+}
+
+Type* pyonToWrapperReturnDeclarationType(Pool* p, const PyonType* pyonType) {
+  switch (pyonTypeKind(pyonType)) {
+    case ValTypeTag:
+      return pyonToWrappedValType(p, pyonType);
+      break;
+    case BareTypeTag: {
+      Type** typeList = malloc(sizeof(Type*));
+      typeList[0] = pyonToWrapperType(p, pyonType);
+      TmplName* tmplName = TmplName_create(p, Name_create_static(p, "Incomplete"), 1, typeList);
+      return createTmplNameInNamespace (p, tmplName);
       break;
     }
-    default: ERR("invalid PyonTypeTag in function pyonToWrappedType(Pool*,PyonType*)");
+    default: ERR("invalid TypeKindTag in function pyonToWrapperReturnType(Pool*, PyonType*)");
   }
 }
 
 Type* 
 pyonToWrapperType(Pool* p, const PyonType* pyonType) {
-  Name* name;
-  int templateCount;
-  Type** typeList;
   switch (pyonType->tag) {
     case PyonIntTag:
-      name = Name_create(p, "Int");
-      templateCount = 0;
-      typeList = NULL;
+      return createTmplNameInNamespace (p, TmplName_create_zero_types(p, Name_create_static(p, "Int")));
       break;
     case PyonFloatTag:
-      name = Name_create(p, "Float");
-      templateCount = 0;
-      typeList = NULL;
+      return createTmplNameInNamespace (p, TmplName_create_zero_types(p, Name_create_static(p, "Float")));
       break;
     case PyonBoolTag:
-      name = Name_create(p, "Bool");
-      templateCount = 0;
-      typeList = NULL;
+      return createTmplNameInNamespace (p, TmplName_create_zero_types(p, Name_create_static(p, "Bool")));
       break;
     case PyonNoneTypeTag:
-      name = Name_create(p, "NoneType");
-      templateCount = 0;
-      typeList = NULL;
+      return createTmplNameInNamespace (p, TmplName_create_zero_types(p, Name_create_static(p, "NoneType")));
       break;
-    case PyonTupleTypeTag:
-      name = Name_create(p, "Tuple");
-      templateCount = pyonType->tuple.count;
-      typeList = malloc(templateCount*sizeof(Type*));
+    case PyonTupleTypeTag: {
+      int templateCount = pyonType->tuple.count;
+      Type** typeList = malloc(templateCount*sizeof(Type*));
       int typeIndex;
       for (typeIndex=0; typeIndex<templateCount; typeIndex++) {
         typeList[typeIndex] = pyonToWrapperType(p, pyonType->tuple.elems[typeIndex]);
       }
-      break;
-    case PyonListTypeTag:
-      name = Name_create(p, "List");
-      templateCount = 1;
-      typeList = malloc(templateCount*sizeof(Type*));
-      typeList[0] = pyonToWrapperType(p, pyonType->list.elem);
-      break;
-    default: ERR("invalid PyonTypeTag in function pyonToWrapperType(Pool*,PyonType*)");
-  }
-  TmplName* tmplName = TmplName_create(p, name, templateCount, typeList);
-  QName* qName = QName_tmplName_create(p, tmplName);
-  qName = QName_namespace_qName_create(p, Name_create(p, "Pyon"), qName);
-  return Type_qName_create(p, qName);
-}
-
-Statement*
-createUnwrappingStatement(Pool* p, const PyonType* pyonType, Declaration* wrappedVariable, Declaration* wrapperVariable) {
-
-  // Left hand side (lhs)
-  TmplName* lhsTmplName = TmplName_create(p, wrappedVariable->name, 0, NULL);
-  QName *lhsObjectID = QName_tmplName_create(p, lhsTmplName);
-  Expression* lhsExpression = Expression_objectID_create(p, lhsObjectID);
-
-  // Right hand side (rhs)
-  TmplName* rhsVariableTmplName = TmplName_create(p, wrapperVariable->name, 0, NULL);
-  QName* rhsVariableQName = QName_tmplName_create(p, rhsVariableTmplName);
-  Expression* rhsExpression;
-  switch (pyonType->tag) {
-    case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag:
-      rhsExpression = Expression_cast_create(p, wrappedVariable->type, rhsVariableQName);
-      break;
-    case PyonTupleTypeTag: case PyonListTypeTag: {
-      Expression* objectID = Expression_objectID_create(p, rhsVariableQName);
-      Expression* memberAccessExpression = Expression_member_access_create(p, objectID, Name_create(p, "getBareData"));
-      rhsExpression = Expression_function_call_create(p, memberAccessExpression, 0, NULL);
+      TmplName* tmplName = TmplName_create(p, Name_create_static(p, "Tuple"), templateCount, typeList);
+      return createTmplNameInNamespace (p, tmplName);
       break;
     }
-    default: ERR("invalid PyonTypeTag in function createUnwrappingStatement(Pool*,PyonType*,Declaration*,Declaration*)");
+    case PyonListTypeTag: {
+      Type** typeList = malloc(sizeof(Type*));
+      typeList[0] = pyonToWrapperType(p, pyonType->list.elem);
+      TmplName* tmplName = TmplName_create(p, Name_create_static(p, "List"), 1, typeList);
+      return createTmplNameInNamespace (p, tmplName);
+      break;
+    }
+    default: ERR("invalid PyonTypeTag in function pyonToWrapperType(Pool*,PyonType*)");
   }
+}
 
-  // lhs = rhs
-  return Statement_assignment_create(p, lhsExpression, rhsExpression);
+TypeKindTag pyonTypeKind(const PyonType *pyonType) {
+  switch (pyonType->tag) {
+    case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag:
+      return ValTypeTag;
+      break;
+    case PyonTupleTypeTag: case PyonListTypeTag:
+      return BareTypeTag;
+      break;
+    default: ERR("invalid PyonTypeTag in function pyonTypeKind(PyonType*)");
+  }
+}
 
+void 
+populateWrappedParameterList(Pool* p, Declaration** parameterList, const PyonTypes* pyonParameterTypes) {
+  int parameterCount = pyonParameterTypes->count;
+  int parameterIndex;
+  for (parameterIndex=0; parameterIndex<parameterCount; parameterIndex++){
+    Type* parameterType = pyonToWrappedParamType(p, pyonParameterTypes->elems[parameterIndex]);
+    parameterList[parameterIndex] = Declaration_local_create(p, parameterType, newVariableName(p));
+  }
+}
+
+void 
+populateArgumentList(Pool* p, Expression** argumentList, Declaration** wrappedParameterList, int parameterCount) {
+  int parameterIndex;
+  for (parameterIndex=0; parameterIndex<parameterCount; parameterIndex++){
+    argumentList[parameterIndex] = nameToObjectIDExpression(p, wrappedParameterList[parameterIndex]->name);;
+  }
 }
 
 Name*
@@ -325,14 +327,30 @@ newVariableName(Pool* p) {
   }
   char *s = malloc(digits + 3);
   sprintf(s, "x_%u", n);
-  return Name_create(p, s);
+  return Name_create_dynamic(p, s);
+}
+
+Type*
+createTmplNameInNamespace (Pool* p, TmplName* tmplName) {
+      QName* qName = QName_tmplName_create(p, tmplName);
+      qName = QName_namespace_qName_create(p, Name_create_static(p, "Pyon"), qName);
+      return Type_qName_create(p, qName);
+}
+
+Expression* 
+nameToObjectIDExpression(Pool* p, Name* name) {
+    TmplName* tmplName = TmplName_create_zero_types(p, name);
+    QName* objectID = QName_tmplName_create(p, tmplName);
+    Expression* expression = Expression_objectID_create(p, objectID);
+    return expression;
 }
 
 
 
-/********************************************************************************
- **                        Example Wrapper Function                            **
- ********************************************************************************
+
+/*******************************************************************************
+ **                       Example Wrapper Function                            **
+ *******************************************************************************
 
       // WRAPPED FUNCTION
       bool sampleFunction(int_32 i,float f, PyonBarePtr tuple);
@@ -361,5 +379,5 @@ newVariableName(Pool* p) {
 
       }
   
- ********************************************************************************/
+ ******************************************************************************/
 

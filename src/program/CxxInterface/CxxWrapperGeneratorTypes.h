@@ -68,8 +68,10 @@ void finalize_StatementListNode(StatementListNode* statementListNode);
 void finalize_StatementList(StatementList* statementList);
 void finalize_Function(Function* function);
 
-Name* Name_create(Pool* p, char* nameString);
+Name* Name_create_static(Pool* p, char* nameString);
+Name* Name_create_dynamic(Pool* p, char* nameString);
 
+TmplName* TmplName_create_zero_types(Pool* p, Name* name);
 TmplName* TmplName_create(Pool* p, Name* name, int typeCount, Type** typeList);
 
 QName* QName_namespace_qName_create(Pool* p, Name* namespaceName, QName* qName);
@@ -106,7 +108,8 @@ Function* Function_definition_create(Pool* p, Declaration* signature, Declaratio
 
 // Name
 
-struct Name { // TODO: boolean to indicate if static or dynamically allocated
+struct Name {
+  int isDynamic;
   char* nameString;
   PoolMembership pool;
 };
