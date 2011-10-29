@@ -202,7 +202,7 @@ compilePyonToPyonMem compile_flags path text = do
   putStrLn "Memory IR"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   when debugMode $ void $ do
-    SystemF.TypecheckMem.typeCheckModule repr_mod -- DEBUG
+    SystemF.TypecheckMem.typeCheckModule repr_mod
   
   return repr_mod
 
@@ -217,17 +217,16 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   when debugMode $ void $ do
     putStrLn "After floating 1"
     print $ SystemF.PrintMemoryIR.pprModule repr_mod
-    evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
+    evaluate $ SystemF.checkForShadowingModule repr_mod
 
   repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
-  repr_mod <- iterateM (highLevelOptimizations False SystemF.GeneralSimplifierPhase) 4 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations False SystemF.GeneralSimplifierPhase) 5 repr_mod
   
   putStrLn ""
   putStrLn "Before loop dimension analysis"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
 
-  repr_mod <- highLevelOptimizations True SystemF.DimensionalitySimplifierPhase repr_mod
-  repr_mod <- highLevelOptimizations True SystemF.DimensionalitySimplifierPhase repr_mod
+  repr_mod <- iterateM (highLevelOptimizations True SystemF.DimensionalitySimplifierPhase) 7 repr_mod
 
   putStrLn ""
   putStrLn "Before parallelizing"
@@ -237,7 +236,10 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   repr_mod <-
     if lookupCompileFlag DoParallelization compile_flags
     then do repr_mod <- SystemF.parallelLoopRewrite repr_mod
-            highLevelOptimizations False SystemF.GeneralSimplifierPhase repr_mod
+            putStrLn ""
+            putStrLn "After parallelizing"
+            print $ SystemF.PrintMemoryIR.pprModule repr_mod
+            highLevelOptimizations False SystemF.DimensionalitySimplifierPhase repr_mod
     else return repr_mod
 
   -- Sequentialize remaining loops
@@ -249,12 +251,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   
   -- Inline loops
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
-
   repr_mod <- SystemF.longRangeFloating repr_mod
-  when debugMode $ void $ do
-    putStrLn "After floating 2"
-    print $ SystemF.PrintMemoryIR.pprModule repr_mod
-    evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
 
   -- Restructure the code resulting from inlining, which may create new
   -- local functions
@@ -262,9 +259,10 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
 
   -- Argument flattening
-  putStrLn ""
-  putStrLn "Before Argument Flattening"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Before Argument Flattening"
+    print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.performGlobalDemandAnalysis repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
   

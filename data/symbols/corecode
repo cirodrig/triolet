@@ -623,7 +623,15 @@ TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
                        (size : FIInt N) (aref : Referenced (arr N a)).
   case aref of referenced @(arr N a) (ay : arr N a).
 
-  viewStream @a (darr1ToView1 @N @a size (arr1D_traverse @N @a repr size ay));
+  case boxed @dim1 (mk_dim1 @0 @N zero_ii (iInt @N size)) of
+    boxed @dim1 (list_dim : dim1).
+
+  viewStream @a
+  (view1_generate @a repr list_dim
+   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+     case si of stored @int (i : int).
+     copy @a repr (subscript @N @a repr ay i) ret));
+
 
 TraversableDict_view0_build
   @(a : bare) (repr : Repr a) (v : view0 a) -> view0 a attribute(inline) = v;
@@ -1670,7 +1678,7 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
 -- ShapeDict-like internal functions
 
 view1_flatten @(a : bare) (vw : view1 a) -> Stream dim1 a
-  attribute(inline) =
+  attribute(inline, inline_dimensionality) =
   -- Shift the indices so that the first index is 0
   case vw of {
     mk_view1 @a @(lo hi : intindex)
@@ -1690,9 +1698,24 @@ view1_flatten @(a : bare) (vw : view1 a) -> Stream dim1 a
   };
 
 
+view1_generate @(a : bare) (repr_a : Repr a) (shape : dim1)
+  (generator : Stored int -> Writer a) -> view1 a
+  attribute(inline, inline_dimensionality) =
+
+  case shape of
+    mk_dim1 @(lo : intindex) @(hi : intindex)
+    (ilo : IInt lo) (ihi : IInt hi).
+
+  mk_view1 @a @lo @hi ilo ihi
+  (\ (i : int) (ret : OutPtr a) -> IEffect a.
+     case boxed @(Stored int) (stored @int i) of
+       boxed @(Stored int) (si : Stored int).
+     generator si ret);
+
+
 view1_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
           (transformer : a -> Writer b) (vw : view1 a) -> view1 b
-  attribute(inline) =
+  attribute(inline, inline_dimensionality) =
   case vw of {
     mk_view1 @a @(lo hi : intindex)
                  (Nlo : IInt lo) (Nhi : IInt hi) (f : int -> Writer a).
@@ -1709,7 +1732,7 @@ view1_zipWith @(a b c : bare)
   (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
   (transformer : a -> b -> Writer c) (vwA : view1 a) (vwB : view1 b)
   -> view1 c
-  attribute(inline) =
+  attribute(inline, inline_dimensionality) =
   case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
@@ -1742,7 +1765,7 @@ view1_zipWith3 @(a b c d : bare)
   (transformer : a -> b -> c -> Writer d)
   (vwA : view1 a) (vwB : view1 b) (vwC : view1 c)
   -> view1 d
-  attribute(inline) =
+  attribute(inline, inline_dimensionality) =
   case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
@@ -1784,7 +1807,7 @@ view1_zipWith4 @(a b c d e : bare)
   (transformer : a -> b -> c -> d -> Writer e)
   (vwA : view1 a) (vwB : view1 b) (vwC : view1 c) (vwD : view1 d)
   -> view1 e
-  attribute(inline) =
+  attribute(inline, inline_dimensionality) =
   case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
@@ -2944,6 +2967,29 @@ Sequence_guard @(a : bare)
   (repr : Repr a) (condition : bool) (s : Sequence a) -> Sequence a
   attribute(inline) =
   if condition then s else Sequence_empty @a;
+
+
+Sequence_generate @(a : bare)
+  (repr : Repr a) (size : dim1) (f : index dim1 -> Writer a) -> Sequence a
+  attribute(inline, inline_final) =
+  case size of
+    mk_dim1 @(lo : intindex) @(hi : intindex) (ilo : IInt lo) (ihi : IInt hi).
+  case ilo of {
+    iInt @lo (flo : FIInt lo).
+      case flo of fiInt @lo (lo_i : int).
+
+      generate @(minus_i hi lo) @a (minus_ii @hi @lo ihi ilo) repr
+      (\ (i : int) (ret : OutPtr a) -> IEffect a.
+        -- The 'generate' loop starts from 0.  Add 'lo_i' to get the real
+        -- starting offset.
+        case boxed @(Stored int) (stored @int (i +# lo_i)) of
+          boxed @(Stored int) (real_ix : Stored int).
+        f real_ix ret)
+  ; iPosInfty @lo.
+      except @(Sequence a)
+  ; iNegInfty @lo.
+      except @(Sequence a)
+  };
 
 
 Sequence_bind @(a b : bare)

@@ -771,6 +771,9 @@ IndexableDict_array2_get_shape :
 
 view1_flatten : (a : bare) -> view1 a -> Stream dim1 a;
 
+view1_generate : (a : bare) -> Repr a -> dim1 -> (index dim1 -> Writer a)
+              -> view1 a;
+
 view1_map : (a b : bare) -> Repr a -> Repr b
 	 -> (a -> Writer b) -> view1 a -> view1 b;
 
@@ -798,6 +801,9 @@ view1_zipWith4 : (a b c d e : bare)
               -> view1 e;
 
 Sequence_flatten : (a : bare) -> Sequence a -> Stream dim1 a;
+
+Sequence_generate : (a : bare)
+                 -> Repr a -> dim1 -> (index dim1 -> Writer a) -> Sequence a;
 
 Sequence_map : (a b : bare) -> Repr a -> Repr b
 	    -> (a -> Writer b) -> Sequence a -> Sequence b;

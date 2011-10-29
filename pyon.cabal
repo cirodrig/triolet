@@ -132,6 +132,7 @@ Executable pyon
     SystemF.Simplifier.AbsValue
     SystemF.Simplifier.Rewrite
     SystemF.Simplifier.Simplify
+    SystemF.Simplifier.StreamExp
     SystemF.SpecToMem
     SystemF.Syntax
     SystemF.Typecheck
