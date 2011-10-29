@@ -153,6 +153,7 @@ highLevelOptimizations :: Bool
                        -> SystemF.Module SystemF.Mem
                        -> IO (SystemF.Module SystemF.Mem)
 highLevelOptimizations global_demand_analysis simplifier_phase mod = do
+  -- Run the rewriter (most optimizations are in here)
   mod <- SystemF.rewriteAtPhase simplifier_phase mod
   when debugMode $ void $ do
     putStrLn "After rewrite"
@@ -160,12 +161,11 @@ highLevelOptimizations global_demand_analysis simplifier_phase mod = do
     evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
     SystemF.TypecheckMem.typeCheckModule mod
 
-  mod <- if global_demand_analysis
-         then SystemF.demandAnalysis mod
-         else SystemF.localDemandAnalysis mod
-
-  -- Temporary: specialize on constructors and re-run demand analysis
+  -- Specialize on constructors
   mod <- SystemF.specializeOnConstructors mod
+
+  -- Demand information was destroyed by the previous passes.
+  -- Re-run demand analysis.
   mod <- if global_demand_analysis
          then SystemF.demandAnalysis mod
          else SystemF.localDemandAnalysis mod
