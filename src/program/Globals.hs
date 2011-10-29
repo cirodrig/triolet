@@ -1,4 +1,6 @@
 
+-- Profiling information for these functions is not useful
+{-# OPTIONS_GHC -no-auto #-}
 module Globals where
 
 import qualified Data.Map as Map

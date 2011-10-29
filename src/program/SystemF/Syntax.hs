@@ -13,6 +13,7 @@ and case statements branch to alternatives ('Alt').
 -}
 
 {-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
+{-# OPTIONS_GHC -no-auto #-}
 module SystemF.Syntax
     (-- * Demand information
      Dmd(..), unknownDmd,

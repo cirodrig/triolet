@@ -5,6 +5,8 @@ constants that need to be initialized in the IO monad and supplies of unique
 integers.  This module assists in defining and using such variables.
 -}
 
+-- Profiling information for these functions is not useful
+{-# OPTIONS_GHC -no-auto #-}
 module GlobalVar
 where
 
