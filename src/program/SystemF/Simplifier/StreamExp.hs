@@ -338,6 +338,9 @@ pprStreamOp' (BindOp t1 t2) =
 pprStreamOp' (ReturnOp t) =
   nameApplication "return" [pprTypePrec t]
 
+pprStreamOp' (EmptyOp t) =
+  nameApplication "empty" [pprTypePrec t]
+
 pprStreamOp' (ReduceOp st op) =
   let (name, tys) = case op
                     of Reduce ty -> ("reduce", [ty])
@@ -418,6 +421,7 @@ streamOpTable =
            , (pyonBuiltin The_view1_reduce1, interpretReduce1 (PolyViewType 1))
            , (pyonBuiltin The_Sequence_bind, interpretBind)
            , (pyonBuiltin The_Sequence_return, interpretReturn)
+           , (pyonBuiltin The_Sequence_empty, interpretEmpty)
            , (pyonBuiltin The_Sequence_generate, interpretGen PolySequenceType)
            , (pyonBuiltin The_Sequence_reduce, interpretReduce PolySequenceType)
            , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 PolySequenceType)
@@ -520,6 +524,14 @@ interpretReturn = StreamOpInterpreter check_arity interpret
     
     interpret inf [ty] [repr, gen] = do
       return $ OpSE inf (ReturnOp ty) [] [repr] [gen] []
+
+interpretEmpty = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 0 = True
+    check_arity _ _ = False
+    
+    interpret inf [ty] [] = do
+      return $ OpSE inf (EmptyOp ty) [] [] [] []
 
 interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
   where
