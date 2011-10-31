@@ -412,8 +412,8 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
 parallelizingRewrites :: RewriteRuleSet
 parallelizingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
   where
-    table = [ --(pyonBuiltin The_primitive_dim1_reduce, rwParallelDim1Reduce)
-            --, (pyonBuiltin The_primitive_dim1_reduce1, rwParallelDim1Reduce1)
+    table = [ --(pyonBuiltin The_primitive_darr1_reduce, rwParallelDim1Reduce)
+            --, (pyonBuiltin The_primitive_darr1_reduce1, rwParallelDim1Reduce1)
             --, (pyonBuiltin The_doall, rwParallelDoall)
             --, (pyonBuiltin The_histogramArray, rwParallelHistogramArray)
             ]
@@ -570,7 +570,7 @@ rwDarr1Reduce inf [size_index, ty]
   case fromExpM darr
   of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr1 ->
-         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_reduce
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_darr1_reduce
              exp = appE inf op [size_index, ty]
                    (repr : count : reducer : init : producer : other_args)
          in return $ Just exp
@@ -598,7 +598,7 @@ rwDarr1Reduce1 inf [size_index, ty]
   case fromExpM darr
   of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr1 ->
-         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_reduce1
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_darr1_reduce1
              exp = appE inf op [size_index, ty]
                    (repr : count : reducer : producer : other_args)
          in return $ Just exp
@@ -616,7 +616,7 @@ rwDarr2Reduce inf [size_y, size_x, ty]
   case fromExpM darr
   of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr2 ->
-         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim2_reduce
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_darr2_reduce
              exp = appE inf op [size_y, size_x, ty]
                    (repr : count_y : count_x : reducer : init : producer : other_args)
          in return $ Just exp
@@ -635,7 +635,7 @@ rwArr1DBuild inf [size_index, ty]
   case fromExpM darr
   of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr1 ->
-         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_generate
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_darr1_generate
              exp = appE inf op [size_index, ty]
                    (repr : count : producer : other_args)
          in return $ Just exp
@@ -653,7 +653,7 @@ rwArr2DBuild inf [size_index_y, size_index_x, ty]
   case fromExpM darr
   of ConE _ (VarCon con _ _) [producer] 
        | con `isPyonBuiltin` The_mk_darr2 ->
-         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim2_generate
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_darr2_generate
              exp = appE inf op [size_index_y, size_index_x, ty]
                    (repr : count_y : count_x : producer : other_args)
          in return $ Just exp

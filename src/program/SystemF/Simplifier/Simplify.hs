@@ -440,16 +440,39 @@ rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
        inf operator ty_args args
   return $ Just x
 
+-- | Perform stream-specific transformations.
+--
+--   In earlier compiler phases, stream expressions are rewritten to more
+--   efficient, potentially parallel stream expressions.
+--   In later compiler phases, @Sequence@ methods are rewritten to sequential
+--   loops.  Other stream methods are inlined and don't require special
+--   transformations.
 interpretStreamInSimplifier inf op_var ty_args args = LR $ \env -> do
-  x <- runTypeEvalM interpret_stream (lrIdSupply $ lrConstants env) (lrTypeEnv env)
+  let phase = lrPhase $ lrConstants env
+  x <- runTypeEvalM (interpret_stream phase) (lrIdSupply $ lrConstants env) (lrTypeEnv env)
   return $ Just x
   where
-    interpret_stream = do
+    interpret_stream phase = do
       ms <- interpretStreamAppExp inf op_var ty_args args
       case ms of
         Nothing -> return Nothing
-        Just s -> do s' <- simplifyStreamExp s
-                     traceShow (text "INTERPRETED" <+> pprExpS s') $ return $ Just $ embedStreamExp s'
+        Just s -> 
+          case phase
+          of GeneralSimplifierPhase -> simplify_stream s
+             DimensionalitySimplifierPhase -> simplify_stream s
+             SequentialSimplifierPhase -> serialize_stream s
+             FinalSimplifierPhase -> serialize_stream s
+
+    simplify_stream s = do
+      s' <- simplifyStreamExp s
+      return $ Just $ embedStreamExp s'
+      -- traceShow (text "INTERPRETED" <+> pprExpS s')
+
+    serialize_stream s = do
+      sequentializeStreamExp s
+      {- case s' of
+        Nothing -> return Nothing
+        Just x -> traceShow (text "INTERPRETED" <+> pprExp x) $ return (Just x) -}
 
 -------------------------------------------------------------------------------
 -- Estimating code size

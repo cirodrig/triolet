@@ -1,14 +1,18 @@
 
+{-# LANGUAGE FlexibleInstances #-}
 module SystemF.Simplifier.StreamExp
        (isStreamAppExp,
         interpretStreamAppExp,
-        simplifyStreamExp,
         embedStreamExp,
+        simplifyStreamExp,
+        sequentializeStreamExp,
         pprExpS)
 where
 
 import Control.Monad
+import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
+import qualified Data.Set as Set
 import Data.Maybe
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
@@ -19,9 +23,12 @@ import Common.PrecDoc
 import Builtins.Builtins
 import SystemF.Build
 import SystemF.IncrementalSubstitution
+import SystemF.Rename
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
+import qualified Type.Rename as Rename
+import Type.Rename(Renameable(..))
 import Type.Type
 import Type.Environment
 
@@ -83,6 +90,58 @@ data instance Exp Stream =
     , sexpScrutinee :: ExpM
     , sexpAlternatives :: [AltS]
     }
+
+instance Renameable (Exp Stream) where
+  rename rn expression =
+    case expression
+    of OtherSE e -> OtherSE $ rename rn e
+       OpSE inf op shape_args repr_args misc_args stream_args ->
+         OpSE inf (rename rn op) (rename rn shape_args) (rename rn repr_args)
+         (rename rn misc_args) (rename rn stream_args)
+       LamSE inf f ->
+         LamSE inf (rename rn f)
+       LetSE inf pat rhs body ->
+         let rhs' = rename rn rhs
+         in renamePatM rn pat $ \rn' pat' ->
+            LetSE inf pat' rhs' (rename rn' body)
+       LetfunSE inf defs body ->
+         renameDefGroup rn defs $ \rn' defs' ->
+         LetfunSE inf defs' (rename rn' body)
+       CaseSE inf scr alts ->
+         CaseSE inf (rename rn scr) (map (rename rn) alts)
+
+instance Renameable (Fun Stream) where
+  rename rn (FunS fun) =
+    renameTyPats rn (funTyParams fun) $ \rn' ty_params -> 
+    renamePatMs rn' (map fromPatS $ funParams fun) $ \rn'' params ->
+    let ret = rename rn'' $ funReturn fun
+        body = rename rn'' $ funBody fun
+    in FunS $ Fun { funInfo = funInfo fun
+                  , funTyParams = ty_params
+                  , funParams = map PatS $ params
+                  , funReturn = ret
+                  , funBody = body}
+
+  freeVariables (FunS fun) =
+    Rename.bindersFreeVariables [p | TyPat p <- funTyParams fun] $
+    let uses_fv = freeVariables (map (patMDmd . fromPatS) $ funParams fun)
+        params_fv = Rename.bindersFreeVariables (map (patMBinder . fromPatS) $ funParams fun) $
+                    freeVariables (funBody fun) `Set.union`
+                    freeVariables (funReturn fun)
+    in Set.union uses_fv params_fv
+
+instance Renameable (Alt Stream) where
+  rename rn (AltS (Alt con params body)) =
+    renameDeConInst rn con $ \rn' con' ->
+    renamePatMs rn' (map fromPatS params) $ \rn'' params' ->
+    AltS $ Alt con' (map PatS params') (rename rn'' body)
+
+  freeVariables (AltS (Alt decon params body)) =
+    deConFreeVariables decon $
+    let uses_fv = freeVariables (map (patMDmd . fromPatS) params) 
+        params_fv = Rename.bindersFreeVariables (map (patMBinder . fromPatS) params) $
+                    freeVariables body
+    in Set.union uses_fv params_fv
 
 data PolyStreamType =
     PolySequenceType
@@ -154,9 +213,10 @@ data ReductionOp =
     -- >   {reducer} {stream} {output pointer}
   | Reduce1 Type
 
-    -- | Reduce sequentially
+    -- | Reduce sequentially.  The type arguments are the input type and the
+    --   accumulator type.
     --
-    -- > (reduce @{other type arguments} @{input type} @{accumulator  type}
+    -- > (reduce @{other type arguments} @{input type} @{accumulator type}
     -- >   {other arguments}) {reducer} {init} {stream} {output pointer}
   | Fold Type Type
 
@@ -164,7 +224,7 @@ data StreamOp =
     -- | Generate a stream.
     --
     -- > generate @{shape indices} @{output type}
-    -- >   {shape parameters} {output repr} {generator function}
+    -- >   {shape parameters} {output repr} {[shape], generator function}
     GenerateOp !StreamType Type
 
     -- | N-ary zip over streams using a transformer function to combine values.
@@ -177,21 +237,26 @@ data StreamOp =
 
     -- | Convert a stream to a 1D sequence.
     --
-    -- > flatten @{shape indices} @{input type} @{input stream}
+    -- > flatten @{shape indices} @{input type} {input stream}
   | ToSequenceOp !StreamType Type
 
     -- | Convert a stream to a 1D view.
     --
-    -- > flatten @{shape indices} @{input type} @{input stream}
+    -- > flatten @{shape indices} @{input type} {input stream}
   | ToView1Op !StreamType Type
 
     -- | Produce a 1D sequence of size 1. 
+    --
+    -- > return @{output type} {output repr} {output writer} {}
   | ReturnOp !Type
 
     -- | Produce a 1D sequence of size 0.
   | EmptyOp !Type
 
-    -- | The bind operation on sequences
+    -- | The bind operation on sequences.
+    --
+    -- > bind @{producer type, transformer type}
+    --        {producer repr} {} {producer, transformer}
   | BindOp !Type !Type
 
     -- | Reduce a stream and produce a single value.
@@ -199,6 +264,28 @@ data StreamOp =
     -- > reduce @{shape indices} @{reduction type parameters}
     -- >   {shape parameters} {repr} {reduction parameters}
   | ReduceOp !StreamType !ReductionOp
+
+instance Renameable StreamOp where
+  rename rn op =
+    case op
+    of GenerateOp st ty -> GenerateOp (rename rn st) (rename rn ty)
+       ZipOp st tys ty -> ZipOp (rename rn st) (rename rn tys) (rename rn ty)
+       ToSequenceOp st ty -> ToSequenceOp (rename rn st) (rename rn ty)
+       ToView1Op st ty -> ToView1Op (rename rn st) (rename rn ty)
+       ReturnOp ty -> ReturnOp (rename rn ty)
+       EmptyOp ty -> EmptyOp (rename rn ty)
+       BindOp t1 t2 -> BindOp (rename rn t1) (rename rn t2)
+       ReduceOp st r -> ReduceOp (rename rn st) (rename rn r)
+
+instance Renameable StreamType where
+  rename rn SequenceType = SequenceType
+  rename rn (ViewType n) = ViewType n
+  rename rn (DArrType ts) = DArrType (rename rn ts)
+
+instance Renameable ReductionOp where
+  rename rn (Reduce t) = Reduce (rename rn t)
+  rename rn (Reduce1 t) = Reduce1 (rename rn t)
+  rename rn (Fold t1 t2) = Fold (rename rn t1) (rename rn t2)
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -250,6 +337,13 @@ pprStreamOp' (BindOp t1 t2) =
 
 pprStreamOp' (ReturnOp t) =
   nameApplication "return" [pprTypePrec t]
+
+pprStreamOp' (ReduceOp st op) =
+  let (name, tys) = case op
+                    of Reduce ty -> ("reduce", [ty])
+                       Reduce1 ty -> ("reduce1", [ty])
+                       Fold in_ty acc_ty -> ("fold", [in_ty, acc_ty])
+  in nameApplication name (pprStreamType st : map pprTypePrec tys)
 
 pprExpSPrec :: ExpS -> PrecDoc  
 pprExpSPrec expression = 
@@ -320,9 +414,13 @@ streamOpTable =
            , (pyonBuiltin The_view1_zipWith, interpretZip (PolyViewType 1) 2)
            , (pyonBuiltin The_view1_zipWith3, interpretZip (PolyViewType 1) 3)
            , (pyonBuiltin The_view1_zipWith4, interpretZip (PolyViewType 1) 4)
+           , (pyonBuiltin The_view1_reduce, interpretReduce (PolyViewType 1))
+           , (pyonBuiltin The_view1_reduce1, interpretReduce1 (PolyViewType 1))
            , (pyonBuiltin The_Sequence_bind, interpretBind)
            , (pyonBuiltin The_Sequence_return, interpretReturn)
            , (pyonBuiltin The_Sequence_generate, interpretGen PolySequenceType)
+           , (pyonBuiltin The_Sequence_reduce, interpretReduce PolySequenceType)
+           , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 PolySequenceType)
            , (pyonBuiltin The_viewToSequence, interpretToSequence (PolyViewType 1))
            ]
 
@@ -353,7 +451,7 @@ interpretZip stream_type n_inputs = StreamOpInterpreter check_arity interpret
           Just (repr_args, transformer : inputs) = breakAt (1 + n_inputs) args
           input_types = init ty_args'
           output_type = last ty_args'
-          op = ZipOp  (applyShapeIndices shape_indices stream_type)
+          op = ZipOp (applyShapeIndices shape_indices stream_type)
                input_types output_type
 
       stream_exps <- mapM interpretStreamSubExp inputs
@@ -362,6 +460,48 @@ interpretZip stream_type n_inputs = StreamOpInterpreter check_arity interpret
     n_shape_indices = numShapeIndices stream_type
     n_ty_args = n_shape_indices + n_inputs + 1
     n_args = n_shape_indices + 2 * n_inputs + 2
+
+interpretReduce stream_type = StreamOpInterpreter check_arity interpret
+  where
+    -- There is one optional argument for the output pointer
+    check_arity ty_args args =
+      ty_args == n_ty_args && (args == n_args || args == n_args + 1)
+
+    interpret inf ty_args args = do
+      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
+          Just (shape_args, args') = takeShapeArguments stream_type args
+          [ty] = ty_args'
+          repr : reducer : init : source : maybe_return_arg = args'
+          op = ReduceOp (applyShapeIndices shape_indices stream_type)
+               (Reduce ty)
+
+      stream_exp <- interpretStreamSubExp source
+      return $ OpSE inf op shape_args [repr] (reducer : init : maybe_return_arg) [stream_exp]
+
+    n_shape_indices = numShapeIndices stream_type
+    n_ty_args = n_shape_indices + 1
+    n_args = n_shape_indices + 4
+
+interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
+  where
+    -- There is one optional argument for the output pointer
+    check_arity ty_args args =
+      ty_args == n_ty_args && (args == n_args || args == n_args + 1)
+
+    interpret inf ty_args args = do
+      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
+          Just (shape_args, args') = takeShapeArguments stream_type args
+          [ty] = ty_args'
+          repr : reducer : source : maybe_return_arg = args'
+          op = ReduceOp (applyShapeIndices shape_indices stream_type)
+               (Reduce ty)
+
+      stream_exp <- interpretStreamSubExp source
+      return $ OpSE inf op shape_args [repr] (reducer : maybe_return_arg) [stream_exp]
+
+    n_shape_indices = numShapeIndices stream_type
+    n_ty_args = n_shape_indices + 1
+    n_args = n_shape_indices + 3
 
 interpretBind = StreamOpInterpreter check_arity interpret
   where
@@ -514,8 +654,26 @@ embedOp (ToView1Op st ty) =
            of ViewType 1 -> pyonBuiltin The_sequenceToView
   in (op, extractShapeIndices st ++ [ty])
 
+embedOp (ReturnOp ty) =
+  (pyonBuiltin The_Sequence_return, [ty])
+
+embedOp (EmptyOp ty) =
+  (pyonBuiltin The_Sequence_empty, [ty])
+
 embedOp (BindOp t1 t2) =
   (pyonBuiltin The_Sequence_bind, [t1, t2])
+
+embedOp (ReduceOp st (Reduce ty)) =
+  let op = case st
+           of SequenceType -> pyonBuiltin The_Sequence_reduce
+              ViewType 1 -> pyonBuiltin The_view1_reduce
+  in (op, extractShapeIndices st ++ [ty])
+
+embedOp (ReduceOp st (Reduce1 ty)) =
+  let op = case st
+           of SequenceType -> pyonBuiltin The_Sequence_reduce1
+              ViewType 1 -> pyonBuiltin The_view1_reduce1
+  in (op, extractShapeIndices st ++ [ty])
 
 embedStreamExp :: ExpS -> ExpM
 embedStreamExp expression =
@@ -544,7 +702,7 @@ embedStreamAlt (AltS alt) =
 -------------------------------------------------------------------------------
 
 simplifyStreamExp :: ExpS -> TypeEvalM ExpS
-simplifyStreamExp expression = traceShow (text "sse" <+> pprExpS expression) $ 
+simplifyStreamExp expression =
   case expression
   of -- Map operation: try to fuse with its producer
      OpSE inf op@(ZipOp st [in_type] out_type)
@@ -588,7 +746,7 @@ simplifyStreamFun (FunS fun) =
     return $ FunS $ fun {funBody = body}
 
 fuseMapWithProducer :: Type -> ExpM -> ExpM -> ExpS -> TypeEvalM (Maybe ExpS)
-fuseMapWithProducer ty repr map_f producer = trace "fuseMapWithProducer" $ 
+fuseMapWithProducer ty repr map_f producer =
   case producer
   of OpSE inf (GenerateOp st producer_ty)
        shape_args [producer_repr] [dim, gen_f] [] -> do
@@ -630,3 +788,122 @@ convertToSequenceOp expression =
             OpSE inf (GenerateOp SequenceType ty) [] repr_args misc_args []
           _ -> return Nothing
      _ -> return Nothing
+     
+-------------------------------------------------------------------------------
+
+-- | Convert a stream expression to a sequential loop.
+--   The conversion only succeeds if the outermost term is a reduction.
+--   The result is often better than simply inlining the stream operations.
+sequentializeStreamExp :: ExpS -> TypeEvalM (Maybe ExpM)
+sequentializeStreamExp expression =
+  case expression
+  of OpSE inf (ReduceOp st reduction_op) shape_args repr_args misc_args [src] ->
+       case reduction_op
+       of Reduce ty -> runMaybeT $ do
+            let (reducer : init : other_args) = misc_args
+                [repr] = repr_args
+
+            -- Assign the Repr to a variable to avoid replicating the
+            -- same expression many times
+            repr_var <- newAnonymousVar ObjectLevel
+            fold_exp <-
+              sequentializeFold ty ty repr_var
+              (ExpM $ VarE defaultExpInfo repr_var) init reducer src
+            let repr_pat = patM (repr_var ::: varApp (pyonBuiltin The_Repr) [ty])
+            return $ letE repr_pat repr fold_exp
+     _ -> return Nothing
+
+-- | Convert a fold over a sequence to a sequential loop.
+--
+--   The accumulator value has type @acc@.
+--   The combining function has type @acc -> a -> Writer acc@.
+--   The input stream has type @Sequence a@.
+--   The returned expression has type @Writer acc@.
+--
+--   The type environment is only used to look up data constructors.
+sequentializeFold :: Type       -- ^ Accumulator type
+                  -> Type       -- ^ Stream contents type
+                  -> Var        -- ^ Repr dictionary for accumulator
+                  -> ExpM       -- ^ Repr dictionary for stream source
+                  -> ExpM       -- ^ Accumulator value
+                  -> ExpM       -- ^ Combining function
+                  -> ExpS       -- ^ Input stream
+                  -> MaybeT TypeEvalM ExpM
+sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
+  case source
+  of OpSE inf (GenerateOp _ _) _ _ [shape, f] [] -> do
+       -- Create a @for@ loop
+       tenv <- getTypeEnv
+       varAppE (pyonBuiltin The_dim1_fold)
+         [acc_ty]
+         [varE acc_repr_var,
+          return shape,
+          lamE $ mkFun []
+          (\ [] -> return ([stored_int_type, acc_ty, outType acc_ty],
+                           initEffectType acc_ty))
+          (\ [] [i_var, a_var, r_var] ->
+            -- > let x = f i in combiner acc x ret
+            localE a_ty (appExp (return f) [] [varE i_var]) $ \x_var ->
+            appExp (return combiner) [] [varE a_var, varE x_var, varE r_var]),
+        return acc]
+     OpSE inf (ReturnOp _) _ _ [w] [] ->
+       -- Accumulate the written value
+       localE a_ty (return w) $ \x_var ->
+       appExp (return combiner) [] [return acc, varE x_var]
+     OpSE inf (EmptyOp _) _ _ _ [] ->
+       -- Return the accumulator
+       varAppE (pyonBuiltin The_copy) [acc_ty] [varE acc_repr_var, return acc]
+     OpSE inf (BindOp p_ty _) _ [p_repr] [] [producer, transformer] -> do
+       -- The "bind" operator is what makes sequentializing folds interesting.
+       -- This transformation is performed:
+       -- T [| bind s (\x. t) |] z c =
+       --   T [| s |] z (\acc x r. T [| t |] acc c r)
+       (t_value_var, t_stream) <- freshenUnaryStreamFunction transformer
+
+       -- Create a function corresponding to the sequentialized transformer.
+       -- This is a combining function for combining the producer's output
+       -- with the accumulator.
+       t_acc_var <- newAnonymousVar ObjectLevel
+       let t_acc = ExpM $ VarE defaultExpInfo t_acc_var
+       t_body <- sequentializeFold acc_ty p_ty acc_repr_var p_repr t_acc
+                 combiner t_stream
+
+       let t_params = [patM (t_acc_var ::: acc_ty),
+                       patM (t_value_var ::: p_ty)]
+           t_return = writerType acc_ty
+           t_combiner =
+             ExpM $ LamE defaultExpInfo $
+             FunM $ Fun defaultExpInfo [] t_params t_return t_body
+
+       sequentializeFold
+         acc_ty a_ty acc_repr_var a_repr acc t_combiner producer
+
+     LetSE inf pat rhs body -> do
+       body' <- sequentializeFold acc_ty a_ty acc_repr_var a_repr acc
+                combiner body
+       return $ ExpM $ LetE inf pat rhs body'
+     CaseSE inf scr alts -> do
+       alts' <- mapM (sequentializeFoldCaseAlternative
+                      acc_ty a_ty acc_repr_var a_repr acc combiner) alts
+       return $ ExpM $ CaseE inf scr alts'
+     OtherSE _ -> mzero
+     LamSE {} -> internalError "sequentializeFold: Unexpected lambda function"
+  where
+    int_type = VarT (pyonBuiltin The_int)
+    stored_int_type =
+      varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_int)]
+
+-- | Rename the parameter variable of a single-parameter stream function.
+--   The renamed parameter and the body are returned.
+freshenUnaryStreamFunction :: ExpS -> MaybeT TypeEvalM (Var, ExpS)
+freshenUnaryStreamFunction (LamSE _ (FunS (Fun _ [] [pat] _ body))) = do
+  let v = patMVar $ fromPatS pat
+  v' <- newClonedVar v
+  return (v', Rename.rename (Rename.singleton v v') body)
+
+freshenUnaryStreamFunction _ = mzero
+
+sequentializeFoldCaseAlternative acc_ty a_ty acc_repr_var a_repr acc combiner
+  (AltS (Alt decon params body)) = do
+    body' <- sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner body
+    return $ AltM (Alt decon (map fromPatS params) body')

@@ -540,7 +540,7 @@ arr1D_build @(N : intindex) @(a : bare)
 
   case s of mk_darr1 @N @a (f : int -> Writer a).
 
-  primitive_dim1_generate @N @a repr size f ret;
+  primitive_darr1_generate @N @a repr size f ret;
 
 
 arr2D_traverse @(M N : intindex) @(a : bare)
@@ -562,7 +562,7 @@ arr2D_build @(M N : intindex) @(a : bare)
   attribute(inline, inline_final) =
 
   case s of mk_darr2 @M @N @a (f : int -> int -> Writer a).
-  primitive_dim2_generate @M @N @a repr height width f ret;
+  primitive_darr2_generate @M @N @a repr height width f ret;
 
 {-
 Old array builder function, using a stream to write the array
@@ -1378,7 +1378,7 @@ ShapeDict_dim2_flatten @(a : bare) (s : Stream dim2 a)
           -- Infinite height, finite width
           viewStream @a
           (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
-           (primitive_dim2_flatten @pos_infty @(minus_i Nhi Nlo) @a
+           (primitive_darr2_flatten @pos_infty @(minus_i Nhi Nlo) @a
             (minus_fii @Nhi @Nlo fnhi fnlo)
             flattened_f))
 
@@ -2583,7 +2583,35 @@ fun_fold_Stream @(a acc : bare)
   };
 
 
-primitive_dim1_reduce @(N : intindex) @(a : bare)
+dim1_fold @(acc : bare)
+  (repr : Repr acc)
+  (d : dim1)
+  (f : index dim1 -> acc -> Writer acc)
+  (init : acc)
+  (ret : OutPtr acc)
+  -> IEffect acc
+  attribute(inline) =
+
+  -- Compute size of loop
+  case d of
+    mk_dim1 @(L : intindex) @(H : intindex) (ilo : IInt L) (ihi : IInt H).
+
+  let flo : FIInt L = fromIndInt @L ilo in
+  let fhi : FIInt H = fromIndInt @H ihi in
+
+  let type N = minus_i H L in
+  let delta : FIInt N = minus_fii @H @L fhi flo in
+  case flo of fiInt @L (lo_i : int).
+
+  -- Execute a for loop
+  for @N @acc repr (iInt @N delta) init
+  (\ (i : int) (x : acc) (ret : OutPtr acc) -> IEffect acc.
+    case boxed @(Stored int) (stored @int i) of
+      boxed @(Stored int) (si : Stored int).
+    f si x ret) ret;
+
+
+primitive_darr1_reduce @(N : intindex) @(a : bare)
   (repr : Repr a) (count : FIInt N)
   (f : a -> a -> Writer a)
   (init : a)
@@ -2598,7 +2626,7 @@ primitive_dim1_reduce @(N : intindex) @(a : bare)
   ret;
 
 
-primitive_dim1_reduce1 @(N : intindex) @(a : bare)
+primitive_darr1_reduce1 @(N : intindex) @(a : bare)
   (repr : Repr a) (size : FIInt N)
   (f : a -> a -> Writer a)
   (g : int -> Writer a)
@@ -2623,7 +2651,7 @@ primitive_dim1_reduce1 @(N : intindex) @(a : bare)
        ret;
 
 
-primitive_dim1_generate @(N : intindex) @(a : bare)
+primitive_darr1_generate @(N : intindex) @(a : bare)
   (repr : Repr a) (size : FIInt N)
   (f : int -> Writer a)
   (ret : OutPtr (arr N a))
@@ -2643,7 +2671,7 @@ darr1_reduce @(N : intindex) @(a : bare)
   -> IEffect a
   attribute(inline, inline_final) =
   case src of mk_darr1 @N @a (g : int -> Writer a).
-  primitive_dim1_reduce @N @a repr size f init g ret;
+  primitive_darr1_reduce @N @a repr size f init g ret;
 
 
 darr1_reduce1 @(N : intindex) @(a : bare)
@@ -2655,7 +2683,7 @@ darr1_reduce1 @(N : intindex) @(a : bare)
   -> IEffect a
   attribute(inline, inline_final) =
   case src of mk_darr1 @N @a (g : int -> Writer a).
-  primitive_dim1_reduce1 @N @a repr size f g ret;
+  primitive_darr1_reduce1 @N @a repr size f g ret;
 
 
 darr1_fold @(N : intindex) @(a acc : bare)
@@ -2803,7 +2831,7 @@ darr2_flatten @(M N MN : intindex) @(a : bare)
   case darr of mk_darr2 @M @N @a (f : int -> int -> Writer a).
   case size_n of fiInt @N (width : int).
 
-  mk_darr1 @MN @a (primitive_dim2_flatten @M @N @a size_n f);
+  mk_darr1 @MN @a (primitive_darr2_flatten @M @N @a size_n f);
 
 
 darr2_reduce @(M N : intindex) @(a : bare)
@@ -2817,10 +2845,10 @@ darr2_reduce @(M N : intindex) @(a : bare)
   -> IEffect a
   attribute(inline, inline_final) =
   case src of mk_darr2 @M @N @a (g : int -> int -> Writer a).
-  primitive_dim2_reduce @M @N @a repr size_y size_x f init g ret;
+  primitive_darr2_reduce @M @N @a repr size_y size_x f init g ret;
 
 
-primitive_dim2_flatten @(M N : intindex) @(a : bare)
+primitive_darr2_flatten @(M N : intindex) @(a : bare)
   (size_n : FIInt N)
   (f : int -> int -> Writer a)
   (i : int)
@@ -2834,7 +2862,7 @@ primitive_dim2_flatten @(M N : intindex) @(a : bare)
   f y x;
 
 
-primitive_dim2_reduce @(M N : intindex) @(a : bare)
+primitive_darr2_reduce @(M N : intindex) @(a : bare)
   (repr : Repr a)
   (size_y : FIInt M)
   (size_x : FIInt N)
@@ -2857,7 +2885,7 @@ primitive_dim2_reduce @(M N : intindex) @(a : bare)
   ret;
 
 
-primitive_dim2_generate @(M N : intindex) @(a : bare)
+primitive_darr2_generate @(M N : intindex) @(a : bare)
   (repr : Repr a) (height : FIInt M) (width : FIInt N)
   (f : int -> int -> Writer a)
   (ret : OutPtr (arr M (arr N a)))
@@ -2888,20 +2916,13 @@ range (n : int) -> Stream dim1 (Stored int)
   viewStream @(Stored int) vw;
 
 
-Stream1_empty @(a : bare) -> Stream1 a
-  attribute(inline) =
-  let zero : IInt 0 = iInt @0 (fiInt @0 0) in
-  viewStream @a
-  (empty_view1 @a);
+Stream1_empty @(a : bare) -> Stream1 a attribute(inline) =
+  sequenceStream @a (Sequence_empty @a);
 
 
 Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
   attribute(inline) =
-  let zero : IInt 0 = iInt @0 (fiInt @0 0) in
-  let one : IInt 1 = iInt @1 (fiInt @1 1) in
-  viewStream @a
-  (mk_view1 @a @0 @1 zero one
-   (\ (i : int) (ret : OutPtr a) -> IEffect a. w ret));
+  sequenceStream @a (Sequence_return @a repr w);
 
 
 Stream1_guard @(a : bare) (repr : Repr a) (condition : bool) (s : Stream1 a)
@@ -3437,7 +3458,100 @@ parallel_doall @(N : intindex) @(a b : bare)
   blocked_doall @N @a @b count do_range;
 
 
-parallel_dim1_generate @(N : intindex) @(a : bare)
+parallel_dim1_reduce @(a : bare)
+  (repr : Repr a)
+  (shp : dim1)
+  (reducer : a -> a -> Writer a)
+  (init : a)
+  (generator : dim1 -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  -- Parallel reduction over a dim1 domain.
+  -- Use blocked_reduce to do the real work.
+  case shp of
+    mk_dim1 @(L : intindex) @(H : intindex) (il : IInt L) (ih : IInt H).
+
+  -- Compute size of interval.  Size must be finite.
+  let type D = minus_i H L in
+  let fdelta : FIInt D = fromIndInt @D (minus_ii @H @L ih il) in
+  case fromIndInt @L il of fiInt @L (lo_bound : int).
+
+  let type b = BoxedType a in
+
+  -- Wrap the reducer and generator functions
+  letfun {
+    g @(N : intindex) (lb : int) (count : FIInt N) (acc : b) -> b =
+
+      -- Create a dim1 spanning [lo_bound + lb, lo_bound + lb + count)
+      case defineIntIndex (lo_bound +# lb) of
+        someIInt @(sub_L : intindex) (sub_lb : FIInt sub_L).
+      let type sub_H = plus_i sub_L N in
+      let sub_ub : FIInt sub_H = plus_fii @sub_L @N sub_lb count in
+      case boxed @dim1 (mk_dim1 @sub_L @sub_H (iInt @sub_L sub_lb) (iInt @sub_H sub_ub)) of
+        boxed @dim1 (dim : dim1).           
+
+      -- Generate a value and accumulate
+      case boxed @a (generator dim) of boxed @a (x : a).
+      case boxed @a (convertToBare @a repr acc) of boxed @a (y : a).
+      convertToBoxed @a repr (reducer y x)
+
+  ; f (x : b) (y : b) -> b =
+      case boxed @a (convertToBare @a repr x) of boxed @a (xb : a).
+      case boxed @a (convertToBare @a repr y) of boxed @a (yb : a).
+      convertToBoxed @a repr (reducer xb yb)
+  } in
+
+  let boxed_init : b = convertToBoxed @a repr (copy @a repr init) in
+  convertToBare @a repr (blocked_reduce @D @b fdelta f boxed_init g) ret;
+
+parallel_dim1_reduce1 @(a : bare)
+  (repr : Repr a)
+  (shp : dim1)
+  (reducer : a -> a -> Writer a)
+  (generator : dim1 -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  -- Parallel reduction over a dim1 domain.
+
+  let reprmaybe : Repr (Maybe a) = repr_Maybe @a repr in
+
+  letfun {
+    fmaybe (mx : Maybe a) (my : Maybe a) (ret : OutPtr (Maybe a))
+      -> IEffect (Maybe a) =
+      case mx of {
+        just @a (x : a).
+          case my of {
+            just @a (y : a). just @a (reducer x y) ret
+          ; nothing @a.      just @a (copy @a repr x) ret
+          }
+      ; nothing @a.
+          case my of {
+            just @a (y : a). just @a (copy @a repr y) ret
+          ; nothing @a.      nothing @a ret
+          }
+      }
+
+  ; gmaybe (range : dim1) (ret : OutPtr (Maybe a)) -> IEffect (Maybe a) =
+      just @a (generator range) ret
+  } in
+
+  case boxed @(Maybe a) (nothing @a) of boxed @(Maybe a) (init : Maybe a).
+
+  -- Call the regular reduction function here
+  case boxed @(Maybe a) (parallel_dim1_reduce @(Maybe a)
+                         reprmaybe shp fmaybe init gmaybe) of
+    boxed @(Maybe a) (retmaybe : Maybe a).
+  case retmaybe of {
+    just @a (retval : a). copy @a repr retval ret
+
+    -- If 'nothing' is returned, then the range was empty.  This is an error.
+  ; nothing @a. except @(IEffect a) 
+  };
+
+
+parallel_darr1_generate @(N : intindex) @(a : bare)
   (repr : Repr a) (size : FIInt N)
   (f : int -> Writer a)
   (ret : OutPtr (arr N a))
@@ -3447,7 +3561,7 @@ parallel_dim1_generate @(N : intindex) @(a : bare)
   (\ (i : int) -> IEffect a. f i (subscript_out @N @a repr ret i));
 
 
-parallel_dim1_reduce @(N : intindex) @(a : bare)
+parallel_darr1_reduce @(N : intindex) @(a : bare)
   (repr : Repr a) (count : FIInt N)
   (f : a -> a -> Writer a)
   (init : a)
@@ -3462,7 +3576,7 @@ parallel_dim1_reduce @(N : intindex) @(a : bare)
       (lb : int) (range_count : FIInt M) (acc : BoxedType a) -> BoxedType a =
       case boxed @a (convertToBare @a repr acc) of boxed @a (uacc : a).
       convertToBoxed @a repr
-      (primitive_dim1_reduce @M @a repr range_count f uacc
+      (primitive_darr1_reduce @M @a repr range_count f uacc
        (\ (i : int) (local_ret : OutPtr a) -> IEffect a.
         g (lb +# i) local_ret))
 
@@ -3476,7 +3590,7 @@ parallel_dim1_reduce @(N : intindex) @(a : bare)
   convertToBare @a repr
   (blocked_reduce @N @(BoxedType a) count boxed_f boxed_init do_range) ret;
 
-parallel_dim1_reduce1 @(N : intindex) @(a : bare)
+parallel_darr1_reduce1 @(N : intindex) @(a : bare)
   (repr : Repr a) (count : FIInt N)
   (f : a -> a -> Writer a)
   (g : int -> Writer a)
@@ -3511,7 +3625,7 @@ parallel_dim1_reduce1 @(N : intindex) @(a : bare)
   case boxed @(Maybe a) (nothing @a) of boxed @(Maybe a) (init : Maybe a).
 
   -- Call the regular reduction function here
-  case boxed @(Maybe a) (parallel_dim1_reduce @N @(Maybe a)
+  case boxed @(Maybe a) (parallel_darr1_reduce @N @(Maybe a)
                          reprmaybe count fmaybe init gmaybe) of
     boxed @(Maybe a) (retmaybe : Maybe a).
   case retmaybe of {
@@ -3522,7 +3636,7 @@ parallel_dim1_reduce1 @(N : intindex) @(a : bare)
   };
 
 
-parallel_dim2_reduce @(M N : intindex) @(a : bare)
+parallel_darr2_reduce @(M N : intindex) @(a : bare)
   (repr : Repr a) (count_y : FIInt M) (count_x : FIInt N)
   (f : a -> a -> Writer a)
   (init : a)
@@ -3541,7 +3655,7 @@ parallel_dim2_reduce @(M N : intindex) @(a : bare)
 
       case boxed @a (convertToBare @a repr acc) of boxed @a (uacc : a).
       convertToBoxed @a repr
-      (primitive_dim2_reduce @M @N @a repr range_count_y range_count_x f uacc
+      (primitive_darr2_reduce @M @N @a repr range_count_y range_count_x f uacc
        (\ (y : int) (x : int) (local_ret : OutPtr a) -> IEffect a.
         g (lb_y +# y) (lb_x +# x) local_ret))
 
@@ -3557,7 +3671,7 @@ parallel_dim2_reduce @(M N : intindex) @(a : bare)
    count_y count_x boxed_f boxed_init do_range) ret;
 
 
-parallel_dim2_generate @(M N : intindex) @(a : bare)
+parallel_darr2_generate @(M N : intindex) @(a : bare)
   (repr : Repr a) (height : FIInt M) (width : FIInt N)
   (f : int -> int -> Writer a)
   (ret : OutPtr (arr M (arr N a)))

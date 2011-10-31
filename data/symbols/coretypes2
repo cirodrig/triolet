@@ -1163,19 +1163,19 @@ unsafeMakeCoercion : (a b : box) -> coerce @box a b;
 -------------------------------------------------------------------------------
 -- Fold-like functions
 
-primitive_dim1_reduce :
+primitive_darr1_reduce :
     (N : intindex) -> (a : bare)
  -> Repr a -> FIInt N
  -> (a -> a -> Writer a) -> a -> (int -> Writer a)
  -> Writer a;
 
-primitive_dim1_reduce1 :
+primitive_darr1_reduce1 :
     (N : intindex) -> (a : bare)
  -> Repr a -> FIInt N
  -> (a -> a -> Writer a) -> (int -> Writer a)
  -> Writer a;
 
-primitive_dim1_generate :
+primitive_darr1_generate :
     (N : intindex) -> (a : bare) -> Repr a -> FIInt N
  -> (int -> Writer a) -> Writer (arr N a);
 
@@ -1233,6 +1233,13 @@ Sequence_fold : (a acc : bare)
 	      -> Sequence a
 	      -> Writer acc;
 
+dim1_fold : (acc : bare)
+         -> Repr acc
+         -> dim1
+         -> (index dim1 -> acc -> Writer acc)
+         -> acc
+         -> Writer acc;
+
 darr2_flatten :
     (M N MN : intindex) -> (a : bare)
  -> FIInt M
@@ -1250,23 +1257,23 @@ darr2_reduce1 : (M N : intindex) -> (a : bare)
              -> (a -> a -> Writer a) -> darr2 M N a
              -> Writer a;
 
-primitive_dim2_reduce :
+primitive_darr2_reduce :
     (M N : intindex) -> (a : bare)
  -> Repr a -> FIInt M -> FIInt N
  -> (a -> a -> Writer a) -> a -> (int -> int -> Writer a)
  -> Writer a;
 
-primitive_dim2_reduce1 :
+primitive_darr2_reduce1 :
     (M N : intindex) -> (a : bare)
  -> Repr a -> FIInt M -> FIInt N
  -> (a -> a -> Writer a) -> (int -> int -> Writer a)
  -> Writer a;
 
-primitive_dim2_generate :
+primitive_darr2_generate :
     (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
  -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
 
-primitive_dim2_flatten attribute(conlike) :
+primitive_darr2_flatten attribute(conlike) :
     (M N : intindex) -> (a : bare)
  -> FIInt N
  -> (int -> int -> Writer a)
@@ -1746,19 +1753,34 @@ parallel_doall : (n : intindex)
      -> (int -> IEffect b)
      -> IEffect a;
 
-parallel_dim1_reduce :
+parallel_dim1_reduce : (a : bare)
+                    -> Repr a
+                    -> dim1
+                    -> (a -> a -> Writer a)
+                    -> a
+                    -> (dim1 -> Writer a)
+                    -> Writer a;
+
+parallel_dim1_reduce1 : (a : bare)
+                     -> Repr a
+                     -> dim1
+                     -> (a -> a -> Writer a)
+                     -> (dim1 -> Writer a)
+                     -> Writer a;
+
+parallel_darr1_reduce :
     (N : intindex) -> (a : bare)
  -> Repr a -> FIInt N
  -> (a -> a -> Writer a) -> a -> (int -> Writer a)
  -> Writer a;
 
-parallel_dim1_reduce1 :
+parallel_darr1_reduce1 :
     (N : intindex) -> (a : bare)
  -> Repr a -> FIInt N
  -> (a -> a -> Writer a) -> (int -> Writer a)
  -> Writer a;
 
-parallel_dim1_generate :
+parallel_darr1_generate :
     (N : intindex) -> (a : bare) -> Repr a -> FIInt N
  -> (int -> Writer a) -> Writer (arr N a);
 
@@ -1769,12 +1791,12 @@ parallel_doall2 : (M N : intindex)
      -> (int -> int -> IEffect b)
      -> IEffect a;
 
-parallel_dim2_reduce :
+parallel_darr2_reduce :
     (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
  -> (a -> a -> Writer a) -> a -> (int -> int -> Writer a)
  -> Writer a;
 
-parallel_dim2_generate :
+parallel_darr2_generate :
     (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
  -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
 
