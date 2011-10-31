@@ -243,6 +243,12 @@ namespace Pyon {
     template<typename T>
   class List;
   
+    template<typename T>
+  class Array1;
+  
+    template<typename T>
+  class Array2;
+  
   /* Stored Classes: BareType versions of ValType classes (specializations of 
    * class Stored, extend class BareType ) */
 
@@ -278,6 +284,12 @@ namespace Pyon {
 
     template<typename T>
   class Incomplete< List<T> >;
+
+    template<typename T>
+  class Incomplete< Array1<T> >;
+
+    template<typename T>
+  class Incomplete< Array2<T> >;
 
 
 
@@ -726,6 +738,87 @@ namespace Pyon {
   };
 
 
+/* ------------------------------- Array1 ----------------------------------- */
+
+  template<typename T>
+  class Array1 : public BareType {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      // Constructors
+      Array1<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_Array1_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_Array1_alignment;
+      }
+      
+      static void 
+      copy(Array1<T> array1, Incomplete< Array1<T> > &incompleteArray1) { 
+          incompleteArray1 = Incomplete< Array1<T> >(array1.getBareData());
+      }
+      
+      static bool 
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Bare 
+      at(int index) { 
+        int32_t min = pyon_Array1_get_bounds(getBareData()).min;
+        PyonBarePtr array1_contents = pyon_Array1_get_contents(getBareData());
+        return T_Bare(array1_contents + (index - min)*addPadding<T_Bare>(T_Bare::getSize()) ); 
+      }
+
+  };
+
+/* ------------------------------- Array2 ----------------------------------- */
+
+  template<typename T>
+  class Array2 : public BareType {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      // Constructors
+      Array2<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_Array2_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_Array2_alignment;
+      }
+      
+      static void 
+      copy(Array2<T> array2, Incomplete< Array2<T> > &incompleteArray2) { 
+          incompleteArray2 = Incomplete< Array2<T> >(array2.getBareData());
+      }
+      
+      static bool 
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Bare 
+      at(int rowIndex, int columnIndex) {
+        Array2Bounds array2Bounds = pyon_Array2_get_bounds(getBareData());
+        int32_t y_min = array2Bounds.ymin;
+        int32_t x_min = array2Bounds.xmin;
+        int32_t x_end = array2Bounds.xend;
+        PyonBarePtr array2_contents = pyon_Array2_get_contents(getBareData());
+        int offset = (rowIndex - y_min)*(x_end - x_min) + (columnIndex - x_min);
+        return T_Bare(array2_contents + offset*addPadding<T_Bare>(T_Bare::getSize()) ); 
+      }
+
+  };
 
 
 
@@ -857,8 +950,61 @@ namespace Pyon {
 
   };
 
+  /* Implementation of Incomplete< Array1<T> > */
 
+    template<typename T>
+  class Incomplete< Array1<T> > : public IncompleteSingleRef< Array1<T> > {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      // Constructors
+      Incomplete< Array1<T> >(void) : IncompleteSingleRef< Array1<T> >() { }
+      Incomplete< Array1<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array1<T> >(_s) { }
+      
+      // Member Functions
+      void initialize(int min, int end) { 
+        pyon_Array1_initialize(min, end, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() );
+      }
+      void create(int min, int end) { this->allocate(); initialize(min, end); }
 
+      Incomplete< T_Bare > 
+      at(int index) { 
+        int32_t min = pyon_Array1_get_bounds(this->getObject()).min;
+        PyonBarePtr array1_contents = pyon_Array1_get_contents(this->getObject());
+        return Incomplete<T_Bare>(array1_contents + (index - min)*addPadding<T_Bare>(T_Bare::getSize()) ); 
+      }
+
+  };
+
+  /* Implementation of Incomplete< Array2<T> > */
+
+    template<typename T>
+  class Incomplete< Array2<T> > : public IncompleteSingleRef< Array2<T> > {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      // Constructors
+      Incomplete< Array2<T> >(void) : IncompleteSingleRef< Array2<T> >() { }
+      Incomplete< Array2<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array2<T> >(_s) { }
+      
+      // Member Functions
+      void initialize(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end) { 
+        pyon_Array2_initialize(y_min, y_end, x_min, x_end, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() );
+      }
+      void create(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end) { this->allocate(); initialize(y_min, y_end, x_min, x_end); }
+
+      Incomplete< T_Bare > 
+      at(int rowIndex, int columnIndex) { 
+        Array2Bounds array2Bounds = pyon_Array2_get_bounds(this->getObject());
+        int32_t y_min = array2Bounds.ymin;
+        int32_t x_min = array2Bounds.xmin;
+        int32_t x_end = array2Bounds.xend;
+        PyonBarePtr array2_contents = pyon_Array2_get_contents(this->getObject());
+        int offset = (rowIndex - y_min)*(x_end - x_min) + (columnIndex - x_min);
+        return Incomplete<T_Bare>(array2_contents + offset*addPadding<T_Bare>(T_Bare::getSize()) ); 
+      }
+
+  };
 
 
 

@@ -283,6 +283,15 @@ pyonToWrapperType(Pool* p, const PyonType* pyonType) {
       return createTmplNameInNamespace (p, tmplName);
       break;
     }
+    case PyonArrayTypeTag: {
+      Type** typeList = malloc(sizeof(Type*));
+      typeList[0] = pyonToWrapperType(p, pyonType->array.elem);
+      char *nameString = malloc(7*sizeof(char)); // 5 ("Array") + 1 (dimension digit) + 1 (null terminator) = 7
+      sprintf(nameString, "Array%d", pyonType->array.dimensionality);
+      TmplName* tmplName = TmplName_create(p, Name_create_dynamic(p, nameString), 1, typeList);
+      return createTmplNameInNamespace (p, tmplName);
+      break;
+    }
     default: ERR("invalid PyonTypeTag in function pyonToWrapperType(Pool*,PyonType*)");
   }
 }
@@ -292,7 +301,7 @@ TypeKindTag pyonTypeKind(const PyonType *pyonType) {
     case PyonIntTag: case PyonFloatTag: case PyonBoolTag: case PyonNoneTypeTag:
       return ValTypeTag;
       break;
-    case PyonTupleTypeTag: case PyonListTypeTag:
+    case PyonTupleTypeTag: case PyonListTypeTag: case PyonArrayTypeTag:
       return BareTypeTag;
       break;
     default: ERR("invalid PyonTypeTag in function pyonTypeKind(PyonType*)");
