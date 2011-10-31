@@ -106,7 +106,7 @@ mkTyFunction name kind cst sf_var instances = do
 mkShapeTyFun = do
   rec { (con, fam) <- mkTyFunction "shape" shape_kind []
                       (pyonBuiltin SystemF.The_shape)
-                      [list_instance, matrix_instance,
+                      [list_instance, array1_instance, array2_instance,
                        listView_instance, matrixView_instance,
                        iter_instance]
 
@@ -114,7 +114,11 @@ mkShapeTyFun = do
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_list)
               (ConTy $ tiBuiltin the_con_dim1)
-      ; let matrix_instance =
+      ; let array1_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_array1)
+              (ConTy $ tiBuiltin the_con_dim1)
+      ; let array2_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_array2)
               (ConTy $ tiBuiltin the_con_dim2)
@@ -331,7 +335,7 @@ mkTraversableClass = do
                   (pyonBuiltin SystemF.The_TraversableDict)
                   (pyonBuiltin SystemF.The_traversableDict)
                   [iter, build]
-                  [list_instance, matrix_instance,
+                  [list_instance, array1_instance, array2_instance,
                    listView_instance, matrixView_instance,
                    iter_instance]
 
@@ -348,13 +352,21 @@ mkTraversableClass = do
                 , InstanceMethod $
                   pyonBuiltin SystemF.The_TraversableDict_list_build]
 
-            matrix_instance =
+            array2_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_array2)
                 [ InstanceMethod $
                   pyonBuiltin SystemF.The_TraversableDict_array2_traverse
                 , InstanceMethod $
                   pyonBuiltin SystemF.The_TraversableDict_array2_build]
+
+            array1_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_array1)
+                [ InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_array1_traverse
+                , InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_array1_build]
 
             listView_instance =
               monomorphicInstance cls
@@ -818,7 +830,8 @@ mkPassableClass = do
                maybe_val_instance,
                complex_instance, sliceobject_instance,
                any_instance,
-               list_instance, matrix_instance,
+               list_instance,
+               array1_instance, array2_instance,
                iter_instance,
                view1_instance, view2_instance,
                tuple2_instance, tuple3_instance,
@@ -857,7 +870,12 @@ mkPassableClass = do
           (ConTy (tiBuiltin the_con_list) @@ ConTy b)
           (pyonBuiltin SystemF.The_repr_list)
           []
-  ; let matrix_instance =
+  ; let array1_instance =
+          polyExplicitInstance [b] [passable $ ConTy b] cls
+          (ConTy (tiBuiltin the_con_array1) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_array1)
+          []
+  ; let array2_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_array2) @@ ConTy b)
           (pyonBuiltin SystemF.The_repr_array2)
