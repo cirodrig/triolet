@@ -683,7 +683,7 @@ TraversableDict_array1_traverse
   viewStream @a
   (mk_view1 @a @lo @hi (iInt @lo flo) (iInt @hi fhi)
    (\ (i : int) (ret : OutPtr a) -> IEffect a.
-      let index : int = AdditiveDict_int_sub i lo_i in
+      let index : int = i -# lo_i in
       copy @a repr (subscript @N @a repr ay index) ret));
 
 TraversableDict_array1_build
@@ -701,9 +701,10 @@ TraversableDict_array1_build
           let delta : FIInt N = minus_fii @hi @lo fhi flo in
           case flo of fiInt @lo (lo_i : int).
 
-          -- The array is zero-indexed; subtract the offset
+          -- The loop is zero-indexed, but the loop body is not.
+          -- Add the offset.
           letfun
-            f2 (i : int) -> Writer a = f (AdditiveDict_int_sub i lo_i)
+            f2 (i : int) -> Writer a = f (i +# lo_i)
           in
 
           mk_array1 @a @lo @hi flo fhi
@@ -772,9 +773,11 @@ TraversableDict_array2_build
   case fMlo of fiInt @Mlo (Mlo_i : int).
   case fNlo of fiInt @Nlo (Nlo_i : int).
 
+  -- The loop is zero-indexed, but the loop body is not.
+  -- Add the offset.
   letfun
     f2 (j : int) (i : int) -> Writer a =
-      f (AdditiveDict_int_sub j Mlo_i) (AdditiveDict_int_sub i Nlo_i)
+      f (j +# Mlo_i) (i +# Nlo_i)
   in
 
   mk_array2 @a @Mlo @Mhi @Nlo @Nhi fMlo fMhi fNlo fNhi
