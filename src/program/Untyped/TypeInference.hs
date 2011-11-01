@@ -117,14 +117,27 @@ assume v assignment (Inf f) = Inf $ \env ->
 --   Generated constraints are added to the context.
 --
 --   A coercion from given type to expected type is returned.
-unifyInf :: SourcePos -> HMType -> HMType -> Inf Coercion
-unifyInf pos expect given = Inf $ \_ -> do
+--
+--   FIXME: We should actually generate coercion placeholders instead of 
+--   coercions.  Later steps of type inference may produce additional
+--   unification of type variables, which may affect the form of coercions
+--   that have already been generated.  Using placeholders to resolve
+--   coercions after-the-fact would solve the problem.
+unifyInf :: Bool -> SourcePos -> HMType -> HMType -> Inf Coercion
+unifyInf reduce pos expect given = Inf $ \_ -> do
   c <- unify pos expect given
+
+  -- In contexts where coercions are not permitted, we should reduce the
+  -- constraint immediately
+  c' <- if reduce
+        then reduceContext c
+        else return c
+
   -- If unification produced equality constraints, the type must be coerced
-  let coercion = if any isEqualityPredicate c
+  let coercion = if any isEqualityPredicate c'
                  then Coercion given expect
                  else NoCoercion expect
-  return (c, Set.empty, [], coercion)
+  return (c', Set.empty, [], coercion)
 
 unifyAndCoerceInf :: SourcePos
                   -> TIExp      -- ^ Expression with given type
@@ -132,7 +145,7 @@ unifyAndCoerceInf :: SourcePos
                   -> HMType     -- ^ Given type
                   -> Inf TIExp  -- ^ Returns expression with expected type
 unifyAndCoerceInf pos e expected given = do
-  co <- unifyInf pos expected given
+  co <- unifyInf False pos expected given
   liftIO $ applyCoercion co e
 
 -- | Add a predicate to the context
@@ -610,7 +623,7 @@ inferExpressionType' expression =
        (fa_exp, fa_ty) <- inferExpressionType fa
        
        -- True and false paths must have same type and passing convention
-       co <- unifyInf pos tr_ty fa_ty
+       co <- unifyInf False pos tr_ty fa_ty
        co_fa_exp <- liftIO $ applyCoercion co fa_exp
        return (mkIfE pos co_cond_exp tr_exp co_fa_exp, tr_ty)
      FunE {expFunction = f} -> do
@@ -760,7 +773,7 @@ inferExportType (Export { exportAnnotation = ann
         debug x = x
         instantiate_and_unify = do
           (inst_exp, var_type) <- instantiateVariable pos var
-          co <- unifyInf pos var_type ty
+          co <- unifyInf True pos var_type ty
           
           -- Since exported types are monomorphic, coercions should never
           -- occur here
