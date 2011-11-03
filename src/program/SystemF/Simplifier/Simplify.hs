@@ -729,6 +729,50 @@ flattenExp' orig_expression expression =
 flattenExps :: [ExpSM] -> Restructure [ExpM]
 flattenExps es = mergeList =<< mapM flattenExp es
 
+-- | Flatten expressions that appear in constructor fields.  The flattening
+--   method is chosen based on the expression's kind.
+-- 
+--   If the kind is \"val\" or \"box\", and it's not a trivial expression,
+--   then bind the argument to a new variable.
+--
+--   If the kind is \"bare\", leave it where it is, but flatten inside the
+--   expression if it's a lambda expression.
+--
+--   If the kind is \"effect\", then leave it where it is.
+flattenConFieldExps :: [(ExpSM, Type, BaseKind)] -> Restructure [ExpM]
+flattenConFieldExps es = mergeList =<< mapM flatten_arg es
+  where
+    flatten_arg (arg, ty, ValK)       = floatConField arg ty
+    flatten_arg (arg, ty, BoxK)       = floatConField arg ty
+    flatten_arg (arg, _, BareK)       = flattenInsideLambda arg
+    flatten_arg _ = internalError "flattenConFieldExps: Unexpected kind"
+
+-- | Flatten expressions that appear as parameters of a conlike function.
+--   All fields are floated and bound to a new variable, unless they are
+--   already trivial expressions.
+flattenConlikeArgs :: [(ExpSM, Type, BaseKind)] -> Restructure [ExpM]
+flattenConlikeArgs es = mergeList =<< mapM flatten_arg es
+  where
+    flatten_arg (arg, ty, k) 
+      | k == ValK || k == BoxK || k == BareK || k == OutK =
+          floatConField arg ty
+      | otherwise =
+          internalError "flattenConlikeArgs: Unexpected kind"
+    
+floatConField arg ty = do
+  -- Float bindings in this field
+  arg' <- flattenExp arg
+      
+  -- Bind this field's value to a variable so that copy propagation can
+  -- occur.  Give the variable 'ManyUnsafe' uses to prevent it from being
+  -- inlined back into this position.  Think of the 'ManyUnsafe' label
+  -- as reflecting how the variable may be used 
+  -- in other locations after copy propagation.
+  joinInContext arg' $ \flat_arg ->
+    if isTrivialExp flat_arg
+    then return $ unitContext flat_arg
+    else asLetContext ty flat_arg
+
 -- | A variant of 'flattenExp' that can also float bindings out of
 --   initializer functions.  It's only safe to float the binding if
 --   the function is guaranteed to be called.
@@ -764,27 +808,8 @@ flattenConExp inf con args = do
   tenv <- getTypeEnv
   (field_types, _) <- conType con
   let field_kinds = conFieldKinds tenv con
-  args' <- mergeList =<< mapM flatten_arg (zip3 args field_types field_kinds)
+  args' <- flattenConFieldExps $ zip3 args field_types field_kinds
   return $ mapContext (\xs -> ExpM $ ConE inf con xs) args'
-  where
-    flatten_arg (arg, ty, BareK) = flattenInsideLambda arg
-    flatten_arg (arg, ty, ValK) = float_field arg ty
-    flatten_arg (arg, ty, BoxK) = float_field arg ty
-    flatten_arg _ = internalError "flattenConExp: Unexpected kind"
-    
-    float_field arg ty = do
-      -- Float bindings in this field
-      arg' <- flattenExp arg
-      
-      -- Bind this field's value to a variable so that copy propagation can
-      -- occur.  Give the variable 'ManyUnsafe' uses to prevent it from being
-      -- inlined back into this position.  Think of the 'ManyUnsafe' label
-      -- as reflecting how the variable may be used 
-      -- in other locations after copy propagation.
-      joinInContext arg' $ \flat_arg ->
-        if isTrivialExp flat_arg
-        then return $ unitContext flat_arg
-        else asLetContext ty flat_arg
 
 flattenLetExp inf (PatSM pat) rhs body = do
   -- Flatten the RHS.  Since the body of the RHS will be the new RHS,
@@ -865,8 +890,29 @@ flattenCaseExp inf scr alts = do
 
 flattenAppExp inf op ty_args args = do
   ctx_op <- flattenExp op
-  ctx_args <- flattenExps args
+
+  -- If the operator is conlike, then float its arguments as if it were a
+  -- data constructor.
+  conlike_op <- eliminateContext check_conlike ctx_op
+  ctx_args <-
+    if conlike_op
+    then do s_args <- mapM applySubstitution args
+            let args' = map deferEmptySubstitution s_args
+            tenv <- getTypeEnv
+            arg_types <- mapM inferExpType s_args
+            let kinds = map (toBaseKind . typeKind tenv) arg_types
+            flattenConlikeArgs $ zip3 args' arg_types kinds
+    else flattenExps args
   mergeWith (\op' args' -> ExpM $ AppE inf op' ty_args args') ctx_op ctx_args
+  where
+    check_conlike (ExpM (VarE _ v)) = do
+      tenv <- getTypeEnv
+      let is_conlike = case lookupTypeWithProperties v tenv
+                       of Just (_, conlike) -> conlike
+                          Nothing -> False
+      return $! Substitute.Nameless $! is_conlike
+
+    check_conlike _ = return $ Substitute.Nameless False
 
 -- | Restructure an expression.  Find subexpressions that have local bindings
 --   and float those bindings outward.  Bindings are only floated out from 

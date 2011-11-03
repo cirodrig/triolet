@@ -517,7 +517,7 @@ shapeSliceRepr : (sh : bare) -> ShapeDict sh -> Repr (slice sh);
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
-copy : (a : bare) -> Repr a -> a -> Writer a;
+copy attribute(conlike) : (a : bare) -> Repr a -> a -> Writer a;
 convertToBoxed : (a : bare) -> Repr a -> Writer a -> BoxedType a;
 convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
 
@@ -1653,7 +1653,8 @@ generate : (n : intindex)
         -> (int -> Writer a)
         -> Sequence a;
 
-subscript : (n : intindex)
+subscript attribute(conlike)
+          : (n : intindex)
          -> (a : bare)
          -> Repr a
          -> arr n a
