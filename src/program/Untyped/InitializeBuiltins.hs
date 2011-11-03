@@ -491,7 +491,7 @@ mkIndexableClass = do
                   (pyonBuiltin SystemF.The_indexableDict)
                   [at, get_shape]
                   [list_instance, listview_instance,
-                   matrix_instance, matrixview_instance]
+                   array1_instance, array2_instance, matrixview_instance]
 
       ; at <- mkClassMethod cls 0 "at_point" at_scheme
       ; get_shape <- mkClassMethod cls 1 "get_shape" get_shape_scheme
@@ -510,7 +510,12 @@ mkIndexableClass = do
               (ConTy $ tiBuiltin the_con_view2)
               [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_view2_at_point
               , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_view2_get_shape]
-      ; let matrix_instance =
+      ; let array1_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_array1)
+              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array1_at_point
+              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array1_get_shape]
+      ; let array2_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_array2)
               [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array2_at_point
