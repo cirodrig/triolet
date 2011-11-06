@@ -932,15 +932,20 @@ namespace Pyon {
       typedef typename AsBareType<T>::type T_Bare;
     public:
       // Constructors
-      Incomplete< List<T> >(void) : IncompleteSingleRef< List<T> >() { this->length = 0; }
-      Incomplete< List<T> >(int length) : IncompleteSingleRef< List<T> >() { this->length = length; }
-      Incomplete< List<T> >(int length, PyonBarePtr _s) : IncompleteSingleRef< List<T> >(_s) { this->length = length; }
+      Incomplete< List<T> >(void)
+        : IncompleteSingleRef< List<T> >(), length(0) {}
+      Incomplete< List<T> >(PyonBarePtr _s)
+        : IncompleteSingleRef< List<T> >(_s), length(0) {}
       
       // Member Functions
-      void initialize() { 
-        pyon_List_initialize( length, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() ); 
+      void initialize(int _length) {
+        length = _length;
+        pyon_List_initialize(_length,
+                             T_Bare::getSize(),
+                             T_Bare::getAlignment(),
+                             this->getObject());
       }
-      void create() { this->allocate(); initialize(); }
+      void create(int _length) { this->allocate(); initialize(_length); }
 
       Incomplete< T_Bare > 
       at(int index) { 
