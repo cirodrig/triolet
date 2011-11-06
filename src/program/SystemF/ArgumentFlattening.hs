@@ -961,9 +961,9 @@ planFlattening mode ty spc = do
          _ -> id_decomp
 
   case spc of
-    -- Don't flatten or remove Repr parameters, because later stages of the
-    -- compiler might want to access them. 
-    _ | is_repr_pattern whnf_type -> id_decomp
+    -- Don't flatten or remove Repr or FIInt parameters, because later
+    -- stages of the compiler might want to access them.
+    _ | is_repr_pattern whnf_type || is_fiint_pattern whnf_type -> id_decomp
 
     -- Remove dead fields
     Unused -> dead_decomp
@@ -990,6 +990,11 @@ planFlattening mode ty spc = do
     is_repr_pattern t =
       case fromVarApp t
       of Just (op, _) -> op == pyonBuiltin The_Repr
+         _ -> False
+
+    is_fiint_pattern t =
+      case fromVarApp t
+      of Just (op, _) -> op == pyonBuiltin The_FIInt
          _ -> False
 
     is_dictionary_pattern t =
