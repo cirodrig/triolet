@@ -1324,8 +1324,12 @@ ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
                   (stride : int)
                   (offset : int).
 
-  mk_view1 @a @Slo @Shi i_slo i_shi
-  (\ (i : int) -> Writer a.
+  case boxed @dim1 (mk_dim1 @Slo @Shi i_slo i_shi) of
+    boxed @dim1 (slice_shape : dim1).
+
+  view1_generate @a repr slice_shape
+  (\ (si : Stored int) -> Writer a.
+    case si of stored @int (i : int).
     let i2 : int = i *# stride +# offset in
     case boxed @(Stored int) (stored @int i2) of
       boxed @(Stored int) (i2_s : Stored int).
@@ -1678,24 +1682,9 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
 -- ShapeDict-like internal functions
 
 view1_flatten @(a : bare) (vw : view1 a) -> Stream dim1 a
-  attribute(inline, inline_dimensionality) =
+  attribute(inline) =
   -- Shift the indices so that the first index is 0
-  case vw of {
-    mk_view1 @a @(lo hi : intindex)
-             (Nlo : IInt lo) (Nhi : IInt hi) (f : int -> Writer a).
-      let fNlo : FIInt lo = fromIndInt @lo Nlo in
-      case fNlo of fiInt @lo (lo_i : int).
-      let size : IInt (minus_i hi lo) = minus_ii @hi @lo Nhi Nlo in
-
-      viewStream @a
-      (mk_view1 @a @0 @(minus_i hi lo) zero_ii size
-       (\ (i : int) -> Writer a. f (i -# lo_i)));
-
-    empty_view1 @a.
-      -- Don't reuse the view value here because the extra use interferes with
-      -- optimization
-      viewStream @a (empty_view1 @a)
-  };
+  viewStream @a (view1_normalize @a vw);
 
 
 view1_generate @(a : bare) (repr_a : Repr a) (shape : dim1)
@@ -2901,6 +2890,26 @@ primitive_darr2_generate @(M N : intindex) @(a : bare)
 
 -------------------------------------------------------------------------------
 -- Methods specifically for 1D streams
+
+view1_normalize @(a : bare) (vw : view1 a) -> view1 a
+  attribute(inline, inline_dimensionality) =
+  -- Shift the indices so that the first index is 0
+  case vw of {
+    mk_view1 @a @(lo hi : intindex)
+             (Nlo : IInt lo) (Nhi : IInt hi) (f : int -> Writer a).
+      let fNlo : FIInt lo = fromIndInt @lo Nlo in
+      case fNlo of fiInt @lo (lo_i : int).
+      let size : IInt (minus_i hi lo) = minus_ii @hi @lo Nhi Nlo in
+
+      mk_view1 @a @0 @(minus_i hi lo) zero_ii size
+       (\ (i : int) -> Writer a. f (i -# lo_i));
+
+    empty_view1 @a.
+      -- Don't reuse the view value here because the extra use interferes with
+      -- optimization
+      empty_view1 @a
+  };
+
 
 range (n : int) -> Stream dim1 (Stored int)
   attribute(inline) =

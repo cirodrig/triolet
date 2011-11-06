@@ -455,6 +455,7 @@ pyonBuiltinVariableNames =
   , "doall"
   , "for"
   , "for_box"
+  , "view1_normalize"
   , "parallel_dim1_reduce"
   , "parallel_dim1_reduce1"
   , "parallel_darr1_reduce"

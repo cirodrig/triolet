@@ -1400,6 +1400,8 @@ chunk_id :
 viewToSequence : (a : bare) -> Repr a -> view1 a -> Sequence a;
 sequenceToView : (a : bare) -> Repr a -> Sequence a -> view1 a;
 
+view1_normalize : (a : bare) -> view1 a -> view1 a;
+
 -- Sequential fold over a stream
 fun_fold_Stream : (a acc : bare)
                -> Repr a
