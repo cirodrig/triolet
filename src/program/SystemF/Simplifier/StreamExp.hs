@@ -65,6 +65,9 @@ data instance Exp Stream =
     , sexpMiscArgs :: [ExpM]
       -- | Stream arguments.
     , sexpStreamArgs :: [ExpS]
+      -- | The optional output pointer for stream expressions whose return
+      --   type is a bare type.
+    , sexpReturnArg :: !(Maybe ExpM)
     }
     -- | Lambda expression
   | LamSE
@@ -95,9 +98,9 @@ instance Renameable (Exp Stream) where
   rename rn expression =
     case expression
     of OtherSE e -> OtherSE $ rename rn e
-       OpSE inf op shape_args repr_args misc_args stream_args ->
+       OpSE inf op shape_args repr_args misc_args stream_args ret_arg ->
          OpSE inf (rename rn op) (rename rn shape_args) (rename rn repr_args)
-         (rename rn misc_args) (rename rn stream_args)
+         (rename rn misc_args) (rename rn stream_args) (rename rn ret_arg)
        LamSE inf f ->
          LamSE inf (rename rn f)
        LetSE inf pat rhs body ->
@@ -352,13 +355,14 @@ pprExpSPrec :: ExpS -> PrecDoc
 pprExpSPrec expression = 
   case expression
   of OtherSE e -> pprExpPrec e
-     OpSE _ op shape_args repr_args misc_args stream_args ->
+     OpSE _ op shape_args repr_args misc_args stream_args ret_arg ->
        let arg_group xs = braces (sep $ map pprExp xs) `hasPrec` atomicPrec
        in asApplication $ pprStreamOp' op ++
                           arg_group shape_args :
                           arg_group repr_args :
                           arg_group misc_args :
-                          map pprExpSPrec stream_args
+                          map pprExpSPrec stream_args ++
+                          maybeToList (fmap pprExpPrec ret_arg)
      LamSE _ f ->
        pprFunS f
      LetSE _ pat rhs body ->
@@ -439,7 +443,7 @@ interpretGen stream_type = StreamOpInterpreter check_arity interpret
           [repr, shape, generator] = args'
           op = GenerateOp (applyShapeIndices shape_indices stream_type)
                output_type
-      return $ OpSE inf op shape_args [repr] [shape, generator] []
+      return $ OpSE inf op shape_args [repr] [shape, generator] [] Nothing
 
     n_shape_indices = numShapeIndices stream_type
     n_ty_args = n_shape_indices + 1
@@ -459,7 +463,7 @@ interpretZip stream_type n_inputs = StreamOpInterpreter check_arity interpret
                input_types output_type
 
       stream_exps <- mapM interpretStreamSubExp inputs
-      return $ OpSE inf op shape_args repr_args [transformer] stream_exps
+      return $ OpSE inf op shape_args repr_args [transformer] stream_exps Nothing
 
     n_shape_indices = numShapeIndices stream_type
     n_ty_args = n_shape_indices + n_inputs + 1
@@ -475,12 +479,15 @@ interpretReduce stream_type = StreamOpInterpreter check_arity interpret
       let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
           Just (shape_args, args') = takeShapeArguments stream_type args
           [ty] = ty_args'
-          repr : reducer : init : source : maybe_return_arg = args'
+          repr : reducer : init : source : args'' = args'
+          maybe_return_arg = case args''
+                             of [] -> Nothing
+                                [x] -> Just x
           op = ReduceOp (applyShapeIndices shape_indices stream_type)
                (Reduce ty)
 
       stream_exp <- interpretStreamSubExp source
-      return $ OpSE inf op shape_args [repr] (reducer : init : maybe_return_arg) [stream_exp]
+      return $ OpSE inf op shape_args [repr] [reducer, init] [stream_exp] maybe_return_arg
 
     n_shape_indices = numShapeIndices stream_type
     n_ty_args = n_shape_indices + 1
@@ -496,12 +503,15 @@ interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
       let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
           Just (shape_args, args') = takeShapeArguments stream_type args
           [ty] = ty_args'
-          repr : reducer : source : maybe_return_arg = args'
+          repr : reducer : source : args'' = args'
+          maybe_return_arg = case args''
+                             of [] -> Nothing
+                                [x] -> Just x
           op = ReduceOp (applyShapeIndices shape_indices stream_type)
                (Reduce ty)
 
       stream_exp <- interpretStreamSubExp source
-      return $ OpSE inf op shape_args [repr] (reducer : maybe_return_arg) [stream_exp]
+      return $ OpSE inf op shape_args [repr] [reducer] [stream_exp] maybe_return_arg
 
     n_shape_indices = numShapeIndices stream_type
     n_ty_args = n_shape_indices + 1
@@ -515,7 +525,7 @@ interpretBind = StreamOpInterpreter check_arity interpret
     interpret inf [t1, t2] [repr, producer, transformer] = do
       producer' <- interpretStreamSubExp producer
       transformer' <- interpretStreamSubExp transformer
-      return $ OpSE inf (BindOp t1 t2) [] [repr] [] [producer', transformer']
+      return $ OpSE inf (BindOp t1 t2) [] [repr] [] [producer', transformer'] Nothing
 
 interpretReturn = StreamOpInterpreter check_arity interpret
   where
@@ -523,7 +533,7 @@ interpretReturn = StreamOpInterpreter check_arity interpret
     check_arity _ _ = False
     
     interpret inf [ty] [repr, gen] = do
-      return $ OpSE inf (ReturnOp ty) [] [repr] [gen] []
+      return $ OpSE inf (ReturnOp ty) [] [repr] [gen] [] Nothing
 
 interpretEmpty = StreamOpInterpreter check_arity interpret
   where
@@ -531,7 +541,7 @@ interpretEmpty = StreamOpInterpreter check_arity interpret
     check_arity _ _ = False
     
     interpret inf [ty] [] = do
-      return $ OpSE inf (EmptyOp ty) [] [] [] []
+      return $ OpSE inf (EmptyOp ty) [] [] [] [] Nothing
 
 interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
   where
@@ -543,7 +553,7 @@ interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
           Just (shape_args, [repr, src]) = takeShapeArguments stream_type args
           op = ToSequenceOp (applyShapeIndices shape_indices stream_type) ty
       src_stream <- interpretStreamSubExp src
-      return $ OpSE inf op shape_args [repr] [] [src_stream]
+      return $ OpSE inf op shape_args [repr] [] [src_stream] Nothing
 
     n_shape_indices = numShapeIndices stream_type
 
@@ -690,11 +700,11 @@ embedOp (ReduceOp st (Reduce1 ty)) =
 embedStreamExp :: ExpS -> ExpM
 embedStreamExp expression =
   case expression
-  of OpSE inf op shape_args reprs misc_args streams ->
+  of OpSE inf op shape_args reprs misc_args streams ret_args ->
        let (op_var, ty_args) = embedOp op
            stream_args = map embedStreamExp streams
        in appE inf (ExpM $ VarE inf op_var) ty_args
-          (shape_args ++ reprs ++ misc_args ++ stream_args)
+          (shape_args ++ reprs ++ misc_args ++ stream_args ++ maybeToList ret_args)
      OtherSE e -> e
      LamSE inf f -> 
        ExpM $ LamE inf (embedStreamFun f)
@@ -718,7 +728,7 @@ simplifyStreamExp expression =
   case expression
   of -- Map operation: try to fuse with its producer
      OpSE inf op@(ZipOp st [in_type] out_type)
-       shape_args repr_args@[in_repr, out_repr] [f] [in_stream] -> do
+       shape_args repr_args@[in_repr, out_repr] [f] [in_stream] Nothing -> do
        e <- fuseMapWithProducer out_type out_repr f in_stream
        case e of
          Just e' -> simplifyStreamExp e'
@@ -726,7 +736,7 @@ simplifyStreamExp expression =
 
      -- Convert to sequence: Try to replace the source stream with the
      -- equivalent sequence stream
-     OpSE inf op@(ToSequenceOp st ty) shape_args [repr] [] [s] -> do
+     OpSE inf op@(ToSequenceOp st ty) shape_args [repr] [] [s] Nothing -> do
        e <- convertToSequenceOp s
        case e of
          Just e' -> simplifyStreamExp e'
@@ -736,9 +746,9 @@ simplifyStreamExp expression =
   where
     simplify_subexpressions e =
       case e
-      of OpSE inf op shape_args repr_args misc_args stream_args -> do
+      of OpSE inf op shape_args repr_args misc_args stream_args ret_arg -> do
            stream_args' <- mapM simplifyStreamExp stream_args
-           return $ OpSE inf op shape_args repr_args misc_args stream_args'
+           return $ OpSE inf op shape_args repr_args misc_args stream_args' ret_arg
          LamSE inf f ->
            LamSE inf `liftM` simplifyStreamFun f
          CaseSE inf scr alts ->
@@ -761,16 +771,16 @@ fuseMapWithProducer :: Type -> ExpM -> ExpM -> ExpS -> TypeEvalM (Maybe ExpS)
 fuseMapWithProducer ty repr map_f producer =
   case producer
   of OpSE inf (GenerateOp st producer_ty)
-       shape_args [producer_repr] [dim, gen_f] [] -> do
+       shape_args [producer_repr] [dim, gen_f] [] Nothing -> do
        new_gen_f <- fuse_with_generator [streamIndexType st] producer_ty gen_f
 
-       return $ Just $ OpSE inf (GenerateOp st ty) shape_args [repr] [dim, new_gen_f] []
+       return $ Just $ OpSE inf (GenerateOp st ty) shape_args [repr] [dim, new_gen_f] [] Nothing
      OpSE inf (ZipOp st zip_tys producer_ty)
-       shape_args zip_and_producer_reprs [zip_f] zip_streams -> do
+       shape_args zip_and_producer_reprs [zip_f] zip_streams Nothing -> do
        new_zip_f <- fuse_with_generator zip_tys producer_ty zip_f
        let zip_reprs = init zip_and_producer_reprs
 
-       return $ Just $ OpSE inf (ZipOp st zip_tys ty) shape_args (zip_reprs ++ [repr]) [new_zip_f] zip_streams
+       return $ Just $ OpSE inf (ZipOp st zip_tys ty) shape_args (zip_reprs ++ [repr]) [new_zip_f] zip_streams Nothing
      _ -> return Nothing
   where
     -- Fuse with generator function
@@ -778,8 +788,7 @@ fuseMapWithProducer ty repr map_f producer =
     fuse_with_generator arg_types producer_ty gen_f =
       lamE $
       mkFun []
-      (\ [] -> return (arg_types ++ [outType producer_ty],
-                       initEffectType producer_ty))
+      (\ [] -> return (arg_types ++ [outType ty], initEffectType ty))
       (\ [] args ->
         let arg_value_vars = init args
             out_ptr = last args
@@ -792,12 +801,12 @@ fuseMapWithProducer ty repr map_f producer =
 convertToSequenceOp :: ExpS -> TypeEvalM (Maybe ExpS)
 convertToSequenceOp expression =
   case expression
-  of OpSE inf (GenerateOp st ty) _ repr_args misc_args [] ->
+  of OpSE inf (GenerateOp st ty) _ repr_args misc_args [] Nothing ->
        case st
        of ViewType 1 ->
             -- Convert view1_generate to Sequence_Generate
             return $ Just $
-            OpSE inf (GenerateOp SequenceType ty) [] repr_args misc_args []
+            OpSE inf (GenerateOp SequenceType ty) [] repr_args misc_args [] Nothing
           _ -> return Nothing
      _ -> return Nothing
      
@@ -809,10 +818,10 @@ convertToSequenceOp expression =
 sequentializeStreamExp :: ExpS -> TypeEvalM (Maybe ExpM)
 sequentializeStreamExp expression =
   case expression
-  of OpSE inf (ReduceOp st reduction_op) shape_args repr_args misc_args [src] ->
+  of OpSE inf (ReduceOp st reduction_op) shape_args repr_args misc_args [src] ret_arg ->
        case reduction_op
        of Reduce ty -> runMaybeT $ do
-            let (reducer : init : other_args) = misc_args
+            let [reducer, init] = misc_args
                 [repr] = repr_args
 
             -- Assign the Repr to a variable to avoid replicating the
@@ -821,8 +830,9 @@ sequentializeStreamExp expression =
             fold_exp <-
               sequentializeFold ty ty repr_var
               (ExpM $ VarE defaultExpInfo repr_var) init reducer src
+            let fold_with_return = appE inf fold_exp [] (maybeToList ret_arg)
             let repr_pat = patM (repr_var ::: varApp (pyonBuiltin The_Repr) [ty])
-            return $ letE repr_pat repr fold_exp
+            return $ letE repr_pat repr fold_with_return
      _ -> return Nothing
 
 -- | Convert a fold over a sequence to a sequential loop.
@@ -843,7 +853,7 @@ sequentializeFold :: Type       -- ^ Accumulator type
                   -> MaybeT TypeEvalM ExpM
 sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
   case source
-  of OpSE inf (GenerateOp _ _) _ _ [shape, f] [] -> do
+  of OpSE inf (GenerateOp _ _) _ _ [shape, f] [] Nothing -> do
        -- Create a @for@ loop
        tenv <- getTypeEnv
        varAppE (pyonBuiltin The_dim1_fold)
@@ -858,14 +868,14 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
             localE a_ty (appExp (return f) [] [varE i_var]) $ \x_var ->
             appExp (return combiner) [] [varE a_var, varE x_var, varE r_var]),
         return acc]
-     OpSE inf (ReturnOp _) _ _ [w] [] ->
+     OpSE inf (ReturnOp _) _ _ [w] [] Nothing ->
        -- Accumulate the written value
        localE a_ty (return w) $ \x_var ->
        appExp (return combiner) [] [return acc, varE x_var]
-     OpSE inf (EmptyOp _) _ _ _ [] ->
+     OpSE inf (EmptyOp _) _ _ _ [] Nothing ->
        -- Return the accumulator
        varAppE (pyonBuiltin The_copy) [acc_ty] [varE acc_repr_var, return acc]
-     OpSE inf (BindOp p_ty _) _ [p_repr] [] [producer, transformer] -> do
+     OpSE inf (BindOp p_ty _) _ [p_repr] [] [producer, transformer] Nothing -> do
        -- The "bind" operator is what makes sequentializing folds interesting.
        -- This transformation is performed:
        -- T [| bind s (\x. t) |] z c =
