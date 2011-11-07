@@ -589,10 +589,11 @@ packParameterRead (FlatArg pat flat_arg) =
          return (Just (var_exp $ patMVar pat),
                  bindVariable tenv (patMBinder pat) packed)
 
-     DeadDecomp e ->
+     DeadDecomp e -> do
        -- Assign the expression to a temporary variable
+       tenv <- getTypeEnv
        return (Just (var_exp $ patMVar pat),
-               \body -> ExpM $ LetE defaultExpInfo pat e body)
+               bindVariable tenv (patMBinder pat) e)
   where
     var_exp v = ExpM $ VarE defaultExpInfo v
 
