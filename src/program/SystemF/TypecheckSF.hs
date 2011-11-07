@@ -95,6 +95,12 @@ typeInferExp (ExpSF expression) =
          typeInferLetfunE inf defs body
        CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
          typeInferCaseE inf scr alts
+       ExceptE {expType = ty} -> do
+         typeCheckType ty
+         return ty
+       CoerceE {expInfo = inf, expArgType = from_ty, expRetType = to_ty,
+                expBody = body} ->
+         typeInferCoerceE inf from_ty to_ty body
          
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM Type
@@ -282,6 +288,17 @@ checkAltParam pos expected_type (VarP field_var given_type) = do
   typeInferType given_type
   let msg = text "Wrong type in field of pattern"
   checkType msg pos expected_type given_type
+
+typeInferCoerceE inf from_ty to_ty body = do
+  typeCheckType from_ty
+  typeCheckType to_ty
+
+  -- Verify that body type matches the given type
+  body_ty <- typeInferExp body
+  let msg = text "Argument of coercion doesn't match expected type"
+  checkType msg (getSourcePos inf) from_ty body_ty
+
+  return to_ty
 
 typeCheckDefGroup :: DefGroup (Def SF) -> TCM b -> TCM b
 typeCheckDefGroup defgroup k = 
