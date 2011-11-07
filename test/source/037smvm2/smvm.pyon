@@ -1,0 +1,16 @@
+
+def sum(xs): return reduce(lambda x, y: x + y, 0, xs)
+
+def matrix_rows(m : (list((int, float)), list(int))) -> iter(shape(list), view1((int, float))):
+	(data, segments) = m
+        # The following two lines use strided slices, because range slices
+        # don't do what we want.  However, maybe range slices should be
+        # redefined to do what we want...
+	ranges = zip(segments, segments[1::])
+	return (data[lo:hi:] for (lo, hi) in ranges)
+
+def smvm2(m, v):
+	return [sum(v[i] * x for (i, x) in row)
+		for row in matrix_rows(m)]
+
+export cplusplus smvm2 : (list((int, float)), list(int)) * array1(float) -> array1(float)
