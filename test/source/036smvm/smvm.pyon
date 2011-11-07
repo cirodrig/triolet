@@ -1,0 +1,9 @@
+# Test sparse matrix vector multiplication
+
+export cplusplus smvm : \
+    array1(list((int, float))) * array1(float) -> array1(float);
+
+def sum(xs): return reduce(lambda x, y: x + y, 0, xs)
+
+def smvm(m, v):
+  return [sum(v[i] * x for (i, x) in row) for row in m]

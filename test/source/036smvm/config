@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Sparse matrix vector multiplication",
+  pyonSources	 = ["smvm.pyon"],
+  llpyonSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
+  expectedResult = ShouldPrint "0,3,9,-16,"
+}
