@@ -928,18 +928,16 @@ namespace Pyon {
     template<typename T>
   class Incomplete< List<T> > : public IncompleteSingleRef< List<T> > {
     private:
-      int length;
       typedef typename AsBareType<T>::type T_Bare;
     public:
       // Constructors
       Incomplete< List<T> >(void)
-        : IncompleteSingleRef< List<T> >(), length(0) {}
+        : IncompleteSingleRef< List<T> >() {}
       Incomplete< List<T> >(PyonBarePtr _s)
-        : IncompleteSingleRef< List<T> >(_s), length(0) {}
-      
+        : IncompleteSingleRef< List<T> >(_s) {}
+
       // Member Functions
       void initialize(int _length) {
-        length = _length;
         pyon_List_initialize(_length,
                              T_Bare::getSize(),
                              T_Bare::getAlignment(),
