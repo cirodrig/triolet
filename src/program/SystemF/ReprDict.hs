@@ -40,7 +40,7 @@ data SingletonValueEnv =
     -- | A lookup table of 'Shape' dictionaries
   , shapeDictEnv :: !(DictEnv.DictEnv MkDict)
 
-    -- | A lookup table of 'intindex' dictionaries
+    -- | A lookup table of 'FIInt' values
   , intIndexEnv :: !(DictEnv.DictEnv MkDict)
   }
 
@@ -452,7 +452,7 @@ createInt_min param_var1 param_var2 subst = MkDict $ do
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
 
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_min_ii)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_min_fii)
 
 createInt_minus param_var1 param_var2 subst = MkDict $ do
   int1 <- lookupIndexedInt' param1
@@ -463,4 +463,4 @@ createInt_minus param_var1 param_var2 subst = MkDict $ do
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
 
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_minus_ii)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_minus_fii)
