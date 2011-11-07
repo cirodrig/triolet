@@ -28,6 +28,7 @@ import qualified Data.Map as Map
 import Data.Set(Set)
 import qualified Data.Set as Set
 import Data.Traversable
+import System.FilePath
 
 import qualified Language.Python.Version3.Parser as Py
 import qualified Language.Python.Common.AST as Py
@@ -910,4 +911,5 @@ parseModule stream path globals nextID =
          return $! case x of Left err -> Left err
                              Right (m, n, (defs, exps)) ->
                                let groups = definitionGroups defs
-                               in Right (m, n, Module path groups exps)
+                                   module_name = takeBaseName path
+                               in Right (m, n, Module module_name groups exps)
