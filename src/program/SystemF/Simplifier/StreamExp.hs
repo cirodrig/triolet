@@ -203,7 +203,12 @@ streamIndexType st =
     ix0 = varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_NoneType]
     ix1 = varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
 
-data ReductionOp =
+-- | A value of this type, combined with a shape,
+--   determines a container type of kind @bare -> bare@.
+data ContainerType =
+  ListType | ArrayType
+
+data ConsumerOp =
     -- | Reduce using a reducer and initial value
     --
     -- > (reduce @{other type arguments} @{type} {other arguments})
@@ -222,6 +227,9 @@ data ReductionOp =
     -- > (reduce @{other type arguments} @{input type} @{accumulator type}
     -- >   {other arguments}) {reducer} {init} {stream} {output pointer}
   | Fold Type Type
+
+    -- | Build a data structure
+  | Build ContainerType Type
 
 data StreamOp =
     -- | Generate a stream.
@@ -256,17 +264,23 @@ data StreamOp =
     -- | Produce a 1D sequence of size 0.
   | EmptyOp !Type
 
+    -- | Produce a view of size 0.
+    --
+    -- > empty @{output type} {output repr} {} {}
+  | EmptyViewOp !Int !Type
+
     -- | The bind operation on sequences.
     --
     -- > bind @{producer type, transformer type}
     --        {producer repr} {} {producer, transformer}
   | BindOp !Type !Type
 
-    -- | Reduce a stream and produce a single value.
+    -- | Consume a stream and produce a single value.
+    --   A reduction consumes a stream.  So does building a data structure.
     --
-    -- > reduce @{shape indices} @{reduction type parameters}
+    -- > consume @{shape indices} @{reduction type parameters}
     -- >   {shape parameters} {repr} {reduction parameters}
-  | ReduceOp !StreamType !ReductionOp
+  | ConsumeOp !StreamType !ConsumerOp
 
 instance Renameable StreamOp where
   rename rn op =
@@ -277,18 +291,20 @@ instance Renameable StreamOp where
        ToView1Op st ty -> ToView1Op (rename rn st) (rename rn ty)
        ReturnOp ty -> ReturnOp (rename rn ty)
        EmptyOp ty -> EmptyOp (rename rn ty)
+       EmptyViewOp n ty -> EmptyViewOp n (rename rn ty)
        BindOp t1 t2 -> BindOp (rename rn t1) (rename rn t2)
-       ReduceOp st r -> ReduceOp (rename rn st) (rename rn r)
+       ConsumeOp st r -> ConsumeOp (rename rn st) (rename rn r)
 
 instance Renameable StreamType where
   rename rn SequenceType = SequenceType
   rename rn (ViewType n) = ViewType n
   rename rn (DArrType ts) = DArrType (rename rn ts)
 
-instance Renameable ReductionOp where
+instance Renameable ConsumerOp where
   rename rn (Reduce t) = Reduce (rename rn t)
   rename rn (Reduce1 t) = Reduce1 (rename rn t)
   rename rn (Fold t1 t2) = Fold (rename rn t1) (rename rn t2)
+  rename rn (Build ct t) = Build ct (rename rn t)
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -344,11 +360,16 @@ pprStreamOp' (ReturnOp t) =
 pprStreamOp' (EmptyOp t) =
   nameApplication "empty" [pprTypePrec t]
 
-pprStreamOp' (ReduceOp st op) =
+pprStreamOp' (EmptyViewOp n t) =
+  nameApplication "empty_view" [int n `hasPrec` atomicPrec, pprTypePrec t]
+
+pprStreamOp' (ConsumeOp st op) =
   let (name, tys) = case op
                     of Reduce ty -> ("reduce", [ty])
                        Reduce1 ty -> ("reduce1", [ty])
                        Fold in_ty acc_ty -> ("fold", [in_ty, acc_ty])
+                       Build ListType ty -> ("build_list", [ty])
+                       Build ArrayType ty -> ("build_array", [ty])
   in nameApplication name (pprStreamType st : map pprTypePrec tys)
 
 pprExpSPrec :: ExpS -> PrecDoc  
@@ -423,12 +444,17 @@ streamOpTable =
            , (pyonBuiltin The_view1_zipWith4, interpretZip (PolyViewType 1) 4)
            , (pyonBuiltin The_view1_reduce, interpretReduce (PolyViewType 1))
            , (pyonBuiltin The_view1_reduce1, interpretReduce1 (PolyViewType 1))
+           , (pyonBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
+           , (pyonBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
+           , (pyonBuiltin The_view1_empty, interpretEmptyView)
            , (pyonBuiltin The_Sequence_bind, interpretBind)
            , (pyonBuiltin The_Sequence_return, interpretReturn)
            , (pyonBuiltin The_Sequence_empty, interpretEmpty)
            , (pyonBuiltin The_Sequence_generate, interpretGen PolySequenceType)
            , (pyonBuiltin The_Sequence_reduce, interpretReduce PolySequenceType)
            , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 PolySequenceType)
+           , (pyonBuiltin The_Sequence_array1_build, interpretBuild PolySequenceType ArrayType)
+           , (pyonBuiltin The_Sequence_list_build, interpretBuild PolySequenceType ListType)
            , (pyonBuiltin The_viewToSequence, interpretToSequence (PolyViewType 1))
            ]
 
@@ -483,7 +509,7 @@ interpretReduce stream_type = StreamOpInterpreter check_arity interpret
           maybe_return_arg = case args''
                              of [] -> Nothing
                                 [x] -> Just x
-          op = ReduceOp (applyShapeIndices shape_indices stream_type)
+          op = ConsumeOp (applyShapeIndices shape_indices stream_type)
                (Reduce ty)
 
       stream_exp <- interpretStreamSubExp source
@@ -507,7 +533,7 @@ interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
           maybe_return_arg = case args''
                              of [] -> Nothing
                                 [x] -> Just x
-          op = ReduceOp (applyShapeIndices shape_indices stream_type)
+          op = ConsumeOp (applyShapeIndices shape_indices stream_type)
                (Reduce ty)
 
       stream_exp <- interpretStreamSubExp source
@@ -516,6 +542,31 @@ interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
     n_shape_indices = numShapeIndices stream_type
     n_ty_args = n_shape_indices + 1
     n_args = n_shape_indices + 3
+
+interpretBuild stream_type container_type =
+  StreamOpInterpreter check_arity interpret
+  where
+    -- There is one optional argument for the output pointer
+    check_arity ty_args args =
+      ty_args == n_ty_args && (args == n_args || args == n_args + 1)
+
+    interpret inf ty_args args = do
+      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
+          Just (shape_args, args') = takeShapeArguments stream_type args
+          [ty] = ty_args'
+          repr : source : args'' = args'
+          maybe_return_arg = case args''
+                             of [] -> Nothing
+                                [x] -> Just x
+          op = ConsumeOp (applyShapeIndices shape_indices stream_type)
+               (Build container_type ty)
+
+      stream_exp <- interpretStreamSubExp source
+      return $ OpSE inf op shape_args [repr] [] [stream_exp] maybe_return_arg
+
+    n_shape_indices = numShapeIndices stream_type
+    n_ty_args = n_shape_indices + 1
+    n_args = n_shape_indices + 2
 
 interpretBind = StreamOpInterpreter check_arity interpret
   where
@@ -556,6 +607,14 @@ interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
       return $ OpSE inf op shape_args [repr] [] [src_stream] Nothing
 
     n_shape_indices = numShapeIndices stream_type
+
+interpretEmptyView = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 1 = True
+    check_arity _ _ = False
+    
+    interpret inf [ty] [repr] = do
+      return $ OpSE inf (EmptyViewOp 1 ty) [] [repr] [] [] Nothing
 
 interpretStreamSubExp :: ExpM -> TypeEvalM ExpS
 interpretStreamSubExp expression =
@@ -682,19 +741,36 @@ embedOp (ReturnOp ty) =
 embedOp (EmptyOp ty) =
   (pyonBuiltin The_Sequence_empty, [ty])
 
+embedOp (EmptyViewOp n ty) =
+  let op = case n
+           of 1 -> pyonBuiltin The_view1_empty
+  in (op, [ty])
+
 embedOp (BindOp t1 t2) =
   (pyonBuiltin The_Sequence_bind, [t1, t2])
 
-embedOp (ReduceOp st (Reduce ty)) =
+embedOp (ConsumeOp st (Reduce ty)) =
   let op = case st
            of SequenceType -> pyonBuiltin The_Sequence_reduce
               ViewType 1 -> pyonBuiltin The_view1_reduce
   in (op, extractShapeIndices st ++ [ty])
 
-embedOp (ReduceOp st (Reduce1 ty)) =
+embedOp (ConsumeOp st (Reduce1 ty)) =
   let op = case st
            of SequenceType -> pyonBuiltin The_Sequence_reduce1
               ViewType 1 -> pyonBuiltin The_view1_reduce1
+  in (op, extractShapeIndices st ++ [ty])
+
+embedOp (ConsumeOp st (Build container_type ty)) =
+  let op = case st
+           of SequenceType ->
+                case container_type
+                of ListType -> pyonBuiltin The_Sequence_list_build
+                   ArrayType -> pyonBuiltin The_Sequence_array1_build
+              ViewType 1 ->
+                case container_type
+                of ListType -> pyonBuiltin The_view1_list_build
+                   ArrayType -> pyonBuiltin The_view1_array1_build
   in (op, extractShapeIndices st ++ [ty])
 
 embedStreamExp :: ExpS -> ExpM
@@ -723,15 +799,102 @@ embedStreamAlt (AltS alt) =
 
 -------------------------------------------------------------------------------
 
+restructureStreamExp :: ExpS -> TypeEvalM ExpS
+restructureStreamExp e =
+  restructureIfNeeded Set.empty e (return . fromMaybe e)
+
+-- | Restructure a stream expression by hoisting out all non-data-dependent
+--   case statements.  Restructuring can introduce code replication.
+--   If the expression was restructured, pass the
+--   part from inside case statements to the continuation, which will
+--   decide what to do with it.  Otherwise pass Nothing.
+--
+--   Hoisting is only valid when it introduces no side effects. 
+--   To avoid introducing side effects, case statements are not hoisted out
+--   of lambdas, and the nesting of case statements is preserved.
+restructureIfNeeded :: Set.Set Var
+                    -> ExpS
+                    -> (Maybe ExpS -> TypeEvalM ExpS)
+                    -> TypeEvalM ExpS
+restructureIfNeeded locals expression cont =
+  case expression
+  of OpSE {sexpStreamArgs = es} ->
+       restructureListIfNeeded locals es $ \m_es' ->
+       case m_es'
+       of Nothing  -> cont Nothing
+          Just es' -> cont $ Just $ expression {sexpStreamArgs = es'}
+     LamSE inf f ->
+       cont Nothing
+     LetSE inf pat rhs body ->
+       let locals' = Set.insert (patMVar pat) locals
+       in restructureIfNeeded locals' body $ \m_body' ->
+          cont (fmap (LetSE inf pat rhs) m_body')
+     LetfunSE inf defs body ->
+       let locals' = foldr Set.insert locals $
+                     map definiendum (defGroupMembers defs)
+       in restructureIfNeeded locals' body $ \m_body' ->
+          cont (fmap (LetfunSE inf defs) m_body')
+     CaseSE inf scr alts
+       -- If the scrutinee is independent of stream-local variables, then
+       -- float the case statement outward
+       | Set.null $ freeVariables scr `Set.intersection` locals -> do
+           alts' <- sequence [restructureAlt locals alt cont | alt <- alts]
+           return $ CaseSE inf scr alts'
+     _ ->
+       cont Nothing
+
+restructureAlt locals (AltS (Alt con params body)) cont = do
+  -- Rename local variables to avoid name conflicts
+  (con', con_rn) <- freshenDeConInst con
+  renamePatMs con_rn (map fromPatS params) $ \con_rn' params' -> do
+    (params', param_rn) <- freshenPatMs params'
+    let rn = param_rn `Rename.compose` con_rn'
+        rn_body = rename rn body
+
+    -- Restructure the case alternative body.
+    -- The continuation is executed to move code inside the body.
+    let extra_locals = map binderVar (deConExTypes con') ++ map patMVar params'
+        locals' = foldr Set.insert locals extra_locals
+    body' <- restructureIfNeeded locals' rn_body cont
+
+    -- Rebuild the case alternative.
+    return $ AltS $ Alt con' (map PatS params') body'
+
+-- | Restructure a list of stream expressions.
+restructureListIfNeeded :: Set.Set Var 
+                        -> [ExpS]
+                        -> (Maybe [ExpS] -> TypeEvalM ExpS)
+                        -> TypeEvalM ExpS
+restructureListIfNeeded locals es cont = go es (cont . sequence) 
+  where
+    go (e:es) k =
+      restructureIfNeeded locals e $ \e' -> go es $ \es' -> k (e' : es')
+
+    go [] k = k []
+
+-- TODO: hoist case statements and non-excepting let statements
+-- out of other stream expressions
+--
+-- > foo (case x of {A. S1; B. S2}) ==> case x of {A. foo S1; B. foo S2})
+
+-- | Simplify a stream expression.
+
+-- First, the expression is globally restructured.
+-- Then a top-down simplification pass is performed.
 simplifyStreamExp :: ExpS -> TypeEvalM ExpS
-simplifyStreamExp expression =
+simplifyStreamExp expression = do
+  simplifyExp =<< restructureStreamExp expression
+  
+-- | Recursively transform a stream expression
+simplifyExp :: ExpS -> TypeEvalM ExpS
+simplifyExp expression =
   case expression
   of -- Map operation: try to fuse with its producer
      OpSE inf op@(ZipOp st [in_type] out_type)
        shape_args repr_args@[in_repr, out_repr] [f] [in_stream] Nothing -> do
        e <- fuseMapWithProducer out_type out_repr f in_stream
        case e of
-         Just e' -> simplifyStreamExp e'
+         Just e' -> simplifyExp e'
          Nothing -> simplify_subexpressions expression
 
      -- Convert to sequence: Try to replace the source stream with the
@@ -739,7 +902,7 @@ simplifyStreamExp expression =
      OpSE inf op@(ToSequenceOp st ty) shape_args [repr] [] [s] Nothing -> do
        e <- convertToSequenceOp s
        case e of
-         Just e' -> simplifyStreamExp e'
+         Just e' -> simplifyExp e'
          Nothing -> simplify_subexpressions expression
 
      _ -> simplify_subexpressions expression
@@ -747,7 +910,7 @@ simplifyStreamExp expression =
     simplify_subexpressions e =
       case e
       of OpSE inf op shape_args repr_args misc_args stream_args ret_arg -> do
-           stream_args' <- mapM simplifyStreamExp stream_args
+           stream_args' <- mapM simplifyExp stream_args
            return $ OpSE inf op shape_args repr_args misc_args stream_args' ret_arg
          LamSE inf f ->
            LamSE inf `liftM` simplifyStreamFun f
@@ -758,13 +921,13 @@ simplifyStreamExp expression =
 simplifyStreamAlt (AltS alt) =
   assumeBinders (deConExTypes $ altCon alt) $
   assumePatMs (map fromPatS $ altParams alt) $ do
-    body <- simplifyStreamExp $ altBody alt
+    body <- simplifyExp $ altBody alt
     return $ AltS $ alt {altBody = body}
 
 simplifyStreamFun (FunS fun) =
   assumeTyPats (funTyParams fun) $
   assumePatMs (map fromPatS $ funParams fun) $ do
-    body <- simplifyStreamExp $ funBody fun
+    body <- simplifyExp $ funBody fun
     return $ FunS $ fun {funBody = body}
 
 fuseMapWithProducer :: Type -> ExpM -> ExpM -> ExpS -> TypeEvalM (Maybe ExpS)
@@ -775,12 +938,20 @@ fuseMapWithProducer ty repr map_f producer =
        new_gen_f <- fuse_with_generator [streamIndexType st] producer_ty gen_f
 
        return $ Just $ OpSE inf (GenerateOp st ty) shape_args [repr] [dim, new_gen_f] [] Nothing
+
      OpSE inf (ZipOp st zip_tys producer_ty)
        shape_args zip_and_producer_reprs [zip_f] zip_streams Nothing -> do
        new_zip_f <- fuse_with_generator zip_tys producer_ty zip_f
        let zip_reprs = init zip_and_producer_reprs
 
        return $ Just $ OpSE inf (ZipOp st zip_tys ty) shape_args (zip_reprs ++ [repr]) [new_zip_f] zip_streams Nothing
+
+     OpSE inf (EmptyOp _) [] [] [] [] Nothing -> 
+       return $ Just $ OpSE inf (EmptyOp ty) [] [] [] [] Nothing
+
+     OpSE inf (EmptyViewOp n _) shape_args [_] [] [] Nothing -> 
+       return $ Just $ OpSE inf (EmptyViewOp n ty) shape_args [repr] [] [] Nothing
+       
      _ -> return Nothing
   where
     -- Fuse with generator function
@@ -813,13 +984,13 @@ convertToSequenceOp expression =
 -------------------------------------------------------------------------------
 
 -- | Convert a stream expression to a sequential loop.
---   The conversion only succeeds if the outermost term is a reduction.
+--   The conversion only succeeds if the outermost term is a consumer.
 --   The result is often better than simply inlining the stream operations.
 sequentializeStreamExp :: ExpS -> TypeEvalM (Maybe ExpM)
 sequentializeStreamExp expression =
   case expression
-  of OpSE inf (ReduceOp st reduction_op) shape_args repr_args misc_args [src] ret_arg ->
-       case reduction_op
+  of OpSE inf (ConsumeOp st op) shape_args repr_args misc_args [src] ret_arg ->
+       case op
        of Reduce ty -> runMaybeT $ do
             let [reducer, init] = misc_args
                 [repr] = repr_args

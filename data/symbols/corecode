@@ -256,8 +256,7 @@ intersectSliceWithRange @(lo hi : intindex)
          }
      ; nothingVal @int. False
      }
-  then -- Slice does not intersect range.  Return an empty slice.
-       internalSlice @0 @0 zero_ii zero_ii 1 0
+  then emptySlice
   else case m_m_stride of {
          nothingVal @(MaybeVal int).
            -- This is a range slice
@@ -521,6 +520,10 @@ sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
   darr1ToView1 @N @a size (arr1D_traverse @N @a repr size ay);
 
 
+view1_empty @(a : bare) (repr : Repr a) -> view1 a
+  attribute(inline, inline_dimensionality) =
+  empty_view1 @a;
+
 -------------------------------------------------------------------------------
 -- Traversable methods
 
@@ -606,13 +609,7 @@ TraversableDict_list_build @(a : bare)
     sequenceStream @a (sq : Sequence a).
       Sequence_list_build @a repr sq ret
   ; viewStream @a (vw : view1 a).
-      view1ToDarr1 @a @(list a) vw
-      (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a)
-        -> Writer (list a).
-	 make_list @a @N size (referenced @(arr N a) (arr1D_build @N @a repr size darr)))
-      (\ (ret : OutPtr (list a)) -> IEffect (list a).
-        make_list @a @0 zero_fii (referenced @(arr 0 a) (\ (ret : OutPtr (arr 0 a)) -> IEffect (arr 0 a). fromEffTok @(arr 0 a) emptyEffTok)) ret)
-      ret
+      view1_list_build @a repr vw ret
   };
 
 -- List traversal.
@@ -699,35 +696,7 @@ TraversableDict_array1_build
   -> IEffect (array1 a) attribute(inline) =
   case s of {
     viewStream @a (v : view1 a).
-      case v of {
-        mk_view1 @a @(lo hi : intindex)
-	(ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-          let flo : FIInt lo = fromIndInt @lo ilo in
-          let fhi : FIInt hi = fromIndInt @hi ihi in
-
-          let type N = minus_i hi lo in
-          let delta : FIInt N = minus_fii @hi @lo fhi flo in
-          case flo of fiInt @lo (lo_i : int).
-
-          -- The loop is zero-indexed, but the loop body is not.
-          -- Add the offset.
-          letfun
-            f2 (i : int) -> Writer a = f (i +# lo_i)
-          in
-
-          mk_array1 @a @lo @hi flo fhi
-          (referenced @(arr N a)
-           (arr1D_build @N @a repr delta (mk_darr1 @N @a f2)))
-          ret;
-
-        empty_view1 @a.
-          let type N0 = minus_i 0 0 in
-          mk_array1 @a @0 @0 zero_fii zero_fii
-          (referenced @(arr N0 a)
-           (\ (ret : OutPtr (arr N0 a)) -> IEffect (arr N0 a).
-              fromEffTok @(arr N0 a) emptyEffTok))
-          ret
-      }
+      view1_array1_build @a repr v ret
 
   ; sequenceStream @a (sq : Sequence a).
       -- Convert to an array1
@@ -1318,22 +1287,27 @@ ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
   case coerce @(shape t) @dim1 shp of
     mk_dim1 @(Nlo Nhi : intindex) (i_nlo : IInt Nlo) (i_nhi : IInt Nhi).
 
-  case intersectSliceWithRange @Nlo @Nhi i_nlo i_nhi slice_argument of
+  case intersectSliceWithRange @Nlo @Nhi i_nlo i_nhi slice_argument of {
     internalSlice @(Slo Shi : intindex)
                   (i_slo : IInt Slo) (i_shi : IInt Shi)
                   (stride : int)
                   (offset : int).
 
-  case boxed @dim1 (mk_dim1 @Slo @Shi i_slo i_shi) of
-    boxed @dim1 (slice_shape : dim1).
+      case boxed @dim1 (mk_dim1 @Slo @Shi i_slo i_shi) of
+        boxed @dim1 (slice_shape : dim1).
 
-  view1_generate @a repr slice_shape
-  (\ (si : Stored int) -> Writer a.
-    case si of stored @int (i : int).
-    let i2 : int = i *# stride +# offset in
-    case boxed @(Stored int) (stored @int i2) of
-      boxed @(Stored int) (i2_s : Stored int).
-    at_index @a repr container (coerce @(index dim1) @(index (shape t)) i2_s));
+      view1_generate @a repr slice_shape
+      (\ (si : Stored int) -> Writer a.
+        case si of stored @int (i : int).
+        let i2 : int = i *# stride +# offset in
+        case boxed @(Stored int) (stored @int i2) of
+          boxed @(Stored int) (i2_s : Stored int).
+        let co_i2 : index (shape t) =
+          coerce @(index dim1) @(index (shape t)) i2_s in
+        at_index @a repr container co_i2)
+  ; emptySlice.
+      view1_empty @a repr
+  };
 
 
 ShapeDict_dim2_flatten @(a : bare) (s : Stream dim2 a)
@@ -1653,30 +1627,45 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
 
   -- Compute the intersection of the container and slice.
   -- Each dimension is computed independently.
-  case intersectSliceWithRange @Mlo @Mhi iMlo iMhi slice_y of
+  case intersectSliceWithRange @Mlo @Mhi iMlo iMhi slice_y of {
     internalSlice @(sliceMlo sliceMhi : intindex)
     (slice_iMlo : IInt sliceMlo)
     (slice_iMhi : IInt sliceMhi)
     (slice_ystride : int)
     (slice_yoffset : int).
-  case intersectSliceWithRange @Nlo @Nhi iNlo iNhi slice_x of
-    internalSlice @(sliceNlo sliceNhi : intindex)
-    (slice_iNlo : IInt sliceNlo)
-    (slice_iNhi : IInt sliceNhi)
-    (slice_xstride : int)
-    (slice_xoffset : int).
 
-  -- Create a view
-  mk_view2 @a @sliceMlo @sliceMhi @sliceNlo @sliceNhi
-  slice_iMlo slice_iMhi slice_iNlo slice_iNhi
-  (\ (y : int) (x : int) -> Writer a.
-     let index_y : int = y *# slice_ystride +# slice_yoffset in
-     let index_x : int = x *# slice_xstride +# slice_xoffset in
-     let type Sint = Stored int in
-     case boxed @(PyonTuple2 Sint Sint)
-     	  (pyonTuple2 @Sint @Sint (stored @int index_y) (stored @int index_x)) of
-       boxed @(PyonTuple2 Sint Sint) (ix : PyonTuple2 Sint Sint).
-     at_index @a repr container (coerce @(index dim2) @(index (shape t)) ix));
+      case intersectSliceWithRange @Nlo @Nhi iNlo iNhi slice_x of {
+        internalSlice @(sliceNlo sliceNhi : intindex)
+        (slice_iNlo : IInt sliceNlo)
+        (slice_iNhi : IInt sliceNhi)
+        (slice_xstride : int)
+        (slice_xoffset : int).
+
+          -- Create a view
+          mk_view2 @a @sliceMlo @sliceMhi @sliceNlo @sliceNhi
+          slice_iMlo slice_iMhi slice_iNlo slice_iNhi
+          (\ (y : int) (x : int) -> Writer a.
+             let index_y : int = y *# slice_ystride +# slice_yoffset in
+             let index_x : int = x *# slice_xstride +# slice_xoffset in
+             let type Sint = Stored int in
+             case boxed @(PyonTuple2 Sint Sint)
+             	  (pyonTuple2 @Sint @Sint
+                   (stored @int index_y)
+                   (stored @int index_x)) of
+               boxed @(PyonTuple2 Sint Sint) (ix : PyonTuple2 Sint Sint).
+             let co_index : index (shape t) =
+               coerce @(index dim2) @(index (shape t)) ix in
+             at_index @a repr container co_index)
+      ; emptySlice.
+          mk_view2 @a @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
+          (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+            except @(IEffect a))
+      }
+  ; emptySlice.
+      mk_view2 @a @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
+      (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+        except @(IEffect a))
+  };
 
 -------------------------------------------------------------------------------
 -- ShapeDict-like internal functions
@@ -2693,6 +2682,53 @@ darr1_fold @(N : intindex) @(a acc : bare)
      f x y next_x)
   ret;
 
+
+view1_list_build @(a : bare)
+  (repr : Repr a) (vw : view1 a) (ret : OutPtr (list a))
+  -> IEffect (list a)
+  attribute(inline, inline_dimensionality) =
+  view1ToDarr1 @a @(list a) vw
+  (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a)
+    -> Writer (list a).
+     make_list @a @N size (referenced @(arr N a) (arr1D_build @N @a repr size darr)))
+  (\ (ret : OutPtr (list a)) -> IEffect (list a).
+    make_list @a @0 zero_fii (referenced @(arr 0 a) (\ (ret : OutPtr (arr 0 a)) -> IEffect (arr 0 a). fromEffTok @(arr 0 a) emptyEffTok)) ret)
+  ret;
+
+
+view1_array1_build @(a : bare)
+  (repr : Repr a) (v : view1 a) (ret : OutPtr (array1 a))
+  -> IEffect (array1 a)
+  attribute(inline, inline_dimensionality) =
+  case v of {
+    mk_view1 @a @(lo hi : intindex)
+    (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
+      let flo : FIInt lo = fromIndInt @lo ilo in
+      let fhi : FIInt hi = fromIndInt @hi ihi in
+
+      let type N = minus_i hi lo in
+      let delta : FIInt N = minus_fii @hi @lo fhi flo in
+      case flo of fiInt @lo (lo_i : int).
+
+      -- The loop is zero-indexed, but the loop body is not.
+      -- Add the offset.
+      letfun
+        f2 (i : int) -> Writer a = f (i +# lo_i)
+      in
+
+      mk_array1 @a @lo @hi flo fhi
+      (referenced @(arr N a)
+       (arr1D_build @N @a repr delta (mk_darr1 @N @a f2)))
+      ret
+
+  ; empty_view1 @a.
+      let type N0 = minus_i 0 0 in
+      mk_array1 @a @0 @0 zero_fii zero_fii
+      (referenced @(arr N0 a)
+       (\ (ret : OutPtr (arr N0 a)) -> IEffect (arr N0 a).
+          fromEffTok @(arr N0 a) emptyEffTok))
+      ret
+  };
 
 view1_reduce1 @(a : bare) (repr : Repr a)
   (f : a -> a -> Writer a)
