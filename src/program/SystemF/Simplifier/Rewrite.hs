@@ -1258,8 +1258,8 @@ rwIntComparison op inf [] [arg1, arg2]
                             False -> false_value
   | otherwise = return Nothing
   where
-    true_value = ExpM (VarE inf (pyonBuiltin The_True))
-    false_value = ExpM (VarE inf (pyonBuiltin The_False))
+    true_value = ExpM (ConE inf (VarCon (pyonBuiltin The_True) [] []) [])
+    false_value = ExpM (ConE inf (VarCon (pyonBuiltin The_False) [] []) [])
 
 {-
 {-
