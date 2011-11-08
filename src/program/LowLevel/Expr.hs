@@ -2,7 +2,7 @@
 These expressions are used in common subexpression elimination.
 -}
 
-{-# LANGUAGE FlexibleContexts, Rank2Types, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts, Rank2Types, ScopedTypeVariables, BangPatterns #-}
 module LowLevel.Expr
        (CSEVal, fromCSEVal,
         Expr, varExpr, litExpr, appExpr,
@@ -72,6 +72,7 @@ exprToCSEVal _           = Nothing
 -- | A commutative and associative operator.
 data CAOp =
     AddZOp !Signedness !Size
+  | MulZOp !Signedness !Size
   | MaxZOp !Signedness !Size
   | AndOp
   | OrOp
@@ -140,6 +141,7 @@ unpackLoadExpr (UnExpr (LoadOp ty) arg) =
 unpackLoadExpr _ = Nothing
 
 pprInfixCAOp (AddZOp _ _) = text "+"
+pprInfixCAOp (MulZOp _ _) = text "*"
 pprInfixCAOp (MaxZOp _ _) = text "`max`"
 pprInfixCAOp AndOp = text "&&"
 pprInfixCAOp OrOp = text "||"
@@ -432,6 +434,7 @@ isReducible expression =
      AppExpr {}     -> True
      CAExpr op _    -> case op
                        of AddZOp {} -> True
+                          MulZOp {} -> True
                           MaxZOp {} -> True
                           AndOp {} -> True
                           OrOp {} -> True
@@ -482,6 +485,7 @@ interpretPrim env op args = fmap (simplify env) $
   case op
   of PrimAddZ sgn sz -> Just $ ca (AddZOp sgn sz)
      PrimSubZ sgn sz -> Just $ subtract_op sgn sz
+     PrimMulZ sgn sz -> Just $ ca (MulZOp sgn sz)
      PrimModZ sgn sz -> Just $ binary (ModZOp sgn sz)
      PrimMaxZ sgn sz -> Just $ ca (MaxZOp sgn sz)
      PrimCmpZ sgn sz op -> Just $ binary (CmpZOp sgn sz op)
@@ -577,6 +581,7 @@ generateExprAtom expression =
                     return (ValA [v])
 
     ca_op (AddZOp sgn sz) = PrimAddZ sgn sz
+    ca_op (MulZOp sgn sz) = PrimMulZ sgn sz
 
     ca op acc args = foldM accumulate acc args
       where
@@ -685,6 +690,7 @@ simplifyCA op es =
   let flat_es = flatten op es
   in case op
      of AddZOp _ _ -> zusSum op $ partialEvalSum flat_es
+        MulZOp _ _ -> zusProd op $ partialEvalProd flat_es
         MaxZOp _ _ -> partialEvalMax op flat_es
         AndOp      -> partialEvalBool True flat_es
         OrOp       -> partialEvalBool False flat_es
@@ -697,11 +703,14 @@ flatten op es = go es
          _ -> e : go es
     go [] = []
 
-partialEvalSum es = peval 0 id es
+partialEvalIntArithmetic unit operator es = peval unit id es
   where
-    peval acc hd (LitExpr (IntL _ _ n) : es) = peval (acc + n) hd es
-    peval acc hd (e : es) = peval acc (hd . (e:)) es
-    peval acc hd [] = (acc, hd [])
+    peval (!acc) hd (LitExpr (IntL _ _ n) : es) = peval (operator acc n) hd es
+    peval acc    hd (e : es)                    = peval acc (hd . (e:)) es
+    peval acc    hd []                          = (acc, hd [])
+
+partialEvalSum es = partialEvalIntArithmetic 0 (+) es
+partialEvalProd es = partialEvalIntArithmetic 1 (*) es
 
 zusSum op@(AddZOp sgn sz) values =
   case values
@@ -709,6 +718,15 @@ zusSum op@(AddZOp sgn sz) values =
      (n, [])  -> LitExpr (intL sgn sz n)
      (0, es)  -> CAExpr op es
      (n, es)  -> CAExpr op (LitExpr (intL sgn sz n) : es)
+
+zusProd op@(MulZOp sgn sz) values =
+  case values
+  of (0, _)    -> LitExpr (intL sgn sz 0) -- Zero rule
+     (n, [])   -> LitExpr (intL sgn sz n)
+     (1, [e])  -> e              -- Unit rule
+     (1, es)   -> CAExpr op es   -- Unit rule
+     (-1, [e]) -> UnExpr (NegateZOp sgn sz) e -- Strength reduction
+     (n, es)   -> CAExpr op (LitExpr (intL sgn sz n) : es)
 
 partialEvalMax op@(MaxZOp sgn sz) es = rebuild $ peval smallest id es
   where
