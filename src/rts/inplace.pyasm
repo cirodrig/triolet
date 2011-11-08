@@ -1,0 +1,37 @@
+
+module pyon.internal.inplace;
+
+#include "rts.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "debug.h"
+#include "inplace.h"
+
+import procedure exit (int) -> ();
+
+#include "new_pyasm_records.h"
+
+function inline intUpdateInPlace_initializer (owned f, pointer ret) -> unit
+{
+  !ret = int call f (nil);
+  nil;
+};
+
+function inline intUpdateInPlace_updater (owned f, pointer ret, unit _) -> unit
+{
+  !ret = int call f (int load ret);
+  nil;
+};
+
+function inline floatUpdateInPlace_initializer (owned f, pointer ret) -> unit
+{
+  !ret = int call f (nil);
+  nil;
+};
+
+function inline floatUpdateInPlace_updater (owned f, pointer ret, unit _) -> unit
+{
+  !ret = float call f (float load ret);
+  nil;
+};
+

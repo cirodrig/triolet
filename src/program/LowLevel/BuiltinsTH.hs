@@ -152,6 +152,7 @@ module_memory_py = ModuleName "pyon.internal.memory_py"
 module_stream = ModuleName "pyon.internal.stream"
 module_structures = ModuleName "pyon.internal.structures"
 module_effects = ModuleName "pyon.internal.effects"
+module_inplace = ModuleName "pyon.internal.inplace"
 module_complex = ModuleName "pyon.internal.complex"
 module_list = ModuleName "pyon.internal.list"
 
@@ -255,10 +256,14 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_rangeIndexed) |])
   , (PyonName module_stream "histogram",
      Right [| pyonBuiltin (SystemF.The_histogram) |])-}
-  , (PyonName module_stream "histogramArray",
-     Right [| pyonBuiltin (SystemF.The_histogramArray) |])
-  , (PyonName module_stream "createHistogram",
-     Right [| pyonBuiltin (SystemF.The_createHistogram) |])
+  , (PyonName module_inplace "intUpdateInPlace_initializer",
+     Right [| pyonBuiltin (SystemF.The_intUpdateInPlace_initializer) |])
+  , (PyonName module_inplace "intUpdateInPlace_updater",
+     Right [| pyonBuiltin (SystemF.The_intUpdateInPlace_updater) |])
+  , (PyonName module_inplace "floatUpdateInPlace_initializer",
+     Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_initializer) |])
+  , (PyonName module_inplace "floatUpdateInPlace_updater",
+     Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_updater) |])
   , (PyonName module_effects "seqEffTok",
      Right [| pyonBuiltin (SystemF.The_seqEffTok) |])
   , (PyonName module_structures "repr_arr",

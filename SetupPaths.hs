@@ -64,7 +64,9 @@ rtsCxxSourceFiles = ["par_loops.cc"]
 rtsPyAsmFiles = ["apply_new.pyasm",
                  "memory_py.pyasm",
                  "effects.pyasm",
-                 "prim.pyasm", "structures.pyasm",
+                 "prim.pyasm",
+                 "inplace.pyasm",
+                 "structures.pyasm",
                  "complex.pyasm",
 		 "list.pyasm", "stream.pyasm"]
 

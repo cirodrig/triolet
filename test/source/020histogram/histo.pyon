@@ -5,7 +5,7 @@ def hist_function(x : float) -> int:
 
 def histo(n):
 #  return __build__(hist_function(__fromint__(x)) for x in range(n))
-  return histogram(21, (hist_function(__fromint__(x))
-                        for x in range(n)))
+  return histogram(0, 21, (hist_function(__fromint__(x))
+                          for x in range(n)))
 
-export ccall histo : int -> list(int)
+export cplusplus histo : int -> array1(int)

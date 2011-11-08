@@ -38,6 +38,7 @@ pyonBuiltinTypeNames =
   , "arr"
   , "EffTok"
   , "Pf"
+  , "UpdateInPlace"
 
     -- Representation coercions
   , "Stored"
@@ -139,6 +140,7 @@ pyonBuiltinVariableNames =
   , "mk_dim1"
   , "mk_dim2"
   , "mk_arr_shape"
+  , "updateInPlace"
 
     -- Class constructors
   , "repr"
@@ -384,7 +386,16 @@ pyonBuiltinVariableNames =
   , "intersectSliceWithRange"
   , "intersectStrideSliceWithRange"
   , "unsafeMakeCoercion"
-    
+
+    -- In-place update
+  , "intUpdateInPlace"
+  , "floatUpdateInPlace"
+  , "intUpdateInPlace_initializer"
+  , "intUpdateInPlace_updater"
+  , "floatUpdateInPlace_initializer"
+  , "floatUpdateInPlace_updater"
+  , "arrUpdateInPlace"
+
     -- Inserted by rewrites or inlining
   , "chunk_id"
   , "sequenceToView"
@@ -410,6 +421,7 @@ pyonBuiltinVariableNames =
   , "Sequence_bind"
 
     -- Fold-like functions
+  , "accumulate_Stream_int"
   , "fun_fold_Stream"
   , "fun_reduce_Stream"
   , "fun_reduce1_Stream"
@@ -473,7 +485,6 @@ pyonBuiltinVariableNames =
   , "blocked_reduce2"
   , "blocked_doall"
   , "blocked_doall2"
-  , "createHistogram"
   , "emptyEffTok"
   , "toEffTok"
   , "seqEffTok"

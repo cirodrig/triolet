@@ -112,35 +112,6 @@ data SliceObject : bare
   (MaybeVal int, MaybeVal int, MaybeVal (MaybeVal int));
 };
 
--- A dummy token that we use to stand in for dependences due to
--- imperative computation that is inserted by the compiler.
---
--- We take advantage of the fact that EffTok is a unit value, and therefore
--- it is not accessed by load or store instructions when reading or writing it,
--- and therefore we can safely masquerade NULL pointers as EffTok references.
-data EffTok : val
-  attribute(abstract)
-{
-  -- We never use the constructor 'effTok' in code, because it could be
-  -- optimized away.  We don't want the optimizer to mess with this data type
-  -- because it stands in for real dependences.
-  -- Instead, use 'emptyEffTok' to produce an EffTok value.
-  effTok () () ();
-};
-
--- An empty side effect.
--- This function is translated specially when converting from Core to LowLevel.
-emptyEffTok : EffTok;
-
--- Translate to a side effect.
--- This function is translated specially when converting from Core to LowLevel.
-toEffTok : (a : bare) -> IEffect a -> EffTok;
-
--- Perform two side-effecting operations in sequence.
-seqEffTok : EffTok -> EffTok -> EffTok;
-
-fromEffTok : (a : bare) -> EffTok -> IEffect a;
-
 data Complex : bare -> bare
 {
   complex (a : bare) () (a, a);
@@ -320,6 +291,78 @@ data IndexableDict : (bare -> bare) -> box
 type index : bare -> bare;
 type slice : bare -> bare;
 type view : bare -> bare -> box;
+
+-------------------------------------------------------------------------------
+-- Imperative computation support
+
+-- A dummy token that we use to stand in for dependences due to
+-- imperative computation that is inserted by the compiler.
+--
+-- We take advantage of the fact that EffTok is a unit value, and therefore
+-- it is not accessed by load or store instructions when reading or writing it,
+-- and therefore we can safely masquerade NULL pointers as EffTok references.
+data EffTok : val
+  attribute(abstract)
+{
+  -- We never use the constructor 'effTok' in code, because it could be
+  -- optimized away.  We don't want the optimizer to mess with this data type
+  -- because it stands in for real dependences.
+  -- Instead, use 'emptyEffTok' to produce an EffTok value.
+  effTok () () ();
+};
+
+-- An empty side effect.
+-- This function is translated specially when converting from Core to LowLevel.
+emptyEffTok : EffTok;
+
+-- Translate to a side effect.
+-- This function is translated specially when converting from Core to LowLevel.
+toEffTok : (a : bare) -> IEffect a -> EffTok;
+
+-- Perform two side-effecting operations in sequence.
+seqEffTok : EffTok -> EffTok -> EffTok;
+
+fromEffTok : (a : bare) -> EffTok -> IEffect a;
+
+-- An in-place update operation.
+--
+-- In-place updating is a computation strategy wherein a value is initialized,
+-- then repeatedly modified to produce some result.
+--
+-- The fields of the operator are an initializer, an indexer (to select an
+-- array element to update), and an updater.
+--
+-- The initializer and updater may be implemented in the low-level API.  The
+-- function types were chosen so that the low-level API does not need to
+-- perform memory allocation.  Token passing is used to represent dependences.
+data UpdateInPlace : bare -> bare -> val -> box
+{
+  updateInPlace (s i : bare, a : val) ()
+    ((NoneType -> a) -> OutPtr s -> EffTok,
+     (a -> a) -> OutPtr s -> i -> EffTok -> EffTok);
+};
+
+-- Update an int in-place.
+intUpdateInPlace : NoneType -> UpdateInPlace (Stored int) (Stored NoneType) int;
+
+-- Update a float in-place.
+floatUpdateInPlace : NoneType -> UpdateInPlace (Stored float) (Stored NoneType) float;
+
+-- These functions are implemented in low-level code.
+intUpdateInPlace_initializer : (NoneType -> int) -> OutPtr (Stored int) -> EffTok;
+intUpdateInPlace_updater : (int -> int) -> OutPtr (Stored int) -> EffTok -> EffTok;
+floatUpdateInPlace_initializer : (NoneType -> float) -> OutPtr (Stored float) -> EffTok;
+floatUpdateInPlace_updater : (float -> float) -> OutPtr (Stored float) -> EffTok -> EffTok;
+
+-- Update an array of values in-place by selecting and updating one array
+-- element in-place.
+--
+-- Out-of-bounds indices have no effect.
+arrUpdateInPlace : (N : intindex) -> (s i : bare) -> (a : val)
+                -> FIInt N
+                -> Repr s
+                -> UpdateInPlace s i a
+                -> UpdateInPlace (arr N s) (PyonTuple2 (Stored int) i) a;
 
 -------------------------------------------------------------------------------
 -- Streams
@@ -524,6 +567,7 @@ convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
 repr_int : Repr (Stored int);
 repr_float : Repr (Stored float);
 repr_bool : Repr (Stored bool);
+repr_NoneType : Repr (Stored NoneType);
 repr_SliceObject : Repr SliceObject;
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
@@ -1404,6 +1448,16 @@ sequenceToView : (a : bare) -> Repr a -> Sequence a -> view1 a;
 view1_empty : (a : bare) -> Repr a -> view1 a;
 view1_normalize : (a : bare) -> view1 a -> view1 a;
 
+-- Fold over a stream using an update-in-place operation
+accumulate_Stream_int : (s i b : bare)
+                 -> Repr i
+                 -> Repr b
+                 -> UpdateInPlace s i int
+                 -> int
+                 -> (b -> i -> (int -> int))
+                 -> Stream dim1 (PyonTuple2 i b)
+                 -> Writer s;
+
 -- Sequential fold over a stream
 fun_fold_Stream : (a acc : bare)
                -> Repr a
@@ -1633,22 +1687,18 @@ rangeIndexed : (n : intindex)
             -> Stream (arr_shape n dim0) (Stored int);
 
 histogram : (sh : bare)
+         -> ShapeDict sh
+         -> int
          -> int
          -> Stream sh (Stored int)
-         -> Writer (list (Stored int));
+         -> Writer (array1 (Stored int));
 
-histogramArray : (sh : bare)
-              -> (n : intindex)
+histogramArray : (n : intindex)
               -> FIInt n
-              -> Stream sh (Stored int)
+              -> int
+              -> int
+              -> Stream dim1 (Stored int)
               -> Writer (arr n (Stored int));
-
--- Low-level function for imperatively initializing an histogram
-createHistogram :
-    (n : intindex)
- -> FIInt n
- -> ((int -> EffTok) -> EffTok -> EffTok)
- -> Writer (arr n (Stored int));
 
 generate : (n : intindex)
         -> (a : bare)

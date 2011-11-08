@@ -454,6 +454,80 @@ safeSlice @(t : bare -> bare) @(a : bare)
   indexable repr container sl;
 
 -------------------------------------------------------------------------------
+-- Imperative computation
+
+intUpdateInPlace (dummy : NoneType)
+              -> UpdateInPlace (Stored int) (Stored NoneType) int
+              attribute(inline, inline_final) =
+  updateInPlace @(Stored int) @(Stored NoneType) @int
+  intUpdateInPlace_initializer
+  (\ (modify : int -> int) (ret : OutPtr (Stored int)) (ix : Stored NoneType)
+     (tok_in : EffTok) -> EffTok.
+     intUpdateInPlace_updater modify ret tok_in);
+
+
+floatUpdateInPlace (dummy : NoneType)
+              -> UpdateInPlace (Stored float) (Stored NoneType) float
+              attribute(inline, inline_final) =
+  updateInPlace @(Stored float) @(Stored NoneType) @float
+  floatUpdateInPlace_initializer
+  (\ (modify : float -> float) (ret : OutPtr (Stored float))
+     (ix : Stored NoneType) (tok_in : EffTok) -> EffTok.
+     floatUpdateInPlace_updater modify ret tok_in);
+
+
+arrUpdateInPlace @(N : intindex) @(s i : bare) @(a : val)
+  (size : FIInt N)
+  (repr : Repr s)
+  (elem_updater : UpdateInPlace s i a)
+  -> UpdateInPlace (arr N s) (PyonTuple2 (Stored int) i) a
+  attribute(inline, inline_final) =
+
+  case size of fiInt @N (u_size : int).
+
+  case elem_updater of
+    updateInPlace @s @i @a
+    (elem_init : (NoneType -> a) -> OutPtr s -> EffTok)
+    (elem_modify : (a -> a) -> OutPtr s -> i -> EffTok -> EffTok).
+
+  -- Initialize the array by running the initializer on every array element
+  letfun
+    initialize_array
+      (get_init : NoneType -> a) (ret : OutPtr (arr N s)) -> EffTok =
+      toEffTok @(arr N s)
+      (doall @N @(arr N s) @s size
+       (\ (i : int) -> IEffect s.
+          let array_element : OutPtr s =
+            subscript_out @N @s repr ret i in
+          fromEffTok @s (elem_init get_init array_element)))
+  in
+
+  -- Update the array by updating one array element.  If out of bounds,
+  -- then do nothing.
+  letfun
+    modify_array
+      (modify_value : a -> a)
+      (ret : OutPtr (arr N s))
+      (ix : PyonTuple2 (Stored int) i)
+      (token_in : EffTok)
+      -> EffTok =
+
+      -- Choose the array index
+      case ix of pyonTuple2 @(Stored int) @i (s_ix : Stored int) (ix2 : i).
+      case s_ix of stored @int (u_ix : int).
+
+      -- If out of bounds, do nothing.  Otherwise, modify an array element.
+      if or (u_ix <# 0) (u_ix >=# u_size)
+      then token_in
+      else let array_element : OutPtr s =
+             subscript_out @N @s repr ret u_ix in
+           elem_modify modify_value array_element ix2 token_in
+  in
+      
+  updateInPlace @(arr N s) @(PyonTuple2 (Stored int) i) @a
+  initialize_array modify_array;
+
+-------------------------------------------------------------------------------
 -- Conversions
 
 view1ToDarr1 @(a b : bare)
@@ -2561,6 +2635,143 @@ fun_fold_Stream @(a acc : bare)
   };
 
 
+histogram @(sh : bare)
+  (shape_dict : ShapeDict sh)
+  (lo_bound : int)
+  (hi_bound : int)
+  (input : Stream sh (Stored int))
+  (ret : OutPtr (array1 (Stored int)))
+  -> IEffect (array1 (Stored int))
+  attribute(inline) =
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_at_index : sh -> index sh -> bool)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (BoxedType (shape t)) (BoxedType sh) ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  case defineIntIndex lo_bound of someIInt @(L : intindex) (lb : FIInt L).
+  case defineIntIndex hi_bound of someIInt @(H : intindex) (hb : FIInt H).
+
+  let type N = minus_i H L in
+  let size : FIInt N = minus_fii @H @L hb lb in
+
+  mk_array1 @(Stored int) @L @H lb hb 
+  (referenced @(arr N (Stored int))
+   (histogramArray @N size lo_bound hi_bound
+    (shape_flatten @(Stored int) input)))
+  ret;
+
+
+histogramArray @(N : intindex)
+  (size : FIInt N)
+  (lo_bound : int)
+  (hi_bound : int)
+  (input : Stream dim1 (Stored int))
+  (ret : OutPtr (arr N (Stored int)))
+  -> IEffect (arr N (Stored int))
+  attribute(inline, inline_dimensionality) =
+  let type Sint = Stored int in
+  let type SNoneType = Stored NoneType in
+  let type index_type = PyonTuple2 Sint SNoneType in
+  let type s = arr N Sint in
+
+  let repr_index : Repr index_type =
+    repr_PyonTuple2 @Sint @SNoneType repr_int repr_NoneType in
+
+  let uip : UpdateInPlace s index_type int =
+    arrUpdateInPlace @N @Sint @SNoneType @int
+    size repr_int (intUpdateInPlace None) in
+
+  -- Put data into the format expected by 'accumulate_Stream_int'.
+  -- Shift the histogram index by 'lo_bound', because the underlying array
+  -- is zero-indexed.
+  let input2 : Stream dim1 (PyonTuple2 index_type SNoneType) =
+    ShapeDict_dim1_map @Sint @(PyonTuple2 index_type SNoneType)
+    repr_int (repr_PyonTuple2 @index_type @SNoneType repr_index repr_NoneType)
+    (\ (x : Sint) (ret : OutPtr (PyonTuple2 index_type SNoneType))
+      -> IEffect (PyonTuple2 index_type SNoneType).
+      case x of stored @int (ux : int).
+      pyonTuple2 @index_type @SNoneType
+      (pyonTuple2 @Sint @SNoneType
+       (stored @int (ux -# lo_bound)) -- Convert to zero-indexed value
+       (stored @NoneType None))
+      (stored @NoneType None) ret)
+    input in
+
+  -- Create the histogram array
+  accumulate_Stream_int @s @(PyonTuple2 Sint SNoneType) @SNoneType
+  (repr_PyonTuple2 @Sint @SNoneType repr_int repr_NoneType)
+  repr_NoneType
+  uip
+  0
+  (\ (dummy : SNoneType) (ix : PyonTuple2 Sint SNoneType) (n : int) -> int.
+     n +# 1)
+  input2
+  ret;
+
+
+accumulate_Stream_int @(s i b : bare)
+  (repr_i : Repr i)
+  (repr_b : Repr b)
+  (uip : UpdateInPlace s i int)
+  (init : int)
+  (modifier : b -> i -> (int -> int))
+  (src : Stream dim1 (PyonTuple2 i b))
+  (ret : OutPtr s)
+  -> IEffect s
+  attribute(inline) =
+
+  let type SEffTok = Stored EffTok in
+  case uip of
+    updateInPlace @s @i @int
+    (initialize : (NoneType -> int) -> OutPtr s -> EffTok)
+    (update : (int -> int) -> OutPtr s -> i -> EffTok -> EffTok).
+
+  -- First, initialize the output
+  let initialized_tok : EffTok =
+    initialize (\ (dummy : NoneType) -> int. init) ret in
+  case boxed @SEffTok (stored @EffTok initialized_tok) of
+    boxed @SEffTok (s_tok : SEffTok). 
+
+  -- Then accumulate updates
+  case boxed @SEffTok
+       (fun_fold_Stream @(PyonTuple2 i b) @SEffTok
+        (repr_PyonTuple2 @i @b repr_i repr_b) repr_EffTok
+
+        -- The accumulating function calls 'update'
+        (\ (s_input_tok : SEffTok) (input : PyonTuple2 i b)
+           (output_ptr : OutPtr SEffTok)
+           -> IEffect SEffTok.
+           case s_input_tok of stored @EffTok (input_tok : EffTok).
+           case input of pyonTuple2 @i @b (ix : i) (arg : b).
+           stored @EffTok (update (modifier arg ix) ret ix input_tok)
+           output_ptr)
+        s_tok
+        src)
+    of boxed @SEffTok (s_final_tok : SEffTok).
+  case s_final_tok of stored @EffTok (final_tok : EffTok).
+  fromEffTok @s final_tok;
+
+
 dim1_fold @(acc : bare)
   (repr : Repr acc)
   (d : dim1)
@@ -3911,20 +4122,6 @@ array_build @(N : intindex) @(a : bare)
 	       except @EffTok
 	   }
   in fromEffTok @(arr N a) (go 0 stream_state);
-
--------------------------------------------------------------------------------
--- List functions
-
-histogram @(sh : bare)
-  (size : int)
-  (input : Stream sh (Stored int))
-  (ret : OutPtr (list (Stored int)))
-  -> IEffect (list (Stored int)) =
-  case defineIntIndex size of someIInt @(N : intindex) (index : FIInt N).
-  make_list @(Stored int) @N index
-  (referenced @(arr N (Stored int))
-   (histogramArray @sh @N index input))
-  ret;
 
 -------------------------------------------------------------------------------
 -- Matrix functions

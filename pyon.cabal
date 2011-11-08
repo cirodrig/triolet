@@ -22,6 +22,7 @@ Data-Files:
   interfaces/memory_py.pi
   interfaces/effects.pi
   interfaces/prim.pi
+  interfaces/inplace.pi
   interfaces/structures.pi
   interfaces/list.pi
   interfaces/stream.pi

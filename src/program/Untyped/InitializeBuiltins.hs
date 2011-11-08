@@ -1139,8 +1139,10 @@ mkSafeSlice2Type =
 mkHistogramType =
   forallType [Star] $ \[sh] ->
   let int_type = ConTy $ tiBuiltin the_con_int
-  in ([], functionType [int_type, ConTy (tiBuiltin the_con_iter) @@ ConTy sh @@ int_type]
-          (ConTy (tiBuiltin the_con_list) @@ int_type))
+  in ([ConTy sh `IsInst` tiBuiltin the_Shape],
+      functionType [int_type, int_type,
+                    ConTy (tiBuiltin the_con_iter) @@ ConTy sh @@ int_type]
+      (ConTy (tiBuiltin the_con_array1) @@ int_type))
 
 mkFloorType =
   return $ monomorphic $

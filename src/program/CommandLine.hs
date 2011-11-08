@@ -393,7 +393,7 @@ findInterfaceFiles = forM interface_files $ \fname -> do
     -- the compiler was built
     interface_files =
       ["memory_py.pi", "prim.pi", "structures.pi", "list.pi", "stream.pi",
-       "effects.pi"]
+       "inplace.pi", "effects.pi"]
    
 -- | Compile and generate an intermediate C file.
 -- If C files are kept, put the C file in the same location as the output, with
