@@ -98,37 +98,40 @@ binaryIntTF :: Var
             -> TypeFunction
 {-# INLINE binaryIntTF #-}
 binaryIntTF operator left_unit right_unit f = typeFunction 2 $ \args ->
-  let can't_reduce = varApp operator args
-  in case args
-     of [arg1, arg2] -> do
-          maff1 <- toExtInt arg1
+  case args
+  of [arg1, arg2] -> do
+       -- Reduce arguments to WHNF first
+       whnf_arg1 <- reduceToWhnf arg1
+       whnf_arg2 <- reduceToWhnf arg2
+       let can't_reduce = varApp operator [whnf_arg1, whnf_arg2]
 
-          case maff1 of
-            Nothing ->
-              -- First argument is unknown.  Is the second argument a unit? 
-              case right_unit
-              of Nothing -> return can't_reduce
-                 Just u -> do
-                   -- Is the second argument a unit?
-                   maff2 <- toExtInt arg2
-                   case maff2 of
-                     Just aff2 | aff2 == u ->
-                       return arg2
-                     _ ->
-                       return can't_reduce
+       maff1 <- toExtInt whnf_arg1
+       case maff1 of
+         Nothing ->
+           -- First argument is unknown.  Is the second argument a unit? 
+           case right_unit
+           of Nothing -> return can't_reduce
+              Just u -> do
+                -- Is the second argument a unit?
+                maff2 <- toExtInt whnf_arg2
+                case maff2 of
+                  Just aff2 | aff2 == u ->
+                    return whnf_arg1
+                  _ ->
+                    return can't_reduce
 
-            Just aff1 ->
-              -- Is the first argument a unit?
-              case left_unit
-              of Just u | u == aff1 ->
-                   return arg2
-                 _ ->
-                   -- Attempt to evaluate
-                   toExtInt' arg2 can't_reduce $ \aff2 ->
-                   return $! case f aff1 aff2
-                             of Just aff -> fromExtInt aff
-                                Nothing -> can't_reduce
-        _ -> return can't_reduce
+         Just aff1 ->
+           -- Is the first argument a unit?
+           case left_unit
+           of Just u | u == aff1 ->
+                return whnf_arg2
+              _ ->
+                -- Attempt to evaluate
+                toExtInt' whnf_arg2 can't_reduce $ \aff2 ->
+                return $! case f aff1 aff2
+                          of Just aff -> fromExtInt aff
+                             Nothing -> can't_reduce
+     _ -> return $ varApp operator args
 
 -- | Subtract type-level integers.
 --   This function works the same in System F and Mem.
