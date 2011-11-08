@@ -2951,13 +2951,14 @@ range (n : int) -> Stream dim1 (Stored int)
   attribute(inline) =
   let vw : view1 (Stored int) =
         if n <# 0
-        then empty_view1 @(Stored int)
+        then view1_empty @(Stored int) repr_int
 	else case defineIntIndex n of someIInt @(N : intindex) (fin : FIInt N).
-	     mk_view1 @(Stored int) @0 @N
-	     (iInt @0 (fiInt @0 0))
-	     (iInt @N fin)
-	     (\ (i : int) (ret : OutPtr (Stored int)) -> IEffect (Stored int).
-	        stored @int i ret) in
+             case boxed @dim1 (mk_dim1 @0 @N zero_ii (iInt @N fin)) of
+               boxed @dim1 (shp : dim1).
+             view1_generate @(Stored int) repr_int shp
+             (\ (si : Stored int) (ret : OutPtr (Stored int))
+               -> IEffect (Stored int).
+               copy @(Stored int) repr_int si ret) in
   viewStream @(Stored int) vw;
 
 
