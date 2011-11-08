@@ -809,9 +809,12 @@ restructureStreamExp e =
 --   part from inside case statements to the continuation, which will
 --   decide what to do with it.  Otherwise pass Nothing.
 --
---   Hoisting is only valid when it introduces no side effects. 
---   To avoid introducing side effects, case statements are not hoisted out
---   of lambdas, and the nesting of case statements is preserved.
+--   Hoisting is only valid when it introduces no side effects.
+--   To avoid introducing side effects, case statements are only hoisted if
+--   their scrutinee (which will be executed more frequently) is a variable.
+--
+--   The nesting of case statements is preserved, which might be important
+--   if we start hoisting in other situations.
 restructureIfNeeded :: Set.Set Var
                     -> ExpS
                     -> (Maybe ExpS -> TypeEvalM ExpS)
@@ -824,7 +827,8 @@ restructureIfNeeded locals expression cont =
        of Nothing  -> cont Nothing
           Just es' -> cont $ Just $ expression {sexpStreamArgs = es'}
      LamSE inf f ->
-       cont Nothing
+       restructureLam locals f $ \f' ->
+       cont (fmap (LamSE inf) f')
      LetSE inf pat rhs body ->
        let locals' = Set.insert (patMVar pat) locals
        in restructureIfNeeded locals' body $ \m_body' ->
@@ -834,15 +838,16 @@ restructureIfNeeded locals expression cont =
                      map definiendum (defGroupMembers defs)
        in restructureIfNeeded locals' body $ \m_body' ->
           cont (fmap (LetfunSE inf defs) m_body')
-     CaseSE inf scr alts
+     CaseSE inf scr@(ExpM (VarE _ scr_var)) alts
        -- If the scrutinee is independent of stream-local variables, then
        -- float the case statement outward
-       | Set.null $ freeVariables scr `Set.intersection` locals -> do
+       | not $ scr_var `Set.member` locals -> do
            alts' <- sequence [restructureAlt locals alt cont | alt <- alts]
            return $ CaseSE inf scr alts'
      _ ->
        cont Nothing
 
+-- Restructure a case alternative that will be floated outward
 restructureAlt locals (AltS (Alt con params body)) cont = do
   -- Rename local variables to avoid name conflicts
   (con', con_rn) <- freshenDeConInst con
@@ -859,6 +864,14 @@ restructureAlt locals (AltS (Alt con params body)) cont = do
 
     -- Rebuild the case alternative.
     return $ AltS $ Alt con' (map PatS params') body'
+
+restructureLam locals (FunS (Fun inf ty_params params ret body)) cont =
+  let locals' = foldr Set.insert locals (map tyPatVar ty_params ++
+                                         map (patMVar . fromPatS) params)
+  in restructureIfNeeded locals' body $ \m_body ->
+     case m_body
+     of Nothing -> cont Nothing
+        Just body' -> cont $ Just $ FunS (Fun inf ty_params params ret body')
 
 -- | Restructure a list of stream expressions.
 restructureListIfNeeded :: Set.Set Var 
