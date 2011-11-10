@@ -3327,6 +3327,15 @@ Sequence_bind @(a b : bare)
   sequence @b @bind_state (bindFromSource @src_st @a @b src_state) next;
 
 
+Sequence_generate_bind @(a : bare)
+  (shp : dim1) (transformer : Stored int -> Sequence a)
+  -> Sequence a
+  attribute(inline, inline_final) =
+  Sequence_bind @(Stored int) @a repr_int
+  (Sequence_generate @(Stored int) repr_int shp (copy @(Stored int) repr_int))
+  transformer;
+
+
 generate @(N : intindex) @(a : bare)
   (size : IInt N) (repr : Repr a) (f : int -> Writer a)
   -> Sequence a attribute(inline, inline_final) =

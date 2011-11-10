@@ -419,6 +419,7 @@ pyonBuiltinVariableNames =
   , "Sequence_return"
   , "Sequence_guard"
   , "Sequence_bind"
+  , "Sequence_generate_bind"
 
     -- Fold-like functions
   , "accumulate_Stream_int"

@@ -242,7 +242,7 @@ data StreamOp =
     --   When N=1, the operation is 'map'.
     --
     -- > zipWith @{shape indices} @{input types} @{output type}
-    -- >   {shape parameters} {input reprs} {output repr}
+    -- >   {shape parameters} {input reprs, output repr}
     -- >   {transformer function} {input streams}
   | ZipOp !StreamType [Type] Type
 
@@ -275,6 +275,12 @@ data StreamOp =
     --        {producer repr} {} {producer, transformer}
   | BindOp !Type !Type
 
+    -- | A fused Sequence version of 'generate' and 'bind'.
+    --
+    -- > generate_bind @{output type}
+    -- >   {} {} {dim1_shape} {transformer function}
+  | GenerateBindOp Type
+
     -- | Consume a stream and produce a single value.
     --   A reduction consumes a stream.  So does building a data structure.
     --
@@ -293,6 +299,7 @@ instance Renameable StreamOp where
        EmptyOp ty -> EmptyOp (rename rn ty)
        EmptyViewOp n ty -> EmptyViewOp n (rename rn ty)
        BindOp t1 t2 -> BindOp (rename rn t1) (rename rn t2)
+       GenerateBindOp t -> GenerateBindOp (rename rn t)
        ConsumeOp st r -> ConsumeOp (rename rn st) (rename rn r)
 
 instance Renameable StreamType where
@@ -353,6 +360,9 @@ pprStreamOp' (ToView1Op st t) =
 
 pprStreamOp' (BindOp t1 t2) =
   nameApplication "bind" [pprTypePrec t1, pprTypePrec t2]
+
+pprStreamOp' (GenerateBindOp t) =
+  nameApplication "generate_bind" [pprTypePrec t]
 
 pprStreamOp' (ReturnOp t) =
   nameApplication "return" [pprTypePrec t]
@@ -447,10 +457,15 @@ streamOpTable =
            , (pyonBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
            , (pyonBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
            , (pyonBuiltin The_view1_empty, interpretEmptyView)
+           , (pyonBuiltin The_Sequence_generate, interpretGen PolySequenceType)
+           , (pyonBuiltin The_Sequence_map, interpretZip PolySequenceType 1)
+           , (pyonBuiltin The_Sequence_zipWith, interpretZip PolySequenceType 2)
+           , (pyonBuiltin The_Sequence_zipWith3, interpretZip PolySequenceType 3)
+           , (pyonBuiltin The_Sequence_zipWith4, interpretZip PolySequenceType 4)
            , (pyonBuiltin The_Sequence_bind, interpretBind)
+           , (pyonBuiltin The_Sequence_generate_bind, interpretGenerateBind)
            , (pyonBuiltin The_Sequence_return, interpretReturn)
            , (pyonBuiltin The_Sequence_empty, interpretEmpty)
-           , (pyonBuiltin The_Sequence_generate, interpretGen PolySequenceType)
            , (pyonBuiltin The_Sequence_reduce, interpretReduce PolySequenceType)
            , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 PolySequenceType)
            , (pyonBuiltin The_Sequence_array1_build, interpretBuild PolySequenceType ArrayType)
@@ -534,7 +549,7 @@ interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
                              of [] -> Nothing
                                 [x] -> Just x
           op = ConsumeOp (applyShapeIndices shape_indices stream_type)
-               (Reduce ty)
+               (Reduce1 ty)
 
       stream_exp <- interpretStreamSubExp source
       return $ OpSE inf op shape_args [repr] [reducer] [stream_exp] maybe_return_arg
@@ -577,6 +592,15 @@ interpretBind = StreamOpInterpreter check_arity interpret
       producer' <- interpretStreamSubExp producer
       transformer' <- interpretStreamSubExp transformer
       return $ OpSE inf (BindOp t1 t2) [] [repr] [] [producer', transformer'] Nothing
+
+interpretGenerateBind = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 2 = True
+    check_arity _ _ = False
+    
+    interpret inf [t] [shape, transformer] = do
+      transformer' <- interpretStreamSubExp transformer
+      return $ OpSE inf (GenerateBindOp t) [] [] [shape] [transformer'] Nothing
 
 interpretReturn = StreamOpInterpreter check_arity interpret
   where
@@ -749,6 +773,9 @@ embedOp (EmptyViewOp n ty) =
 embedOp (BindOp t1 t2) =
   (pyonBuiltin The_Sequence_bind, [t1, t2])
 
+embedOp (GenerateBindOp t) =
+  (pyonBuiltin The_Sequence_generate_bind, [t])
+
 embedOp (ConsumeOp st (Reduce ty)) =
   let op = case st
            of SequenceType -> pyonBuiltin The_Sequence_reduce
@@ -800,8 +827,7 @@ embedStreamAlt (AltS alt) =
 -------------------------------------------------------------------------------
 
 restructureStreamExp :: ExpS -> TypeEvalM ExpS
-restructureStreamExp e =
-  restructureIfNeeded Set.empty e (return . fromMaybe e)
+restructureStreamExp e = restructureIfNeeded Set.empty e return
 
 -- | Restructure a stream expression by hoisting out all non-data-dependent
 --   case statements.  Restructuring can introduce code replication.
@@ -817,27 +843,25 @@ restructureStreamExp e =
 --   if we start hoisting in other situations.
 restructureIfNeeded :: Set.Set Var
                     -> ExpS
-                    -> (Maybe ExpS -> TypeEvalM ExpS)
+                    -> (ExpS -> TypeEvalM ExpS)
                     -> TypeEvalM ExpS
 restructureIfNeeded locals expression cont =
   case expression
   of OpSE {sexpStreamArgs = es} ->
-       restructureListIfNeeded locals es $ \m_es' ->
-       case m_es'
-       of Nothing  -> cont Nothing
-          Just es' -> cont $ Just $ expression {sexpStreamArgs = es'}
+       restructureListIfNeeded locals es $ \es' ->
+       cont (expression {sexpStreamArgs = es'})
      LamSE inf f ->
        restructureLam locals f $ \f' ->
-       cont (fmap (LamSE inf) f')
+       cont (LamSE inf f')
      LetSE inf pat rhs body ->
        let locals' = Set.insert (patMVar pat) locals
-       in restructureIfNeeded locals' body $ \m_body' ->
-          cont (fmap (LetSE inf pat rhs) m_body')
+       in restructureIfNeeded locals' body $ \body' ->
+          cont (LetSE inf pat rhs body')
      LetfunSE inf defs body ->
        let locals' = foldr Set.insert locals $
                      map definiendum (defGroupMembers defs)
-       in restructureIfNeeded locals' body $ \m_body' ->
-          cont (fmap (LetfunSE inf defs) m_body')
+       in restructureIfNeeded locals' body $ \body' ->
+          cont (LetfunSE inf defs body')
      CaseSE inf scr@(ExpM (VarE _ scr_var)) alts
        -- If the scrutinee is independent of stream-local variables, then
        -- float the case statement outward
@@ -845,7 +869,7 @@ restructureIfNeeded locals expression cont =
            alts' <- sequence [restructureAlt locals alt cont | alt <- alts]
            return $ CaseSE inf scr alts'
      _ ->
-       cont Nothing
+       cont expression
 
 -- Restructure a case alternative that will be floated outward
 restructureAlt locals (AltS (Alt con params body)) cont = do
@@ -868,17 +892,15 @@ restructureAlt locals (AltS (Alt con params body)) cont = do
 restructureLam locals (FunS (Fun inf ty_params params ret body)) cont =
   let locals' = foldr Set.insert locals (map tyPatVar ty_params ++
                                          map (patMVar . fromPatS) params)
-  in restructureIfNeeded locals' body $ \m_body ->
-     case m_body
-     of Nothing -> cont Nothing
-        Just body' -> cont $ Just $ FunS (Fun inf ty_params params ret body')
+  in restructureIfNeeded locals' body $ \body' ->
+    cont $ FunS (Fun inf ty_params params ret body')
 
 -- | Restructure a list of stream expressions.
 restructureListIfNeeded :: Set.Set Var 
                         -> [ExpS]
-                        -> (Maybe [ExpS] -> TypeEvalM ExpS)
+                        -> ([ExpS] -> TypeEvalM ExpS)
                         -> TypeEvalM ExpS
-restructureListIfNeeded locals es cont = go es (cont . sequence) 
+restructureListIfNeeded locals es cont = go es cont
   where
     go (e:es) k =
       restructureIfNeeded locals e $ \e' -> go es $ \es' -> k (e' : es')
@@ -910,21 +932,44 @@ simplifyExp expression =
          Just e' -> simplifyExp e'
          Nothing -> simplify_subexpressions expression
 
+     -- Zip operation: if any argument is empty, the entire stream is empty
+     OpSE inf op@(ZipOp st _ out_type) _ reprs _ stream_args _ -> do
+       let out_repr = last reprs
+       stream_args' <- mapM simplifyExp stream_args
+       if any isEmptyStream stream_args'
+         then return $ empty_stream inf st out_type out_repr
+         else return $ expression {sexpStreamArgs = stream_args'}
+
      -- Convert to sequence: Try to replace the source stream with the
      -- equivalent sequence stream
      OpSE inf op@(ToSequenceOp st ty) shape_args [repr] [] [s] Nothing -> do
        e <- convertToSequenceOp s
        case e of
          Just e' -> simplifyExp e'
-         Nothing -> simplify_subexpressions expression
+         Nothing -> do
+           s' <- simplifyExp s
+           if isEmptyStream s'
+             then return $ empty_stream inf SequenceType ty repr
+             else return $ expression {sexpStreamArgs = [s']}
+
+     -- Sequence bind: Try to fuse with 'generate'
+     OpSE inf op@(BindOp producer_ty transformer_ty)
+       [] [repr] [] [producer, transformer] Nothing -> do
+       simplifyBindOp inf op repr producer transformer
 
      _ -> simplify_subexpressions expression
   where
+    empty_stream inf SequenceType ty _ =
+      OpSE inf (EmptyOp ty) [] [] [] [] Nothing
+      
+    empty_stream inf (ViewType n) ty repr =
+      OpSE inf (EmptyViewOp n ty) [] [repr] [] [] Nothing
+
     simplify_subexpressions e =
       case e
-      of OpSE inf op shape_args repr_args misc_args stream_args ret_arg -> do
+      of OpSE {sexpStreamArgs = stream_args} -> do
            stream_args' <- mapM simplifyExp stream_args
-           return $ OpSE inf op shape_args repr_args misc_args stream_args' ret_arg
+           return $ e {sexpStreamArgs = stream_args'}
          LamSE inf f ->
            LamSE inf `liftM` simplifyStreamFun f
          CaseSE inf scr alts ->
@@ -959,12 +1004,33 @@ fuseMapWithProducer ty repr map_f producer =
 
        return $ Just $ OpSE inf (ZipOp st zip_tys ty) shape_args (zip_reprs ++ [repr]) [new_zip_f] zip_streams Nothing
 
+     OpSE inf (BindOp producer_ty transformer_ty)
+       [] [producer_repr] [] [producer, transformer] Nothing -> runMaybeT $ do
+       -- Fuse with the transformer
+       (var, s) <- freshenUnaryStreamFunction transformer
+       s' <- MaybeT $ fuseMapWithProducer ty repr map_f s
+       let return_type = varApp (pyonBuiltin The_Sequence) [ty]
+       return $ OpSE inf (BindOp producer_ty ty) [] [producer_repr] []
+         [producer, mkUnaryStreamFunction defaultExpInfo var producer_ty
+                    return_type s'] Nothing
+
+     OpSE inf (GenerateBindOp transformer_ty)
+       [] [] [shp] [transformer] Nothing -> runMaybeT $ do
+       -- Fuse with the transformer
+       (var, s) <- freshenUnaryStreamFunction transformer
+       s' <- MaybeT $ fuseMapWithProducer ty repr map_f s
+       let stored_int_type =
+             varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
+           return_type = varApp (pyonBuiltin The_Sequence) [ty]
+       return $ OpSE inf (GenerateBindOp ty) [] [] [shp]
+         [mkUnaryStreamFunction defaultExpInfo var stored_int_type return_type s'] Nothing
+
      OpSE inf (EmptyOp _) [] [] [] [] Nothing -> 
        return $ Just $ OpSE inf (EmptyOp ty) [] [] [] [] Nothing
 
-     OpSE inf (EmptyViewOp n _) shape_args [_] [] [] Nothing -> 
-       return $ Just $ OpSE inf (EmptyViewOp n ty) shape_args [repr] [] [] Nothing
-       
+     OpSE inf (EmptyViewOp n _) [] [_] [] [] Nothing -> 
+       return $ Just $ OpSE inf (EmptyViewOp n ty) [] [repr] [] [] Nothing
+
      _ -> return Nothing
   where
     -- Fuse with generator function
@@ -993,7 +1059,67 @@ convertToSequenceOp expression =
             OpSE inf (GenerateOp SequenceType ty) [] repr_args misc_args [] Nothing
           _ -> return Nothing
      _ -> return Nothing
-     
+
+simplifyBindOp :: ExpInfo -> StreamOp -> ExpM -> ExpS -> ExpS
+               -> TypeEvalM ExpS
+simplifyBindOp inf bind_op@(BindOp producer_ty transformer_ty) repr producer transformer = do
+  producer' <- simplifyExp producer
+  case producer' of
+    OpSE _ (GenerateOp SequenceType _) [] [_] [shp, gen_f] [] Nothing -> do
+      -- Fuse the bind and generate operations together
+      m_transformer <- runMaybeT $ freshenUnaryStreamFunction transformer
+      case m_transformer of
+        Nothing -> simplify_subexpressions producer'
+        Just (transformer_var, transformer_body) -> do
+          transformer_body' <- assume transformer_var producer_ty $ 
+                               simplifyExp transformer_body
+
+          -- Create a fused transformer function that runs the producer and
+          -- transformer.
+          --
+          -- > \ ix. case boxed @(index dim1) (gen_f ix)
+          -- >       of boxed @(index dim1) (transformer_var : index dim1).
+          -- >       transformer_body
+          ix_var <- newAnonymousVar ObjectLevel
+          let new_transformer =
+                fuse_bind_generate gen_f ix_var transformer_var transformer_body'
+          return $ OpSE inf (GenerateBindOp transformer_ty)
+            [] [] [shp] [new_transformer] Nothing
+
+    _ | isEmptyStream producer' ->
+      return $ OpSE inf (EmptyOp transformer_ty) [] [] [] [] Nothing
+
+    _ -> simplify_subexpressions producer'
+  where
+    simplify_subexpressions producer' = do
+      transformer' <- simplifyStreamExp transformer
+      return $ OpSE inf bind_op [] [repr] [] [producer', transformer'] Nothing
+
+    fuse_bind_generate gen_f ix_var trans_var trans_body = let
+      index_type = varApp (pyonBuiltin The_index) [VarT $ pyonBuiltin The_dim1]
+      boxed_decon = VarDeCon (pyonBuiltin The_boxed) [producer_ty] []
+      boxed_con = VarCon (pyonBuiltin The_boxed) [producer_ty] []
+      case_alt = AltS $ Alt boxed_decon
+                 [PatS $ patM (trans_var ::: producer_ty)] trans_body
+      scr_exp = conE inf boxed_con
+                [appE inf gen_f [] [ExpM $ VarE defaultExpInfo ix_var]]
+      case_exp = CaseSE inf scr_exp [case_alt]
+      in mkUnaryStreamFunction inf ix_var index_type
+         (varApp (pyonBuiltin The_Sequence) [transformer_ty]) case_exp
+
+-- | Check whether the given expression is an empty stream.
+--
+--   We look through stream expressions, but not through function calls.
+--   If a stream function call is equivalent to the empty stream, that should
+--   be detected when the function call is transformed (not here).
+isEmptyStream :: ExpS -> Bool
+isEmptyStream (OpSE {sexpOp = EmptyOp _}) = True
+isEmptyStream (OpSE {sexpOp = EmptyViewOp _ _}) = True
+isEmptyStream (LetSE {sexpBody = s}) = isEmptyStream s
+isEmptyStream (LetfunSE {sexpBody = s}) = isEmptyStream s
+isEmptyStream (CaseSE {sexpAlternatives = [AltS (Alt _ _ s)]}) = isEmptyStream s
+isEmptyStream _ = False
+
 -------------------------------------------------------------------------------
 
 -- | Convert a stream expression to a sequential loop.
@@ -1052,6 +1178,18 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
             localE a_ty (appExp (return f) [] [varE i_var]) $ \x_var ->
             appExp (return combiner) [] [varE a_var, varE x_var, varE r_var]),
         return acc]
+
+     -- Sequentialize 'map'
+     OpSE inf (ZipOp _ [in_ty] _) _ [in_repr, _] [zip_f] [in_stream] Nothing -> do
+       -- Apply the function to whatever 'in_stream' returns.
+       map_combiner <-
+         lamE $ mkFun []
+         (\ [] -> return ([acc_ty, in_ty, outType acc_ty], initEffectType acc_ty))
+         (\ [] [acc_var, in_var, r_var] ->
+             localE a_ty (appExp (return zip_f) [] [varE in_var]) $ \x_var ->
+             appExp (return combiner) [] [varE acc_var, varE x_var, varE r_var])
+       sequentializeFold acc_ty in_ty acc_repr_var in_repr acc map_combiner in_stream
+
      OpSE inf (ReturnOp _) _ _ [w] [] Nothing ->
        -- Accumulate the written value
        localE a_ty (return w) $ \x_var ->
@@ -1064,26 +1202,38 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
        -- This transformation is performed:
        -- T [| bind s (\x. t) |] z c =
        --   T [| s |] z (\acc x r. T [| t |] acc c r)
-       (t_value_var, t_stream) <- freshenUnaryStreamFunction transformer
-
-       -- Create a function corresponding to the sequentialized transformer.
-       -- This is a combining function for combining the producer's output
-       -- with the accumulator.
-       t_acc_var <- newAnonymousVar ObjectLevel
-       let t_acc = ExpM $ VarE defaultExpInfo t_acc_var
-       t_body <- sequentializeFold acc_ty p_ty acc_repr_var p_repr t_acc
-                 combiner t_stream
-
-       let t_params = [patM (t_acc_var ::: acc_ty),
-                       patM (t_value_var ::: p_ty)]
-           t_return = writerType acc_ty
-           t_combiner =
-             ExpM $ LamE defaultExpInfo $
-             FunM $ Fun defaultExpInfo [] t_params t_return t_body
+       t_combiner <-
+         sequentializeCombiningFunction acc_ty p_ty acc_repr_var p_repr combiner transformer
 
        sequentializeFold
          acc_ty a_ty acc_repr_var a_repr acc t_combiner producer
 
+     OpSE inf (GenerateBindOp transformer_ty)
+       _ [] [shp] [transformer] Nothing -> do
+       -- Fused 'bind' and generate'
+       -- Create a combiner from the transformer
+       let stored_int_repr =
+             ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_int)
+       t_combiner <-
+         sequentializeCombiningFunction acc_ty stored_int_type
+         acc_repr_var stored_int_repr combiner transformer
+
+       -- Create a @for@ loop that uses the combiner
+       tenv <- getTypeEnv
+       varAppE (pyonBuiltin The_dim1_fold)
+         [acc_ty]
+         [varE acc_repr_var,
+          return shp,
+          lamE $ mkFun []
+          (\ [] -> return ([stored_int_type, acc_ty, outType acc_ty],
+                           initEffectType acc_ty))
+          (\ [] [i_var, a_var, r_var] ->
+            -- > t_combiner acc i ret
+            appExp (return t_combiner) [] [varE a_var, varE i_var, varE r_var]),
+          return acc]
+
+     OpSE {} -> internalError "sequentializeFold: Unsupported stream"
+     
      LetSE inf pat rhs body -> do
        body' <- sequentializeFold acc_ty a_ty acc_repr_var a_repr acc
                 combiner body
@@ -1099,6 +1249,25 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
     stored_int_type =
       varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_int)]
 
+-- Turn a one-parameter stream function into a combining function for a fold
+sequentializeCombiningFunction acc_ty arg_ty acc_repr_var arg_repr combiner transformer = do
+  (t_value_var, t_stream) <- freshenUnaryStreamFunction transformer
+
+  -- Create a function corresponding to the sequentialized transformer.
+  -- This is a combining function for combining the producer's output
+  -- with the accumulator.
+  t_acc_var <- newAnonymousVar ObjectLevel
+  let t_acc = ExpM $ VarE defaultExpInfo t_acc_var
+  t_body <- sequentializeFold acc_ty arg_ty acc_repr_var arg_repr t_acc
+            combiner t_stream
+
+  let t_params = [patM (t_acc_var ::: acc_ty),
+                  patM (t_value_var ::: arg_ty)]
+      t_return = writerType acc_ty
+  return $
+    ExpM $ LamE defaultExpInfo $
+    FunM $ Fun defaultExpInfo [] t_params t_return t_body
+
 -- | Rename the parameter variable of a single-parameter stream function.
 --   The renamed parameter and the body are returned.
 freshenUnaryStreamFunction :: ExpS -> MaybeT TypeEvalM (Var, ExpS)
@@ -1108,6 +1277,14 @@ freshenUnaryStreamFunction (LamSE _ (FunS (Fun _ [] [pat] _ body))) = do
   return (v', Rename.rename (Rename.singleton v v') body)
 
 freshenUnaryStreamFunction _ = mzero
+
+-- | Construct a stream function that takes one parameter.
+--
+--   The return type should be an application of a stream type constructor.
+mkUnaryStreamFunction :: ExpInfo -> Var -> Type -> Type -> ExpS -> ExpS
+mkUnaryStreamFunction inf v param_ty return_stream_ty body =
+  LamSE inf $
+  FunS $ Fun inf [] [PatS $ patM (v ::: param_ty)] return_stream_ty body
 
 sequentializeFoldCaseAlternative acc_ty a_ty acc_repr_var a_repr acc combiner
   (AltS (Alt decon params body)) = do

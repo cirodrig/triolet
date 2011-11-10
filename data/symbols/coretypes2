@@ -1769,6 +1769,10 @@ Sequence_guard : (a : bare) -> Repr a -> bool -> Sequence a -> Sequence a;
 Sequence_bind : (a b : bare)
 	     -> Repr a -> Sequence a -> (a -> Sequence b) -> Sequence b;
 
+-- A fused version of 'bind' and 'generate'.
+Sequence_generate_bind : (a : bare)
+	              -> dim1 -> (index dim1 -> Sequence a) -> Sequence a;
+
 view1_list_build : (a : bare)
 		-> Repr a
 		-> view1 a
