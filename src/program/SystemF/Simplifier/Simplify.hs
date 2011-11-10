@@ -1443,6 +1443,13 @@ rwAppWithOperator' is_stream_arg inf op op_val ty_args args =
     inline_function_call funm = betaReduce is_stream_arg inf funm ty_args args
 
 -- | Attempt to statically evaluate a copy.
+
+-- One argument.  Cannot optimize.
+rwCopyApp inf copy_op ty [repr] = do
+  (repr', _) <- rwExp False repr
+  return (appE inf copy_op [ty] [repr'], topCode)
+
+-- Two or three arguments
 rwCopyApp inf copy_op ty args = debug $ do
   whnf_type <- reduceToWhnf ty
   case fromVarApp whnf_type of
