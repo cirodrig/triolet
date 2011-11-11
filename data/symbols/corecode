@@ -568,16 +568,18 @@ darr1ToView1 @(N : intindex) @(a : bare)
 
 viewToSequence @(a : bare) (repr : Repr a) (vw : view1 a)
   -> Sequence a attribute(inline, inline_dimensionality) =
-  case boxed @(StoredBox (Sequence a))
-    (view1ToDarr1 @a @(StoredBox (Sequence a)) vw
-     (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a)
-       -> Writer (StoredBox (Sequence a)).
-       case darr of mk_darr1 @N @a (f : int -> Writer a).
-       storedBox @(Sequence a) (generate @N @a (iInt @N size) repr f))
-     (storedBox @(Sequence a) (Sequence_empty @a)))
-  of boxed @(StoredBox (Sequence a)) (sb : StoredBox (Sequence a)).
-  case sb of storedBox @(Sequence a) (sq : Sequence a).
-  sq;
+  case vw of {
+    mk_view1 @a @(lo hi : intindex)
+    (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
+      case boxed @dim1 (mk_dim1 @lo @hi ilo ihi) of
+        boxed @dim1 (dim : dim1).
+      Sequence_generate @a repr dim
+      (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+        case si of stored @int (i : int). f i ret)
+
+  ; empty_view1 @a.
+      Sequence_empty @a
+  };
 
 
 sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
