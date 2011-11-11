@@ -14,11 +14,16 @@ module SystemF.IncrementalSubstitution
         discardSubstitution,
         applySubstitution,
         applySubstitutionFun,
-        applySubstitutionAlt
+        applySubstitutionAlt,
+        freshenFullyExp
        )
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+import Control.Applicative
+import Control.Monad hiding(mapM)
+import Data.Traversable(mapM)
+
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Rename
@@ -230,3 +235,69 @@ applySubstitutionAlt (AltSM (Alt decon params body)) = do
   body' <- applySubstitution body
   return $ AltM $ Alt decon (map fromPatSM params) body'
   
+-- | Eliminate name shadowing in an expression.  The expression is traversed, 
+--   and any shadowed names are renamed.
+--
+--   Since this function inspects every subexpression, it should be used
+--   sparingly.
+freshenFullyExp :: EvalMonad m => ExpSM -> m ExpM
+freshenFullyExp e = liftTypeEvalM $ freshenFullyExp' e
+
+freshenFullyExp' :: ExpSM -> TypeEvalM ExpM
+freshenFullyExp' expression = do
+  expression' <- freshenHead expression
+  case expression' of
+    VarE inf v -> return $ ExpM $ VarE inf v
+    LitE inf l -> return $ ExpM $ LitE inf l
+    ConE inf con args ->
+      ExpM <$> (ConE inf con <$> mapM recurse args)
+    AppE inf op ts es ->
+      ExpM <$> (AppE inf <$> recurse op <*> pure ts <*> mapM recurse es)
+    LamE inf f ->
+      ExpM <$> (LamE inf <$> freshenFullyFun' f)
+    LetE inf p val body ->
+      let p' = fromPatSM p
+      in ExpM <$> (LetE inf p' <$> recurse val <*> assumePatM p' (recurse body))
+    LetfunE inf defs body -> do
+      let freshen_defs = mapM (mapMDefiniens freshenFullyFun') defs
+          freshen_body = recurse body
+          assume_defs :: forall a. TypeEvalM a -> TypeEvalM a 
+          assume_defs m = foldr assume_def m (defGroupMembers defs)
+            where
+              assume_def def m =
+                let FunSM f = definiens def
+                    ty = forallType [b | TyPat b <- funTyParams f] $
+                         funType (map (patMType . fromPatSM) $ funParams f) (funReturn f)
+                in assume (definiendum def) ty m
+
+      defs' <- case defs
+               of NonRec _ -> freshen_defs
+                  Rec _    -> assume_defs freshen_defs
+      body' <- assume_defs freshen_body
+      return $ ExpM $ LetfunE inf defs' body'
+    CaseE inf scr alts ->
+      ExpM <$> (CaseE inf <$> freshenFullyExp' scr <*> mapM freshenFullyAlt' alts)
+    ExceptE inf ty -> return $ ExpM $ ExceptE inf ty
+    CoerceE inf t1 t2 e ->
+      ExpM <$> (CoerceE inf t1 t2 <$> freshenFullyExp' e)
+  where
+    recurse e = freshenFullyExp' e
+
+-- | Eliminate name shadowing in a function body.  The function parameters
+--   have already been renamed.
+freshenFullyFun' (FunSM f) =
+  assumeTyPats (funTyParams f) $ assumePatMs (map fromPatSM $ funParams f) $ do
+    body <- freshenFullyExp' $ funBody f
+    return $ FunM $ Fun { funInfo = funInfo f
+                        , funTyParams = funTyParams f
+                        , funParams = map fromPatSM $ funParams f
+                        , funReturn = funReturn f
+                        , funBody = body}
+
+freshenFullyAlt' (AltSM alt) =
+  assumeBinders (deConExTypes $ altCon alt) $
+  assumePatMs (map fromPatSM $ altParams alt) $ do
+    body <- freshenFullyExp' $ altBody alt
+    return $ AltM $ Alt { altCon = altCon alt
+                        , altParams = map fromPatSM $ altParams alt
+                        , altBody = body}

@@ -29,6 +29,8 @@ import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
 import qualified Type.Rename as Rename
 import Type.Rename(Renameable(..))
+import qualified Type.Substitute as Substitute
+import Type.Substitute(Substitutable(..), substitute, freshen)
 import Type.Type
 import Type.Environment
 
@@ -146,6 +148,56 @@ instance Renameable (Alt Stream) where
                     freeVariables body
     in Set.union uses_fv params_fv
 
+instance Substitutable (Exp Stream) where
+  type Substitution (Exp Stream) = Subst
+  substituteWorker s expression =
+    case expression
+    of OtherSE e -> OtherSE `liftM` substitute s e 
+       OpSE inf op shape_args repr_args misc_args stream_args return_arg -> do
+         op' <- substitute (typeSubst s) op
+         shape_args' <- substitute s shape_args
+         repr_args' <- substitute s repr_args
+         misc_args' <- substitute s misc_args
+         stream_args' <- substitute s stream_args
+         return_arg' <- substitute s return_arg
+         return $ OpSE inf op' shape_args' repr_args' misc_args' stream_args' return_arg'
+       LamSE inf f ->
+         LamSE inf `liftM` substitute s f
+       LetSE inf b rhs body -> do
+         rhs' <- substitute s rhs
+         substitutePatM s b $ \s' b' -> do
+           body' <- substitute s' body
+           return $ LetSE inf b' rhs' body'
+       LetfunSE inf defs body -> do
+         substituteDefGroup substitute s defs $ \s' defs' -> do
+           body' <- substitute s' body
+           return $ LetfunSE inf defs' body'
+       CaseSE inf scr alts -> do
+         scr' <- substitute s scr
+         alts' <- substitute s alts
+         return $ CaseSE inf scr' alts'
+
+instance Substitutable (Fun Stream) where
+  type Substitution (Fun Stream) = Subst
+  substituteWorker s (FunS fun) =
+    substituteTyPats s (funTyParams fun) $ \s' ty_params ->
+    substitutePatMs s' (map fromPatS $ funParams fun) $ \s'' params -> do
+      body <- substitute s'' $ funBody fun
+      ret <- substitute (typeSubst s'') $ funReturn fun
+      return $ FunS $ Fun { funInfo = funInfo fun
+                          , funTyParams = ty_params
+                          , funParams = map PatS params
+                          , funReturn = ret
+                          , funBody = body}
+
+instance Substitutable (Alt Stream) where
+  type Substitution (Alt Stream) = Subst
+  substituteWorker s (AltS (Alt con params body)) =
+    substituteDeConInst (typeSubst s) con $ \ts' con' ->
+    substitutePatMs (setTypeSubst ts' s) (map fromPatS params) $ \s' params' -> do
+      body' <- substitute s' body
+      return $ AltS $ Alt con' (map PatS params') body'
+
 data PolyStreamType =
     PolySequenceType
   | PolyViewType {-# UNPACK #-}!Int
@@ -248,12 +300,12 @@ data StreamOp =
 
     -- | Convert a stream to a 1D sequence.
     --
-    -- > flatten @{shape indices} @{input type} {input stream}
+    -- > flatten @{shape indices} @{type} {shape_args} {repr} {input stream}
   | ToSequenceOp !StreamType Type
 
     -- | Convert a stream to a 1D view.
     --
-    -- > flatten @{shape indices} @{input type} {input stream}
+    -- > flatten @{shape indices} @{type} {shape_args} {repr} {input stream}
   | ToView1Op !StreamType Type
 
     -- | Produce a 1D sequence of size 1. 
@@ -312,6 +364,44 @@ instance Renameable ConsumerOp where
   rename rn (Reduce1 t) = Reduce1 (rename rn t)
   rename rn (Fold t1 t2) = Fold (rename rn t1) (rename rn t2)
   rename rn (Build ct t) = Build ct (rename rn t)
+
+instance Substitutable StreamOp where
+  type Substitution StreamOp = Substitute.TypeSubst
+  substituteWorker s op =
+    case op
+    of GenerateOp st ty ->
+         GenerateOp `liftM` substitute s st `ap` substitute s ty
+       ZipOp st tys ty ->
+         ZipOp `liftM` substitute s st `ap` substitute s tys `ap` substitute s ty
+       ToSequenceOp st ty ->
+         ToSequenceOp `liftM` substitute s st `ap` substitute s ty
+       ToView1Op st ty ->
+         ToView1Op `liftM` substitute s st `ap` substitute s ty
+       ReturnOp ty ->
+         ReturnOp `liftM` substitute s ty
+       EmptyOp ty ->
+         EmptyOp `liftM` substitute s ty
+       EmptyViewOp n ty ->
+         EmptyViewOp n `liftM` substitute s ty
+       BindOp t1 t2 ->
+         BindOp `liftM` substitute s t1 `ap` substitute s t2
+       GenerateBindOp t ->
+         GenerateBindOp `liftM` substitute s t
+       ConsumeOp st r ->
+         ConsumeOp `liftM` substitute s st `ap` substitute s r
+
+instance Substitutable StreamType where
+  type Substitution StreamType = Substitute.TypeSubst
+  substituteWorker s SequenceType = return SequenceType
+  substituteWorker s (ViewType n) = return (ViewType n)
+  substituteWorker s (DArrType ts) = DArrType `liftM` substitute s ts
+  
+instance Substitutable ConsumerOp where
+  type Substitution ConsumerOp = Substitute.TypeSubst
+  substituteWorker s (Reduce t) = Reduce `liftM` substitute s t
+  substituteWorker s (Reduce1 t) = Reduce1 `liftM` substitute s t
+  substituteWorker s (Fold t1 t2) = Fold `liftM` substitute s t1 `ap` substitute s t2
+  substituteWorker s (Build ct t) = Build ct `liftM` substitute s t
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -855,13 +945,16 @@ restructureIfNeeded locals expression cont =
        cont (LamSE inf f')
      LetSE inf pat rhs body ->
        let locals' = Set.insert (patMVar pat) locals
-       in restructureIfNeeded locals' body $ \body' ->
+       in assumePatM pat $
+          restructureIfNeeded locals' body $ \body' ->
           cont (LetSE inf pat rhs body')
-     LetfunSE inf defs body ->
+     LetfunSE inf defs body -> do
        let locals' = foldr Set.insert locals $
                      map definiendum (defGroupMembers defs)
-       in restructureIfNeeded locals' body $ \body' ->
-          cont (LetfunSE inf defs body')
+       (_, e) <- assumeDefGroup defs (return ()) $
+                 restructureIfNeeded locals' body $ \body' ->
+                 cont (LetfunSE inf defs body')
+       return e
      CaseSE inf scr@(ExpM (VarE _ scr_var)) alts
        -- If the scrutinee is independent of stream-local variables, then
        -- float the case statement outward
@@ -884,7 +977,9 @@ restructureAlt locals (AltS (Alt con params body)) cont = do
     -- The continuation is executed to move code inside the body.
     let extra_locals = map binderVar (deConExTypes con') ++ map patMVar params'
         locals' = foldr Set.insert locals extra_locals
-    body' <- restructureIfNeeded locals' rn_body cont
+    body' <- assumeBinders (deConExTypes con') $
+             assumePatMs params' $
+             restructureIfNeeded locals' rn_body cont
 
     -- Rebuild the case alternative.
     return $ AltS $ Alt con' (map PatS params') body'
@@ -892,8 +987,10 @@ restructureAlt locals (AltS (Alt con params body)) cont = do
 restructureLam locals (FunS (Fun inf ty_params params ret body)) cont =
   let locals' = foldr Set.insert locals (map tyPatVar ty_params ++
                                          map (patMVar . fromPatS) params)
-  in restructureIfNeeded locals' body $ \body' ->
-    cont $ FunS (Fun inf ty_params params ret body')
+  in assumeTyPats ty_params $
+     assumePatMs (map fromPatS params) $
+     restructureIfNeeded locals' body $ \body' ->
+     cont $ FunS (Fun inf ty_params params ret body')
 
 -- | Restructure a list of stream expressions.
 restructureListIfNeeded :: Set.Set Var 
@@ -922,15 +1019,20 @@ simplifyStreamExp expression = do
   
 -- | Recursively transform a stream expression
 simplifyExp :: ExpS -> TypeEvalM ExpS
-simplifyExp expression =
-  case expression
-  of -- Map operation: try to fuse with its producer
+simplifyExp input_expression = do
+  expression <- freshen input_expression
+  case expression of
+     -- Map operation: try to fuse with its producer
      OpSE inf op@(ZipOp st [in_type] out_type)
        shape_args repr_args@[in_repr, out_repr] [f] [in_stream] Nothing -> do
-       e <- fuseMapWithProducer out_type out_repr f in_stream
-       case e of
-         Just e' -> simplifyExp e'
-         Nothing -> simplify_subexpressions expression
+       (progress, e) <-
+         fuseMapWithProducer st shape_args in_type out_type in_repr out_repr f in_stream
+
+       -- If the expression was transformed, then re-simplify it.
+       -- Otherwise, process subexpressions.
+       if progress
+         then simplifyExp e
+         else simplify_subexpressions e
 
      -- Zip operation: if any argument is empty, the entire stream is empty
      OpSE inf op@(ZipOp st _ out_type) _ reprs _ stream_args _ -> do
@@ -974,7 +1076,7 @@ simplifyExp expression =
            LamSE inf `liftM` simplifyStreamFun f
          CaseSE inf scr alts ->
            CaseSE inf scr `liftM` mapM simplifyStreamAlt alts
-         _ -> return expression
+         _ -> return e
 
 simplifyStreamAlt (AltS alt) =
   assumeBinders (deConExTypes $ altCon alt) $
@@ -988,63 +1090,118 @@ simplifyStreamFun (FunS fun) =
     body <- simplifyExp $ funBody fun
     return $ FunS $ fun {funBody = body}
 
-fuseMapWithProducer :: Type -> ExpM -> ExpM -> ExpS -> TypeEvalM (Maybe ExpS)
-fuseMapWithProducer ty repr map_f producer =
-  case producer
-  of OpSE inf (GenerateOp st producer_ty)
-       shape_args [producer_repr] [dim, gen_f] [] Nothing -> do
-       new_gen_f <- fuse_with_generator [streamIndexType st] producer_ty gen_f
-
-       return $ Just $ OpSE inf (GenerateOp st ty) shape_args [repr] [dim, new_gen_f] [] Nothing
-
-     OpSE inf (ZipOp st zip_tys producer_ty)
-       shape_args zip_and_producer_reprs [zip_f] zip_streams Nothing -> do
-       new_zip_f <- fuse_with_generator zip_tys producer_ty zip_f
-       let zip_reprs = init zip_and_producer_reprs
-
-       return $ Just $ OpSE inf (ZipOp st zip_tys ty) shape_args (zip_reprs ++ [repr]) [new_zip_f] zip_streams Nothing
-
-     OpSE inf (BindOp producer_ty transformer_ty)
-       [] [producer_repr] [] [producer, transformer] Nothing -> runMaybeT $ do
-       -- Fuse with the transformer
-       (var, s) <- freshenUnaryStreamFunction transformer
-       s' <- MaybeT $ fuseMapWithProducer ty repr map_f s
-       let return_type = varApp (pyonBuiltin The_Sequence) [ty]
-       return $ OpSE inf (BindOp producer_ty ty) [] [producer_repr] []
-         [producer, mkUnaryStreamFunction defaultExpInfo var producer_ty
-                    return_type s'] Nothing
-
-     OpSE inf (GenerateBindOp transformer_ty)
-       [] [] [shp] [transformer] Nothing -> runMaybeT $ do
-       -- Fuse with the transformer
-       (var, s) <- freshenUnaryStreamFunction transformer
-       s' <- MaybeT $ fuseMapWithProducer ty repr map_f s
-       let stored_int_type =
-             varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
-           return_type = varApp (pyonBuiltin The_Sequence) [ty]
-       return $ OpSE inf (GenerateBindOp ty) [] [] [shp]
-         [mkUnaryStreamFunction defaultExpInfo var stored_int_type return_type s'] Nothing
-
-     OpSE inf (EmptyOp _) [] [] [] [] Nothing -> 
-       return $ Just $ OpSE inf (EmptyOp ty) [] [] [] [] Nothing
-
-     OpSE inf (EmptyViewOp n _) [] [_] [] [] Nothing -> 
-       return $ Just $ OpSE inf (EmptyViewOp n ty) [] [repr] [] [] Nothing
-
-     _ -> return Nothing
+fuseMapWithProducer :: StreamType -> [ExpM]
+                    -> Type -> Type -> ExpM -> ExpM -> ExpM -> ExpS
+                    -> TypeEvalM (Bool, ExpS)
+fuseMapWithProducer shape shape_args in_type ty in_repr repr map_f producer =
+  fuse_with_producer shape shape_args producer
   where
+    fuse_with_producer :: StreamType -> [ExpM] -> ExpS -> TypeEvalM (Bool, ExpS)
+    fuse_with_producer shape shape_args producer =
+      case producer
+      of OpSE inf (GenerateOp st producer_ty)
+           shape_args [producer_repr] [dim, gen_f] [] Nothing -> do
+           new_gen_f <- fuse_with_generator [streamIndexType st] producer_ty gen_f
+
+           progress $ OpSE inf (GenerateOp st ty) shape_args [repr] [dim, new_gen_f] [] Nothing
+
+         OpSE inf (ZipOp st zip_tys producer_ty)
+           shape_args zip_and_producer_reprs [zip_f] zip_streams Nothing -> do
+           new_zip_f <- fuse_with_generator zip_tys producer_ty zip_f
+           let zip_reprs = init zip_and_producer_reprs
+
+           progress $ OpSE inf (ZipOp st zip_tys ty) shape_args (zip_reprs ++ [repr]) [new_zip_f] zip_streams Nothing
+
+         OpSE inf (BindOp producer_ty transformer_ty)
+           [] [producer_repr] [] [producer, transformer] Nothing -> do
+           -- Fuse with the transformer
+           m_transformer <- runMaybeT $ freshenUnaryStreamFunction transformer
+           case m_transformer of
+             Just (var, s) -> do
+               (_, s') <- fuse_with_producer SequenceType [] s
+               let return_type = varApp (pyonBuiltin The_Sequence) [ty]
+               progress $ OpSE inf (BindOp producer_ty ty) [] [producer_repr] []
+                 [producer, mkUnaryStreamFunction defaultExpInfo var producer_ty
+                            return_type s'] Nothing
+             Nothing ->
+               build_map_expression shape shape_args producer
+
+         OpSE inf (GenerateBindOp transformer_ty)
+           [] [] [shp] [transformer] Nothing -> do
+           -- Fuse with the transformer
+           m_transformer <- runMaybeT $ freshenUnaryStreamFunction transformer
+           case m_transformer of
+             Just (var, s) -> do
+               (_, s') <- fuse_with_producer SequenceType [] s
+               let stored_int_type =
+                     varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
+                   return_type = varApp (pyonBuiltin The_Sequence) [ty]
+               progress $ OpSE inf (GenerateBindOp ty) [] [] [shp]
+                 [mkUnaryStreamFunction defaultExpInfo var stored_int_type return_type s'] Nothing
+             Nothing ->
+               build_map_expression shape shape_args producer
+
+         OpSE inf (EmptyOp _) [] [] [] [] Nothing -> 
+           progress $ OpSE inf (EmptyOp ty) [] [] [] [] Nothing
+
+         OpSE inf (EmptyViewOp n _) [] [_] [] [] Nothing -> 
+           progress $ OpSE inf (EmptyViewOp n ty) [] [repr] [] [] Nothing
+
+         OpSE inf (ToSequenceOp st _) shape_args [_] [] [s] Nothing -> do
+           (_, s') <- fuse_with_producer st shape_args s
+           progress $ OpSE inf (ToSequenceOp st ty) shape_args [repr] [] [s'] Nothing
+
+         LetSE inf pat rhs body -> do
+           (_, body') <- assumePatM pat $
+                         fuse_with_producer shape shape_args body
+           progress $ LetSE inf pat rhs body'
+
+         LetfunSE inf defs body -> do
+           (_, (_, body')) <- assumeDefGroup defs (return ()) $
+                              fuse_with_producer shape shape_args body
+           progress $ LetfunSE inf defs body'
+         
+         CaseSE inf scr alts -> do
+           (progress_list, alts') <-
+             mapAndUnzipM (fuse_with_alt shape shape_args) alts
+
+           -- If any case alternatives introduced the potential for further
+           -- optimization, then keep the change.
+           -- Otherwise, leave the expression where it is.
+           if or progress_list
+             then progress $ CaseSE inf scr alts'
+             else build_map_expression shape shape_args producer
+
+         _ -> build_map_expression shape shape_args producer
+
+    build_map_expression shape shape_args producer =
+      no_progress $ OpSE defaultExpInfo (ZipOp shape [in_type] ty)
+      shape_args [in_repr, repr] [map_f] [producer] Nothing
+
+    fuse_with_alt shape shape_args alt = do 
+      AltS (Alt decon params body) <- freshen alt
+      (b, body') <- assumeBinders (deConExTypes decon) $
+                    assumePatMs (map fromPatS params) $
+                    fuse_with_producer shape shape_args body
+      return (b, AltS $ Alt decon params body')
+
     -- Fuse with generator function
     -- > \ ARGS r. case boxed (gen_f ARGS) of boxed x. map_f x r
-    fuse_with_generator arg_types producer_ty gen_f =
+    fuse_with_generator arg_types producer_ty gen_f = do
+      -- Rename the function to avoid name shadowing
+      map_f' <- freshenFullyExp $ deferEmptySubstitution map_f
       lamE $
-      mkFun []
-      (\ [] -> return (arg_types ++ [outType ty], initEffectType ty))
-      (\ [] args ->
-        let arg_value_vars = init args
-            out_ptr = last args
-        in localE producer_ty
-           (appExp (return gen_f) [] (map varE arg_value_vars)) $ \x ->
-           appExp (return map_f) [] [varE x, varE out_ptr])
+        mkFun []
+        (\ [] -> return (arg_types ++ [outType ty], initEffectType ty))
+        (\ [] args ->
+          let arg_value_vars = init args
+              out_ptr = last args
+          in localE producer_ty
+             (appExp (return gen_f) [] (map varE arg_value_vars)) $ \x ->
+             appExp (return map_f') [] [varE x, varE out_ptr])
+
+    progress x = return (True, x)
+    no_progress x = return (False, x)
 
 -- | Convert a stream operation to an equivalent sequence operation, if
 --   possible.
@@ -1175,7 +1332,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
                            initEffectType acc_ty))
           (\ [] [i_var, a_var, r_var] ->
             -- > let x = f i in combiner acc x ret
-            localE a_ty (appExp (return f) [] [varE i_var]) $ \x_var ->
+            localE acc_ty (appExp (return f) [] [varE i_var]) $ \x_var ->
             appExp (return combiner) [] [varE a_var, varE x_var, varE r_var]),
         return acc]
 
