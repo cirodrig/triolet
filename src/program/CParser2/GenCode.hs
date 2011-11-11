@@ -326,10 +326,10 @@ translateCon :: SystemF.ExpInfo -> DataType -> DataConType
              -> Var -> [RLType] -> [RLExp] -> TransM SystemF.ExpM
 translateCon inf type_con data_con op ty_args args
   | length ty_args /= n_ty_args + n_ex_types =
-    error "Wrong number of type arguments to data constructor"
+    error $ show (getSourcePos inf) ++ ": Wrong number of type arguments to data constructor"
   | length args < n_args =
     -- Instead of producing an error, the constructor could be eta-expanded.
-    error "Too few arguments to data constructor"
+    error $ show (getSourcePos inf) ++ ": Too few arguments to data constructor"
   | otherwise = do
       -- Convert type arguments
       arg_types <- mapM translateType ty_args
