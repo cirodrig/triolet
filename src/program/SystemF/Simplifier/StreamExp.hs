@@ -33,6 +33,7 @@ import qualified Type.Substitute as Substitute
 import Type.Substitute(Substitutable(..), substitute, freshen)
 import Type.Type
 import Type.Environment
+import Type.Eval
 
 breakAt n xs = go n xs
   where
@@ -95,6 +96,14 @@ data instance Exp Stream =
     , sexpScrutinee :: ExpM
     , sexpAlternatives :: [AltS]
     }
+    -- | Raise an exception instead of producing a stream.
+    -- The expression's type is decomposed into parts.
+  | ExceptSE
+    { sexpInfo :: ExpInfo
+    , sexpStreamType :: !StreamType
+    , sexpShape :: [Type]
+    , sexpElementType :: Type
+    }
 
 instance Renameable (Exp Stream) where
   rename rn expression =
@@ -114,6 +123,8 @@ instance Renameable (Exp Stream) where
          LetfunSE inf defs' (rename rn' body)
        CaseSE inf scr alts ->
          CaseSE inf (rename rn scr) (map (rename rn) alts)
+       ExceptSE inf st shape ty ->
+         ExceptSE inf (rename rn st) (rename rn shape) (rename rn ty)
 
 instance Renameable (Fun Stream) where
   rename rn (FunS fun) =
@@ -176,6 +187,12 @@ instance Substitutable (Exp Stream) where
          scr' <- substitute s scr
          alts' <- substitute s alts
          return $ CaseSE inf scr' alts'
+       ExceptSE inf st shape ty -> do
+         let type_subst = typeSubst s
+         st' <- substitute type_subst st
+         shape' <- substitute type_subst shape
+         ty' <- substitute type_subst ty
+         return $ ExceptSE inf st' shape' ty'
 
 instance Substitutable (Fun Stream) where
   type Substitution (Fun Stream) = Subst
@@ -403,6 +420,26 @@ instance Substitutable ConsumerOp where
   substituteWorker s (Fold t1 t2) = Fold `liftM` substitute s t1 `ap` substitute s t2
   substituteWorker s (Build ct t) = Build ct `liftM` substitute s t
 
+deconstructStreamType :: Type -> TypeEvalM (StreamType, [Type], Type)
+deconstructStreamType ty = do
+  ty' <- reduceToWhnf ty
+  return $! case fromVarApp ty'
+            of Just (op, [arg])
+                 | op `isPyonBuiltin` The_Sequence -> (SequenceType, [], arg)
+                 | op `isPyonBuiltin` The_view1 -> (ViewType 1, [], arg)
+                 | op `isPyonBuiltin` The_view2 -> (ViewType 2, [], arg)
+
+               -- Don't know how to handle other types
+               _ -> internalError "deconstructStreamType"
+
+reconstructStreamType :: StreamType -> [Type] -> Type -> Type
+reconstructStreamType stream_type [] ty =
+  let op = case stream_type
+           of SequenceType -> pyonBuiltin The_Sequence
+              ViewType 1   -> pyonBuiltin The_view1
+              ViewType 2   -> pyonBuiltin The_view2
+  in varApp op [ty]
+
 -------------------------------------------------------------------------------
 -- Pretty-printing
 
@@ -492,6 +529,8 @@ pprExpSPrec expression =
      CaseSE _ scr alts ->
        text "case" <+> pprExp scr $$
        text "of" <+> vcat (map pprAltS alts) `hasPrec` stmtPrec
+     ExceptSE _ st shape ty ->
+       asApplication $ nameApplication "except" (pprStreamType st : map pprTypePrec (shape ++ [ty]))
 
 pprAltS :: AltS -> Doc
 pprAltS (AltS (Alt decon params body)) =
@@ -746,6 +785,9 @@ interpretStreamSubExp expression =
     CaseE inf scr alts -> do
       alts' <- mapM interpretStreamAlt alts
       return $ CaseSE inf scr alts'
+    ExceptE inf ty -> do
+      (stream_type, shape_types, element_type) <- deconstructStreamType ty
+      return $ ExceptSE inf stream_type shape_types element_type
     _ -> embed_expression
   where
     embed_expression = return $ OtherSE expression
@@ -905,6 +947,9 @@ embedStreamExp expression =
        ExpM $ LetE inf b rhs (embedStreamExp body)
      CaseSE inf scr alts ->
        ExpM $ CaseE inf scr (map embedStreamAlt alts)
+     ExceptSE inf stream_type shape_types element_type ->
+       let ty = reconstructStreamType stream_type shape_types element_type
+       in ExpM $ ExceptE inf ty
 
 embedStreamFun (FunS f) =
   FunM $ Fun (funInfo f) (funTyParams f) (map fromPatS $ funParams f)
@@ -1172,6 +1217,10 @@ fuseMapWithProducer shape shape_args in_type ty in_repr repr map_f producer =
              then progress $ CaseSE inf scr alts'
              else build_map_expression shape shape_args producer
 
+         ExceptSE inf stream_type shape_types _ ->
+           -- Return type of the exception statement is changed
+           progress $ ExceptSE inf stream_type shape_types ty
+
          _ -> build_map_expression shape shape_args producer
 
     build_map_expression shape shape_args producer =
@@ -1399,6 +1448,9 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
        alts' <- mapM (sequentializeFoldCaseAlternative
                       acc_ty a_ty acc_repr_var a_repr acc combiner) alts
        return $ ExpM $ CaseE inf scr alts'
+     ExceptSE inf _ _ _ ->
+       -- Raise an exception
+       return $ ExpM $ ExceptE inf (writerType acc_ty)
      OtherSE _ -> mzero
      LamSE {} -> internalError "sequentializeFold: Unexpected lambda function"
   where
