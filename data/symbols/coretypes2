@@ -235,18 +235,21 @@ data VectorDict : bare -> box
 data TraversableDict : (bare -> bare) -> box
 {
   traversableDict (t : bare -> bare) ()
-  ((a : bare) -> Repr a -> t a -> Stream (shape t) a,
+  ((a : bare) -> Repr a -> t a -> Writer (shape t),
+   (a : bare) -> Repr a -> t a -> Stream (shape t) a,
    (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a));
 };
 
 -- Operations related to data domains and traversals over them.
--- The operations are flatten-to-list, map, zipWith{2..4},
+-- The operations are indices, flatten-to-list, map, zipWith{2..4},
 -- range checking for integers, and slicing.
 data ShapeDict : bare -> box
 {
   shapeDict (sh : bare) ()
   (Repr (index sh),
    Repr (slice sh),
+
+   sh -> Stream sh (index sh),
 
    (a : bare) -> Stream sh a -> Stream dim1 a,
 
@@ -612,11 +615,17 @@ repr_EffTok : Repr (Stored EffTok);
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionaries
 
+TraversableDict_Stream_domain :
+  (sh : bare) -> (a : bare) -> Repr a -> Stream sh a -> Writer sh;
+
 TraversableDict_Stream_build :
   (sh : bare) -> (a : bare) -> Repr a -> Stream sh a -> Stream sh a;
 
 TraversableDict_Stream_traverse :
   (sh : bare) -> (a : bare) -> Repr a -> Stream sh a -> Stream sh a;
+
+TraversableDict_list_domain :
+  (a : bare) -> Repr a -> list a -> Writer dim1;
 
 TraversableDict_list_build :
   (a : bare) -> Repr a -> Stream dim1 a -> Writer (list a);
@@ -624,11 +633,17 @@ TraversableDict_list_build :
 TraversableDict_list_traverse :
   (a : bare) -> Repr a -> list a -> Stream dim1 a;
 
+TraversableDict_view0_domain :
+  (a : bare) -> Repr a -> view0 a -> Writer dim0;
+
 TraversableDict_view0_build :
   (a : bare) -> Repr a -> Stream dim0 a -> view0 a;
 
 TraversableDict_view0_traverse :
   (a : bare) -> Repr a -> view0 a -> Stream dim0 a;
+
+TraversableDict_view1_domain :
+  (a : bare) -> Repr a -> view1 a -> Writer dim1;
 
 TraversableDict_view1_build :
   (a : bare) -> Repr a -> Stream dim1 a -> view1 a;
@@ -636,11 +651,17 @@ TraversableDict_view1_build :
 TraversableDict_view1_traverse :
   (a : bare) -> Repr a -> view1 a -> Stream dim1 a;
 
+TraversableDict_view2_domain :
+  (a : bare) -> Repr a -> view2 a -> Writer dim2;
+
 TraversableDict_view2_build :
   (a : bare) -> Repr a -> Stream dim2 a -> view2 a;
 
 TraversableDict_view2_traverse :
   (a : bare) -> Repr a -> view2 a -> Stream dim2 a;
+
+TraversableDict_array0_domain :
+  (a : bare) -> Repr a -> array0 a -> Writer dim0;
 
 TraversableDict_array0_build :
   (a : bare) -> Repr a -> Stream dim0 a -> Writer (array0 a);
@@ -648,11 +669,17 @@ TraversableDict_array0_build :
 TraversableDict_array0_traverse :
   (a : bare) -> Repr a -> array0 a -> Stream dim0 a;
 
+TraversableDict_array1_domain :
+  (a : bare) -> Repr a -> array1 a -> Writer dim1;
+
 TraversableDict_array1_build :
   (a : bare) -> Repr a -> Stream dim1 a -> Writer (array1 a);
 
 TraversableDict_array1_traverse :
   (a : bare) -> Repr a -> array1 a -> Stream dim1 a;
+
+TraversableDict_array2_domain :
+  (a : bare) -> Repr a -> array2 a -> Writer dim2;
 
 TraversableDict_array2_build :
   (a : bare) -> Repr a -> Stream dim2 a -> Writer (array2 a);
@@ -695,6 +722,8 @@ ShapeDict_dim0_slice :
   coerce @box (BoxedType (shape t)) (Boxed dim0) ->
   IndexableDict t -> Repr a -> t a -> slice dim0 -> view0 a;
 
+ShapeDict_dim1_indices : dim1 -> Stream dim1 (index dim1);
+
 ShapeDict_dim1_flatten :
   (a : bare) -> Stream dim1 a -> Stream dim1 a;
 
@@ -729,6 +758,8 @@ ShapeDict_dim1_slice :
   (t : bare -> bare) -> (a : bare) ->
   coerce @box (BoxedType (shape t)) (Boxed dim1) ->
   IndexableDict t -> Repr a -> t a -> slice dim1 -> view1 a;
+
+ShapeDict_dim2_indices : dim2 -> Stream dim2 (index dim2);
 
 ShapeDict_dim2_flatten :
   (a : bare) -> Stream dim2 a -> Stream dim1 a;
@@ -1680,6 +1711,23 @@ stencil2D : (t : bare -> bare) -> (a b : bare)
 	 -> (view2 a -> Writer b)
 	 -> t a
 	 -> Writer (array2 b);
+
+shift2D : (t : bare -> bare) -> (a : bare)
+       -> IndexableDict t
+       -> coerce @box (BoxedType (shape t)) (Boxed dim2)
+       -> Repr a
+       -> index (shape t)
+       -> t a
+       -> view2 a;
+
+extend2D : (t : bare -> bare) -> (a : bare)
+        -> IndexableDict t
+        -> coerce @box (BoxedType (shape t)) (Boxed dim2)
+        -> Repr a
+        -> index (shape t)
+        -> index (shape t)
+        -> t a
+        -> view2 a;
 
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)

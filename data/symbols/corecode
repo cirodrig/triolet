@@ -380,6 +380,7 @@ safeIndex @(t : bare -> bare) @(a : bare)
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -428,6 +429,7 @@ safeSlice @(t : bare -> bare) @(a : bare)
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -2152,12 +2154,14 @@ fun_reduce @(t : bare -> bare) @(a : bare)
 
   case traversable
   of traversableDict @t
+       (domain : (a : bare) -> Repr a -> t a -> Writer sh)
        (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
        (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
 
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -2197,12 +2201,14 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
 
   case traversable
   of traversableDict @t
+       (domain : (a : bare) -> Repr a -> t a -> Writer sh)
        (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
        (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
 
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -2244,12 +2250,14 @@ fun_map @(t : bare -> bare)
 
   case traversable of
     traversableDict @t
+    (domain : (a : bare) -> Repr a -> t a -> Writer sh)
     (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
     (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
 
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -2288,10 +2296,12 @@ fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
   attribute(inline) =
   case traversable1
   of traversableDict @t1
+       (domain1 : (a : bare) -> Repr a -> t1 a -> Writer (shape t1))
        (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
        (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
   case traversable2
   of traversableDict @t2
+       (domain2 : (a : bare) -> Repr a -> t2 a -> Writer (shape t2))
        (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
        (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
   let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
@@ -2303,6 +2313,7 @@ fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -2347,14 +2358,17 @@ fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
   attribute(inline) =
   case traversable1
   of traversableDict @t1
+       (domain1 : (a : bare) -> Repr a -> t1 a -> Writer (shape t1))
        (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
        (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
   case traversable2
   of traversableDict @t2
+       (domain2 : (a : bare) -> Repr a -> t2 a -> Writer (shape t2))
        (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
        (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
   case traversable3
   of traversableDict @t3
+       (domain3 : (a : bare) -> Repr a -> t3 a -> Writer (shape t3))
        (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
        (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
   let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
@@ -2369,6 +2383,7 @@ fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -2416,18 +2431,22 @@ fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
   attribute(inline) =
   case traversable1
   of traversableDict @t1
+       (domain1 : (a : bare) -> Repr a -> t1 a -> Writer (shape t1))
        (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
        (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
   case traversable2
   of traversableDict @t2
+       (domain2 : (a : bare) -> Repr a -> t2 a -> Writer (shape t2))
        (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
        (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
   case traversable3
   of traversableDict @t3
+       (domain3 : (a : bare) -> Repr a -> t3 a -> Writer (shape t3))
        (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
        (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
   case traversable4
   of traversableDict @t4
+       (domain4 : (a : bare) -> Repr a -> t4 a -> Writer (shape t4))
        (traverse4 : (a : bare) -> Repr a -> t4 a -> Stream (shape t4) a)
        (build4 : (a : bare) -> Repr a -> Stream (shape t4) a -> Writer (t4 a)).
   let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
@@ -2445,6 +2464,7 @@ fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -2649,6 +2669,7 @@ histogram @(sh : bare)
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
+    (shape_indices : sh -> Stream sh (index sh))
     (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
@@ -3648,6 +3669,150 @@ stencil2D @(t : bare -> bare) @(a b : bare)
               (init_array center_origin_y right_origin_x center_height right_boundary_size safe_get ret_array)))
             (toEffTok @out_array -- Center region
              (init_array center_origin_y center_origin_x center_height center_width unsafe_get ret_array)))))));
+
+
+extend2D @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (is_2d : coerce @box (BoxedType (shape t)) (Boxed dim2))
+  (repr : Repr a)
+  (low_bound : index (shape t))
+  (hi_bound : index (shape t))
+  (inp : t a)
+  -> view2 a =
+
+  let type Sint = Stored int in
+
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer (shape t)).
+  
+  -- Get the bounds of the output data
+  case coerce @(index (shape t)) @(index dim2) low_bound of
+    pyonTuple2 @Sint @Sint (s_ylo : Sint) (s_xlo : Sint).
+  case s_ylo of stored @int (ylo : int).
+  case s_xlo of stored @int (xlo : int).
+
+  case coerce @(index (shape t)) @(index dim2) low_bound of
+    pyonTuple2 @Sint @Sint (s_yhi : Sint) (s_xhi : Sint).
+  case s_yhi of stored @int (yhi : int).
+  case s_xhi of stored @int (xhi : int).
+
+  -- Lower bound must be less than upper bound
+  if or (ylo ># yhi) (xlo ># xhi)
+  then except @(view2 a)
+  else
+
+  -- Inspect the input data
+  case boxed @(shape t) (get_shape @a inp) of boxed @(shape t) (shp : shape t).
+  case coerce @(shape t) @dim2 shp of
+    mk_dim2
+    @(Mlo Mhi Nlo Nhi : intindex)
+    (inp_ymin : IInt Mlo)
+    (inp_yend : IInt Mhi)
+    (inp_xmin : IInt Nlo)
+    (inp_xend : IInt Nhi).
+    case fromIndInt @Mlo inp_ymin of
+      fiInt @Mlo (inp_ymin_i : int).
+    case fromIndInt @Nlo inp_xmin of
+      fiInt @Nlo (inp_xmin_i : int).
+    case fromIndInt @Mhi inp_yend of
+      fiInt @Mhi (inp_yend_i : int).
+    case fromIndInt @Nhi inp_xend of
+      fiInt @Nhi (inp_xend_i : int).
+
+  -- Input must be nonempty
+  if or (inp_ymin_i >=# inp_yend_i) (inp_xmin_i >=# inp_xend_i)
+  then except @(view2 a)
+  else
+
+  -- Create the output view
+  case defineIntIndex ylo of someIInt @(Mlo : intindex) (f_ylo : FIInt Mlo).
+  case defineIntIndex yhi of someIInt @(Mhi : intindex) (f_yhi : FIInt Mhi).
+  case defineIntIndex xlo of someIInt @(Nlo : intindex) (f_xlo : FIInt Nlo).
+  case defineIntIndex xhi of someIInt @(Nhi : intindex) (f_xhi : FIInt Nhi).
+  mk_view2 @a @Mlo @Mhi @Nlo @Nhi (iInt @Mlo f_ylo) (iInt @Mhi f_yhi)
+  (iInt @Nlo f_xlo) (iInt @Nhi f_xhi)
+  (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+     -- Coerce indices to the nearest in-range part of the input object
+     let real_y : int =
+           if y <# inp_ymin_i then inp_ymin_i else
+           if y >=# inp_yend_i then inp_yend_i -# 1 else
+           y in
+     let real_x : int =
+           if x <# inp_xmin_i then inp_xmin_i else
+           if x >=# inp_xend_i then inp_xend_i -# 1 else
+           x in
+
+     -- Create an index
+     case boxed @(PyonTuple2 Sint Sint)
+          (pyonTuple2 @Sint @Sint (stored @int real_y) (stored @int real_x)) of
+       boxed @(PyonTuple2 Sint Sint) (ix : index dim2).
+     at_index @a repr inp (coerce @(index dim2) @(index (shape t)) ix) ret);
+
+
+shift2D @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (is_2d : coerce @box (BoxedType (shape t)) (Boxed dim2))
+  (repr : Repr a)
+  (offset : index (shape t))
+  (inp : t a)
+  -> view2 a =
+
+  let type Sint = Stored int in
+
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer (shape t)).
+  
+  -- Get the offset to use
+  case coerce @(index (shape t)) @(index dim2) offset of
+    pyonTuple2 @Sint @Sint (s_y_off : Sint) (s_x_off : Sint).
+  case s_y_off of stored @int (y_off : int).
+  case s_x_off of stored @int (x_off : int).
+  case defineIntIndex y_off of
+    someIInt @(Mdelta : intindex) (md : FIInt Mdelta).
+  let mdi : IInt Mdelta = iInt @Mdelta md in
+  case defineIntIndex x_off of
+    someIInt @(Ndelta : intindex) (nd : FIInt Ndelta).
+  let ndi : IInt Ndelta = iInt @Ndelta nd in
+
+  -- Inspect the input data
+  case boxed @(shape t) (get_shape @a inp) of boxed @(shape t) (shp : shape t).
+  case coerce @(shape t) @dim2 shp of
+    mk_dim2
+    @(Mlo Mhi Nlo Nhi : intindex)
+    (inp_ymin : IInt Mlo)
+    (inp_yend : IInt Mhi)
+    (inp_xmin : IInt Nlo)
+    (inp_xend : IInt Nhi).
+    case fromIndInt @Mlo inp_ymin of
+      fiInt @Mlo (inp_ymin_i : int).
+    case fromIndInt @Nlo inp_xmin of
+      fiInt @Nlo (inp_xmin_i : int).
+    case fromIndInt @Mhi inp_yend of
+      fiInt @Mhi (inp_yend_i : int).
+    case fromIndInt @Nhi inp_xend of
+      fiInt @Nhi (inp_xend_i : int).
+
+  -- Create the output view
+  mk_view2 @a @(plus_i Mlo Mdelta) @(plus_i Mhi Mdelta)
+  @(plus_i Nlo Ndelta) @(plus_i Nhi Ndelta)
+  (plus_ii @Mlo @Mdelta inp_ymin mdi)
+  (plus_ii @Mhi @Mdelta inp_yend mdi)
+  (plus_ii @Nlo @Ndelta inp_xmin ndi)
+  (plus_ii @Nhi @Ndelta inp_xend ndi)
+  (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+     -- Subtract the shift to get the original offset
+     let real_y : int = y -# y_off in
+     let real_x : int = x -# x_off in
+
+     -- Create an index
+     case boxed @(PyonTuple2 Sint Sint)
+          (pyonTuple2 @Sint @Sint (stored @int real_y) (stored @int real_x)) of
+       boxed @(PyonTuple2 Sint Sint) (ix : index dim2).
+     at_index @a repr inp (coerce @(index dim2) @(index (shape t)) ix) ret);
 
 -------------------------------------------------------------------------------
 -- Loops
