@@ -325,6 +325,9 @@ pyonBuiltinVariableNames =
   , "VectorDict_Complex_magnitude"
   , "VectorDict_Complex_dot"
 
+    -- Constructor-like functions
+  , "create_view2"
+
     -- Pseudo-dictionary methods inserted by optimizations
   , "arr1D_build"
   , "arr1D_traverse"

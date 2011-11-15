@@ -16,7 +16,7 @@ import Untyped.Syntax
 $(do d <- declareRecord tiBuiltinSpecification
      return [d])
 
-$(declareFieldReaders tiBuiltinSpecification "the")
+$(declareFieldReaders tiBuiltinSpecification "the_")
 
 tiBuiltin :: (TIBuiltins -> a) -> a
 tiBuiltin f = unsafePerformIO $ do
@@ -31,17 +31,17 @@ the_TIBuiltins :: MVar TIBuiltins
 the_TIBuiltins = unsafePerformIO newEmptyMVar
 
 builtinTypes :: [TyCon]
-builtinTypes = $(listE [[| tiBuiltin $(varE $ mkName ("_con_" ++ name)) |] 
+builtinTypes = $(listE [[| tiBuiltin $(varE $ mkName ("con_" ++ name)) |] 
                        | name <- pyonSourceTypes ])
                
 builtinGlobals :: [Variable]
-builtinGlobals = $(listE [[| tiBuiltin $(varE $ mkName ('_':name)) |] 
+builtinGlobals = $(listE [[| tiBuiltin $(varE $ mkName ('v':'_':name)) |] 
                          | name <- pyonSourceGlobals ])
 
 -- | The set of all built-in global variables, including those that cannot
 -- be referenced directly in source code
 allBuiltinGlobals :: [Variable]
-allBuiltinGlobals = $(listE [[| tiBuiltin $(varE $ mkName ('_':name)) |] 
+allBuiltinGlobals = $(listE [[| tiBuiltin $(varE $ mkName ('v':'_':name)) |] 
                          | name <- pyonSourceGlobals ++ pyonOtherGlobals ])
 
 -- | Predefined names that may be referenced in source code.

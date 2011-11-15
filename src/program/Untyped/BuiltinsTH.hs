@@ -48,6 +48,7 @@ pyonSourceGlobals =
   , "rows"
   , "cols"
   , "outerproduct"
+  , "view2"
   , "stencil2D"
   , "extend2D"
   , "shift2D"
@@ -121,12 +122,12 @@ pyonClasses =
 tiBuiltinSpecification =
   recordDef "TIBuiltins" fields
   where
-    fields = [('_':name, IsStrict, [t| Type.Var.Var |])
+    fields = [('t':'_':name, IsStrict, [t| Type.Var.Var |])
              | name <- pyonSourceTypes ++ pyonOtherTypes] ++ 
-             [("_con_" ++ name, IsStrict, [t| TyCon |])
+             [("con_" ++ name, IsStrict, [t| TyCon |])
              | name <- pyonSourceTypes ++ pyonOtherTypes] ++
-             [('_':name, NotStrict, [t| Variable |])
+             [('v':'_':name, NotStrict, [t| Variable |])
              | name <- pyonSourceGlobals ++ pyonOtherGlobals] ++
-             [('_':name, IsStrict, [t| Class |])
+             [('c':'_':name, IsStrict, [t| Class |])
              | name <- pyonClasses]
 

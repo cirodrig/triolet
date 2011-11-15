@@ -155,7 +155,7 @@ requirePredicate p = require [p]
 -- | Require the given type to have a parameter-passing convention
 requirePassable :: HMType -> Inf ()
 requirePassable ty = do 
-  require [ty `IsInst` tiBuiltin the_Repr]
+  require [ty `IsInst` tiBuiltin the_c_Repr]
 
 -- | For debugging, print a constraint
 printContext s c | null c = return ()
@@ -202,7 +202,7 @@ instantiateVariable pos v = Inf $ \env ->
          instantiateTypeAssignment pos ass
          
        -- There must be a parameter passing convention for this type
-       let cst = ty `IsInst` tiBuiltin the_Repr
+       let cst = ty `IsInst` tiBuiltin the_c_Repr
 
        -- For debugging, show the instantiation that occurred
        -- printContext ("instantiate " ++ maybe "" showLabel (varName v)) (cst : constraint)

@@ -210,16 +210,16 @@ doExpr expr =
            l' = case l
                 of IntLit n ->
                      -- Generate a call to 'fromInt' to cast to any valid value
-                     let oper = tiBuiltin the___fromint__
+                     let oper = tiBuiltin the_v___fromint__
                      in callVariable pos oper [make_literal (U.IntL n)]
                    FloatLit f ->
                      -- Generate a call to 'fromFloat' to cast to any valid value
-                     let oper = tiBuiltin the___fromfloat__
+                     let oper = tiBuiltin the_v___fromfloat__
                      in callVariable pos oper [make_literal (U.FloatL f)]
                    ImaginaryLit d ->
                      -- Generate a call to 'makeComplex' and 'fromFloat'
-                     let oper1 = tiBuiltin the___fromfloat__
-                         oper2 = tiBuiltin the_complex
+                     let oper1 = tiBuiltin the_v___fromfloat__
+                         oper2 = tiBuiltin the_v_complex
                          real = callVariable pos oper1 [make_literal (U.FloatL 0)]
                          imag = callVariable pos oper1 [make_literal (U.FloatL d)]
                      in callVariable pos oper2 [real, imag]
@@ -242,7 +242,7 @@ doExpr expr =
        doSlicing pos base slices
      ListComp pos iter -> do
        iter' <- doIterator iter
-       return $ callVariable pos (tiBuiltin the___build__) [iter']
+       return $ callVariable pos (tiBuiltin the_v___build__) [iter']
      Generator pos iter -> do
        doIterator iter
      Call pos op args -> do
@@ -273,7 +273,7 @@ doSubscripting pos base indices = do
         of [i] -> i
            [i, j] -> U.TupleE (U.Ann pos) [i, j]
            _ -> error "Only 1- or 2-dimensional array subscripts are allowed"
-  return $ callVariable pos (tiBuiltin the_safeIndex) [base', index_value]
+  return $ callVariable pos (tiBuiltin the_v_safeIndex) [base', index_value]
 
 doSlicing pos base slices = do
   base' <- doExpr base
@@ -283,33 +283,33 @@ doSlicing pos base slices = do
           [s] -> s
           [s1, s2] ->
             U.TupleE (U.Ann pos) [s1, s2]
-  return $ callVariable pos (tiBuiltin the_safeSlice) [base', slice_value]
+  return $ callVariable pos (tiBuiltin the_v_safeSlice) [base', slice_value]
 
 doSlice (SliceSlice pos l u s) = do
   l' <- translate_maybe doExpr l
   u' <- translate_maybe doExpr u
   s' <- translate_maybe (translate_maybe doExpr) s
-  return $ callVariable pos (tiBuiltin the_sliceObject) [l', u', s']
+  return $ callVariable pos (tiBuiltin the_v_sliceObject) [l', u', s']
   where
     translate_maybe :: (a -> Cvt U.Expression) -> Maybe a -> Cvt U.Expression
     translate_maybe do_just (Just x) = do
       x' <- do_just x
-      return $ callVariable pos (tiBuiltin the_justVal) [x']
+      return $ callVariable pos (tiBuiltin the_v_justVal) [x']
     
     translate_maybe _ Nothing =
-      return $ U.VariableE (U.Ann pos) (tiBuiltin the_nothingVal)
+      return $ U.VariableE (U.Ann pos) (tiBuiltin the_v_nothingVal)
 
 doSlice (ExprSlice e) = do
   e' <- doExpr e
   let one = U.LiteralE (U.Ann noSourcePos) (U.IntL 1)
-      u = callVariable (noSourcePos) (tiBuiltin the___add__) [e', one]
-      stride = U.VariableE (U.Ann noSourcePos) (tiBuiltin the_nothingVal)
-  return $ callVariable noSourcePos (tiBuiltin the_sliceObject) [e', u, stride]
+      u = callVariable (noSourcePos) (tiBuiltin the_v___add__) [e', one]
+      stride = U.VariableE (U.Ann noSourcePos) (tiBuiltin the_v_nothingVal)
+  return $ callVariable noSourcePos (tiBuiltin the_v_sliceObject) [e', u, stride]
 
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do
   dom' <- doExpr dom
-  let iterator = callVariable pos (tiBuiltin the___iter__) [dom']
+  let iterator = callVariable pos (tiBuiltin the_v___iter__) [dom']
   convertParameters params $ \[param'] ->
     case body
     of CompBody simple_body -> do
@@ -320,14 +320,14 @@ doIterator (IterFor pos params dom body) = do
          body_expr <- doExpr simple_body
          let body_fun =
                U.Function (U.Ann pos) Nothing [param'] Nothing body_expr
-         return $ callVariable pos (tiBuiltin the_map)
+         return $ callVariable pos (tiBuiltin the_v_map)
            [U.FunE (U.Ann pos) body_fun, iterator]
          
        _ -> do
          -- Convert "FOO for x in BAR" to bind(bar, lambda x. FOO)
          body' <- doComprehension body 
          let body_fun = U.Function (U.Ann pos) Nothing [param'] Nothing body'
-         return $ callVariable pos (tiBuiltin the_iterBind)
+         return $ callVariable pos (tiBuiltin the_v_iterBind)
            [iterator, U.FunE (U.Ann pos) body_fun]
 
 doGuard :: SSAIterIf Expr -> Cvt U.Expression
@@ -335,13 +335,13 @@ doGuard (IterIf pos cond body) = do
   -- Convert "FOO if BAR" to guard(BAR, FOO)
   cond' <- doExpr cond
   body' <- doComprehension body
-  return $ callVariable pos (tiBuiltin the_guard) [cond', body']
+  return $ callVariable pos (tiBuiltin the_v_guard) [cond', body']
 
 doComprehension (CompFor iter) = doIterator iter
 doComprehension (CompIf iter) = doGuard iter
 doComprehension (CompBody e) = do
   e' <- doExpr e
-  return $ callVariable noSourcePos (tiBuiltin the_do) [e']
+  return $ callVariable noSourcePos (tiBuiltin the_v_do) [e']
 
 doSuite :: [SSAStmt]
         -> ([U.Expression] -> Cvt U.Expression)
@@ -500,27 +500,27 @@ callVariable pos op args =
 
 convertUnaryOperator op = 
   case op
-  of Python.Minus {} -> tiBuiltin the___negate__
+  of Python.Minus {} -> tiBuiltin the_v___negate__
      _ -> internalError "convertUnaryOperator: Unrecognized operator"
 
 convertBinaryOperator op =
   case op
-  of Python.Exponent {}          -> tiBuiltin the___power__
-     Python.LessThan {}          -> tiBuiltin the___lt__
-     Python.GreaterThan {}       -> tiBuiltin the___gt__
-     Python.Equality {}          -> tiBuiltin the___eq__
-     Python.GreaterThanEquals {} -> tiBuiltin the___ge__
-     Python.LessThanEquals {}    -> tiBuiltin the___le__
-     Python.NotEquals {}         -> tiBuiltin the___ne__
-     Python.Xor {}               -> tiBuiltin the___xor__
-     Python.BinaryAnd {}         -> tiBuiltin the___and__
-     Python.BinaryOr {}          -> tiBuiltin the___or__
-     Python.Multiply {}          -> tiBuiltin the___mul__
-     Python.Plus {}              -> tiBuiltin the___add__
-     Python.Minus {}             -> tiBuiltin the___sub__
-     Python.Divide {}            -> tiBuiltin the___div__
-     Python.FloorDivide {}       -> tiBuiltin the___floordiv__
-     Python.Modulo {}            -> tiBuiltin the___mod__
+  of Python.Exponent {}          -> tiBuiltin the_v___power__
+     Python.LessThan {}          -> tiBuiltin the_v___lt__
+     Python.GreaterThan {}       -> tiBuiltin the_v___gt__
+     Python.Equality {}          -> tiBuiltin the_v___eq__
+     Python.GreaterThanEquals {} -> tiBuiltin the_v___ge__
+     Python.LessThanEquals {}    -> tiBuiltin the_v___le__
+     Python.NotEquals {}         -> tiBuiltin the_v___ne__
+     Python.Xor {}               -> tiBuiltin the_v___xor__
+     Python.BinaryAnd {}         -> tiBuiltin the_v___and__
+     Python.BinaryOr {}          -> tiBuiltin the_v___or__
+     Python.Multiply {}          -> tiBuiltin the_v___mul__
+     Python.Plus {}              -> tiBuiltin the_v___add__
+     Python.Minus {}             -> tiBuiltin the_v___sub__
+     Python.Divide {}            -> tiBuiltin the_v___div__
+     Python.FloorDivide {}       -> tiBuiltin the_v___floordiv__
+     Python.Modulo {}            -> tiBuiltin the_v___mod__
      _ -> internalError "convertBinaryOperator: Unrecognized operator"
 
 convertModule :: Module SSAID -> Cvt U.Module

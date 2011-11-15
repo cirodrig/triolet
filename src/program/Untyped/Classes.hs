@@ -544,7 +544,7 @@ splitConstraint cst fvars qvars = do
     
     -- Check if the dependent variable can be fixed using defaulting rules
     isDefaultable (IsInst head cls) =
-      cls == tiBuiltin the_Traversable
+      cls == tiBuiltin the_c_Traversable
     
     isDefaultable (IsEqual _ _) = False
 
@@ -574,7 +574,7 @@ splitConstraint cst fvars qvars = do
 defaultConstraint cst =
   case cst
   of IsInst head cls
-       | cls == tiBuiltin the_Traversable -> do
+       | cls == tiBuiltin the_c_Traversable -> do
            can_head <- canonicalizeHead head
            case can_head of
              ConTy c

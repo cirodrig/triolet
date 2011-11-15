@@ -269,7 +269,7 @@ mkOrdClass = do
   rec { a <- newTyVar Star Nothing
         ; let compareScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy $ tiBuiltin the_con_bool)
 
-        ; let cls = mkClass "Ord" a [ConTy a `IsInst` tiBuiltin the_Eq]
+        ; let cls = mkClass "Ord" a [ConTy a `IsInst` tiBuiltin the_c_Eq]
                     (pyonBuiltin SystemF.The_OrdDict)
                     (pyonBuiltin SystemF.The_ordDict)
                     [lt, le, gt, ge]
@@ -441,7 +441,7 @@ mkShapeClass = do
     let tT = ConTy t
         aT = ConTy a
     in ([shapeType tT `IsEqual` ConTy sh,
-         tT `IsInst` tiBuiltin the_Indexable,
+         tT `IsInst` tiBuiltin the_c_Indexable,
          passable aT],
         functionType [slice_type]
         (TFunAppTy (tiBuiltin the_con_view) [ConTy sh] @@ aT))
@@ -637,7 +637,7 @@ mkMultiplicativeClass = do
   ; let binScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy a)
         fromIntScheme = monomorphic $
                         functionType [ConTy (tiBuiltin the_con_int)] (ConTy a)
-  ; let cls = mkClass "Multiplicative" a [ConTy a `IsInst` tiBuiltin the_Additive]
+  ; let cls = mkClass "Multiplicative" a [ConTy a `IsInst` tiBuiltin the_c_Additive]
               (pyonBuiltin SystemF.The_MultiplicativeDict)
               (pyonBuiltin SystemF.The_multiplicativeDict)
               [times, fromInt, one]
@@ -724,8 +724,8 @@ mkFloatingClass = do
       b <- newTyVar Star Nothing
       let complex_instance =
              polyInstance [b]
-             [ConTy b `IsInst` tiBuiltin the_Multiplicative,
-              ConTy b `IsInst` tiBuiltin the_Fractional,
+             [ConTy b `IsInst` tiBuiltin the_c_Multiplicative,
+              ConTy b `IsInst` tiBuiltin the_c_Fractional,
               ConTy b `IsInst` cls]
              cls
              (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
@@ -760,7 +760,7 @@ mkVectorClass = do
                       functionType [ConTy a, ConTy a] float_type
 
       let cls =
-            mkClass "Vector" a [ConTy a `IsInst` tiBuiltin the_Additive]
+            mkClass "Vector" a [ConTy a `IsInst` tiBuiltin the_c_Additive]
             (pyonBuiltin SystemF.The_VectorDict)
             (pyonBuiltin SystemF.The_vectorDict)
             [scale, magnitude, dot]
@@ -800,7 +800,7 @@ mkRemainderClass = do
       remScheme = monomorphic $
                   functionType [ConTy a, ConTy a] (ConTy a)
   rec let cls =
-            mkClass "Remainder" a [ConTy a `IsInst` tiBuiltin the_Multiplicative]
+            mkClass "Remainder" a [ConTy a `IsInst` tiBuiltin the_c_Multiplicative]
             (pyonBuiltin SystemF.The_RemainderDict)
             (pyonBuiltin SystemF.The_remainderDict)
             [divide, remainder]
@@ -829,7 +829,7 @@ mkFractionalClass = do
   let divScheme = monomorphic $
                   functionType [ConTy a, ConTy a] (ConTy a)
   rec let cls =
-            mkClass "Fractional" a [ConTy a `IsInst` tiBuiltin the_Multiplicative]
+            mkClass "Fractional" a [ConTy a `IsInst` tiBuiltin the_c_Multiplicative]
             (pyonBuiltin SystemF.The_FractionalDict)
             (pyonBuiltin SystemF.The_fractionalDict)
             [divide]
@@ -955,14 +955,14 @@ mkPassableClass = do
 -------------------------------------------------------------------------------
 -- Global function initialization
 
-passable t = t `IsInst` tiBuiltin the_Repr
+passable t = t `IsInst` tiBuiltin the_c_Repr
 
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
-  in ([ tT `IsInst` tiBuiltin the_Traversable
-      , shapeType tT `IsInst` tiBuiltin the_Shape
+  in ([ tT `IsInst` tiBuiltin the_c_Traversable
+      , shapeType tT `IsInst` tiBuiltin the_c_Shape
       , passable aT
       , passable bT
       ],
@@ -971,16 +971,16 @@ mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
 mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
-  in ([tT `IsInst` tiBuiltin the_Traversable
-      , shapeType tT `IsInst` tiBuiltin the_Shape
+  in ([tT `IsInst` tiBuiltin the_c_Traversable
+      , shapeType tT `IsInst` tiBuiltin the_c_Shape
       , passable aT],
       functionType [functionType [aT, aT] aT, aT, tT @@ aT] aT)
 
 mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
-  in ([tT `IsInst` tiBuiltin the_Traversable
-      , shapeType tT `IsInst` tiBuiltin the_Shape
+  in ([tT `IsInst` tiBuiltin the_c_Traversable
+      , shapeType tT `IsInst` tiBuiltin the_c_Shape
       , passable aT],
       functionType [functionType [aT, aT] aT, tT @@ aT] aT)
 
@@ -993,10 +993,10 @@ mkZipType =
       t2T = ConTy t2
       aT = ConTy a
       bT = ConTy b
-  in ([ t1T `IsInst` tiBuiltin the_Traversable
-      , t2T `IsInst` tiBuiltin the_Traversable
+  in ([ t1T `IsInst` tiBuiltin the_c_Traversable
+      , t2T `IsInst` tiBuiltin the_c_Traversable
       , shapeType t1T `IsEqual` shapeType t2T
-      , shapeType t1T `IsInst` tiBuiltin the_Shape
+      , shapeType t1T `IsInst` tiBuiltin the_c_Shape
       , passable aT
       , passable bT]
      , functionType [t1T @@ aT, t2T @@ bT]
@@ -1015,12 +1015,12 @@ mkZip3Type =
       aT = ConTy a
       bT = ConTy b
       cT = ConTy c
-  in ([ t1T `IsInst` tiBuiltin the_Traversable
-      , t2T `IsInst` tiBuiltin the_Traversable
-      , t3T `IsInst` tiBuiltin the_Traversable
+  in ([ t1T `IsInst` tiBuiltin the_c_Traversable
+      , t2T `IsInst` tiBuiltin the_c_Traversable
+      , t3T `IsInst` tiBuiltin the_c_Traversable
       , shapeType t1T `IsEqual` shapeType t2T
       , shapeType t2T `IsEqual` shapeType t3T
-      , shapeType t1T `IsInst` tiBuiltin the_Shape
+      , shapeType t1T `IsInst` tiBuiltin the_c_Shape
       , passable aT
       , passable bT
       , passable cT]
@@ -1044,14 +1044,14 @@ mkZip4Type =
       bT = ConTy b
       cT = ConTy c
       dT = ConTy d
-  in ([ t1T `IsInst` tiBuiltin the_Traversable
-      , t2T `IsInst` tiBuiltin the_Traversable
-      , t3T `IsInst` tiBuiltin the_Traversable
-      , t4T `IsInst` tiBuiltin the_Traversable
+  in ([ t1T `IsInst` tiBuiltin the_c_Traversable
+      , t2T `IsInst` tiBuiltin the_c_Traversable
+      , t3T `IsInst` tiBuiltin the_c_Traversable
+      , t4T `IsInst` tiBuiltin the_c_Traversable
       , shapeType t1T `IsEqual` shapeType t2T
       , shapeType t2T `IsEqual` shapeType t3T
       , shapeType t3T `IsEqual` shapeType t4T
-      , shapeType t1T `IsInst` tiBuiltin the_Shape
+      , shapeType t1T `IsInst` tiBuiltin the_c_Shape
       , passable aT
       , passable bT
       , passable cT
@@ -1074,7 +1074,7 @@ mkLenType =
       aT = ConTy a
       int_type = ConTy $ tiBuiltin the_con_int
   in ([shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim1), 
-       tT `IsInst` tiBuiltin the_Indexable],
+       tT `IsInst` tiBuiltin the_c_Indexable],
       functionType [tT @@ aT] int_type)
 
 mkWidthHeightType =
@@ -1083,7 +1083,7 @@ mkWidthHeightType =
       aT = ConTy a
       int_type = ConTy $ tiBuiltin the_con_int
   in ([shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
-       tT `IsInst` tiBuiltin the_Indexable],
+       tT `IsInst` tiBuiltin the_c_Indexable],
       functionType [tT @@ aT] int_type)
 
 mkOuterProductType =
@@ -1097,13 +1097,22 @@ mkOuterProductType =
                     iterType (ConTy $ tiBuiltin the_con_list) bT]
       (iterType (ConTy $ tiBuiltin the_con_array2) cT))
 
+mkView2Type =
+  forallType [Star] $ \[a] ->
+  let aT = ConTy a
+      int_type = ConTy $ tiBuiltin the_con_int
+      ints_type = TupleTy 2 @@ int_type @@ int_type
+  in ([passable aT],
+      functionType [ints_type, ints_type, functionType [ints_type] aT]
+      (ConTy (tiBuiltin the_con_view2) @@ aT))
+
 mkStencil2DType =
   forallType [Star :-> Star, Star, Star] $ \[t, a, b] ->
   let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
       int_type = ConTy $ tiBuiltin the_con_int
-  in ([tT `IsInst` tiBuiltin the_Indexable,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable,
        shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
        passable aT, passable bT],
       functionType [int_type, int_type, int_type, int_type,
@@ -1123,7 +1132,7 @@ mkShift2DType =
       aT = ConTy a
       int_type = ConTy $ tiBuiltin the_con_int
       int2_type = TupleTy 2 @@ int_type @@ int_type
-  in ([tT `IsInst` tiBuiltin the_Indexable,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable,
        shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
        passable aT],
       functionType [int2_type, tT @@ aT]
@@ -1135,7 +1144,7 @@ mkExtend2DType =
       aT = ConTy a
       int_type = ConTy $ tiBuiltin the_con_int
       int2_type = TupleTy 2 @@ int_type @@ int_type
-  in ([tT `IsInst` tiBuiltin the_Indexable,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable,
        shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
        passable aT],
       functionType [int2_type, int2_type, tT @@ aT]
@@ -1146,7 +1155,7 @@ mkRowsColsType =
   let tT = ConTy t
       aT = ConTy a
       listview a = ConTy (tiBuiltin the_con_view1) @@ a
-  in ([tT `IsInst` tiBuiltin the_Indexable,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable,
        shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
        passable aT],
       functionType [tT @@ aT] (listview $ listview aT))
@@ -1156,8 +1165,8 @@ mkSafeIndexType =
   let tT = ConTy t
       aT = ConTy a
       index_type = TFunAppTy (tiBuiltin the_con_index) [shapeType tT]
-  in ([tT `IsInst` tiBuiltin the_Indexable,
-       shapeType tT `IsInst` tiBuiltin the_Shape,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable,
+       shapeType tT `IsInst` tiBuiltin the_c_Shape,
        passable aT], functionType [tT @@ aT, index_type] aT)
 
 mkSafeSliceType =
@@ -1168,8 +1177,8 @@ mkSafeSliceType =
       t_shape = TFunAppTy (tiBuiltin the_con_shape) [ConTy t]
       slice_type = TFunAppTy (tiBuiltin the_con_slice) [t_shape]
       view_type = TFunAppTy (tiBuiltin the_con_view) [t_shape]
-  in ([tT `IsInst` tiBuiltin the_Indexable,
-       shapeType tT `IsInst` tiBuiltin the_Shape,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable,
+       shapeType tT `IsInst` tiBuiltin the_c_Shape,
        passable aT], functionType [tT @@ aT, slice_type]
                      (view_type @@ aT))
 
@@ -1179,7 +1188,7 @@ mkSafeIndex2Type =
   let tT = ConTy t
       aT = ConTy a
       int_type = ConTy $ tiBuiltin the_con_int
-  in ([tT `IsInst` tiBuiltin the_Indexable2,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable2,
        passable aT], functionType [tT @@ aT, int_type, int_type] aT)
 
 mkSafeSlice2Type =
@@ -1187,7 +1196,7 @@ mkSafeSlice2Type =
   let tT = ConTy t
       aT = ConTy a
       int_type = ConTy $ tiBuiltin the_con_int
-  in ([tT `IsInst` tiBuiltin the_Indexable2,
+  in ([tT `IsInst` tiBuiltin the_c_Indexable2,
        passable aT], functionType [tT @@ aT, int_type, int_type, int_type, int_type, int_type, int_type]
                      (ConTy (tiBuiltin the_con_view2) @@ aT))
 -}
@@ -1195,7 +1204,7 @@ mkSafeSlice2Type =
 mkHistogramType =
   forallType [Star] $ \[sh] ->
   let int_type = ConTy $ tiBuiltin the_con_int
-  in ([ConTy sh `IsInst` tiBuiltin the_Shape],
+  in ([ConTy sh `IsInst` tiBuiltin the_c_Shape],
       functionType [int_type, int_type,
                     ConTy (tiBuiltin the_con_iter) @@ ConTy sh @@ int_type]
       (ConTy (tiBuiltin the_con_array1) @@ int_type))
@@ -1231,7 +1240,7 @@ mkMapStreamType =
   let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
-  in ([shapeType tT `IsInst` tiBuiltin the_Shape,
+  in ([shapeType tT `IsInst` tiBuiltin the_c_Shape,
        passable aT, passable bT],
       functionType [functionType [aT] bT, iterType tT aT] (iterType tT bT))
 
@@ -1239,7 +1248,7 @@ mkListIterType =
   forallType [Star, Star] $ \[sh, a] ->
   let shT = ConTy sh
       aT = ConTy a
-  in ([shT `IsInst` tiBuiltin the_Shape],
+  in ([shT `IsInst` tiBuiltin the_c_Shape],
       functionType [ConTy (tiBuiltin the_con_iter) @@ shT @@ aT]
       (iterType (ConTy $ tiBuiltin the_con_list) aT))
 
@@ -1405,7 +1414,10 @@ initializeTIBuiltins = do
               ),
               ("outerproduct", [| mkOuterProductType |]
               , [| pyonBuiltin SystemF.The_outerproduct |]
-              ),              
+              ),
+              ("view2", [| mkView2Type |]
+              , [| pyonBuiltin SystemF.The_create_view2 |]
+              ),
               ("stencil2D", [| mkStencil2DType |]
               , [| pyonBuiltin SystemF.The_stencil2D |]
               ),              
@@ -1479,42 +1491,42 @@ initializeTIBuiltins = do
               )
             ]
           cls_members =
-            [ ([| the_Eq |], ["__eq__", "__ne__"])
-            , ([| the_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
-            , ([| the_Traversable |], ["domain", "__iter__", "__build__"])
-            , ([| the_Shape |], ["indices", "flattenStream", "mapStream", 
+            [ ([| the_c_Eq |], ["__eq__", "__ne__"])
+            , ([| the_c_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
+            , ([| the_c_Traversable |], ["domain", "__iter__", "__build__"])
+            , ([| the_c_Shape |], ["indices", "flattenStream", "mapStream", 
                                  "zipWithStream", "zipWith3Stream",
                                  "zipWith4Stream", "inRange", "getSlice"])
-            , ([| the_Indexable |], ["at_point", "get_shape"])
-            , ([| the_Additive |], ["__add__", "__sub__", "__negate__", "zero"])
-            , ([| the_Multiplicative |], ["__mul__", "__fromint__", "one"])
-            , ([| the_Remainder |], ["__floordiv__", "__mod__"])
-            , ([| the_Fractional |], ["__div__"])
-            , ([| the_Floating |], ["__fromfloat__", "__power__",
+            , ([| the_c_Indexable |], ["at_point", "get_shape"])
+            , ([| the_c_Additive |], ["__add__", "__sub__", "__negate__", "zero"])
+            , ([| the_c_Multiplicative |], ["__mul__", "__fromint__", "one"])
+            , ([| the_c_Remainder |], ["__floordiv__", "__mod__"])
+            , ([| the_c_Fractional |], ["__div__"])
+            , ([| the_c_Floating |], ["__fromfloat__", "__power__",
                                     "exp", "log", "sqrt",
                                     "sin", "cos", "tan", "pi"])
-            , ([| the_Vector |], ["scale", "magnitude", "dot"])
+            , ([| the_c_Vector |], ["scale", "magnitude", "dot"])
             ]
 
           -- Construct initializers
           typ_initializer (name, _, con) =
-            ('_':name, [| return $(con) |])
+            ('t':'_':name, [| return $(con) |])
           tycon_initializer (name, kind, con) =
-            ("_con_" ++ name, [| builtinTyCon name kind $(con) |])
+            ("con_" ++ name, [| builtinTyCon name kind $(con) |])
           tyfun_initializer (name, con, _) =
-            ('_':name, [| return $(con) |])
+            ('t':'_':name, [| return $(con) |])
           tyfun_con_initializer (name, _, mk_function) =
-            ("_con_" ++ name, mk_function)
+            ("con_" ++ name, mk_function)
           cls_initializer (name, mk) =
-            ('_':name, mk)
+            ('c':'_':name, mk)
           global_initializer (name, typ, con) =
-            ('_':name, [| mkGlobalVar name $(typ) $(con) |])
+            ('v':'_':name, [| mkGlobalVar name $(typ) $(con) |])
           datacon_initializer (name, typ, con) =
-            ('_':name, [| mkGlobalCon name $(typ) $(con) |])
+            ('v':'_':name, [| mkGlobalCon name $(typ) $(con) |])
           cls_member_initializer (cls, members) = zipWith mb members [0..]
             where
               mb member_name index =
-                ('_':member_name,
+                ('v':'_':member_name,
                  [| -- Verify the method's name
                     let v = clmVariable $
                             getClassMethod (tiBuiltin $(cls)) index
@@ -1537,7 +1549,7 @@ initializeTIBuiltins = do
 
 -- | Print the names and types of all built-in variables
 printTIBuiltinGlobals = do
-  forM_ $(TH.listE [TH.tupE [TH.varE $ TH.mkName $ '_':name, TH.litE (TH.stringL name)]
+  forM_ $(TH.listE [TH.tupE [TH.varE $ TH.mkName $ 'v':'_':name, TH.litE (TH.stringL name)]
                     | name <- pyonSourceGlobals]) $ \(x, name) -> do
     ass <- readMVar $ varTranslation $ tiBuiltin x
     putStrLn name
