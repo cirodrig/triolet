@@ -9,7 +9,8 @@
 -}
 
 {-# LANGUAGE FlexibleInstances, DoRec #-}
-module Parser.Parser(convertStatement, convertModule, parseModule)
+module Parser.Parser(Level(..),
+                     convertStatement, convertModule, parseModule)
 where
 
 import Prelude hiding(mapM, sequence)
@@ -39,6 +40,7 @@ import Export
 import Parser.ParserSyntax
 import {-# SOURCE #-} Parser.SSA
 
+import Common.Error
 import Common.SourcePos(SourcePos, fileSourcePos)
 
 toSourcePos :: Py.SrcSpan -> SourcePos
@@ -64,9 +66,35 @@ data Binding =
     }
     deriving(Show)
 
--- A map from variable names to bindings
-type Bindings = Map.Map String Binding
+type Namespace = Map.Map String Binding
 
+-- | There are separate namespaces for values, types, and kinds.
+--
+--   Bindings consist of a map from variable name to entity in each namespace.
+data Bindings =
+  Bindings
+  { valueBindings :: !Namespace
+  , typeBindings :: !Namespace
+  , kindBindings :: !Namespace
+  } deriving(Show)
+
+data Level = ValueLevel | TypeLevel | KindLevel
+
+emptyBindings = Bindings Map.empty Map.empty Map.empty
+
+bindingsAtLevel :: Level -> Bindings -> Namespace
+bindingsAtLevel ValueLevel = valueBindings
+bindingsAtLevel TypeLevel = typeBindings
+bindingsAtLevel KindLevel = kindBindings
+
+modifyBindingsAtLevel :: Level
+                      -> (Namespace -> Namespace)
+                      -> (Bindings -> Bindings)
+modifyBindingsAtLevel ValueLevel f b = b {valueBindings = f $ valueBindings b}
+modifyBindingsAtLevel TypeLevel f b = b {typeBindings = f $ typeBindings b}
+modifyBindingsAtLevel KindLevel f b = b {kindBindings = f $ kindBindings b}
+
+{-
 -- Given a binding and the set of nonlocal uses and defs, produce scope
 -- information for the variable.
 toScopeVar :: NameSet -> NameSet -> Binding -> Maybe ScopeVar
@@ -101,6 +129,7 @@ toGlobalScopeVar binding =
        Nonlocal _ -> Nothing      -- Error, will be reported if there are any
                                  -- defs or uses of the variable
        Global _   -> error "Unexpected 'global' declaration at global scope" 
+-}
 
 -- A name resolution scope.
 -- The value of 'finalMembers' is the value of 'currentMembers' after the
@@ -117,8 +146,46 @@ type Scopes = [Scope]
 emptyScope :: Scopes
 emptyScope = []
 
--- A set of variable names
 type NameSet = Set.Set String
+
+-- | The domain of a set of name bindings. 
+--   The domain consists of a set of names in each namespace.
+data BindingDomain =
+  BindingDomain
+  { valueDomain :: NameSet
+  , typeDomain :: NameSet
+  , kindDomain :: NameSet
+  }
+
+bdEmpty = BindingDomain Set.empty Set.empty Set.empty
+
+bdSingleton lv ident = bdInsert lv ident bdEmpty
+
+bdInsert ValueLevel id (BindingDomain v t k) =
+  BindingDomain (Set.insert id v) t k
+
+bdInsert TypeLevel id (BindingDomain v t k) =
+  BindingDomain v (Set.insert id t) k
+
+bdInsert KindLevel id (BindingDomain v t k) =
+  BindingDomain v t (Set.insert id k)
+
+bdUnion (BindingDomain v1 t1 k1) (BindingDomain v2 t2 k2) =
+  BindingDomain (Set.union v1 v2) (Set.union t1 t2) (Set.union k1 k2)
+
+BindingDomain v1 t1 k1 `bdDiff` BindingDomain v2 t2 k2 =
+  BindingDomain (v1 `Set.difference` v2) (t1 `Set.difference` t2) (k1 `Set.difference` k2)
+
+-- | Create a 'BindingDomain' that is a subset of the domain of a 'Bindings' 
+bindingDomain :: Bindings -> BindingDomain
+bindingDomain (Bindings v t k) =
+  BindingDomain (Map.keysSet v) (Map.keysSet t) (Map.keysSet k)
+
+filterBindingDomain :: (String -> Binding -> Bool) -> Bindings -> BindingDomain
+filterBindingDomain f (Bindings v t k) =
+  BindingDomain (transform v) (transform t) (transform k)
+  where
+    transform m = Set.fromList [k | (k, v) <- Map.toList m, f k v]
 
 -- | A Python variable with scope information.
 --
@@ -169,25 +236,25 @@ newtype Cvt a = Cvt {run :: CvtState -> IO (Cvt' a)}
 -- the free variable references that were def'd in the conversion,
 -- and a return value.
 data Cvt' a = OK { state       :: !CvtState
-                 , uses        :: NameSet
-                 , defs        :: NameSet
+                 , uses        :: !BindingDomain
+                 , defs        :: !BindingDomain
                  , returnValue :: a
                  }
             | Fail String
 
 -- Add some uses and defs to the output of a cvt step
-joinCvtResults :: NameSet -> NameSet -> Cvt a -> Cvt a
+joinCvtResults :: BindingDomain -> BindingDomain -> Cvt a -> Cvt a
 joinCvtResults u d m = Cvt $ \s -> do
   x <- run m s
   case x of
-    OK s' u2 d2 x    -> return $ OK s' (Set.union u u2) (Set.union d d2) x
+    OK s' u2 d2 x    -> return $ OK s' (bdUnion u u2) (bdUnion d d2) x
     failure@(Fail _) -> return failure
 
 ok :: CvtState -> a -> IO (Cvt' a)
-ok s x = return $ OK s Set.empty Set.empty x
+ok s x = return $ OK s bdEmpty bdEmpty x
 
 instance Monad Cvt where
-    return x = Cvt $ \s -> return $ OK s Set.empty Set.empty x
+    return x = Cvt $ \s -> return $ OK s bdEmpty bdEmpty x
     fail msg = Cvt $ \_ -> return $ Fail msg
     m >>= k  = Cvt $ \s -> do
       x <- run m s
@@ -222,22 +289,18 @@ enter_ isGlobalScope m = Cvt $ \initialState -> do
                   let (final, finalState') = removeNewScope finalState
                   in (final, localUses, localDefs, Right (finalState', x))
                 Fail str ->
-                  (Map.empty, Set.empty, Set.empty, Left str)
+                  (emptyBindings, bdEmpty, bdEmpty, Left str)
 
   -- Nonlocal variables, plus uses that are not satisfied locally,
   -- propagate upward
-  ; let boundHere = Set.fromList $ mapMaybe localBindingName $ Map.elems final
-        usesNotBoundHere = Set.fromList $
-                           Map.keys $
-                           Map.filter isNonlocalUse final
-        defsNotBoundHere = Set.fromList $
-                           Map.keys $
-                           Map.filter isNonlocalDef final
-        nonlocalUses = Set.union
-                       (localUses `Set.difference` boundHere)
+  ; let boundHere = filterBindingDomain localBindingName final
+        usesNotBoundHere = filterBindingDomain isNonlocalUse final
+        defsNotBoundHere = filterBindingDomain isNonlocalDef final
+        nonlocalUses = bdUnion
+                       (localUses `bdDiff` boundHere)
                        usesNotBoundHere
-        nonlocalDefs = Set.union
-                       (localDefs `Set.difference` boundHere)
+        nonlocalDefs = bdUnion
+                       (localDefs `bdDiff` boundHere)
                        defsNotBoundHere }
   return $! case result
             of Right (finalState, resultValue) ->
@@ -247,7 +310,7 @@ enter_ isGlobalScope m = Cvt $ \initialState -> do
       -- Put a new scope on the stack.  The new scope contains the final value
       -- of its dictionary.
       addNewScope finalScope (S ms ns scopes errs) =
-          S ms ns (Scope finalScope Map.empty : scopes) errs
+          S ms ns (Scope finalScope emptyBindings : scopes) errs
 
       -- Remove the scope at the top of the stack.
       -- Save its final dictionary, which will be inserted when the scope was
@@ -255,15 +318,15 @@ enter_ isGlobalScope m = Cvt $ \initialState -> do
       removeNewScope (S ms ns (Scope _ finalScope : scopes) errs) =
           (finalScope, S ms ns scopes errs)
 
-      localBindingName (Local _ v) = Just $ varName v
-      localBindingName (Param _ v) = Just $ varName v
-      localBindingName _           = Nothing
+      localBindingName _ (Local _ v) = True
+      localBindingName _ (Param _ v) = True
+      localBindingName _ _           = False
 
-      isNonlocalUse (Nonlocal False) = True
-      isNonlocalUse _                = False
+      isNonlocalUse _ (Nonlocal False) = True
+      isNonlocalUse _ _                = False
 
-      isNonlocalDef (Nonlocal True) = True
-      isNonlocalDef _               = False
+      isNonlocalDef _ (Nonlocal True) = True
+      isNonlocalDef _ _               = False
 
 enter = enter_ False
 enterGlobal = enter_ True
@@ -314,13 +377,14 @@ newJoinNodeRef = Cvt $ \s -> do
 -- Low-level editing of bindings
 
 -- Look up a variable in the environment.  The result must be used lazily.
-lookupVar :: PyIdent -> Cvt PVar
-lookupVar name = withScopes $ \s -> lookup s
+lookupVar :: Level -> PyIdent -> Cvt PVar
+lookupVar lv name = withScopes $ \s -> lookup s
     where
-      lookup (s:ss) = case Map.lookup (identName name) $ finalMembers s
-                      of Just (Local _ v) -> (v, noError)
-                         Just (Param _ v) -> (v, noError)
-                         _                -> lookup ss
+      lookup (s:ss) =
+        case Map.lookup (identName name) $ bindingsAtLevel lv $ finalMembers s
+        of Just (Local _ v) -> (v, noError)
+           Just (Param _ v) -> (v, noError)
+           _                -> lookup ss
 
       lookup [] = (noVariable, oneError msg)
 
@@ -329,50 +393,51 @@ lookupVar name = withScopes $ \s -> lookup s
       noVariable = error "Invalid variable due to parse error"
 
 -- Look up a binding in the current, incomplete local scope.
-lookupCurrentLocalBinding :: PyIdent -> Cvt (Maybe Binding)
-lookupCurrentLocalBinding name =
+lookupCurrentLocalBinding :: Level -> PyIdent -> Cvt (Maybe Binding)
+lookupCurrentLocalBinding lv name =
     withScopes $ \s -> (lookup (head s), noError)
     where
-      lookup s = Map.lookup (identName name) $ currentMembers s
+      lookup s = Map.lookup (identName name) $ bindingsAtLevel lv $ currentMembers s
 
 -- Insert or modify a binding
-addLocalBinding :: PyIdent -> Binding -> Cvt ()
-addLocalBinding name binding =
+addLocalBinding :: Level -> PyIdent -> Binding -> Cvt ()
+addLocalBinding lv name binding =
     updateScopes $ \s -> (addBinding s, noError)
     where
       addBinding (s:ss) = addBindingToScope s : ss
 
       addBindingToScope s =
-        s {currentMembers = Map.insert (identName name) binding $
+        s {currentMembers = modifyBindingsAtLevel lv
+                            (Map.insert (identName name) binding) $
                             currentMembers s}
 
 -- | Put the given list of variables into the environment.  Use this function
 -- at global scope to initialize the global variables.
-defineGlobals :: [PVar] -> Cvt ()
+defineGlobals :: [(PVar, Level)] -> Cvt ()
 defineGlobals xs = mapM_ define_global xs
   where 
-    define_global v =
+    define_global (v, lv) =
       let binding = Local True v
-      in addLocalBinding (Py.Ident (varName v) Py.SpanEmpty) binding
+      in addLocalBinding lv (Py.Ident (varName v) Py.SpanEmpty) binding
 
 -- Indicate that a definition was seen
-signalDef :: PyIdent -> Cvt ()
-signalDef id = Cvt $ \s ->
-  return $ OK s Set.empty (Set.singleton $ identName id) ()
+signalDef :: Level -> PyIdent -> Cvt ()
+signalDef lv id = Cvt $ \s ->
+  return $ OK s bdEmpty (bdSingleton lv $ identName id) ()
 
 -- Indicate that a use was seen
-signalUse :: PyIdent -> Cvt ()
-signalUse id = Cvt $ \s ->
-  return $ OK s (Set.singleton $ identName id) Set.empty ()
+signalUse :: Level -> PyIdent -> Cvt ()
+signalUse lv id = Cvt $ \s ->
+  return $ OK s (bdSingleton lv $ identName id) bdEmpty ()
 
 -------------------------------------------------------------------------------
 -- High-level editing of bindings
 
 -- Record that a binding has a definition 
-markAsDefinition :: PyIdent -> Binding -> Cvt ()
-markAsDefinition name b
+markAsDefinition :: Level -> PyIdent -> Binding -> Cvt ()
+markAsDefinition lv name b
     | bIsDef b = return ()
-    | otherwise = addLocalBinding name (b {bIsDef = True})
+    | otherwise = addLocalBinding lv name (b {bIsDef = True})
 
 -- Create a new variable from an identifier.
 -- This is different from all other variables created by newVar.
@@ -381,69 +446,77 @@ newVar id = makeVar (identName id) <$> newID
 
 -- Process a definition of an identifier.  Return the corresponding variable,
 -- which must be used lazily.
-definition :: PyIdent -> Cvt PVar
-definition name = do
-  signalDef name
+definition :: Level -> PyIdent -> Cvt PVar
+definition lv name = do
+  signalDef lv name
   -- Insert a new binding if appropriate
-  mb <- lookupCurrentLocalBinding name
+  mb <- lookupCurrentLocalBinding lv name
   case mb of
-    Just b  -> markAsDefinition name b
+    Just b  -> markAsDefinition lv name b
     Nothing -> do v' <- newVar name
-                  addLocalBinding name (Local True v')
+                  addLocalBinding lv name (Local True v')
 
   -- Look up the actual binding for this variable.
   -- The binding that was inserted may not be the actual binding.
-  lookupVar name
+  lookupVar lv name
 
 -- Process a parameter definition.
 -- Unlike ordinary definitions, parameters cannot be redefined.
 -- Return the corresponding variable.
-parameterDefinition :: PyIdent -> Cvt PVar
-parameterDefinition name = do
-  signalDef name
-  mb <- lookupCurrentLocalBinding name
+parameterDefinition :: Level -> PyIdent -> Cvt PVar
+parameterDefinition lv name = do
+  signalDef lv name
+  mb <- lookupCurrentLocalBinding lv name
   case mb of
-    Just _  -> parameterRedefined name
+    Just _  -> parameterRedefined lv name
     Nothing -> do v <- newVar name
-                  addLocalBinding name (Param True v)
+                  addLocalBinding lv name (Param True v)
                   return v
 
-parameterRedefined :: PyIdent -> Cvt a
-parameterRedefined name =
-    let msg = "Parameter variable '" ++ identName name ++ "' redefined"
-    in fail msg
+parameterRedefined :: Level -> PyIdent -> Cvt a
+parameterRedefined lv name = fail msg
+  where
+    msg =
+      case lv
+      of ValueLevel ->
+           "Parameter variable '" ++ identName name ++ "' redefined"
+         TypeLevel ->
+           "Type parameter '" ++ identName name ++ "' redefined"
+         KindLevel ->
+           -- It should be impossible to define a kind variable
+           internalError "Kind parameters are not allowed"
 
 -- Record that a variable is globally or nonlocally defined.  If this
 -- conflicts with an existing definition, report an error.
-globalDeclaration, nonlocalDeclaration :: PyIdent -> Cvt ()
-globalDeclaration name = do
-  b <- lookupCurrentLocalBinding name
+globalDeclaration, nonlocalDeclaration :: Level -> PyIdent -> Cvt ()
+globalDeclaration lv name = do
+  b <- lookupCurrentLocalBinding lv name
   case b of
     Just (Local isDef v) -> -- override local binding
-                            addLocalBinding name (Global isDef)
-    Just (Param _ _)   -> parameterRedefined name
+                            addLocalBinding lv name (Global isDef)
+    Just (Param _ _)   -> parameterRedefined lv name
     Just (Nonlocal _)  -> fail msg
     Just (Global _)    -> return () -- no change
-    Nothing            -> addLocalBinding name (Global False)
+    Nothing            -> addLocalBinding lv name (Global False)
     where
       msg = "Variable '" ++ identName name ++ "' cannot be declared both global and nonlocal"
 
-nonlocalDeclaration name = do
-  b <- lookupCurrentLocalBinding name
+nonlocalDeclaration lv name = do
+  b <- lookupCurrentLocalBinding lv name
   case b of
     Just (Local isDef v) -> -- override local binding
-                            addLocalBinding name (Nonlocal isDef)
-    Just (Param _ _)  -> parameterRedefined name
+                            addLocalBinding lv name (Nonlocal isDef)
+    Just (Param _ _)  -> parameterRedefined lv name
     Just (Nonlocal _) -> return () -- no change
     Just (Global _)   -> fail message
-    Nothing           -> addLocalBinding name (Nonlocal False)
+    Nothing           -> addLocalBinding lv name (Nonlocal False)
     where
       message = "Variable '" ++ identName name ++ "' cannot be declared both global and nonlocal"
 
 -- Look up a use of a variable
-use name = do
-  signalUse name
-  lookupVar name
+use lv name = do
+  signalUse lv name
+  lookupVar lv name
 
 -------------------------------------------------------------------------------
 -- Conversions for Python 3 Syntax
@@ -453,82 +526,100 @@ type PySlice = Py.SliceSpan
 type PyStmt = Py.StatementSpan
 type PyComp a = Py.ComprehensionSpan a
 
-expression :: PyExpr -> Cvt (Expr Int)
-expression expr =
+-- | Parse an expression.  The level parameter indicates whether the
+--   expression is a value or a type.  Values and types use different subsets 
+--   of the same AST syntax.
+expression :: Level -> PyExpr -> Cvt (Expr Int)
+expression lv expr =
     case expr
     of Py.Var {Py.var_ident = ident} -> 
-         Variable source_pos <$> use ident
+         Variable source_pos <$> use lv ident
        Py.Int {Py.int_value = n} -> 
          pure (Literal source_pos (IntLit n))
        Py.Float {Py.float_value = d} ->
+         assert_value_level $
          pure (Literal source_pos (FloatLit d))
        Py.Imaginary {Py.imaginary_value = d} ->
+         assert_value_level $
          pure (Literal source_pos (ImaginaryLit d))
        Py.Bool {Py.bool_value = b} ->
+         assert_value_level $
          pure (Literal source_pos (BoolLit b))
        Py.None {} -> 
          pure(Literal source_pos NoneLit)
        Py.Tuple {Py.tuple_exprs = es} -> 
-         Tuple source_pos <$> traverse expression es
+         Tuple source_pos <$> traverse subexpression es
        Py.Call {Py.call_fun = f, Py.call_args = xs} -> 
-         Call source_pos <$> expression f <*> traverse argument xs
+         Call source_pos <$> subexpression f <*> traverse (argument lv) xs
        Py.LetExpr { Py.let_target = ts
                   , Py.let_rhs = rhs
-                  , Py.let_body = body} -> do
+                  , Py.let_body = body} -> assert_value_level $ do
          let t = case ts
                  of [t] -> t
                     _ -> error "Multiple assignment not allowed in 'let'"
-         rhs' <- expression rhs
+         rhs' <- subexpression rhs
          enter $ do
            t' <- exprToParam t 
-           body' <- expression body 
+           body' <- subexpression body 
            return $ Let source_pos t' rhs' body'
        Py.CondExpr { Py.ce_true_branch = tr
                    , Py.ce_condition = c
                    , Py.ce_false_branch = fa} -> 
+         assert_value_level $
          let mkCond tr c fa = Cond source_pos c tr fa
-         in mkCond <$> expression tr <*> expression c <*> expression fa
+         in mkCond <$> subexpression tr <*> subexpression c <*> subexpression fa
        Py.BinaryOp { Py.operator = op
                    , Py.left_op_arg = l
                    , Py.right_op_arg = r} -> 
-         Binary source_pos op <$> expression l <*> expression r
+         Binary source_pos op <$> subexpression l <*> subexpression r
        Py.Subscript {Py.subscriptee = base, Py.subscript_exprs = indices} ->
-         Subscript source_pos <$> expression base <*>
-         traverse expression indices
+         assert_value_level $
+         Subscript source_pos <$> subexpression base <*>
+         traverse subexpression indices
        Py.SlicedExpr {Py.slicee = base, Py.slices = slices} ->
-         Slicing source_pos <$> expression base <*> traverse slice slices
+         assert_value_level $
+         Slicing source_pos <$> subexpression base <*> traverse slice slices
        Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 
-         Unary source_pos op <$> expression arg
+         Unary source_pos op <$> subexpression arg
        Py.Lambda {Py.lambda_args = args, Py.lambda_body = body} -> 
+         assert_value_level $
          enter $ Lambda source_pos <$> traverse parameter args 
-                                   <*> expression body
+                                   <*> subexpression body
 
        -- Generators and list comprehensions have a separate scope
        Py.Generator {Py.gen_comprehension = comp} -> 
-         enter $ Generator source_pos <$> comprehension expression comp
+         assert_value_level $
+         enter $ Generator source_pos <$> comprehension subexpression comp
        Py.ListComp {Py.list_comprehension = comp} -> 
-         enter $ ListComp source_pos <$> comprehension expression comp
+         assert_value_level $
+         enter $ ListComp source_pos <$> comprehension subexpression comp
                             
-       Py.Paren {Py.paren_expr = e} -> expression e
+       Py.Paren {Py.paren_expr = e} -> subexpression e
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
     where
+      assert_value_level m = 
+        case lv
+        of ValueLevel -> m
+           TypeLevel -> error $ show source_pos ++ ": Invalid type expression"
+           KindLevel -> error $ show source_pos ++ ": Invalid kind expression"
+      subexpression e = expression lv e
       source_pos = toSourcePos $ Py.expr_annot expr
 
 -- Convert an optional expression into an expression or None
-maybeExpression :: SourcePos -> Maybe PyExpr -> Cvt (Expr Int)
-maybeExpression _   (Just e) = expression e
-maybeExpression pos Nothing  = pure (noneExpr pos)
+maybeExpression :: Level -> SourcePos -> Maybe PyExpr -> Cvt (Expr Int)
+maybeExpression lv _   (Just e) = expression lv e
+maybeExpression _  pos Nothing  = pure (noneExpr pos)
 
 slice :: PySlice -> Cvt (Slice Int)
 slice sl =
   case sl
   of Py.SliceProper l u s _ ->
        SliceSlice source_pos <$>
-       traverse expression l <*>
-       traverse expression u <*>
-       traverse (traverse expression) s
+       traverse (expression ValueLevel) l <*>
+       traverse (expression ValueLevel) u <*>
+       traverse (traverse (expression ValueLevel)) s
      Py.SliceExpr e _ ->
-       ExprSlice <$> expression e
+       ExprSlice <$> expression ValueLevel e
   where
     source_pos = toSourcePos $ Py.slice_annot sl
 
@@ -536,14 +627,14 @@ comprehension :: (a -> Cvt (b Int)) -> PyComp a -> Cvt (IterFor Int b)
 comprehension convertBody comprehension =
     compFor $ Py.comprehension_for comprehension
     where
-      compFor cf = mkIter <$> expression (Py.comp_in_expr cf)
+      compFor cf = mkIter <$> expression ValueLevel (Py.comp_in_expr cf)
                           <*> traverse exprToParam (Py.comp_for_exprs cf)
                           <*> compIter (Py.comp_for_iter cf)
           where
             pos = toSourcePos $ Py.comp_for_annot cf
             mkIter e params body = IterFor pos params e body
 
-      compIf ci = IterIf pos <$> expression (Py.comp_if ci)
+      compIf ci = IterIf pos <$> expression ValueLevel (Py.comp_if ci)
                              <*> compIter (Py.comp_if_iter ci)
         where
           pos = toSourcePos $ Py.comp_if_annot ci
@@ -559,29 +650,32 @@ comprehension convertBody comprehension =
 
 noneExpr pos = Literal pos NoneLit
 
-argument :: Py.ArgumentSpan -> Cvt (Expr Int)
-argument (Py.ArgExpr {Py.arg_py_annotation = Just _}) = 
+argument :: Level -> Py.ArgumentSpan -> Cvt (Expr Int)
+argument _ (Py.ArgExpr {Py.arg_py_annotation = Just _}) = 
   error "Type annotation not allowed here"
-argument (Py.ArgExpr {Py.arg_expr = e, Py.arg_py_annotation = Nothing}) = 
-  expression e
-argument _ = error "Unsupported argument type"
+argument lv (Py.ArgExpr {Py.arg_expr = e, Py.arg_py_annotation = Nothing}) = 
+  expression lv e
+argument _ _ = error "Unsupported argument type"
 
+-- | Parse a value-level parameter variable declaration.
 parameter :: Py.ParameterSpan -> Cvt (Parameter Int)
 parameter (Py.Param {Py.param_name = name, Py.param_py_annotation = ann}) =
-  Parameter <$> parameterDefinition name <*> traverse expression ann
+  Parameter <$>
+  parameterDefinition ValueLevel name <*>
+  traverse (expression TypeLevel) ann
 
 parameters xs = traverse parameter xs
 
 exprToParam :: PyExpr -> Cvt (Parameter Int)
 exprToParam e@(Py.Var name _) =
-  Parameter <$> parameterDefinition name <*> pure Nothing
+  Parameter <$> parameterDefinition ValueLevel name <*> pure Nothing
 exprToParam e@(Py.Tuple es _) =
   TupleParam <$> traverse exprToParam es
 exprToParam (Py.Paren e _) = exprToParam e
-exprToParam _                 = error "Unsupported variable binding"
+exprToParam _ = error "Unsupported variable binding"
 
 exprToLHS :: PyExpr -> Cvt (Parameter Int)
-exprToLHS e@(Py.Var name _) = Parameter <$> definition name <*> pure Nothing
+exprToLHS e@(Py.Var name _) = Parameter <$> definition ValueLevel name <*> pure Nothing
 exprToLHS e@(Py.Tuple es _) = TupleParam <$> traverse exprToLHS es
 exprToLHS (Py.Paren e _) = exprToLHS e
 exprToLHS _                 = error "Unsupported assignment target"
@@ -597,28 +691,28 @@ singleStatement stmt =
                                <*> traverse exprToLHS targets
                                <*> suite bodyClause -}
        Py.StmtExpr {Py.stmt_expr = e} ->
-         singleton . ExprStmt source_pos <$> expression e
+         singleton . ExprStmt source_pos <$> expression ValueLevel e
        Py.Conditional {Py.cond_guards = guards, Py.cond_else = els} ->
          foldr ifelse (suite els) guards
        Py.Assign {Py.assign_to = dsts, Py.assign_expr = src} -> 
-         assignments (reverse dsts) (expression src)
+         assignments (reverse dsts) (expression ValueLevel src)
        Py.Return {Py.return_expr = me} ->
          -- Process, then discard statements after the return
          singleton <$> (Return source_pos <$> newStmtID
                                           <*> newJoinNodeRef 
-                                          <*> maybeExpression source_pos me)
+                                          <*> maybeExpression ValueLevel source_pos me)
        Py.Pass {} -> pure []
        Py.NonLocal {Py.nonLocal_vars = xs} -> 
-         [] <$ mapM_ nonlocalDeclaration xs
+         [] <$ mapM_ (nonlocalDeclaration ValueLevel) xs
        Py.Global {Py.global_vars = xs} -> 
-         [] <$ mapM_ globalDeclaration xs
+         [] <$ mapM_ (globalDeclaration ValueLevel) xs
        _ -> fail $ "Cannot translate statement:\n" ++ Py.prettyText stmt
     where
       source_pos = toSourcePos $ Py.stmt_annot stmt
       -- An if-else clause
       ifelse (guard, ifTrue) ifFalse = 
-          singleton <$> (If source_pos <$> expression guard 
-                                       <*> suite ifTrue 
+          singleton <$> (If source_pos <$> expression ValueLevel guard
+                                       <*> suite ifTrue
                                        <*> ifFalse
                                        <*> pure Nothing)
 
@@ -634,7 +728,7 @@ defStatements stmts =
 -- for the next assignment.
 assignments :: [PyExpr] -> Cvt (Expr Int) -> Cvt [Stmt Int]
 assignments (v:vs) src = (:) <$> assign v src
-                             <*> assignments vs (expression v)
+                             <*> assignments vs (expression ValueLevel v)
     where
       assign v src = 
         let pos = toSourcePos $ Py.expr_annot v
@@ -689,8 +783,8 @@ exportStatement stmt@(Py.Export {Py.export_lang = lang,
     of "ccall" -> return CCall
        "cplusplus" -> return CPlusPlus
        _ -> error $ "Unsupported language '" ++ identName lang ++ "'"
-  var <- use item
-  ty' <- expression ty
+  var <- use ValueLevel item
+  ty' <- expression TypeLevel ty
   
   -- Determine the exported name.
   -- Remove quote characters from the given string.
@@ -734,18 +828,18 @@ funDefinition' decorators (Py.Fun { Py.fun_name = name
                                   , Py.fun_body = body
                                   , Py.stmt_annot = annotation}) = do
   Decorators forall_decorator <- extractDecorators decorators
-  nameVar <- definition name
+  nameVar <- definition ValueLevel name
   let pos = toSourcePos annotation
   enter $ do
     qvars <- traverse (mapM qvarDefinition) forall_decorator
     params' <- parameters params
-    result' <- traverse expression result
+    result' <- traverse (expression TypeLevel) result
     body' <- suite body
     return $ Func pos nameVar qvars params' result' body' Nothing
     
   where
     qvarDefinition (qvar_name, qvar_kind) = do
-      qvar <- parameterDefinition qvar_name
+      qvar <- parameterDefinition TypeLevel qvar_name
       return (qvar, qvar_kind)
 
 extractDecorators decorators =
@@ -772,7 +866,7 @@ extractDecorators decorators =
     readArguments args = mapM readArgument args 
     readArgument (Py.ArgExpr { Py.arg_expr = Py.Var {Py.var_ident = ident}
                              , Py.arg_py_annotation = annot}) = do
-      annot_expr <- traverse expression annot
+      annot_expr <- traverse (expression KindLevel) annot
       return $ Just (ident, annot_expr)
     readArgument _ = return Nothing
 
@@ -882,7 +976,7 @@ convertStatement stmt names =
 
 -- | Convert a Python module to a Pyon module.
 -- The lowest unassigned variable ID is returned.
-convertModule :: [Var Int]       -- ^ Predefined global variables
+convertModule :: [(Var Int, Level)] -- ^ Predefined global variables
               -> Py.ModuleSpan   -- ^ Module to scan
               -> Int             -- ^ First unique variable ID to use
               -> IO (Either [String] (Int, Int, ([Func Int], [ExportItem Int])))
@@ -900,7 +994,7 @@ convertModule globals mod names =
 -- The lowest unassigned variable ID is returned.
 parseModule :: String           -- ^ File contents
             -> String           -- ^ File name
-            -> [Var Int]        -- ^ Predefined global variables
+            -> [(Var Int, Level)]  -- ^ Predefined global variables
             -> Int              -- ^ First unique variable ID to use
             -> IO (Either [String] (Int, Int, Module Int))
 parseModule stream path globals nextID =

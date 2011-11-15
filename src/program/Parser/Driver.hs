@@ -12,7 +12,7 @@ import Parser.ParserSyntax
 import Parser.SSA
 import Parser.GenUntyped
 import Untyped.Syntax
-import Untyped.Data(ParserVarBinding)
+import Untyped.Data(ParserVarBinding(..))
 import Globals
 import GlobalVar
 
@@ -20,6 +20,11 @@ import GlobalVar
 parserGlobals :: InitGlobalVar [(Var Int, ParserVarBinding)]
 {-# NOINLINE parserGlobals #-}
 parserGlobals = defineInitGlobalVar ()
+
+varBindingLevel :: ParserVarBinding -> Level
+varBindingLevel (KindBinding _) = KindLevel
+varBindingLevel (TypeBinding _) = TypeLevel
+varBindingLevel (ObjectBinding _) = ValueLevel
 
 ssaGlobals :: [(SSAVar, ParserVarBinding)]
 ssaGlobals =
@@ -32,7 +37,9 @@ parseFile file_path text = do
   pglobals <- readInitGlobalVarIO parserGlobals
   (nextStm, parse_mod) <-
     modifyStaticGlobalVar the_nextParserVarID $ \nextID -> do
-      mast <- parseModule text file_path (map fst pglobals) nextID
+      let predefined_vars :: [(Var Int, Level)]
+          predefined_vars = [(v, varBindingLevel b) | (v, b) <- pglobals]
+      mast <- parseModule text file_path predefined_vars nextID
       case mast of
         Left errs -> do
           mapM_ putStrLn errs  
