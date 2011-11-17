@@ -446,11 +446,9 @@ pprContext show_body (ApplyContext {_ctxContext = c, _ctxBody = b}) =
       text "let" <+> hang decon_doc 4 (vcat $ map exception other_alts)
       where
         decon_doc =
-          hang (pprPatternMatch (AltM (Alt decon pats undefined)) <+> text "=") 4
-          (pprExp scr)
+          hang (pprPatternMatch decon pats <+> text "=") 4 (pprExp scr)
         exception (AltBinders decon pats) =
-          text "except if" <+>
-          pprPatternMatch (AltM (Alt decon pats undefined))
+          text "except if" <+> pprPatternMatch decon pats
 
     show_context (LetfunCtx _ defs) =
       text "letrec" <+> pprDefGroup defs

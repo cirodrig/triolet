@@ -61,6 +61,9 @@ import GlobalVar
 
 debugMode = False
 
+pprMemModule =
+  SystemF.PrintMemoryIR.pprModuleFlags SystemF.PrintMemoryIR.tersePprFlags
+
 main = do
   -- Parse arguments
   (global_values, job) <- parseCommandLineArguments
@@ -157,7 +160,7 @@ highLevelOptimizations global_demand_analysis simplifier_phase mod = do
   mod <- SystemF.rewriteAtPhase simplifier_phase mod
   when debugMode $ void $ do
     putStrLn "After rewrite"
-    print $ SystemF.PrintMemoryIR.pprModule mod
+    print $ pprMemModule mod
     evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
     SystemF.TypecheckMem.typeCheckModule mod
 
@@ -200,7 +203,7 @@ compilePyonToPyonMem compile_flags path text = do
   
   putStrLn ""
   putStrLn "Memory IR"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  print $ pprMemModule repr_mod
   when debugMode $ void $ do
     SystemF.TypecheckMem.typeCheckModule repr_mod
   
@@ -216,7 +219,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   repr_mod <- SystemF.longRangeFloating repr_mod
   when debugMode $ void $ do
     putStrLn "After floating 1"
-    print $ SystemF.PrintMemoryIR.pprModule repr_mod
+    print $ pprMemModule repr_mod
     evaluate $ SystemF.checkForShadowingModule repr_mod
 
   repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
@@ -224,13 +227,13 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   
   putStrLn ""
   putStrLn "Before loop dimension analysis"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  print $ pprMemModule repr_mod
 
   repr_mod <- iterateM (highLevelOptimizations True SystemF.DimensionalitySimplifierPhase) 7 repr_mod
 
   putStrLn ""
   putStrLn "Before parallelizing"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  print $ pprMemModule repr_mod
 
   -- Parallelize outer loops
   repr_mod <-
@@ -238,7 +241,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
     then do repr_mod <- SystemF.parallelLoopRewrite repr_mod
             putStrLn ""
             putStrLn "After parallelizing"
-            print $ SystemF.PrintMemoryIR.pprModule repr_mod
+            print $ pprMemModule repr_mod
             highLevelOptimizations False SystemF.DimensionalitySimplifierPhase repr_mod
     else return repr_mod
 
@@ -247,7 +250,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
 
   putStrLn ""
   putStrLn "After Simplifying"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  print $ pprMemModule repr_mod
   
   -- Inline loops
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
@@ -279,7 +282,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
 
   putStrLn ""
   putStrLn "Optimized"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  print $ pprMemModule repr_mod
 
   when debugMode $ void $ do
     SystemF.TypecheckMem.typeCheckModule repr_mod

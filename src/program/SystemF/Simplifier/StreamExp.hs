@@ -534,7 +534,7 @@ pprExpSPrec expression =
 
 pprAltS :: AltS -> Doc
 pprAltS (AltS (Alt decon params body)) =
-  hang (pprPatternMatch (AltM (Alt decon (map fromPatS params) undefined)) <> text ".") 2
+  hang (pprPatternMatch decon (map fromPatS params) <> text ".") 2
   (pprExpS body)
 
 pprFunS :: FunS -> PrecDoc
