@@ -754,7 +754,8 @@ inferExportType (Export { exportAnnotation = ann
                       
     -- Instantiate an exported variable
     instantiate_export_var pos var ty = Inf $ \env -> do
-      (cst, tyvars, placeholders, x) <- runInf instantiate_and_unify env
+      (cst, tyvars, placeholders, x) <-
+        runInf (instantiateExportedVariable pos var ty) env
       
       -- Reduce the constraints, so that type variables get unified as a result
       -- of equality constraints.
@@ -769,18 +770,38 @@ inferExportType (Export { exportAnnotation = ann
         internalError "Unresolved placeholders in export expression"
       
       return ([], tyvars, [], x)
-      where
-        debug x = x
-        instantiate_and_unify = do
-          (inst_exp, var_type) <- instantiateVariable pos var
-          co <- unifyInf True pos var_type ty
-          
-          -- Since exported types are monomorphic, coercions should never
-          -- occur here
-          case co of
-            NoCoercion _ -> return ()
-            _ -> internalError "Unexpected type coercion in export expression"
-          return inst_exp
+
+-- | Instantiate an exported function variable to a monotype.
+--   Return the instantiated expression.
+instantiateExportedVariable :: SourcePos -> Variable -> HMType -> Inf TIExp
+instantiateExportedVariable pos var export_type = Inf $ \env -> do
+  -- Instantiate at the given exported type
+  (constraint, unbound_vars, placeholders, inst_exp) <- flip runInf env $ do
+    (exp, var_type) <- instantiateVariable pos var
+    unifyAndCoerceInf pos exp var_type export_type
+
+  -- Generalize the type to a type scheme.  It will be a monomorphic type
+  -- scheme.  Nevertheless, this step is required becasue it does context
+  -- reduction and defaulting.
+  (deferred, local_tyvars, retained, [inst_scheme]) <-
+    generalize env constraint [(Nothing, export_type)]
+
+  -- Debugging output
+  {- doc <- runPpr $ pprTyScheme inst_scheme
+  print "Exported function scheme"
+  print doc -}
+
+  -- Verify that generalized scheme is monomorphic
+  unless (null retained) $
+    fail "Exported function must not be polymorphic"
+
+  -- These should be impossible because the exported type is monomorphic
+  unless (Set.null local_tyvars) $
+    internalError "Exported function has free type variables after type inference"
+  unless (null deferred) $
+    internalError "Exported function has deferred constraints"
+
+  return ([], unbound_vars, placeholders, inst_exp)
 
 inferModuleTypes :: Module -> Inf (ModuleName, [SystemF.DefGroup TIDef], [TIExport])
 inferModuleTypes (Module module_name defss exports) = do
