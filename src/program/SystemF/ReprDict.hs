@@ -245,6 +245,12 @@ createDictEnv = do
   list_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_list) [VarT arg],
      createDict_list arg)
+  array1_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin The_array1) [VarT arg],
+     createDict_array1 arg)
+  array2_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin The_array2) [VarT arg],
+     createDict_array2 arg)
   complex_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_Complex) [VarT arg],
      createDict_complex arg)
@@ -266,7 +272,8 @@ createDictEnv = do
                                   stream_dict,
                                   float_dict, int_dict, efftok_dict,
                                   sliceobj_dict,
-                                  list_dict, complex_dict, array_dict,
+                                  list_dict, array1_dict, array2_dict,
+                                  complex_dict, array_dict,
                                   referenced_dict, maybe_dict,
                                   tuple2_dict, tuple3_dict, tuple4_dict,
                                   eq_dict, ord_dict,
@@ -356,6 +363,22 @@ createDict_list param_var subst = MkDict $
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_list)
+
+createDict_array1 :: Var -> TypeSubst -> MkDict
+createDict_array1 param_var subst = MkDict $
+  withReprDict param $ \elt_dict ->
+  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_array1)
+
+createDict_array2 :: Var -> TypeSubst -> MkDict
+createDict_array2 param_var subst = MkDict $
+  withReprDict param $ \elt_dict ->
+  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_array2)
 
 createDict_referenced :: Var -> TypeSubst -> MkDict
 createDict_referenced param_var subst = MkDict $

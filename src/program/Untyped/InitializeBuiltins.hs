@@ -425,8 +425,9 @@ mkShapeClass = do
   flattenStreamScheme <- forallType [Star] $ \[a] ->
     let aT = ConTy a
         shT = ConTy sh
-    in ([], functionType [ConTy (tiBuiltin the_con_iter) @@ shT @@ aT]
-            (iterType (ConTy $ tiBuiltin the_con_list) aT))
+    in ([passable aT],
+        functionType [ConTy (tiBuiltin the_con_iter) @@ shT @@ aT]
+        (iterType (ConTy $ tiBuiltin the_con_list) aT))
 
   map_scheme <- zipWithN_scheme (ConTy sh) 1
   zip_scheme <- zipWithN_scheme (ConTy sh) 2
@@ -860,6 +861,7 @@ mkPassableClass = do
               [int_instance, float_instance, bool_instance, none_instance,
                maybe_val_instance,
                complex_instance, sliceobject_instance,
+               dim1_instance, dim2_instance,
                any_instance,
                list_instance,
                array1_instance, array2_instance,
@@ -880,6 +882,12 @@ mkPassableClass = do
   ; let none_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_NoneType)
           (pyonBuiltin SystemF.The_repr_NoneType) []
+  ; let dim1_instance =
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_dim1)
+          (pyonBuiltin SystemF.The_repr_dim1) []
+  ; let dim2_instance =
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_dim2)
+          (pyonBuiltin SystemF.The_repr_dim2) []
   ; let any_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_Any)
           (pyonBuiltin SystemF.The_repr_Any) []

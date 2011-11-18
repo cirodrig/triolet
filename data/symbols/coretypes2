@@ -251,7 +251,7 @@ data ShapeDict : bare -> box
 
    sh -> Stream sh (index sh),
 
-   (a : bare) -> Stream sh a -> Stream dim1 a,
+   (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a,
 
    (a b : bare) ->
    Repr a -> Repr b ->
@@ -442,6 +442,8 @@ data view2 : bare -> box
   (IInt Mlo, IInt Mhi,
    IInt Nlo, IInt Nhi,
    int -> int -> Writer a);
+
+  empty_view2 (a : bare) () ();
 };
 
 -- A 1D array function.  Basically a 'view1' with its type parameters
@@ -572,6 +574,8 @@ repr_float : Repr (Stored float);
 repr_bool : Repr (Stored bool);
 repr_NoneType : Repr (Stored NoneType);
 repr_SliceObject : Repr SliceObject;
+repr_dim1 : Repr dim1;
+repr_dim2 : Repr dim2;
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
@@ -688,7 +692,7 @@ TraversableDict_array2_traverse :
   (a : bare) -> Repr a -> array2 a -> Stream dim2 a;
 
 ShapeDict_dim0_flatten :
-  (a : bare) -> Stream dim0 a -> Stream dim1 a;
+  (a : bare) -> Repr a -> Stream dim0 a -> Stream dim1 a;
 
 ShapeDict_dim0_map :
   (a b : bare) ->
@@ -725,7 +729,7 @@ ShapeDict_dim0_slice :
 ShapeDict_dim1_indices : dim1 -> Stream dim1 (index dim1);
 
 ShapeDict_dim1_flatten :
-  (a : bare) -> Stream dim1 a -> Stream dim1 a;
+  (a : bare) -> Repr a -> Stream dim1 a -> Stream dim1 a;
 
 ShapeDict_dim1_map :
   (a b : bare) ->
@@ -762,7 +766,7 @@ ShapeDict_dim1_slice :
 ShapeDict_dim2_indices : dim2 -> Stream dim2 (index dim2);
 
 ShapeDict_dim2_flatten :
-  (a : bare) -> Stream dim2 a -> Stream dim1 a;
+  (a : bare) -> Repr a -> Stream dim2 a -> Stream dim1 a;
 
 ShapeDict_dim2_map :
   (a b : bare) ->
@@ -844,7 +848,7 @@ IndexableDict_array2_get_shape :
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionary-like internal methods
 
-view1_flatten : (a : bare) -> view1 a -> Stream dim1 a;
+view1_flatten : (a : bare) -> Repr a -> view1 a -> Stream dim1 a;
 
 view1_generate : (a : bare) -> Repr a -> dim1 -> (index dim1 -> Writer a)
               -> view1 a;
@@ -875,7 +879,7 @@ view1_zipWith4 : (a b c d e : bare)
               -> view1 d
               -> view1 e;
 
-Sequence_flatten : (a : bare) -> Sequence a -> Stream dim1 a;
+Sequence_flatten : (a : bare) -> Repr a -> Sequence a -> Stream dim1 a;
 
 Sequence_generate : (a : bare)
                  -> Repr a -> dim1 -> (index dim1 -> Writer a) -> Sequence a;
@@ -1635,6 +1639,8 @@ shift2D : (t : bare -> bare) -> (a : bare)
        -> t a
        -> view2 a;
 
+range2D : index dim2 -> Stream dim2 (index dim2);
+
 extend2D : (t : bare -> bare) -> (a : bare)
         -> IndexableDict t
         -> coerce @box (BoxedType (shape t)) (Boxed dim2)
@@ -1643,6 +1649,9 @@ extend2D : (t : bare -> bare) -> (a : bare)
         -> index (shape t)
         -> t a
         -> view2 a;
+
+create_view2 : (a : bare) -> Repr a
+            -> index dim2 -> index dim2 -> (index dim2 -> Writer a) -> view2 a;
 
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)

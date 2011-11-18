@@ -381,7 +381,7 @@ safeIndex @(t : bare -> bare) @(a : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -430,7 +430,7 @@ safeSlice @(t : bare -> bare) @(a : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -733,6 +733,19 @@ TraversableDict_view1_traverse
   @(a : bare) (repr : Repr a) (v : view1 a) -> Stream1 a attribute(inline) =
   viewStream @a v;
 
+TraversableDict_view2_domain
+  @(a : bare) (repr : Repr a) (v : view2 a) (ret : OutPtr dim2) -> IEffect dim2
+  attribute(inline) =
+  case v of {
+    mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
+    (mlo : IInt Mlo) (mhi : IInt Mhi) (nlo : IInt Nlo) (nhi : IInt Nhi)
+    (f : int -> int -> Writer a).
+      mk_dim2 @Mlo @Mhi @Nlo @Nhi mlo mhi nlo nhi ret
+
+  ; empty_view2 @a.
+      mk_dim2 @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii ret
+  };
+
 TraversableDict_view2_build
   @(a : bare) (repr : Repr a) (v : view2 a) -> view2 a attribute(inline) = v;
 
@@ -809,36 +822,44 @@ TraversableDict_array2_traverse
 
 TraversableDict_array2_build
   @(a : bare) (repr : Repr a) (v : view2 a) (ret : OutPtr (array2 a))
-  -> IEffect (array2 a) attribute(inline) =
-  case v of
+  -> IEffect (array2 a) attribute(inline, inline_dimensionality) =
+  case v of {
     mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
     (iMlo : IInt Mlo) (iMhi : IInt Mhi)
     (iNlo : IInt Nlo) (iNhi : IInt Nhi)
     (f : int -> int -> Writer a).
-  let fMlo : FIInt Mlo = fromIndInt @Mlo iMlo in
-  let fMhi : FIInt Mhi = fromIndInt @Mhi iMhi in
-  let fNlo : FIInt Nlo = fromIndInt @Nlo iNlo in
-  let fNhi : FIInt Nhi = fromIndInt @Nhi iNhi in
+      let fMlo : FIInt Mlo = fromIndInt @Mlo iMlo in
+      let fMhi : FIInt Mhi = fromIndInt @Mhi iMhi in
+      let fNlo : FIInt Nlo = fromIndInt @Nlo iNlo in
+      let fNhi : FIInt Nhi = fromIndInt @Nhi iNhi in
 
-  let type M = minus_i Mhi Mlo in
-  let type N = minus_i Nhi Nlo in
-  let height : FIInt M = minus_fii @Mhi @Mlo fMhi fMlo in
-  let width : FIInt N = minus_fii @Nhi @Nlo fNhi fNlo in
+      let type M = minus_i Mhi Mlo in
+      let type N = minus_i Nhi Nlo in
+      let height : FIInt M = minus_fii @Mhi @Mlo fMhi fMlo in
+      let width : FIInt N = minus_fii @Nhi @Nlo fNhi fNlo in
 
-  case fMlo of fiInt @Mlo (Mlo_i : int).
-  case fNlo of fiInt @Nlo (Nlo_i : int).
+      case fMlo of fiInt @Mlo (Mlo_i : int).
+      case fNlo of fiInt @Nlo (Nlo_i : int).
 
-  -- The loop is zero-indexed, but the loop body is not.
-  -- Add the offset.
-  letfun
-    f2 (j : int) (i : int) -> Writer a =
-      f (j +# Mlo_i) (i +# Nlo_i)
-  in
+      -- The loop is zero-indexed, but the loop body is not.
+      -- Add the offset.
+      letfun
+        f2 (j : int) (i : int) -> Writer a =
+          f (j +# Mlo_i) (i +# Nlo_i)
+      in
 
-  mk_array2 @a @Mlo @Mhi @Nlo @Nhi fMlo fMhi fNlo fNhi
-  (referenced @(arr M (arr N a))
-   (arr2D_build @M @N @a repr height width (mk_darr2 @M @N @a f2)))
-  ret;
+      mk_array2 @a @Mlo @Mhi @Nlo @Nhi fMlo fMhi fNlo fNhi
+      (referenced @(arr M (arr N a))
+       (arr2D_build @M @N @a repr height width (mk_darr2 @M @N @a f2)))
+      ret
+
+  ; empty_view2 @a.
+      mk_array2 @a @0 @0 @0 @0 zero_fii zero_fii zero_fii zero_fii
+      (referenced @(arr 0 (arr 0 a))
+       (\ (r : OutPtr (arr 0 (arr 0 a))) -> IEffect (arr 0 (arr 0 a)).
+         fromEffTok @(arr 0 (arr 0 a)) emptyEffTok))
+      ret
+  };
 
 -------------------------------------------------------------------------------
 -- Indexable methods
@@ -924,16 +945,20 @@ IndexableDict_view2_at_point
   (index : PyonTuple2 (Stored int) (Stored int))
   (ret : OutPtr a)
   -> IEffect a attribute(inline) =
-  case vw of
+  case vw of {
     mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
     (imlo : IInt Mlo) (imhi : IInt Mhi)
     (inlo : IInt Nlo) (inhi : IInt Nhi)
     (f : int -> int -> Writer a).
-  case index of pyonTuple2 @(Stored int) @(Stored int)
-                (ix_y : Stored int) (ix_x : Stored int).
-  case ix_y of stored @int (ix_y_i : int).
-  case ix_x of stored @int (ix_x_i : int).
-  f ix_y_i ix_x_i ret;
+      case index of pyonTuple2 @(Stored int) @(Stored int)
+                    (ix_y : Stored int) (ix_x : Stored int).
+      case ix_y of stored @int (ix_y_i : int).
+      case ix_x of stored @int (ix_x_i : int).
+      f ix_y_i ix_x_i ret
+
+  ; empty_view2 @a.
+      except @(IEffect a)
+  };
 
 
 IndexableDict_view2_get_shape
@@ -941,12 +966,16 @@ IndexableDict_view2_get_shape
   (vw : view2 a)
   (ret : OutPtr dim2)
   -> IEffect dim2 attribute(inline) =
-  case vw of
+  case vw of {
     mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
     (imlo : IInt Mlo) (imhi : IInt Mhi)
     (inlo : IInt Nlo) (inhi : IInt Nhi)
     (f : int -> int -> Writer a).
-  mk_dim2 @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi ret;
+      mk_dim2 @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi ret
+
+  ; empty_view2 @a.
+      mk_dim2 @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii ret
+  };
 
 
 IndexableDict_array0_at_point
@@ -1039,7 +1068,7 @@ IndexableDict_array2_get_shape
 -------------------------------------------------------------------------------
 -- Shape functions
 
-ShapeDict_dim0_flatten @(a : bare) (s : Stream dim0 a)
+ShapeDict_dim0_flatten @(a : bare) (repr : Repr a) (s : Stream dim0 a)
   -> Stream dim1 a attribute(inline) =
   case s of mk_view0 @a (f : NoneType -> Writer a).
   viewStream @a
@@ -1133,13 +1162,13 @@ ShapeDict_dim0_slice @(t : bare -> bare) @(a : bare)
     at_index @a repr container (coerce @(index dim0) @(index (shape t)) ix));
 
 
-ShapeDict_dim1_flatten @(a : bare) (s : Stream dim1 a)
+ShapeDict_dim1_flatten @(a : bare) (repr : Repr a) (s : Stream dim1 a)
   -> Stream dim1 a attribute(inline) =
   case s of {
     sequenceStream @a (sq : Sequence a).
       s
   ; viewStream @a (vw : view1 a).
-      view1_flatten @a vw
+      view1_flatten @a repr vw
   };
 
 
@@ -1388,71 +1417,88 @@ ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
   };
 
 
-ShapeDict_dim2_flatten @(a : bare) (s : Stream dim2 a)
-  -> Stream dim1 a attribute(inline) =
-  case s of
+ShapeDict_dim2_indices (dim : dim2) -> Stream dim2 (index dim2)
+  attribute(inline) =
+
+  case dim of
+    mk_dim2 @(Mlo Mhi Nlo Nhi : intindex)
+      (imlo : IInt Mlo) (imhi : IInt Mhi)
+      (inlo : IInt Nlo) (inhi : IInt Nhi).
+  mk_view2 @(index dim2) @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
+  (\ (y : int) (x : int) (ret : OutPtr (index dim2)) -> IEffect (index dim2).
+    pyonTuple2 @(Stored int) @(Stored int)
+    (stored @int y) (stored @int x) ret);
+
+
+ShapeDict_dim2_flatten @(a : bare) (repr : Repr a) (s : Stream dim2 a)
+  -> Stream dim1 a attribute(inline, inline_dimensionality) =
+  case s of {
     mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
     (imlo : IInt Mlo) (imhi : IInt Mhi)
     (inlo : IInt Nlo) (inhi : IInt Nhi)
     (f : int -> int -> Writer a).
-  let fmlo : FIInt Mlo = fromIndInt @Mlo imlo in
-  let fnlo : FIInt Nlo = fromIndInt @Nlo inlo in
-  case inhi of {
-    iInt @Nhi (fnhi : FIInt Nhi).
-      -- Flatten a 2D stream that is finite in the X dimension
-      case fmlo of fiInt @Mlo (mlo_i : int).
-      case fnlo of fiInt @Nlo (nlo_i : int).
-      case fnhi of fiInt @Nhi (nhi_i : int).
-      let size_n : int = nhi_i -# nlo_i in
+      let fmlo : FIInt Mlo = fromIndInt @Mlo imlo in
+      let fnlo : FIInt Nlo = fromIndInt @Nlo inlo in
+      case inhi of {
+        iInt @Nhi (fnhi : FIInt Nhi).
+          -- Flatten a 2D stream that is finite in the X dimension
+          case fmlo of fiInt @Mlo (mlo_i : int).
+          case fnlo of fiInt @Nlo (nlo_i : int).
+          case fnhi of fiInt @Nhi (nhi_i : int).
+          let size_n : int = nhi_i -# nlo_i in
 
-      letfun
-        flattened_f (y : int) (x : int) (ret : OutPtr a) -> IEffect a =
-        f (mlo_i +# y) (nlo_i +# x) ret
-      in
-      case imhi of {
-        iInt @Mhi (fmhi : FIInt Mhi).
-          -- Finite height and width
+          letfun
+            flattened_f (y : int) (x : int) (ret : OutPtr a) -> IEffect a =
+            f (mlo_i +# y) (nlo_i +# x) ret
+          in
+          case imhi of {
+            iInt @Mhi (fmhi : FIInt Mhi).
+              -- Finite height and width
 
-          case fmhi of fiInt @Mhi (mhi_i : int).
-          let size_m : int = mhi_i -# mlo_i in
-          let size : int = size_n *# size_m in
-          case defineIntIndex size of
-            someIInt @(MN : intindex) (size_mn : FIInt MN).
+              case fmhi of fiInt @Mhi (mhi_i : int).
+              let size_m : int = mhi_i -# mlo_i in
+              let size : int = size_n *# size_m in
+              case defineIntIndex size of
+                someIInt @(MN : intindex) (size_mn : FIInt MN).
 
-          let type delta_M = minus_i Mhi Mlo in
-          let type delta_N = minus_i Nhi Nlo in
+              let type delta_M = minus_i Mhi Mlo in
+              let type delta_N = minus_i Nhi Nlo in
 
-          viewStream @a
-          (darr1ToView1 @MN @a
-           size_mn
-           (darr2_flatten @delta_M @delta_N @MN @a
-            (minus_fii @Mhi @Mlo fmhi fmlo)
-            (minus_fii @Nhi @Nlo fnhi fnlo)
-            (mk_darr2 @delta_M @delta_N @a flattened_f)))
+              viewStream @a
+              (darr1ToView1 @MN @a
+               size_mn
+               (darr2_flatten @delta_M @delta_N @MN @a
+                (minus_fii @Mhi @Mlo fmhi fmlo)
+                (minus_fii @Nhi @Nlo fnhi fnlo)
+                (mk_darr2 @delta_M @delta_N @a flattened_f)))
 
-      ; iPosInfty @Mhi.
-          -- Infinite height, finite width
+          ; iPosInfty @Mhi.
+              -- Infinite height, finite width
+              viewStream @a
+              (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
+               (primitive_darr2_flatten @pos_infty @(minus_i Nhi Nlo) @a
+                (minus_fii @Nhi @Nlo fnhi fnlo)
+                flattened_f))
+
+          ; iNegInfty @Mhi.
+              except @(Stream dim1 a)
+          }
+
+      ; iPosInfty @Nhi.
+          -- Create a view spanning the N dimension only,
+          -- since the extent in the N dimension is infinite
+          case fmlo of fiInt @Mlo (mlo_i : int).
+          case fnlo of fiInt @Nlo (nlo_i : int).
           viewStream @a
           (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
-           (primitive_darr2_flatten @pos_infty @(minus_i Nhi Nlo) @a
-            (minus_fii @Nhi @Nlo fnhi fnlo)
-            flattened_f))
+           (\ (i : int) -> Writer a. f mlo_i (i +# nlo_i)))
 
-      ; iNegInfty @Mhi.
+      ; iNegInfty @Nhi.
           except @(Stream dim1 a)
       }
 
-  ; iPosInfty @Nhi.
-      -- Create a view spanning the N dimension only,
-      -- since the extent in the N dimension is infinite
-      case fmlo of fiInt @Mlo (mlo_i : int).
-      case fnlo of fiInt @Nlo (nlo_i : int).
-      viewStream @a
-      (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
-       (\ (i : int) -> Writer a. f mlo_i (i +# nlo_i)))
-
-  ; iNegInfty @Nhi.
-      except @(Stream dim1 a)
+  ; empty_view2 @a.
+      viewStream @a (view1_empty @a repr)
   };
 
 
@@ -1460,15 +1506,19 @@ ShapeDict_dim2_map @(a b : bare)
   (repr_a : Repr a) (repr_b : Repr b)
   (transformer : a -> Writer b)
   (input_stream : Stream dim2 a)
-  -> Stream dim2 b attribute(inline) =
-  case input_stream of
+  -> Stream dim2 b attribute(inline, inline_dimensionality) =
+  case input_stream of {
     mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
     (imlo : IInt Mlo) (imhi : IInt Mhi)
     (inlo : IInt Nlo) (inhi : IInt Nhi)
     (f : int -> int -> Writer a).
-  mk_view2 @b @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
-  (\ (j : int) (i : int) -> Writer b.
-    case boxed @a (f j i) of boxed @a (x : a). transformer x);
+      mk_view2 @b @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
+      (\ (j : int) (i : int) -> Writer b.
+        case boxed @a (f j i) of boxed @a (x : a). transformer x)
+
+  ; empty_view2 @a.
+      empty_view2 @b
+  };
 
 
 ShapeDict_dim2_zipWith @(a b c : bare)
@@ -1476,39 +1526,43 @@ ShapeDict_dim2_zipWith @(a b c : bare)
   (transformer : a -> b -> Writer c)
   (sA : Stream dim2 a)
   (sB : Stream dim2 b)
-  -> Stream dim2 c attribute(inline) =
-  case sA of
+  -> Stream dim2 c attribute(inline, inline_dimensionality) =
+  case sA of {
     mk_view2 @a @(MloA MhiA NloA NhiA : intindex)
     (imloA : IInt MloA) (imhiA : IInt MhiA)
     (inloA : IInt NloA) (inhiA : IInt NhiA)
     (fA : int -> int -> Writer a).
-  case sB of
-    mk_view2 @b @(MloB MhiB NloB NhiB : intindex)
-    (imloB : IInt MloB) (imhiB : IInt MhiB)
-    (inloB : IInt NloB) (inhiB : IInt NhiB)
-    (fB : int -> int -> Writer b).
+      case sB of {
+        mk_view2 @b @(MloB MhiB NloB NhiB : intindex)
+        (imloB : IInt MloB) (imhiB : IInt MhiB)
+        (inloB : IInt NloB) (inhiB : IInt NhiB)
+        (fB : int -> int -> Writer b).
 
-  -- Find the intersection of the two regions
-  let type MloC = max_i MloA MloB in
-  let type MhiC = min_i MhiA MhiB in
-  let type NloC = max_i NloA NloB in
-  let type NhiC = min_i NhiA NhiB in
-  let imloC : IInt MloC = max_ii @MloA @MloB imloA imloB in
-  let imhiC : IInt MhiC = min_ii @MhiA @MhiB imhiA imhiB in
-  let inloC : IInt NloC = max_ii @NloA @NloB inloA inloB in
-  let inhiC : IInt NhiC = min_ii @NhiA @NhiB inhiA inhiB in
+          -- Find the intersection of the two regions
+          let type MloC = max_i MloA MloB in
+          let type MhiC = min_i MhiA MhiB in
+          let type NloC = max_i NloA NloB in
+          let type NhiC = min_i NhiA NhiB in
+          let imloC : IInt MloC = max_ii @MloA @MloB imloA imloB in
+          let imhiC : IInt MhiC = min_ii @MhiA @MhiB imhiA imhiB in
+          let inloC : IInt NloC = max_ii @NloA @NloB inloA inloB in
+          let inhiC : IInt NhiC = min_ii @NhiA @NhiB inhiA inhiB in
 
-  -- Is the intersection nonempty?
-  if and (range_nonempty_ii @MloC @MhiC imloC imhiC)
-         (range_nonempty_ii @NloC @NhiC inloC inhiC)
-  then mk_view2 @c @MloC @MhiC @NloC @NhiC imloC imhiC inloC inhiC
-       (\ (j : int) (i : int) -> Writer c.
-         case boxed @a (fA j i) of boxed @a (x : a).
-         case boxed @b (fB j i) of boxed @b (y : b).
-         transformer x y)
-  else mk_view2 @c @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-       (\ (j : int) (i : int) (ret : OutPtr c) -> IEffect c.
-          except @(IEffect c));
+          -- Is the intersection nonempty?
+          if and (range_nonempty_ii @MloC @MhiC imloC imhiC)
+                 (range_nonempty_ii @NloC @NhiC inloC inhiC)
+          then mk_view2 @c @MloC @MhiC @NloC @NhiC imloC imhiC inloC inhiC
+               (\ (j : int) (i : int) -> Writer c.
+                 case boxed @a (fA j i) of boxed @a (x : a).
+                 case boxed @b (fB j i) of boxed @b (y : b).
+                 transformer x y)
+          else empty_view2 @c
+      ; empty_view2 @b.
+          empty_view2 @c
+      }
+  ; empty_view2 @a.
+      empty_view2 @c
+  };
 
 
 ShapeDict_dim2_zipWith3 @(a b c d : bare)
@@ -1517,49 +1571,59 @@ ShapeDict_dim2_zipWith3 @(a b c d : bare)
   (sA : Stream dim2 a)
   (sB : Stream dim2 b)
   (sC : Stream dim2 c)
-  -> Stream dim2 d attribute(inline) =
-  case sA of
+  -> Stream dim2 d attribute(inline, inline_dimensionality) =
+  case sA of {
     mk_view2 @a @(MloA MhiA NloA NhiA : intindex)
     (imloA : IInt MloA) (imhiA : IInt MhiA)
     (inloA : IInt NloA) (inhiA : IInt NhiA)
     (fA : int -> int -> Writer a).
-  case sB of
-    mk_view2 @b @(MloB MhiB NloB NhiB : intindex)
-    (imloB : IInt MloB) (imhiB : IInt MhiB)
-    (inloB : IInt NloB) (inhiB : IInt NhiB)
-    (fB : int -> int -> Writer b).
-  case sC of
-    mk_view2 @c @(MloC MhiC NloC NhiC : intindex)
-    (imloC : IInt MloC) (imhiC : IInt MhiC)
-    (inloC : IInt NloC) (inhiC : IInt NhiC)
-    (fC : int -> int -> Writer c).
+      case sB of {
+        mk_view2 @b @(MloB MhiB NloB NhiB : intindex)
+        (imloB : IInt MloB) (imhiB : IInt MhiB)
+        (inloB : IInt NloB) (inhiB : IInt NhiB)
+        (fB : int -> int -> Writer b).
+          case sC of {
+            mk_view2 @c @(MloC MhiC NloC NhiC : intindex)
+            (imloC : IInt MloC) (imhiC : IInt MhiC)
+            (inloC : IInt NloC) (inhiC : IInt NhiC)
+            (fC : int -> int -> Writer c).
 
-  -- Find the intersection of the two regions
-  let type MloD = max_i (max_i MloA MloB) MloC in
-  let type MhiD = min_i (min_i MhiA MhiB) MhiC in
-  let type NloD = max_i (max_i NloA NloB) NloC in
-  let type NhiD = min_i (min_i NhiA NhiB) NhiC in
-  let imloD : IInt MloD = max_ii @(max_i MloA MloB) @MloC
-                          (max_ii @MloA @MloB imloA imloB) imloC in
-  let imhiD : IInt MhiD = min_ii @(min_i MhiA MhiB) @MhiC
-                          (min_ii @MhiA @MhiB imhiA imhiB) imhiC in
-  let inloD : IInt NloD = max_ii @(max_i NloA NloB) @NloC
-                          (max_ii @NloA @NloB inloA inloB) inloC in
-  let inhiD : IInt NhiD = min_ii @(min_i NhiA NhiB) @NhiC
-                          (min_ii @NhiA @NhiB inhiA inhiB) inhiC in
+              -- Find the intersection of the two regions
+              let type MloD = max_i (max_i MloA MloB) MloC in
+              let type MhiD = min_i (min_i MhiA MhiB) MhiC in
+              let type NloD = max_i (max_i NloA NloB) NloC in
+              let type NhiD = min_i (min_i NhiA NhiB) NhiC in
+              let imloD : IInt MloD = max_ii @(max_i MloA MloB) @MloC
+                                      (max_ii @MloA @MloB imloA imloB) imloC in
+              let imhiD : IInt MhiD = min_ii @(min_i MhiA MhiB) @MhiC
+                                      (min_ii @MhiA @MhiB imhiA imhiB) imhiC in
+              let inloD : IInt NloD = max_ii @(max_i NloA NloB) @NloC
+                                      (max_ii @NloA @NloB inloA inloB) inloC in
+              let inhiD : IInt NhiD = min_ii @(min_i NhiA NhiB) @NhiC
+                                      (min_ii @NhiA @NhiB inhiA inhiB) inhiC in
 
-  -- Is the intersection nonempty?
-  if and (range_nonempty_ii @MloD @MhiD imloD imhiD)
-         (range_nonempty_ii @NloD @NhiD inloD inhiD)
-  then mk_view2 @d @MloD @MhiD @NloD @NhiD imloD imhiD inloD inhiD
-       (\ (j : int) (i : int) -> Writer d.
-         case boxed @a (fA j i) of boxed @a (x : a).
-         case boxed @b (fB j i) of boxed @b (y : b).
-         case boxed @c (fC j i) of boxed @c (z : c).
-         transformer x y z)
-  else mk_view2 @d @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-       (\ (j : int) (i : int) (ret : OutPtr d) -> IEffect d.
-          except @(IEffect d));
+              -- Is the intersection nonempty?
+              if and (range_nonempty_ii @MloD @MhiD imloD imhiD)
+                     (range_nonempty_ii @NloD @NhiD inloD inhiD)
+              then mk_view2 @d @MloD @MhiD @NloD @NhiD imloD imhiD inloD inhiD
+                   (\ (j : int) (i : int) -> Writer d.
+                     case boxed @a (fA j i) of boxed @a (x : a).
+                     case boxed @b (fB j i) of boxed @b (y : b).
+                     case boxed @c (fC j i) of boxed @c (z : c).
+                     transformer x y z)
+              else empty_view2 @d
+
+          ; empty_view2 @c.
+              empty_view2 @d
+          }
+
+      ; empty_view2 @b.
+          empty_view2 @d
+      }
+
+  ; empty_view2 @a.
+      empty_view2 @d
+  };
 
 
 ShapeDict_dim2_zipWith4 @(a b c d e : bare)
@@ -1569,59 +1633,70 @@ ShapeDict_dim2_zipWith4 @(a b c d e : bare)
   (sB : Stream dim2 b)
   (sC : Stream dim2 c)
   (sD : Stream dim2 d)
-  -> Stream dim2 e attribute(inline) =
-  case sA of
+  -> Stream dim2 e attribute(inline, inline_dimensionality) =
+  case sA of {
     mk_view2 @a @(MloA MhiA NloA NhiA : intindex)
     (imloA : IInt MloA) (imhiA : IInt MhiA)
     (inloA : IInt NloA) (inhiA : IInt NhiA)
     (fA : int -> int -> Writer a).
-  case sB of
-    mk_view2 @b @(MloB MhiB NloB NhiB : intindex)
-    (imloB : IInt MloB) (imhiB : IInt MhiB)
-    (inloB : IInt NloB) (inhiB : IInt NhiB)
-    (fB : int -> int -> Writer b).
-  case sC of
-    mk_view2 @c @(MloC MhiC NloC NhiC : intindex)
-    (imloC : IInt MloC) (imhiC : IInt MhiC)
-    (inloC : IInt NloC) (inhiC : IInt NhiC)
-    (fC : int -> int -> Writer c).
-  case sD of
-    mk_view2 @d @(MloD MhiD NloD NhiD : intindex)
-    (imloD : IInt MloD) (imhiD : IInt MhiD)
-    (inloD : IInt NloD) (inhiD : IInt NhiD)
-    (fD : int -> int -> Writer d).
+      case sB of {
+        mk_view2 @b @(MloB MhiB NloB NhiB : intindex)
+        (imloB : IInt MloB) (imhiB : IInt MhiB)
+        (inloB : IInt NloB) (inhiB : IInt NhiB)
+        (fB : int -> int -> Writer b).
+          case sC of {
+            mk_view2 @c @(MloC MhiC NloC NhiC : intindex)
+            (imloC : IInt MloC) (imhiC : IInt MhiC)
+            (inloC : IInt NloC) (inhiC : IInt NhiC)
+            (fC : int -> int -> Writer c).
+              case sD of {
+                mk_view2 @d @(MloD MhiD NloD NhiD : intindex)
+                (imloD : IInt MloD) (imhiD : IInt MhiD)
+                (inloD : IInt NloD) (inhiD : IInt NhiD)
+                (fD : int -> int -> Writer d).
 
-  -- Find the intersection of the two regions
-  let type MloE = max_i (max_i (max_i MloA MloB) MloC) MloD in
-  let type MhiE = min_i (min_i (min_i MhiA MhiB) MhiC) MhiD in
-  let type NloE = max_i (max_i (max_i NloA NloB) NloC) NloD in
-  let type NhiE = min_i (min_i (min_i NhiA NhiB) NhiC) NhiD in
-  let imloE : IInt MloE = max_ii @(max_i (max_i MloA MloB) MloC) @MloD
-                          (max_ii @(max_i MloA MloB) @MloC
-                           (max_ii @MloA @MloB imloA imloB) imloC) imloD in
-  let imhiE : IInt MhiE = min_ii @(min_i (min_i MhiA MhiB) MhiC) @MhiD
-                          (min_ii @(min_i MhiA MhiB) @MhiC
-                           (min_ii @MhiA @MhiB imhiA imhiB) imhiC) imhiD in
-  let inloE : IInt NloE = max_ii @(max_i (max_i NloA NloB) NloC) @NloD
-                          (max_ii @(max_i NloA NloB) @NloC
-                           (max_ii @NloA @NloB inloA inloB) inloC) inloD in
-  let inhiE : IInt NhiE = min_ii @(min_i (min_i NhiA NhiB) NhiC) @NhiD
-                          (min_ii @(min_i NhiA NhiB) @NhiC
-                           (min_ii @NhiA @NhiB inhiA inhiB) inhiC) inhiD in
+                  -- Find the intersection of the two regions
+                  let type MloE = max_i (max_i (max_i MloA MloB) MloC) MloD in
+                  let type MhiE = min_i (min_i (min_i MhiA MhiB) MhiC) MhiD in
+                  let type NloE = max_i (max_i (max_i NloA NloB) NloC) NloD in
+                  let type NhiE = min_i (min_i (min_i NhiA NhiB) NhiC) NhiD in
+                  let imloE : IInt MloE = max_ii @(max_i (max_i MloA MloB) MloC) @MloD
+                                          (max_ii @(max_i MloA MloB) @MloC
+                                           (max_ii @MloA @MloB imloA imloB) imloC) imloD in
+                  let imhiE : IInt MhiE = min_ii @(min_i (min_i MhiA MhiB) MhiC) @MhiD
+                                          (min_ii @(min_i MhiA MhiB) @MhiC
+                                           (min_ii @MhiA @MhiB imhiA imhiB) imhiC) imhiD in
+                  let inloE : IInt NloE = max_ii @(max_i (max_i NloA NloB) NloC) @NloD
+                                          (max_ii @(max_i NloA NloB) @NloC
+                                           (max_ii @NloA @NloB inloA inloB) inloC) inloD in
+                  let inhiE : IInt NhiE = min_ii @(min_i (min_i NhiA NhiB) NhiC) @NhiD
+                                          (min_ii @(min_i NhiA NhiB) @NhiC
+                                           (min_ii @NhiA @NhiB inhiA inhiB) inhiC) inhiD in
 
-  -- Is the intersection nonempty?
-  if and (range_nonempty_ii @MloE @MhiE imloE imhiE)
-         (range_nonempty_ii @NloE @NhiE inloE inhiE)
-  then mk_view2 @e @MloE @MhiE @NloE @NhiE imloE imhiE inloE inhiE
-       (\ (j : int) (i : int) -> Writer e.
-         case boxed @a (fA j i) of boxed @a (x : a).
-         case boxed @b (fB j i) of boxed @b (y : b).
-         case boxed @c (fC j i) of boxed @c (z : c).
-         case boxed @d (fD j i) of boxed @d (w : d).
-         transformer x y z w)
-  else mk_view2 @e @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-       (\ (j : int) (i : int) (ret : OutPtr e) -> IEffect e.
-          except @(IEffect e));
+                  -- Is the intersection nonempty?
+                  if and (range_nonempty_ii @MloE @MhiE imloE imhiE)
+                         (range_nonempty_ii @NloE @NhiE inloE inhiE)
+                  then mk_view2 @e @MloE @MhiE @NloE @NhiE imloE imhiE inloE inhiE
+                       (\ (j : int) (i : int) -> Writer e.
+                         case boxed @a (fA j i) of boxed @a (x : a).
+                         case boxed @b (fB j i) of boxed @b (y : b).
+                         case boxed @c (fC j i) of boxed @c (z : c).
+                         case boxed @d (fD j i) of boxed @d (w : d).
+                         transformer x y z w)
+                  else empty_view2 @e
+
+              ; empty_view2 @d.
+                  empty_view2 @e
+              }
+          ; empty_view2 @c.
+              empty_view2 @e
+          }
+      ; empty_view2 @b.
+          empty_view2 @e
+      }
+  ; empty_view2 @a.
+      empty_view2 @e
+  };
 
 ShapeDict_dim2_inRange (dim : dim2) (ix : index dim2) -> bool
   attribute(inline) =
@@ -1735,20 +1810,16 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
                coerce @(index dim2) @(index (shape t)) ix in
              at_index @a repr container co_index)
       ; emptySlice.
-          mk_view2 @a @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-          (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
-            except @(IEffect a))
+          empty_view2 @a
       }
   ; emptySlice.
-      mk_view2 @a @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-      (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
-        except @(IEffect a))
+      empty_view2 @a
   };
 
 -------------------------------------------------------------------------------
 -- ShapeDict-like internal functions
 
-view1_flatten @(a : bare) (vw : view1 a) -> Stream dim1 a
+view1_flatten @(a : bare) (repr : Repr a) (vw : view1 a) -> Stream dim1 a
   attribute(inline) =
   -- Shift the indices so that the first index is 0
   viewStream @a (view1_normalize @a vw);
@@ -2162,7 +2233,7 @@ fun_reduce @(t : bare -> bare) @(a : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -2184,7 +2255,7 @@ fun_reduce @(t : bare -> bare) @(a : bare)
 		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
 
   fun_reduce_Stream @a repr reducer init
-  (shape_flatten @a (traverse @a repr input))
+  (shape_flatten @a repr (traverse @a repr input))
   ret;
 
 
@@ -2209,7 +2280,7 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -2231,7 +2302,7 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
 		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
 
   fun_reduce1_Stream @a repr reducer
-  (shape_flatten @a (traverse @a repr input))
+  (shape_flatten @a repr (traverse @a repr input))
   ret;
 
 
@@ -2258,7 +2329,7 @@ fun_map @(t : bare -> bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -2314,7 +2385,7 @@ fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -2384,7 +2455,7 @@ fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -2465,7 +2536,7 @@ fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -2596,16 +2667,50 @@ outerproduct @(a b c : bare)
              transformer value_a value_b ret);
 
         empty_view1 @b.
-          mk_view2 @c @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-          (\ (y : int) (x : int) (ret : OutPtr c) -> IEffect c.
-            except @(IEffect c))
+          empty_view2 @c
       };
 
     empty_view1 @a.
-      mk_view2 @c @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-      (\ (y : int) (x : int) (ret : OutPtr c) -> IEffect c.
-        except @(IEffect c))
+      empty_view2 @c
   };
+
+-------------------------------------------------------------------------------
+-- Internal constructor-like methods
+
+create_view2 @(a : bare)
+  (repr : Repr a)
+  (lo_bound : index dim2)
+  (hi_bound : index dim2)
+  (generator : index dim2 -> Writer a)
+  -> view2 a
+  attribute(inline) =
+
+  let type Sint = Stored int in
+
+  case lo_bound of pyonTuple2 @Sint @Sint (s_lb_y : Sint) (s_lb_x : Sint).
+  case s_lb_y of stored @int (lb_y : int).
+  case s_lb_x of stored @int (lb_x : int).
+  case hi_bound of pyonTuple2 @Sint @Sint (s_hb_y : Sint) (s_hb_x : Sint).
+  case s_hb_y of stored @int (hb_y : int).
+  case s_hb_x of stored @int (hb_x : int).
+
+  if or (lb_y ># hb_y) (lb_x ># hb_x)
+  then empty_view2 @a
+  else case defineIntIndex lb_y of
+         someIInt @(Mlo : intindex) (mlo_i : FIInt Mlo).
+       case defineIntIndex lb_x of
+         someIInt @(Nlo : intindex) (nlo_i : FIInt Nlo).
+       case defineIntIndex hb_y of
+         someIInt @(Mhi : intindex) (mhi_i : FIInt Mhi).
+       case defineIntIndex hb_x of
+         someIInt @(Nhi : intindex) (nhi_i : FIInt Nhi).
+       mk_view2 @a @Mlo @Mhi @Nlo @Nhi (iInt @Mlo mlo_i) (iInt @Mhi mhi_i)
+       (iInt @Nlo nlo_i) (iInt @Nhi nhi_i)
+       (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+         case boxed @(PyonTuple2 Sint Sint)
+              (pyonTuple2 @Sint @Sint (stored @int y) (stored @int x)) of
+           boxed @(PyonTuple2 Sint Sint) (ix : index dim2).
+         generator ix ret);
 
 -------------------------------------------------------------------------------
 -- Fold-like internal methods
@@ -2670,7 +2775,7 @@ histogram @(sh : bare)
     (index_repr : Repr (index sh))
     (slice_repr : Repr (slice sh))
     (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
     (shape_map : (a b : bare) ->
                  Repr a -> Repr b ->
 		 (a -> Writer b) -> Stream sh a -> Stream sh b)
@@ -2700,7 +2805,7 @@ histogram @(sh : bare)
   mk_array1 @(Stored int) @L @H lb hb 
   (referenced @(arr N (Stored int))
    (histogramArray @N size lo_bound hi_bound
-    (shape_flatten @(Stored int) input)))
+    (shape_flatten @(Stored int) repr_int input)))
   ret;
 
 
@@ -3749,6 +3854,24 @@ extend2D @(t : bare -> bare) @(a : bare)
           (pyonTuple2 @Sint @Sint (stored @int real_y) (stored @int real_x)) of
        boxed @(PyonTuple2 Sint Sint) (ix : index dim2).
      at_index @a repr inp (coerce @(index dim2) @(index (shape t)) ix) ret);
+
+
+range2D (extent : index dim2) -> Stream dim2 (index dim2)
+  attribute(inline) =
+
+  let type Sint = Stored int in
+  case extent of pyonTuple2 @Sint @Sint (sy : Sint) (sx : Sint).
+  case sy of stored @int (y : int).
+  case sx of stored @int (x : int).
+
+  if or (y <# 0) (x <# 0)
+  then except @(Stream dim2 (index dim2))
+  else case defineIntIndex y of someIInt @(M : intindex) (m : FIInt M).
+       case defineIntIndex x of someIInt @(N : intindex) (n : FIInt N).
+       mk_view2 @(PyonTuple2 Sint Sint) @0 @0 @M @N zero_ii zero_ii (iInt @M m) (iInt @N n)
+       (\ (y : int) (x : int) (ret : OutPtr (PyonTuple2 Sint Sint))
+          -> IEffect (PyonTuple2 Sint Sint).
+        pyonTuple2 @Sint @Sint (stored @int y) (stored @int x) ret);
 
 
 shift2D @(t : bare -> bare) @(a : bare)
