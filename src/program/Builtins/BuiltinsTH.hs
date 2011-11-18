@@ -370,8 +370,6 @@ pyonBuiltinVariableNames =
   , "max_int"
   , "or"
   , "and"
-  , "bind"
-  , "chunk"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
   , "oper_BITWISEXOR"
@@ -413,7 +411,6 @@ pyonBuiltinVariableNames =
   , "arrUpdateInPlace"
 
     -- Inserted by rewrites or inlining
-  , "chunk_id"
   , "sequenceToView"
   , "viewToSequence"
   , "view1_empty"
@@ -508,10 +505,6 @@ pyonBuiltinVariableNames =
   , "fromEffTok"
   
     -- Obsolete, will be eliminated
-  , "oper_EMPTY"
-  , "oper_DO"
-  , "oper_GUARD"
-  , "oper_CAT_MAP"
   , "array_build"
   , "array_reduce"
   , "fun_map_Stream"
@@ -520,15 +513,4 @@ pyonBuiltinVariableNames =
   , "fun_zip4_Stream"
   , "fun_asList_Stream"
   , "fun_asMatrix_Stream"
-  , "LinStream_reduce"
-  , "LinStream_reduce1"
-  , "LinStream_fold"
-  , "LinStream_flatten"
-  , "LinStream_map"
-  , "LinStream_zipWith"
-  , "LinStream_zipWith3"
-  , "LinStream_zipWith4"
-  , "LinStream_zipWith_array"
-  , "LinStream_zipWith3_array"
-  , "LinStream_zipWith4_array"
   ]
