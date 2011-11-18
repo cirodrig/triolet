@@ -10,7 +10,6 @@ body of the function.
 
 -}
 {-# LANGUAGE GeneralizedNewtypeDeriving, TypeSynonymInstances, DoRec #-}
-{-# OPTIONS_GHC -auto #-}
 module SystemF.GlobalDemand (performGlobalDemandAnalysis)
 where
 
