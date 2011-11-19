@@ -219,6 +219,9 @@ resolveType pos ty =
      AllT d r    -> fmap fst $ resolveDomain d $ \d' -> do
                       (r', lv) <- resolveLType r
                       return (AllT d' r', lv)
+     LamT d r    -> withMany (resolveDomainT pos) d $ \d' -> do
+                      (r', lv) <- resolveLType r
+                      return (LamT d' r', lv)
      CoT k d r   -> do (k', k_lv) <- resolveLType k
                        (d', d_lv) <- resolveLType d
                        (r', r_lv) <- resolveLType r

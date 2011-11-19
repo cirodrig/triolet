@@ -63,6 +63,10 @@ translateType lty =
        Type.FunT (translateType dom) (translateType rng)
      AllT (Domain param ty) rng ->
        Type.AllT (toVar param ::: translateType ty) (translateType rng)
+     LamT doms body ->
+       let mk_lambda (Domain param d) body =
+             Type.LamT (toVar param ::: translateType d) body
+       in foldr mk_lambda (translateType body) doms
      CoT kind dom rng ->
        Type.typeApp (Type.CoT (Type.toBaseKind $ translateType kind)) 
        [translateType dom, translateType rng]

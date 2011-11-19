@@ -224,6 +224,14 @@ translateType' lty =
        dom <- translateType' ty
        rng' <- liftT (assume v dom) $ translateType' rng
        return $ Type.AllT (v ::: dom) rng'
+     LamT doms body ->
+       let mk_lambda (Domain param d : doms) body = do
+             body' <- mk_lambda doms body
+             d' <- translateType' d
+             return $ Type.LamT (toVar param ::: d') body'
+           mk_lambda [] body =
+             translateType' body
+       in mk_lambda doms body
      CoT kind dom rng -> do
        kind' <- translateType' kind
        dom' <- translateType' dom

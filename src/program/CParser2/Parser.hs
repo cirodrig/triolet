@@ -182,7 +182,7 @@ pType = dependent_function <|> function
       return $ L pos (FunT domain rng)
 
 pCoType :: P PLType
-pCoType = coercion <|> pAppType
+pCoType = coercion <|> function <|> pAppType
   where
     coercion = located $ do
       match CoerceTok
@@ -191,6 +191,13 @@ pCoType = coercion <|> pAppType
       dom <- pTypeAtom
       rng <- pTypeAtom
       return $ CoT kind dom rng
+
+    function = located $ do
+      match BackslashTok
+      dom <- parameters
+      match DotTok
+      body <- pType
+      return $ LamT dom body
 
 -- | Parse a type application
 pAppType :: P PLType

@@ -4,7 +4,7 @@ single 'Module' contains all the data of a file being parsed by the
 frontend.
 -}
 
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
 module CParser2.AST where
 
 import Control.Monad
@@ -117,6 +117,12 @@ data Type ix =
     , tRng :: LType ix
     }
     
+    -- | A type function
+  | LamT
+    { tDomains :: [Domain ix]
+    , tBody :: LType ix
+    }
+
     -- | A coercion type
   | CoT
     { tKind :: LType ix
