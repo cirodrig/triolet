@@ -711,6 +711,8 @@ coerceExpAtType :: Type -> Type -> ExpM -> (ExpM -> RI (ExpM, a))
 coerceExpAtType g_type e_type e k = do
   co <- coercion g_type e_type
   coerceExp co e k
+  where
+    debug = traceShow $ text "coerceExpAtType" <+> PrintMemoryIR.pprExp e
 
 -- | Coerce an expression and return the result.  This is only valid for
 --   return types, because we can't put a case statement around the consumer
@@ -939,6 +941,9 @@ reprApply :: ExpM               -- ^ Operator
 reprApply op op_type ty_args args = do
   app_result <- reprTypeOfApp op op_type ty_args (map snd args)
   applyResultToValues app_result (map fst args)
+  where
+    debug x =
+      traceShow (text "reprApply" <+> vcat (PrintMemoryIR.pprExp op : map (pprType . fst) ty_args)) x
 
 reprApplyCon :: Var                -- ^ Constructor
              -> [TypeArgument]     -- ^ Type arguments
