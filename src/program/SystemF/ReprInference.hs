@@ -202,7 +202,8 @@ coercionKind tenv natural_t =
        case natural_t
        of FunT {} -> Just BoxK
           AllT {} -> Just BoxK
-          AppT (AppT (CoT BoxK) _) _ -> Just ValK
+          AppT (AppT (CoT (VarT co_kind)) _) _ 
+            | co_kind == boxV -> Just ValK
           _ -> internalError "coercionKind: Not implemented for this type"
 
 -- | Given two types returned by 'stripReprConversions',
@@ -386,10 +387,11 @@ cvtType mode (AllT (a ::: t1) t2) = do
   rng <- assume a dom $ fmap fst $ cvtType mode t2 
   return (AllT (a ::: dom) rng, boxT)
 
-cvtType mode (CoT BoxK) = do
-  -- Coercion type
-  -- Always generate coercions on boxed objects.
-  return (CoT BoxK, boxT `FunT` boxT `FunT` valT)
+cvtType mode (CoT (VarT k)) 
+  | k == boxV = do
+    -- Coercion type
+    -- Always generate coercions on boxed objects.
+    return (CoT (VarT k), boxT `FunT` boxT `FunT` valT)
   
 cvtType mode (CoT _) =
   internalError "cvtType: Unexpected kind in coercion type"

@@ -58,7 +58,7 @@ data Type =
     --
     --   A coercion (s ~ t) carries the ability to coerce a value of type s
     --   to a value of type t.
-  | CoT !BaseKind
+  | CoT Kind
 
     -- | An unboxed tuple constructor.
     --   The type parameters have the specified kinds, which must be either
@@ -248,7 +248,7 @@ pprTypePrec ty =
      AllT binder rng -> ppr_all [binder] rng `hasPrec` lamPrec
      AnyT k -> text "Any :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec
      IntT n -> hasAtomicPrec $ text (show n)
-     CoT k -> text "Coercion :" <+> pprTypePrec (fromBaseKind k) ?+ typeAnnPrec `hasPrec` typeAnnPrec 
+     CoT k -> text "Coercion :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec 
      UTupleT ks -> text "UTuple" <+> utuple_tags ks `hasPrec` appPrec
   where
     utuple_tags ks =

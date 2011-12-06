@@ -141,7 +141,7 @@ cmpType expected given =
       compareTypes' dom1 dom2 >&&> bindAndCompare a2 dom2 rng1 rng2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
     cmp (IntT n1, IntT n2) = return $ n1 == n2
-    cmp (CoT k1, CoT k2) = return $ k1 == k2
+    cmp (CoT k1, CoT k2) = compareTypes' k1 k2
     cmp (UTupleT a, UTupleT b) = return $ a == b
 
     -- Matching (\x. e1) with e2

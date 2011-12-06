@@ -47,35 +47,50 @@ fromVarAttrs attrs =
   
 -------------------------------------------------------------------------------
 
+insertDomain :: Type.Binder -> SpecTypeEnv -> SpecTypeEnv
+insertDomain (v ::: t) e = insertType v t e
+
 toVar (ResolvedVar v _) = v
 
-translateDomain :: Domain Resolved -> Type.Binder
-translateDomain (Domain param ty) = toVar param ::: translateType ty
+translateDomain :: SpecTypeEnv -> Domain Resolved -> Type.Binder
+translateDomain tenv (Domain param ty) = toVar param ::: translateType tenv ty
 
-translateType :: RLType -> Type.Type
-translateType lty =
+translateType :: SpecTypeEnv -> RLType -> Type.Type
+translateType tenv lty =
   case unLoc lty
   of VarT v -> Type.VarT (toVar v)
      IntIndexT n -> Type.IntT n
+     TupleT ts ->
+       -- Get kinds of type arguments
+       let tys = map (translateType tenv) ts
+           kinds = map (Type.toBaseKind . Type.typeKind tenv) tys
+       in Type.typeApp (Type.UTupleT kinds) tys
+
      AppT op arg ->
-       Type.AppT (translateType op) (translateType arg)
+       Type.AppT (translateType tenv op) (translateType tenv arg)
      FunT dom rng ->
-       Type.FunT (translateType dom) (translateType rng)
+       Type.FunT (translateType tenv dom) (translateType tenv rng)
      AllT (Domain param ty) rng ->
-       Type.AllT (toVar param ::: translateType ty) (translateType rng)
+       let dom' = toVar param ::: translateType tenv ty
+           rng' = translateType (insertDomain dom' tenv) rng
+       in Type.AllT dom' rng'
      LamT doms body ->
-       let mk_lambda (Domain param d) body =
-             Type.LamT (toVar param ::: translateType d) body
-       in foldr mk_lambda (translateType body) doms
+       let mk_lambda tenv (Domain param d : ds) body =
+             let dom' = toVar param ::: translateType tenv d
+                 rng = mk_lambda (insertDomain dom' tenv) ds body
+             in Type.LamT dom' rng
+           mk_lambda tenv [] body =
+             translateType tenv body
+       in mk_lambda tenv doms body
      CoT kind dom rng ->
-       Type.typeApp (Type.CoT (Type.toBaseKind $ translateType kind)) 
-       [translateType dom, translateType rng]
+       Type.typeApp (Type.CoT (translateType tenv kind)) 
+       [translateType tenv dom, translateType tenv rng]
 
 -- | Translate a data constructor field to the type used for passing the 
 --   field as an argument to a constructor application.
 translateDataConFieldArgument :: SpecTypeEnv -> RLType -> Type.Type
 translateDataConFieldArgument tenv lty =
-  let translated_type = translateType lty
+  let translated_type = translateType tenv lty
       translated_kind = Type.typeKind tenv translated_type
   in case translated_kind
      of Type.VarT kvar
@@ -88,9 +103,10 @@ translateDataConFieldArgument tenv lty =
         _ -> internalError "translateDataConFieldArgument: Unexpected kind"
 
 translateDataConDecl tenv data_type_con decl =
-  let params = map translateDomain $ dconParams decl
-      ex_types = map translateDomain $ dconExTypes decl
-      args = map translateType $ dconArgs decl
+  let params = map (translateDomain tenv) $ dconParams decl
+      ex_types = map (translateDomain tenv) $ dconExTypes decl
+      local_tenv = foldr insertDomain tenv (params ++ ex_types)
+      args = map (translateType local_tenv) $ dconArgs decl
       ty = make_datacon_type params ex_types (dconArgs decl) (range_type params)
   in (ty, DataConType params ex_types args (toVar $ dconVar decl) data_type_con)
   where
@@ -127,13 +143,13 @@ translateDecl tenv (Decl name ent) =
   of VarEnt ty attrs ->
        let conlike = fromVarAttrs attrs
        in conlike `seq`
-          insertTypeWithProperties core_name (translateType ty) conlike
+          insertTypeWithProperties core_name (translateType tenv ty) conlike
      TypeEnt ty (Just type_function) ->
-       insertTypeFunction core_name (translateType ty) type_function
+       insertTypeFunction core_name (translateType tenv ty) type_function
      TypeEnt ty Nothing ->
-       insertType core_name (translateType ty)
+       insertType core_name (translateType tenv ty)
      DataEnt ty data_cons attrs ->
-       let kind = translateType ty
+       let kind = translateType tenv ty
            abstract = AbstractAttr `elem` attrs
            data_con_descrs =
              map (translateDataConDecl tenv core_name . unLoc) data_cons

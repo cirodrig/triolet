@@ -452,7 +452,7 @@ convertPredicate' (IsEqual t1 t2) = do
   -- Create a coercion value
   t1' <- convertHMType' t1
   t2' <- convertHMType' t2
-  return $ Type.Type.typeApp (Type.Type.CoT Type.Type.BoxK) [t1', t2']
+  return $ Type.Type.typeApp (Type.Type.CoT Type.Type.boxT) [t1', t2']
 
 -- | Convert a type scheme to a function type.  Each quantified variable
 -- becomes a parameter in the function type.

@@ -236,7 +236,7 @@ translateType' lty =
        kind' <- translateType' kind
        dom' <- translateType' dom
        rng' <- translateType' rng
-       return $ Type.typeApp (Type.CoT (Type.toBaseKind kind')) [dom', rng']
+       return $ Type.typeApp (Type.CoT kind') [dom', rng']
 
 translateFun pos f = do
   ty_binders <- mapM translateDomain $ fTyParams f

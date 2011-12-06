@@ -1089,8 +1089,9 @@ deadValue t = do
                args <- mapM deadValue dom
                let expr = ExpM $ ConE defaultExpInfo (dead_indint_op p) args
                return expr
-         (CoT BoxK, [t1, t2]) ->
-           return $ ExpM $ AppE defaultExpInfo make_coercion_op [t1, t2] []
+         (CoT (VarT k), [t1, t2])
+           | k == boxV ->
+               return $ ExpM $ AppE defaultExpInfo make_coercion_op [t1, t2] []
          _ -> internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box

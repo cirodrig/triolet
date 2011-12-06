@@ -81,8 +81,7 @@ typeKind tenv ty =
        typeKind (insertType x param_k tenv) rng
      CoT k ->
        -- Kind of a coercion is k -> k -> val
-       let kind = fromBaseKind k
-       in kind `FunT` kind `FunT` valT
+       k `FunT` k `FunT` valT
      UTupleT ks -> funType (map fromBaseKind ks) valT
      _ -> internalError "typeKind: Unrecognized type"
 
@@ -134,10 +133,12 @@ typeCheckType ty =
 
      AnyT k -> return k
      IntT _ -> return intindexT
-     CoT k ->
+     CoT k -> do
+       -- Check that the coercion kind is valid
+       typeCheckType k
+
        -- Kind of a coercion is k -> k -> val
-       let kind = fromBaseKind k
-       in return (kind `FunT` kind `FunT` valT)
+       return (k `FunT` k `FunT` valT)
      UTupleT ks
        | all valid_unboxed_tuple_field ks ->
            return $ funType (map fromBaseKind ks) valT
