@@ -770,9 +770,17 @@ namespace Pyon {
       // Member Functions
       T_Bare 
       at(int index) { 
-        int32_t min = pyon_Array1_get_bounds(getBareData()).min;
+        Array1Bounds array1Bounds = pyon_Array1_get_bounds(getBareData());
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t displacement = index - array1Bounds.min;
+        int i = displacement / array1Bounds.stride;
+        if (displacement % array1Bounds.stride != 0)
+          pyonError("Array index out of bounds\n");
+
         PyonBarePtr array1_contents = pyon_Array1_get_contents(getBareData());
-        return T_Bare(array1_contents + (index - min)*addPadding<T_Bare>(T_Bare::getSize()) ); 
+        int element_size = addPadding<T_Bare>(T_Bare::getSize());
+        return T_Bare(array1_contents + i * element_size);
       }
 
   };
@@ -810,12 +818,24 @@ namespace Pyon {
       T_Bare 
       at(int rowIndex, int columnIndex) {
         Array2Bounds array2Bounds = pyon_Array2_get_bounds(getBareData());
-        int32_t y_min = array2Bounds.ymin;
-        int32_t x_min = array2Bounds.xmin;
-        int32_t x_end = array2Bounds.xend;
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array2Bounds.xmin;
+        int xi = x_displacement / array2Bounds.xstride;
+        if (x_displacement % array2Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array2Bounds.ymin;
+        int yi = y_displacement / array2Bounds.ystride;
+        if (y_displacement % array2Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array2Bounds.xsize;
+        int index = yi * row_n_members + xi;
         PyonBarePtr array2_contents = pyon_Array2_get_contents(getBareData());
-        int offset = (rowIndex - y_min)*(x_end - x_min) + (columnIndex - x_min);
-        return T_Bare(array2_contents + offset*addPadding<T_Bare>(T_Bare::getSize()) ); 
+        int element_size = addPadding<T_Bare>(T_Bare::getSize());
+        return T_Bare(array2_contents + index * element_size);
       }
 
   };
@@ -999,12 +1019,24 @@ namespace Pyon {
       Incomplete< T_Bare > 
       at(int rowIndex, int columnIndex) { 
         Array2Bounds array2Bounds = pyon_Array2_get_bounds(this->getObject());
-        int32_t y_min = array2Bounds.ymin;
-        int32_t x_min = array2Bounds.xmin;
-        int32_t x_end = array2Bounds.xend;
-        PyonBarePtr array2_contents = pyon_Array2_get_contents(this->getObject());
-        int offset = (rowIndex - y_min)*(x_end - x_min) + (columnIndex - x_min);
-        return Incomplete<T_Bare>(array2_contents + offset*addPadding<T_Bare>(T_Bare::getSize()) ); 
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array2Bounds.xmin;
+        int xi = x_displacement / array2Bounds.xstride;
+        if (x_displacement % array2Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array2Bounds.ymin;
+        int yi = y_displacement / array2Bounds.ystride;
+        if (y_displacement % array2Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array2Bounds.xsize;
+        int index = yi * row_n_members + xi;
+        PyonBarePtr array2_contents = pyon_Array2_get_contents(this->getBareData());
+        int element_size = addPadding<T_Bare>(T_Bare::getSize());
+        return Incomplete<T_Bare>(array2_contents + index * element_size ); 
       }
 
   };

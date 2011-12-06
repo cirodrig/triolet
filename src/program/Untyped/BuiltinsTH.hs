@@ -20,9 +20,9 @@ pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list",
    "array", "array0", "array1", "array2",
    "Maybe", "Any",
-   "shape", "dim0", "dim1", "dim2",
+   "shape", "list_dim", "dim0", "dim1", "dim2",
    "index", "slice",
-   "view", "view0", "view1", "view2"]
+   "view"]
 
 -- | Predefined data types not visible to the Pyon parser
 pyonOtherTypes :: [String]
@@ -100,9 +100,11 @@ pyonOtherGlobals :: [String]
 pyonOtherGlobals =
   [ "do", "guard", "iterBind",
     "safeIndex", "safeSlice",
-    "flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
-    "inRange", "getSlice",
-    "at_point", "get_shape",
+    "member", "intersection",
+    "flattenStream", "generate",
+    "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
+    "getSlice",
+    "at_point",
     "sliceObject", "justVal", "nothingVal"
   ]
 

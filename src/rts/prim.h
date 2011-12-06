@@ -69,13 +69,17 @@ extern procedure pyon.internal.prim.min_fii
 extern procedure pyon.internal.prim.minus_fii
   (FinIndInt, FinIndInt) -> FinIndInt;
 
+extern procedure pyon.internal.prim.gcd (int, int) -> int;
+
+extern procedure pyon.internal.prim.extgcd_x (int, int) -> int;
+
 extern function pyon.internal.prim.doall
   (FinIndInt, owned) -> ();
 
 extern function pyon.internal.prim.for
-  (owned, IndInt, pointer, owned, pointer) -> ();
+  (owned, FinIndInt, pointer, owned, pointer) -> ();
 
-extern function pyon.internal.prim.blocked_reduce
+extern function pyon.internal.prim.blocked_1d_reduce
   (FinIndInt, owned, owned, owned) -> owned;
 
 // C implementation of blocked_reduce
@@ -88,7 +92,7 @@ extern procedure pyon.internal.prim.blocked_reduce_accumulate_range
 extern procedure pyon.internal.prim.blocked_reduce_reduce
   "blocked_reduce_reduce" (pointer, owned, owned) -> owned;
 
-extern function pyon.internal.prim.blocked_reduce2
+extern function pyon.internal.prim.blocked_2d_reduce
   (FinIndInt, FinIndInt, owned, owned, owned) -> owned;
 
 // C implementation of blocked_reduce

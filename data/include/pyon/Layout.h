@@ -106,7 +106,8 @@ namespace Pyon {
   extern "C" const PyonUInt pyon_Array1_alignment;
   extern "C" void
   pyon_Array1_initialize(PyonInt min,
-                         PyonInt end,
+                         PyonInt stride,
+                         PyonInt size,
                          PyonUInt elt_size,
                          PyonUInt elt_align,
                          PyonBarePtr ret);
@@ -115,7 +116,8 @@ namespace Pyon {
 
   struct Array1Bounds {
     int32_t min;
-    int32_t end;
+    int32_t stride;
+    int32_t size;
   };
   extern "C" Array1Bounds
   pyon_Array1_get_bounds(PyonBarePtr array) __attribute__((pure));
@@ -124,9 +126,11 @@ namespace Pyon {
   extern "C" const PyonUInt pyon_Array2_alignment;
   extern "C" void
   pyon_Array2_initialize(PyonInt y_min,
-                         PyonInt y_end,
+                         PyonInt y_stride,
+                         PyonInt y_size,
                          PyonInt x_min,
-                         PyonInt x_end,
+                         PyonInt x_stride,
+                         PyonInt x_size,
                          PyonUInt elt_size,
                          PyonUInt elt_align,
                          PyonBarePtr ret);
@@ -135,9 +139,11 @@ namespace Pyon {
   
   struct Array2Bounds {
     int32_t ymin;
-    int32_t yend;
+    int32_t ystride;
+    int32_t ysize;
     int32_t xmin;
-    int32_t xend;
+    int32_t xstride;
+    int32_t xsize;
   };
   extern "C" Array2Bounds
   pyon_Array2_get_bounds(PyonBarePtr array) __attribute__((pure));

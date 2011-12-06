@@ -195,7 +195,7 @@ builtinFunctions =
   --, (PyonName module_list "list_len",
   --   Right [| pyonBuiltin SystemF.The_len |])
   , (PyonName module_list "list_build",
-     Right [| pyonBuiltin SystemF.The_Sequence_list_build |])
+     Right [| pyonBuiltin SystemF.The_Sequence_build_list |])
   , (PyonName module_list "array1_build",
      Right [| pyonBuiltin SystemF.The_Sequence_array1_build |])
   -- , (PyonName module_list "list_traverse",
@@ -299,10 +299,10 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_doall) |])
   , (PyonName module_prim "for",
      Right [| pyonBuiltin (SystemF.The_for) |])
-  , (PyonName module_prim "blocked_reduce",
-     Right [| pyonBuiltin (SystemF.The_blocked_reduce) |])
-  , (PyonName module_prim "blocked_reduce2",
-     Right [| pyonBuiltin (SystemF.The_blocked_reduce2) |])
+  , (PyonName module_prim "blocked_1d_reduce",
+     Right [| pyonBuiltin (SystemF.The_blocked_1d_reduce) |])
+  , (PyonName module_prim "blocked_2d_reduce",
+     Right [| pyonBuiltin (SystemF.The_blocked_2d_reduce) |])
   , (PyonName module_prim "blocked_doall",
      Right [| pyonBuiltin (SystemF.The_blocked_doall) |])
   , (PyonName module_prim "blocked_doall2",

@@ -329,12 +329,12 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
   where
     table = [ (pyonBuiltin The_convertToBare, rwConvertToBare)
             , (pyonBuiltin The_convertToBoxed, rwConvertToBoxed)
-            , (pyonBuiltin The_darr1_reduce, rwDarr1Reduce)
-            , (pyonBuiltin The_darr1_reduce1, rwDarr1Reduce1)
-            , (pyonBuiltin The_darr2_reduce, rwDarr2Reduce)
-            , (pyonBuiltin The_arr1D_build, rwArr1DBuild)
-            , (pyonBuiltin The_arr2D_build, rwArr2DBuild)
-            , (pyonBuiltin The_view1ToDarr1, rwView1ToDarr1)
+            --, (pyonBuiltin The_darr1_reduce, rwDarr1Reduce)
+            --, (pyonBuiltin The_darr1_reduce1, rwDarr1Reduce1)
+            --, (pyonBuiltin The_darr2_reduce, rwDarr2Reduce)
+            --, (pyonBuiltin The_arr1D_build, rwArr1DBuild)
+            --, (pyonBuiltin The_arr2D_build, rwArr2DBuild)
+            --, (pyonBuiltin The_view1ToDarr1, rwView1ToDarr1)
             -- , (pyonBuiltin The_range, rwRange)
             -- , (pyonBuiltin The_TraversableDict_list_traverse, rwTraverseList)
             --, (pyonBuiltin The_TraversableDict_list_build, rwBuildList)
@@ -371,33 +371,39 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
     exprs = [ (pyonBuiltin The_count, count_expr) 
             , (pyonBuiltin The_zero_ii, zero_ii_expr)
             , (pyonBuiltin The_one_ii, one_ii_expr)
+            , (pyonBuiltin The_ShapeDict_list_dim, shape_dict_list_dim)
+            , (pyonBuiltin The_ShapeDict_dim0, shape_dict_dim0)
+            , (pyonBuiltin The_ShapeDict_dim1, shape_dict_dim1)
             ]
     
     -- The following expression represents the "count" stream:
     --
     -- > viewStream @(Stored int)
-    -- > (mk_view1 @(Stored int) @0 @pos_infty zero_ii (iPosInfty @pos_infty)
-    -- >  (\ (x : int) -> (). stored @int x))
-    count_expr = do
-      fun <-
-        lamE $ mkFun []
-        (\ [] -> return ([intType], writerType storedIntType))
-        (\ [] [x] -> mkConE defaultExpInfo stored [varE x])
-      zero_ii <- zero_ii_expr
-      return $
-        conE defaultExpInfo view_stream
-        [conE defaultExpInfo mk_view1
-         [zero_ii, conE defaultExpInfo iPosInfty [], fun]]
+    -- > (view_generate @list_dim ShapeDict_list_dim
+    -- >  @(Stored int) repr_int
+    -- >   (mk_list_dim (nothingVal @int))
+    -- >   (copy @(Stored int) repr_int))
+    count_expr =
+      mkConE defaultExpInfo view_stream
+      [appExp
+       (varAppE (pyonBuiltin The_view_generate)
+        [VarT $ pyonBuiltin The_list_dim]
+        [varE (pyonBuiltin The_ShapeDict_list_dim)])
+       [storedIntType]
+       [varE (pyonBuiltin The_repr_int), 
+        return $ conE defaultExpInfo mk_list_dim [conE defaultExpInfo nothing_val []],
+        varAppE (pyonBuiltin The_copy) [storedIntType]
+        [varE (pyonBuiltin The_repr_int)]]]
       where
         view_stream =
           VarCon (pyonBuiltin The_viewStream) [storedIntType] []
-        mk_view1 =
-          VarCon (pyonBuiltin The_mk_view1) [storedIntType]
-          [IntT 0, posInftyT]
-        iPosInfty =
-          VarCon (pyonBuiltin The_iPosInfty) [posInftyT] []
-        stored =
-          VarCon (pyonBuiltin The_stored) [VarT $ pyonBuiltin The_int] []
+        mk_list_dim =
+          VarCon (pyonBuiltin The_mk_list_dim) [] []
+        nothing_val =
+          VarCon (pyonBuiltin The_nothingVal) [VarT $ pyonBuiltin The_int] []
+        mk_view =
+          VarCon (pyonBuiltin The_mk_view)
+          [VarT $ pyonBuiltin The_list_dim, storedIntType] []
 
     zero_ii_expr =
       return $
@@ -406,6 +412,54 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
       return $
       conE defaultExpInfo (iInt_con (IntT 1)) [ExpM $ VarE defaultExpInfo (pyonBuiltin The_one_fii)]
     iInt_con n = VarCon (pyonBuiltin The_iInt) [n] []
+    
+    shape_dict shape_type index_repr slice_repr
+      member intersect flatten generate map zip zip3 zip4 slice =
+      let dictionary_members = [index_repr, slice_repr, member, intersect,
+                                flatten, generate, map, zip, zip3, zip4,
+                                slice]
+          con = VarCon (pyonBuiltin The_shapeDict) [shape_type] []
+      in mkConE defaultExpInfo con
+         [varE $ pyonBuiltin x | x <- dictionary_members] :: FreshVarM ExpM
+
+    shape_dict_list_dim =
+      shape_dict (VarT $ pyonBuiltin The_list_dim)
+      The_repr_int The_repr_SliceObject
+      The_ShapeDict_list_dim_member
+      The_ShapeDict_list_dim_intersect
+      The_ShapeDict_list_dim_flatten
+      The_ShapeDict_list_dim_generate
+      The_ShapeDict_list_dim_map
+      The_ShapeDict_list_dim_zipWith
+      The_ShapeDict_list_dim_zipWith3
+      The_ShapeDict_list_dim_zipWith4
+      The_ShapeDict_list_dim_slice
+
+    shape_dict_dim0 =
+      shape_dict (VarT $ pyonBuiltin The_dim0)
+      The_repr_NoneType The_repr_NoneType
+      The_ShapeDict_dim0_member
+      The_ShapeDict_dim0_intersect
+      The_ShapeDict_dim0_flatten
+      The_ShapeDict_dim0_generate
+      The_ShapeDict_dim0_map
+      The_ShapeDict_dim0_zipWith
+      The_ShapeDict_dim0_zipWith3
+      The_ShapeDict_dim0_zipWith4
+      The_ShapeDict_dim0_slice
+
+    shape_dict_dim1 =
+      shape_dict (VarT $ pyonBuiltin The_dim1)
+      The_repr_int The_repr_SliceObject
+      The_ShapeDict_dim1_member
+      The_ShapeDict_dim1_intersect
+      The_ShapeDict_dim1_flatten
+      The_ShapeDict_dim1_generate
+      The_ShapeDict_dim1_map
+      The_ShapeDict_dim1_zipWith
+      The_ShapeDict_dim1_zipWith3
+      The_ShapeDict_dim1_zipWith4
+      The_ShapeDict_dim1_slice
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
@@ -559,7 +613,7 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
 
 rwConvertToBoxed _ _ _ = return Nothing
 
-
+{-
 -- | Convert a reduction on a @mk_darr1@ to a primitive reduction.
 --   The result is basically the same as if the function were inlined.
 --   It's done as a rewrite rule because we want to \"inline\" only if
@@ -669,6 +723,7 @@ rwView1ToDarr1 inf [_, _] (vw : user : _ : other_args)
       return $ Just $ ExpM $ AppE inf user [size] (count : darr : other_args)
 
 rwView1ToDarr1 _ _ _ = return Nothing
+-}
 
 {-
 -- | Convert 'range' into an explicitly indexed variant

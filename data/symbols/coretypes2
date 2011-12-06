@@ -77,6 +77,24 @@ data MaybeVal : val -> val
   nothingVal (a : val) () ();
 };
 
+-- An integer interval, given by inclusive lower and exclusive upper bounds.
+-- The upper bound must be greater or equal to the lower bound.
+-- 'Nothing' means that the interval is unbounded at that end.
+data Interval : val
+{
+  interval () () (MaybeVal int, MaybeVal int);
+};
+
+-- | A linear map, representing the function y = s*x + a.
+--   The stride 's' must be nonzero.
+--
+--   Negative strides are valid; however, note that many functions expect
+--   linear maps with positive strides.
+data LinearMap : val
+{
+  linearMap () () (int, int);
+};
+
 -- A finite indexed integer 
 data FIInt : intindex -> val
 {
@@ -235,13 +253,12 @@ data VectorDict : bare -> box
 data TraversableDict : (bare -> bare) -> box
 {
   traversableDict (t : bare -> bare) ()
-  ((a : bare) -> Repr a -> t a -> shape t,
-   (a : bare) -> Repr a -> t a -> Stream (shape t) a,
+  ((a : bare) -> Repr a -> t a -> Stream (shape t) a,
    (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a));
 };
 
 -- Operations related to data domains and traversals over them.
--- The operations are indices, flatten-to-list, map, zipWith{2..4},
+-- The operations are flatten-to-list, generate, map, zipWith{2..4},
 -- range checking for integers, and slicing.
 data ShapeDict : box -> box
 {
@@ -249,10 +266,19 @@ data ShapeDict : box -> box
   (Repr (index sh),
    Repr (slice sh),
 
-   sh -> Stream sh (index sh),
+   -- Member
+   sh -> index sh -> bool,
 
-   (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a,
+   -- Intersect
+   sh -> sh -> sh,
 
+   -- Flatten
+   (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a,
+
+   -- Generate
+   (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a,
+
+   -- Map and zips
    (a b : bare) ->
    Repr a -> Repr b ->
    (a -> Writer b) -> Stream sh a -> Stream sh b,
@@ -271,8 +297,7 @@ data ShapeDict : box -> box
    (a -> b -> c -> d -> Writer e) ->
    Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e,
 
-   sh -> index sh -> bool,
-
+   -- Slice
    (t : bare -> bare) -> (a : bare) ->
    coerce @box (shape t) sh ->
    IndexableDict t -> Repr a -> t a -> slice sh -> view sh a
@@ -293,7 +318,6 @@ data IndexableDict : (bare -> bare) -> box
 
 type index : box -> bare;
 type slice : box -> bare;
-type view : box -> bare -> box;
 
 -------------------------------------------------------------------------------
 -- Imperative computation support
@@ -379,7 +403,7 @@ type Stream : box -> bare -> box;
 data Stream1 : bare -> box
 {
   sequenceStream (a : bare) () (Sequence a);
-  viewStream (a : bare) () (view1 a);
+  viewStream (a : bare) () (view list_dim a);
 };
 
 -- A dynamically computed sequence of values.
@@ -416,76 +440,14 @@ data BindState : box -> bare -> bare -> box
 -------------------------------------------------------------------------------
 -- Views
 
-data view0 : bare -> box
+--  A view is a container represented by a function
+data view : box -> bare -> box
 {
-  mk_view0 (a : bare) () (NoneType -> Writer a);
+  mk_view (sh : box, a : bare) () (sh, index sh -> Writer a);
 };
-
--- A 1D array view.  The index space is bounded by 'lo' (inclusive) and 'hi'
--- (exclusive).
-data view1 : bare -> box
-{
-  mk_view1
-  (a : bare) (lo hi : intindex)
-  (IInt lo, IInt hi, int -> Writer a);
-
-  empty_view1 (a : bare) () ();
-};
-
--- A 2D array view.  The index space is bounded in the Y dimension by
--- 'Mlo' (inclusive) and 'Mhi' (exclusive), and in the x dimension by
--- 'Nlo' (inclusive) and 'Nhi' (exclusive).
-data view2 : bare -> box
-{
-  mk_view2
-  (a : bare) (Mlo Mhi Nlo Nhi : intindex)
-  (IInt Mlo, IInt Mhi,
-   IInt Nlo, IInt Nhi,
-   int -> int -> Writer a);
-
-  empty_view2 (a : bare) () ();
-};
-
--- A 1D array function.  Basically a 'view1' with its type parameters
--- exposed.  The index is the array size; indexing starts from zero.
-data darr1 : intindex -> bare -> box
-{
-  mk_darr1 (N : intindex, a : bare) () (int -> Writer a);
-};
-
--- A 2D array function.  Basically a 'view2' with its type parameters
--- exposed.  The indices are the array size; indexing starts from zero.
-data darr2 : intindex -> intindex -> bare -> box
-{
-  mk_darr2 (M N : intindex, a : bare) () (int -> int -> Writer a);
-};
-
-view1ToDarr1 : (a : bare) -> (b : bare)
-	    -> view1 a
-	    -> ((N : intindex) -> FIInt N -> darr1 N a -> Writer b)
-	    -> Writer b
-	    -> Writer b;
-
-darr1ToView1 :
-    (N : intindex) -> (a : bare)
- -> FIInt N
- -> darr1 N a
- -> view1 a;
-
-view2ToDarr2 : (a : bare) -> (b : bare)
-	    -> view2 a
-	    -> ((M N : intindex) -> FIInt M -> FIInt N -> darr2 M N a -> Writer b)
-	    -> Writer b
-	    -> Writer b;
-
-darr2ToView2 : (M N : intindex) -> (a : bare)
-	    -> FIInt M
-	    -> FIInt N
-	    -> darr2 M N a
-	    -> view2 a;
 
 -------------------------------------------------------------------------------
--- Containers
+-- Storage
 
 data list : bare -> bare
 {
@@ -504,29 +466,45 @@ data array0 : bare -> bare
   mk_array0 (a : bare) () (a);
 };
 
--- A 1D array.  The array is bounded by 'lo' (inclusive) and 'hi' (exclusive).
+-- A 1D array.
+-- The array's domain is described by a lower bound, stride, and size.
 data array1 : bare -> bare
 {
-  mk_array1 (a : bare) (lo hi : intindex)
-  (FIInt lo, FIInt hi, Referenced (arr (minus_i hi lo) a));
+  mk_array1 (a : bare) (N : intindex)
+  (int, int, FIInt N, Referenced (arr N a));
 };
 
--- A 1D array.  The array is bounded in the Y dimension by
--- 'Mlo' (inclusive) and 'Mhi' (exclusive), and in the x dimension by
--- 'Nlo' (inclusive) and 'Nhi' (exclusive).
+-- A 2D array.
+-- The array's domain is described by a lower bound, stride, and size in
+-- the Y dimension, and a lower bound, stride, and size in the X dimension.
 data array2 : bare -> bare
 {
   mk_array2
-  (a : bare) (Mlo Mhi Nlo Nhi : intindex)
-  (FIInt Mlo, FIInt Mhi, FIInt Nlo, FIInt Nhi,
-   Referenced (arr (minus_i Mhi Mlo) (arr (minus_i Nhi Nlo) a)));
+  (a : bare) (M N : intindex)
+  (int, int, FIInt M, int, int, FIInt N, Referenced (arr M (arr N a)));
 };
+
+-- Convert the "size" fields of an array to an equivalent dim1.
+arrayDescToDim1 : (N : intindex) -> int -> int -> FIInt N -> dim1;
+
+-- Convert a dim1 to the equivalent "size" fields of an array.
+dim1ToArrayDesc : (a : bare)
+               -> dim1
+               -> ((N : intindex) -> int -> int -> FIInt N -> Writer a)
+               -> Writer a;
 
 -------------------------------------------------------------------------------
 -- Shapes
 
 -- Get the stream shape corresponding to a container
 type shape : (bare -> bare) -> box;
+
+-- The shape of a list stream.
+-- 'Nothing' is an infinite stream; otherwise the shape is the length.
+data list_dim : box
+{
+  mk_list_dim () () (MaybeVal int);
+};
 
 -- The shape of a singleton stream
 data dim0 : box
@@ -535,21 +513,22 @@ data dim0 : box
 };
 
 -- A one-dimensional domain.
--- Stored as (lo-bound, hi_bound).
+-- The domain is the intersection of an interval and a linear map's range.
+--
+-- Invariants:
+-- The interval's lower and upper bounds are in the range of the linear map.
+-- The linear map's stride is positive.
+-- The linear map's alignment may be anything; it's not constrained to be a
+-- small positive number.
 data dim1 : box
 {
-  mk_dim1 ()
-    (Nlo : intindex, Nhi : intindex)
-    (IInt Nlo, IInt Nhi);
+  mk_dim1 () () (Interval, LinearMap);
 };
 
--- A two-dimensional domain
--- Stored as (lo-bound-y, hi-bound-y, lo-bound-x, hi-bound-x).
+-- A two-dimensional domain.  The cross product of two domains.
 data dim2 : box
 {
-  mk_dim2 ()
-    (Mlo : intindex, Mhi : intindex, Nlo : intindex, Nhi : intindex)
-    (IInt Mlo, IInt Mhi, IInt Nlo, IInt Nhi);
+  mk_dim2 () () (dim1, dim1);
 };
 
 -- The shape of an array stream.
@@ -574,6 +553,10 @@ repr_float : Repr (Stored float);
 repr_bool : Repr (Stored bool);
 repr_NoneType : Repr (Stored NoneType);
 repr_SliceObject : Repr SliceObject;
+repr_list_dim : Repr (StoredBox list_dim);
+repr_dim0 : Repr (StoredBox dim0);
+repr_dim1 : Repr (StoredBox dim1);
+repr_dim2 : Repr (StoredBox dim2);
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
@@ -600,9 +583,7 @@ repr_Box : (a : box) -> Repr (BareType a);
 
 repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
-
-repr_view1 : (a : bare) -> Repr (BareType (view1 a));
-repr_view2 : (a : bare) -> Repr (BareType (view2 a));
+repr_view : (sh : box) -> (a : bare) -> Repr (BareType (view sh a));
 
 -- Representation of a referenced object that contains nothing and will
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,
@@ -617,53 +598,41 @@ repr_EffTok : Repr (Stored EffTok);
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionaries
 
-TraversableDict_Stream_domain :
-  (sh : box) -> (a : bare) -> Repr a -> Stream sh a -> sh;
-
 TraversableDict_Stream_build :
   (sh : box) -> (a : bare) -> Repr a -> Stream sh a -> Stream sh a;
 
 TraversableDict_Stream_traverse :
   (sh : box) -> (a : bare) -> Repr a -> Stream sh a -> Stream sh a;
 
-TraversableDict_list_domain :
-  (a : bare) -> Repr a -> list a -> dim1;
+TraversableDict_view_list_dim_build :
+  (a : bare) -> Repr a -> Stream list_dim a -> view list_dim a;
+
+TraversableDict_view_list_dim_traverse :
+  (a : bare) -> Repr a -> view list_dim a -> Stream list_dim a;
+
+TraversableDict_view_dim0_build :
+  (a : bare) -> Repr a -> Stream dim0 a -> view dim0 a;
+
+TraversableDict_view_dim0_traverse :
+  (a : bare) -> Repr a -> view dim0 a -> Stream dim0 a;
+
+TraversableDict_view_dim1_build :
+  (a : bare) -> Repr a -> Stream dim1 a -> view dim1 a;
+
+TraversableDict_view_dim1_traverse :
+  (a : bare) -> Repr a -> view dim1 a -> Stream dim1 a;
+
+TraversableDict_view_dim2_build :
+  (a : bare) -> Repr a -> Stream dim2 a -> view dim2 a;
+
+TraversableDict_view_dim2_traverse :
+  (a : bare) -> Repr a -> view dim2 a -> Stream dim2 a;
 
 TraversableDict_list_build :
-  (a : bare) -> Repr a -> Stream dim1 a -> Writer (list a);
+  (a : bare) -> Repr a -> Stream list_dim a -> Writer (list a);
 
 TraversableDict_list_traverse :
-  (a : bare) -> Repr a -> list a -> Stream dim1 a;
-
-TraversableDict_view0_domain :
-  (a : bare) -> Repr a -> view0 a -> dim0;
-
-TraversableDict_view0_build :
-  (a : bare) -> Repr a -> Stream dim0 a -> view0 a;
-
-TraversableDict_view0_traverse :
-  (a : bare) -> Repr a -> view0 a -> Stream dim0 a;
-
-TraversableDict_view1_domain :
-  (a : bare) -> Repr a -> view1 a -> dim1;
-
-TraversableDict_view1_build :
-  (a : bare) -> Repr a -> Stream dim1 a -> view1 a;
-
-TraversableDict_view1_traverse :
-  (a : bare) -> Repr a -> view1 a -> Stream dim1 a;
-
-TraversableDict_view2_domain :
-  (a : bare) -> Repr a -> view2 a -> dim2;
-
-TraversableDict_view2_build :
-  (a : bare) -> Repr a -> Stream dim2 a -> view2 a;
-
-TraversableDict_view2_traverse :
-  (a : bare) -> Repr a -> view2 a -> Stream dim2 a;
-
-TraversableDict_array0_domain :
-  (a : bare) -> Repr a -> array0 a -> dim0;
+  (a : bare) -> Repr a -> list a -> Stream list_dim a;
 
 TraversableDict_array0_build :
   (a : bare) -> Repr a -> Stream dim0 a -> Writer (array0 a);
@@ -671,17 +640,11 @@ TraversableDict_array0_build :
 TraversableDict_array0_traverse :
   (a : bare) -> Repr a -> array0 a -> Stream dim0 a;
 
-TraversableDict_array1_domain :
-  (a : bare) -> Repr a -> array1 a -> dim1;
-
 TraversableDict_array1_build :
   (a : bare) -> Repr a -> Stream dim1 a -> Writer (array1 a);
 
 TraversableDict_array1_traverse :
   (a : bare) -> Repr a -> array1 a -> Stream dim1 a;
-
-TraversableDict_array2_domain :
-  (a : bare) -> Repr a -> array2 a -> dim2;
 
 TraversableDict_array2_build :
   (a : bare) -> Repr a -> Stream dim2 a -> Writer (array2 a);
@@ -689,8 +652,64 @@ TraversableDict_array2_build :
 TraversableDict_array2_traverse :
   (a : bare) -> Repr a -> array2 a -> Stream dim2 a;
 
+ShapeDict_list_dim : ShapeDict list_dim;
+ShapeDict_dim0 : ShapeDict dim0;
+ShapeDict_dim1 : ShapeDict dim1;
+ShapeDict_dim2 : ShapeDict dim2;
+
+ShapeDict_list_dim_member :
+  list_dim -> index list_dim -> bool;
+
+ShapeDict_list_dim_intersect :
+  list_dim -> list_dim -> list_dim;
+
+ShapeDict_list_dim_generate :
+  (a : bare) -> Repr a -> list_dim -> (index list_dim -> Writer a) ->
+  Stream list_dim a;
+
+ShapeDict_list_dim_flatten :
+  (a : bare) -> Repr a -> Stream list_dim a -> Stream list_dim a;
+
+ShapeDict_list_dim_map :
+  (a b : bare) ->
+  Repr a -> Repr b ->
+  (a -> Writer b) ->
+  Stream list_dim a -> Stream list_dim b;
+
+ShapeDict_list_dim_zipWith :
+  (a b c : bare) ->
+  Repr a -> Repr b -> Repr c ->
+  (a -> b -> Writer c) ->
+  Stream list_dim a -> Stream list_dim b -> Stream list_dim c;
+
+ShapeDict_list_dim_zipWith3 :
+  (a b c d : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d ->
+  (a -> b -> c -> Writer d) ->
+  Stream list_dim a -> Stream list_dim b -> Stream list_dim c -> Stream list_dim d;
+
+ShapeDict_list_dim_zipWith4 :
+  (a b c d e : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+  (a -> b -> c -> d -> Writer e) ->
+  Stream list_dim a -> Stream list_dim b -> Stream list_dim c -> Stream list_dim d -> Stream list_dim e;
+
+ShapeDict_list_dim_slice :
+  (t : bare -> bare) -> (a : bare) ->
+  coerce @box (shape t) list_dim ->
+  IndexableDict t -> Repr a -> t a -> slice list_dim -> view list_dim a;
+
+ShapeDict_dim0_member :
+  dim0 -> index dim0 -> bool;
+
+ShapeDict_dim0_intersect :
+  dim0 -> dim0 -> dim0;
+
+ShapeDict_dim0_generate :
+  (a : bare) -> Repr a -> dim0 -> (index dim0 -> Writer a) -> Stream dim0 a;
+
 ShapeDict_dim0_flatten :
-  (a : bare) -> Repr a -> Stream dim0 a -> Stream dim1 a;
+  (a : bare) -> Repr a -> Stream dim0 a -> Stream list_dim a;
 
 ShapeDict_dim0_map :
   (a b : bare) ->
@@ -716,18 +735,22 @@ ShapeDict_dim0_zipWith4 :
   (a -> b -> c -> d -> Writer e) ->
   Stream dim0 a -> Stream dim0 b -> Stream dim0 c -> Stream dim0 d -> Stream dim0 e;
 
-ShapeDict_dim0_inRange :
-  dim0 -> index dim0 -> bool;
-
 ShapeDict_dim0_slice :
   (t : bare -> bare) -> (a : bare) ->
   coerce @box (shape t) dim0 ->
-  IndexableDict t -> Repr a -> t a -> slice dim0 -> view0 a;
+  IndexableDict t -> Repr a -> t a -> slice dim0 -> view dim0 a;
 
-ShapeDict_dim1_indices : dim1 -> Stream dim1 (index dim1);
+ShapeDict_dim1_member :
+  dim1 -> index dim1 -> bool;
+
+ShapeDict_dim1_intersect :
+  dim1 -> dim1 -> dim1;
+
+ShapeDict_dim1_generate :
+  (a : bare) -> Repr a -> dim1 -> (index dim1 -> Writer a) -> Stream dim1 a;
 
 ShapeDict_dim1_flatten :
-  (a : bare) -> Repr a -> Stream dim1 a -> Stream dim1 a;
+  (a : bare) -> Repr a -> Stream dim1 a -> Stream list_dim a;
 
 ShapeDict_dim1_map :
   (a b : bare) ->
@@ -753,18 +776,22 @@ ShapeDict_dim1_zipWith4 :
   (a -> b -> c -> d -> Writer e) ->
   Stream dim1 a -> Stream dim1 b -> Stream dim1 c -> Stream dim1 d -> Stream dim1 e;
 
-ShapeDict_dim1_inRange :
-  dim1 -> index dim1 -> bool;
-
 ShapeDict_dim1_slice :
   (t : bare -> bare) -> (a : bare) ->
   coerce @box (shape t) dim1 ->
-  IndexableDict t -> Repr a -> t a -> slice dim1 -> view1 a;
+  IndexableDict t -> Repr a -> t a -> slice dim1 -> view dim1 a;
 
-ShapeDict_dim2_indices : dim2 -> Stream dim2 (index dim2);
+ShapeDict_dim2_member :
+  dim2 -> index dim2 -> bool;
+
+ShapeDict_dim2_intersect :
+  dim2 -> dim2 -> dim2;
+
+ShapeDict_dim2_generate :
+  (a : bare) -> Repr a -> dim2 -> (index dim2 -> Writer a) -> Stream dim2 a;
 
 ShapeDict_dim2_flatten :
-  (a : bare) -> Repr a -> Stream dim2 a -> Stream dim1 a;
+  (a : bare) -> Repr a -> Stream dim2 a -> Stream list_dim a;
 
 ShapeDict_dim2_map :
   (a b : bare) ->
@@ -790,39 +817,25 @@ ShapeDict_dim2_zipWith4 :
   (a -> b -> c -> d -> Writer e) ->
   Stream dim2 a -> Stream dim2 b -> Stream dim2 c -> Stream dim2 d -> Stream dim2 e;
 
-ShapeDict_dim2_inRange :
-  dim2 -> index dim2 -> bool;
-
 ShapeDict_dim2_slice :
   (t : bare -> bare) -> (a : bare) ->
   coerce @box (shape t) dim2 ->
-  IndexableDict t -> Repr a -> t a -> slice dim2 -> view2 a;
+  IndexableDict t -> Repr a -> t a -> slice dim2 -> view dim2 a;
 
 
 IndexableDict_list_at_point :
   (a : bare) -> Repr a -> list a -> Stored int -> Writer a;
 
 IndexableDict_list_get_shape :
-  (a : bare) -> list a -> dim1;
+  (a : bare) -> list a -> list_dim;
 
-IndexableDict_view0_at_point :
-  (a : bare) -> Repr a -> view0 a -> Stored NoneType -> Writer a;
+IndexableDict_view_at_point :
+  (sh : box) -> ShapeDict sh ->
+  (a : bare) -> Repr a -> view sh a -> index sh -> Writer a;
 
-IndexableDict_view0_get_shape :
-  (a : bare) -> view0 a -> dim0;
-
-IndexableDict_view1_at_point :
-  (a : bare) -> Repr a -> view1 a -> Stored int -> Writer a;
-
-IndexableDict_view1_get_shape :
-  (a : bare) -> view1 a -> dim1;
-
-IndexableDict_view2_at_point :
-  (a : bare) -> Repr a -> view2 a -> PyonTuple2 (Stored int) (Stored int)
-  -> Writer a;
-
-IndexableDict_view2_get_shape :
-  (a : bare) -> view2 a -> dim2;
+IndexableDict_view_get_shape :
+  (sh : box) -> ShapeDict sh ->
+  (a : bare) -> view sh a -> sh;
 
 IndexableDict_array0_at_point :
   (a : bare) -> Repr a -> array0 a -> Stored NoneType -> Writer a;
@@ -842,71 +855,6 @@ IndexableDict_array2_at_point :
 
 IndexableDict_array2_get_shape :
   (a : bare) -> array2 a -> dim2;
-
--------------------------------------------------------------------------------
--- Stream and Traversable dictionary-like internal methods
-
-view1_flatten : (a : bare) -> Repr a -> view1 a -> Stream dim1 a;
-
-view1_generate : (a : bare) -> Repr a -> dim1 -> (index dim1 -> Writer a)
-              -> view1 a;
-
-view1_map : (a b : bare) -> Repr a -> Repr b
-	 -> (a -> Writer b) -> view1 a -> view1 b;
-
-view1_zipWith : (a b c : bare) -> Repr a -> Repr b -> Repr c
-             -> (a -> b -> Writer c)
-             -> view1 a
-             -> view1 b
-             -> view1 c;
-
-view1_zipWith3 : (a b c d : bare)
-              -> Repr a -> Repr b -> Repr c -> Repr d
-              -> (a -> b -> c -> Writer d)
-              -> view1 a
-              -> view1 b
-              -> view1 c
-              -> view1 d;
-
-view1_zipWith4 : (a b c d e : bare)
-              -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e
-              -> (a -> b -> c -> d -> Writer e)
-              -> view1 a
-              -> view1 b
-              -> view1 c
-              -> view1 d
-              -> view1 e;
-
-Sequence_flatten : (a : bare) -> Repr a -> Sequence a -> Stream dim1 a;
-
-Sequence_generate : (a : bare)
-                 -> Repr a -> dim1 -> (index dim1 -> Writer a) -> Sequence a;
-
-Sequence_map : (a b : bare) -> Repr a -> Repr b
-	    -> (a -> Writer b) -> Sequence a -> Sequence b;
-
-Sequence_zipWith : (a b c : bare) -> Repr a -> Repr b -> Repr c
-		-> (a -> b -> Writer c)
-		-> Sequence a
-		-> Sequence b
-		-> Sequence c;
-
-Sequence_zipWith3 : (a b c d : bare)
-		 -> Repr a -> Repr b -> Repr c -> Repr d
-		 -> (a -> b -> c -> Writer d)
-		 -> Sequence a
-		 -> Sequence b
-		 -> Sequence c
-                 -> Sequence d;
-
-Sequence_zipWith4 : (a b c d e : bare)
-		 -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e
-		 -> (a -> b -> c -> d -> Writer e)
-		 -> Sequence a
-		 -> Sequence b
-		 -> Sequence c
-                 -> Sequence d
-                 -> Sequence e;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -1130,21 +1078,6 @@ max_int : int -> int -> int;
 or : bool -> bool -> bool;
 and : bool -> bool -> bool;
 
--- Compute the intersection of a slice with a range given by the
--- inclusive lower and exclusive upper bounds.
--- Returns an internal slice object.
-intersectSliceWithRange : (lo hi : intindex)
-		       -> IInt lo -> IInt hi
-                       -> SliceObject
-		       -> InternalSlice;
-
-intersectStrideSliceWithRange : MaybeVal int
-                             -> MaybeVal int
-                             -> MaybeVal int
-                             -> MaybeVal int
-                             -> int
-		             -> InternalSlice;
-
 -- An internal slice object.
 -- The two integers are (in_stride, in_offset).
 --
@@ -1214,6 +1147,22 @@ max_ii : (m n : intindex)
 
 range_nonempty_ii : (m n : intindex) -> IInt m -> IInt n -> bool;
 
+
+gcd : int -> int -> int;
+extgcd_x : int -> int -> int;
+isEmptyInterval : Interval -> bool;
+inInterval : int -> Interval -> bool;
+intersectInterval : Interval -> Interval -> Interval;
+inLM : int -> LinearMap -> bool;
+evalLM : int -> LinearMap -> int;
+invEvalLM : int -> LinearMap -> int;
+intersectLM : LinearMap -> LinearMap -> MaybeVal LinearMap;
+trimInterval : Interval -> LinearMap -> Interval;
+
+internalApplyListSlice : SliceObject -> list_dim -> (list_dim, LinearMap);
+internalApplyArraySlice : SliceObject -> dim1 -> dim1;
+sliceToDomain : SliceObject -> dim1;
+
 -------------------------------------------------------------------------------
 -- propositions
 
@@ -1238,57 +1187,125 @@ deadProof : (p : prop) -> Pf p;
 -- Construct a coercion.  This function is unsafe.
 unsafeMakeCoercion : (a b : box) -> coerce @box a b;
 
+-- Construct a coercion.  This function is unsafe.
+unsafeMakeViewCoercion : (d : box)
+                      -> coerce @(bare -> box) (Stream d) (view d);
+
 -------------------------------------------------------------------------------
--- Fold-like functions
+-- Stream consumers
 
-primitive_darr1_reduce :
-    (N : intindex) -> (a : bare)
- -> Repr a -> FIInt N
- -> (a -> a -> Writer a) -> a -> (int -> Writer a)
- -> Writer a;
+build_list_dim_list : (a : bare)
+                   -> Repr a
+                   -> view list_dim a
+                   -> Writer (list a);
 
-primitive_darr1_reduce1 :
-    (N : intindex) -> (a : bare)
- -> Repr a -> FIInt N
- -> (a -> a -> Writer a) -> (int -> Writer a)
- -> Writer a;
+build_dim1_array : (a : bare)
+                -> Repr a
+                -> view dim1 a
+                -> Writer (array1 a);
 
-primitive_darr1_generate :
-    (N : intindex) -> (a : bare) -> Repr a -> FIInt N
- -> (int -> Writer a) -> Writer (arr N a);
+reduce_list_dim : (a : bare)
+  -> Repr a
+  -> (a -> a -> Writer a)
+  -> a
+  -> view list_dim a
+  -> Writer a;
 
-darr1_reduce : (N : intindex) -> (a : bare)
-            -> Repr a -> FIInt N
-            -> (a -> a -> Writer a) -> a -> darr1 N a
-            -> Writer a;
+reduce1_list_dim : (a : bare)
+  -> Repr a
+  -> (a -> a -> Writer a)
+  -> view list_dim a
+  -> Writer a;
 
-darr1_reduce1 : (N : intindex) -> (a : bare)
-             -> Repr a -> FIInt N
-             -> (a -> a -> Writer a) -> darr1 N a
-             -> Writer a;
+reduce_dim1 : (a : bare)
+  -> Repr a
+  -> (a -> a -> Writer a)
+  -> a
+  -> view dim1 a
+  -> Writer a;
 
-darr1_fold : (N : intindex) -> (a acc : bare)
-          -> Repr a -> Repr acc -> FIInt N
-          -> (acc -> a -> Writer acc) -> acc -> darr1 N a
-          -> Writer acc;
+reduce1_dim1 : (a : bare)
+  -> Repr a
+  -> (a -> a -> Writer a)
+  -> view dim1 a
+  -> Writer a;
 
-view1_reduce : (a : bare)
-            -> Repr a
-            -> (a -> a -> Writer a)
-            -> a
-            -> view1 a
-            -> Writer a;
+-------------------------------------------------------------------------------
+-- Stream and Traversable dictionary-like internal methods
 
-view1_reduce1 : (a : bare)
-             -> Repr a
-             -> (a -> a -> Writer a)
-             -> view1 a
-             -> Writer a;
+view_generate :
+  (sh : box) -> ShapeDict sh ->
+  (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> view sh a;
 
-view1_fold : (a acc : bare)
-          -> Repr a -> Repr acc
-          -> (acc -> a -> Writer acc) -> acc -> view1 a
-          -> Writer acc;
+view_map :
+  (sh : box) -> ShapeDict sh ->
+  (a b : bare) -> Repr a -> Repr b -> (a -> Writer b) -> view sh a -> view sh b;
+
+view_zipWith :
+  (sh : box) -> ShapeDict sh ->
+  (a b c : bare) -> Repr a -> Repr b -> Repr c ->
+  (a -> b -> Writer c) ->
+  view sh a ->
+  view sh b ->
+  view sh c;
+
+view_zipWith3 :
+  (sh : box) -> ShapeDict sh ->
+  (a b c d : bare) -> Repr a -> Repr b -> Repr c -> Repr d ->
+  (a -> b -> c -> Writer d) ->
+  view sh a ->
+  view sh b ->
+  view sh c ->
+  view sh d;
+
+view_zipWith4 :
+  (sh : box) -> ShapeDict sh ->
+  (a b c d e : bare) -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+  (a -> b -> c -> d -> Writer e) ->
+  view sh a ->
+  view sh b ->
+  view sh c ->
+  view sh d ->
+  view sh e;
+
+Sequence_flatten : (a : bare) -> Repr a -> Sequence a -> Stream dim1 a;
+
+Sequence_generate : (a : bare)
+                 -> Repr a -> list_dim -> (index list_dim -> Writer a) -> Sequence a;
+
+Sequence_map : (a b : bare) -> Repr a -> Repr b
+	    -> (a -> Writer b) -> Sequence a -> Sequence b;
+
+Sequence_zipWith : (a b c : bare) -> Repr a -> Repr b -> Repr c
+		-> (a -> b -> Writer c)
+		-> Sequence a
+		-> Sequence b
+		-> Sequence c;
+
+Sequence_zipWith3 : (a b c d : bare)
+		 -> Repr a -> Repr b -> Repr c -> Repr d
+		 -> (a -> b -> c -> Writer d)
+		 -> Sequence a
+		 -> Sequence b
+		 -> Sequence c
+                 -> Sequence d;
+
+Sequence_zipWith4 : (a b c d e : bare)
+		 -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e
+		 -> (a -> b -> c -> d -> Writer e)
+		 -> Sequence a
+		 -> Sequence b
+		 -> Sequence c
+                 -> Sequence d
+                 -> Sequence e;
+
+-------------------------------------------------------------------------------
+-- Sequence operations
+
+--view1_fold : (a acc : bare)
+--          -> Repr a -> Repr acc
+--          -> (acc -> a -> Writer acc) -> acc -> view list_dim a
+--          -> Writer acc;
 
 Sequence_reduce : (a : bare)
 		-> Repr a
@@ -1311,64 +1328,30 @@ Sequence_fold : (a acc : bare)
 	      -> Sequence a
 	      -> Writer acc;
 
-dim1_fold : (acc : bare)
-         -> Repr acc
-         -> dim1
-         -> (index dim1 -> acc -> Writer acc)
-         -> acc
-         -> Writer acc;
+Sequence_build_list : (a : bare) -> Repr a -> Sequence a -> Writer (list a);
 
-darr2_flatten :
-    (M N MN : intindex) -> (a : bare)
- -> FIInt M
- -> FIInt N
- -> darr2 M N a
- -> darr1 MN a;
+--dim1_fold : (acc : bare)
+--         -> Repr acc
+--         -> dim1
+--         -> (index dim1 -> acc -> Writer acc)
+--         -> acc
+--         -> Writer acc;
 
-darr2_reduce : (M N : intindex) -> (a : bare)
-            -> Repr a -> FIInt M -> FIInt N
-            -> (a -> a -> Writer a) -> a -> darr2 M N a
-            -> Writer a;
+Sequence_parallel_reduce_helper : (a b : bare) -> Repr a -> Repr b
+  -> list_dim
+  -> (b -> b -> Writer b)
+  -> b
+  -> (Stored int -> Writer a)
+  -> (a -> Sequence b)
+  -> Writer b;
 
-darr2_reduce1 : (M N : intindex) -> (a : bare)
-             -> Repr a -> FIInt M -> FIInt N
-             -> (a -> a -> Writer a) -> darr2 M N a
-             -> Writer a;
-
-primitive_darr2_reduce :
-    (M N : intindex) -> (a : bare)
- -> Repr a -> FIInt M -> FIInt N
- -> (a -> a -> Writer a) -> a -> (int -> int -> Writer a)
- -> Writer a;
-
-primitive_darr2_reduce1 :
-    (M N : intindex) -> (a : bare)
- -> Repr a -> FIInt M -> FIInt N
- -> (a -> a -> Writer a) -> (int -> int -> Writer a)
- -> Writer a;
-
-primitive_darr2_generate :
-    (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
- -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
-
-primitive_darr2_flatten attribute(conlike) :
-    (M N : intindex) -> (a : bare)
- -> FIInt N
- -> (int -> int -> Writer a)
- -> (int -> Writer a);
-
-fun_reduce_Stream : (a : bare)
-          	 -> Repr a
-          	 -> (a -> a -> Writer a)
-	  	 -> a
-          	 -> Stream dim1 a
-          	 -> Writer a;
-
-fun_reduce1_Stream : (a : bare)
-          	  -> Repr a
-          	  -> (a -> a -> Writer a)
-          	  -> Stream dim1 a
-          	  -> Writer a;
+Sequence_parallel_reduce : (a : bare)
+                        -> Repr a
+                        -> list_dim
+                        -> (a -> a -> Writer a)
+                        -> a
+                        -> (Stored int -> Sequence a)
+                        -> Writer a;
 
 -------------------------------------------------------------------------------
 -- High-level stream and container functions
@@ -1382,6 +1365,54 @@ fun_map : (t : bare -> bare)
        -> (a -> Writer b)
        -> t a
        -> Writer (t b);
+
+fun_zip : (t1 t2 : bare -> bare)
+       -> (a b : bare)
+       -> TraversableDict t1
+       -> TraversableDict t2
+       -> coerce @box (shape t1) (shape t2)
+       -> ShapeDict (shape t1)
+       -> Repr a
+       -> Repr b
+       -> t1 a
+       -> t2 b
+       -> Stream (shape t1) (PyonTuple2 a b);
+
+fun_zip3 : (t1 t2 t3 : bare -> bare)
+        -> (a b c : bare)
+        -> TraversableDict t1
+        -> TraversableDict t2
+        -> TraversableDict t3
+        -> coerce @box (shape t1) (shape t2)
+        -> coerce @box (shape t2) (shape t3)
+        -> ShapeDict (shape t1)
+        -> Repr a
+        -> Repr b
+        -> Repr c
+        -> t1 a
+        -> t2 b
+        -> t3 c
+        -> Stream (shape t1) (PyonTuple3 a b c);
+
+fun_zip4 : (t1 t2 t3 t4 : bare -> bare)
+        -> (a b c d : bare)
+        -> TraversableDict t1
+        -> TraversableDict t2
+        -> TraversableDict t3
+        -> TraversableDict t4
+        -> coerce @box (shape t1) (shape t2)
+        -> coerce @box (shape t2) (shape t3)
+        -> coerce @box (shape t3) (shape t4)
+        -> ShapeDict (shape t1)
+        -> Repr a
+        -> Repr b
+        -> Repr c
+        -> Repr d
+        -> t1 a
+        -> t2 b
+        -> t3 c
+        -> t4 d
+        -> Stream (shape t1) (PyonTuple4 a b c d);
 
 fun_reduce : (t : bare -> bare)
           -> (a : bare)
@@ -1402,6 +1433,76 @@ fun_reduce1 : (t : bare -> bare)
            -> t a
            -> Writer a;
 
+-------------------------------------------------------------------------------
+-- Domain loops
+
+primitive_list_dim_reduce : (a : bare)
+  -> Repr a
+  -> list_dim
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> a
+  -> OutPtr a
+  -> IEffect a;
+
+parallel_list_dim_reduce : (a : bare)
+  -> Repr a
+  -> list_dim
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> a
+  -> OutPtr a
+  -> IEffect a;
+
+primitive_list_dim_reduce1 : (a : bare)
+  -> Repr a
+  -> list_dim
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> OutPtr a
+  -> IEffect a;
+
+parallel_list_dim_reduce1 : (a : bare)
+  -> Repr a
+  -> list_dim
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> OutPtr a
+  -> IEffect a;
+
+primitive_dim1_reduce : (a : bare)
+  -> Repr a
+  -> dim1
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> a
+  -> OutPtr a
+  -> IEffect a;
+
+parallel_dim1_reduce : (a : bare)
+  -> Repr a
+  -> dim1
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> a
+  -> OutPtr a
+  -> IEffect a;
+
+primitive_dim1_reduce1 : (a : bare)
+  -> Repr a
+  -> dim1
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> OutPtr a
+  -> IEffect a;
+
+parallel_dim1_reduce1 : (a : bare)
+  -> Repr a
+  -> dim1
+  -> (Stored int -> Writer a)
+  -> (a -> a -> Writer a)
+  -> OutPtr a
+  -> IEffect a;
 
 -------------------------------------------------------------------------------
 -- Other functions
@@ -1416,23 +1517,23 @@ deadBox : (a : box) -> a;
 -- A dummy referenced object that is used as a placeholder for a dead value.
 deadRef : (a : bare) -> Writer a;
 
-arr1D_traverse : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
-	      -> arr N a -> darr1 N a;
+-- arr1D_traverse : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
+-- 	      -> arr N a -> darr1 N a;
 
 arr1D_build : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
-	   -> darr1 N a -> Writer (arr N a);
+	   -> (int -> Writer a) -> Writer (arr N a);
 
-arr2D_traverse : (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
-	      -> arr M (arr N a) -> darr2 M N a;
+-- arr2D_traverse : (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
+-- 	      -> arr M (arr N a) -> darr2 M N a;
 
 arr2D_build : (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
-	   -> darr2 M N a -> Writer (arr M (arr N a));
+	   -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
 
-viewToSequence : (a : bare) -> Repr a -> view1 a -> Sequence a;
-sequenceToView : (a : bare) -> Repr a -> Sequence a -> view1 a;
+viewToSequence : (a : bare) -> Repr a -> view list_dim a -> Sequence a;
+sequenceToView : (a : bare) -> Repr a -> Sequence a -> view list_dim a;
 
-view1_empty : (a : bare) -> Repr a -> view1 a;
-view1_normalize : (a : bare) -> view1 a -> view1 a;
+view1_empty : (a : bare) -> Repr a -> view dim1 a;
+view1_normalize : (a : bare) -> view dim1 a -> view dim1 a;
 
 -- Fold over a stream using an update-in-place operation
 accumulate_Stream_int : (s i b : bare)
@@ -1443,15 +1544,6 @@ accumulate_Stream_int : (s i b : bare)
                  -> (b -> i -> (int -> int))
                  -> Stream dim1 (PyonTuple2 i b)
                  -> Writer s;
-
--- Sequential fold over a stream
-fun_fold_Stream : (a acc : bare)
-               -> Repr a
-               -> Repr acc
-               -> (acc -> a -> Writer acc)
-               -> acc
-               -> Stream dim1 a
-               -> Writer acc;
 
 -- Reinterpret a stream as having list shape
 fun_asList_Stream : (sh a : bare)
@@ -1521,60 +1613,12 @@ fun_zip4_Stream : (sh a b c d : bare)
                -> Stream sh d
                -> Stream sh (PyonTuple4 a b c d);
 
-fun_zip : (t1 t2 : bare -> bare)
-       -> (a b : bare)
-       -> TraversableDict t1
-       -> TraversableDict t2
-       -> coerce @box (shape t1) (shape t2)
-       -> ShapeDict (shape t1)
-       -> Repr a
-       -> Repr b
-       -> t1 a
-       -> t2 b
-       -> Stream (shape t1) (PyonTuple2 a b);
+count : Stream list_dim (Stored int);
 
-fun_zip3 : (t1 t2 t3 : bare -> bare)
-        -> (a b c : bare)
-        -> TraversableDict t1
-        -> TraversableDict t2
-        -> TraversableDict t3
-        -> coerce @box (shape t1) (shape t2)
-        -> coerce @box (shape t2) (shape t3)
-        -> ShapeDict (shape t1)
-        -> Repr a
-        -> Repr b
-        -> Repr c
-        -> t1 a
-        -> t2 b
-        -> t3 c
-        -> Stream (shape t1) (PyonTuple3 a b c);
-
-fun_zip4 : (t1 t2 t3 t4 : bare -> bare)
-        -> (a b c d : bare)
-        -> TraversableDict t1
-        -> TraversableDict t2
-        -> TraversableDict t3
-        -> TraversableDict t4
-        -> coerce @box (shape t1) (shape t2)
-        -> coerce @box (shape t2) (shape t3)
-        -> coerce @box (shape t3) (shape t4)
-        -> ShapeDict (shape t1)
-        -> Repr a
-        -> Repr b
-        -> Repr c
-        -> Repr d
-        -> t1 a
-        -> t2 b
-        -> t3 c
-        -> t4 d
-        -> Stream (shape t1) (PyonTuple4 a b c d);
-
-count : Stream dim1 (Stored int);
-
-range : int -> Stream dim1 (Stored int);
+range : int -> Stream list_dim (Stored int);
 
 len : (t : bare -> bare) -> (a : bare)
-   -> (coerce @box (shape t) dim1)
+   -> (coerce @box (shape t) list_dim)
    -> IndexableDict t
    -> t a -> int;
 
@@ -1600,32 +1644,31 @@ rows : (t : bare -> bare) -> (a : bare)
     -> IndexableDict t
     -> coerce @box (shape t) dim2
     -> Repr a
-    -> t a -> view1 (StoredBox (view1 a));
+    -> t a -> view dim1 (StoredBox (view dim1 a));
 
 cols : (t : bare -> bare) -> (a : bare)
     -> IndexableDict t
     -> coerce @box (shape t) dim2
     -> Repr a
-    -> t a -> view1 (StoredBox (view1 a));
+    -> t a -> view dim1 (StoredBox (view dim1 a));
 
-outerproduct : (a b c : bare) -> Repr a -> Repr b -> Repr c
-	    -> (a -> b -> Writer c)
+outerproduct : (a b : bare) -> Repr a -> Repr b
 	    -> Stream dim1 a
 	    -> Stream dim1 b
-	    -> Stream dim2 c;
+	    -> Stream dim2 (PyonTuple2 a b);
 
 transpose : (t : bare -> bare) -> (a : bare)
          -> IndexableDict t
 	 -> coerce @box (shape t) dim2
 	 -> Repr a
-	 -> t a -> view2 a;
+	 -> t a -> view dim2 a;
 
 stencil2D : (t : bare -> bare) -> (a b : bare)
 	 -> IndexableDict t
 	 -> coerce @box (shape t) dim2
 	 -> Repr a -> Repr b
 	 -> int -> int -> int -> int
-	 -> (view2 a -> Writer b)
+	 -> (view dim2 a -> Writer b)
 	 -> t a
 	 -> Writer (array2 b);
 
@@ -1635,7 +1678,7 @@ shift2D : (t : bare -> bare) -> (a : bare)
        -> Repr a
        -> index (shape t)
        -> t a
-       -> view2 a;
+       -> view dim2 a;
 
 range2D : index dim2 -> Stream dim2 (index dim2);
 
@@ -1646,10 +1689,10 @@ extend2D : (t : bare -> bare) -> (a : bare)
         -> index (shape t)
         -> index (shape t)
         -> t a
-        -> view2 a;
+        -> view dim2 a;
 
 create_view2 : (a : bare) -> Repr a
-            -> index dim2 -> index dim2 -> (index dim2 -> Writer a) -> view2 a;
+            -> index dim2 -> index dim2 -> (index dim2 -> Writer a) -> view dim2 a;
 
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)
@@ -1710,17 +1753,13 @@ Sequence_bind : (a b : bare)
 
 -- A fused version of 'bind' and 'generate'.
 Sequence_generate_bind : (a : bare)
-	              -> dim1 -> (index dim1 -> Sequence a) -> Sequence a;
+	              -> list_dim -> (index list_dim -> Sequence a) -> Sequence a;
 
-view1_list_build : (a : bare)
-		-> Repr a
-		-> view1 a
-		-> Writer (list a);
 
-view1_array1_build : (a : bare)
-		  -> Repr a
-		  -> view1 a
-		  -> Writer (array1 a);
+view_array1_build : (a : bare)
+                 -> Repr a
+                 -> view dim1 a
+                 -> Writer (array1 a);
 
 Sequence_list_build : (a : bare)
 		   -> Repr a
@@ -1746,14 +1785,14 @@ doall : (n : intindex)
 for : (n : intindex)
    -> (acc : bare)
    -> Repr acc
-   -> IInt n
+   -> FIInt n
    -> acc
    -> (int -> acc -> Writer acc)
    -> Writer acc;
 
 -- Sequential loop with boxed accumulator
 for_box : (n : intindex) -> (acc : box)
-       -> IInt n -> acc -> (int -> acc -> acc) -> acc;
+       -> FIInt n -> acc -> (int -> acc -> acc) -> acc;
 
 parallel_doall : (n : intindex)
      -> (a b : bare)
@@ -1776,22 +1815,6 @@ parallel_dim1_reduce1 : (a : bare)
                      -> (dim1 -> Writer a)
                      -> Writer a;
 
-parallel_darr1_reduce :
-    (N : intindex) -> (a : bare)
- -> Repr a -> FIInt N
- -> (a -> a -> Writer a) -> a -> (int -> Writer a)
- -> Writer a;
-
-parallel_darr1_reduce1 :
-    (N : intindex) -> (a : bare)
- -> Repr a -> FIInt N
- -> (a -> a -> Writer a) -> (int -> Writer a)
- -> Writer a;
-
-parallel_darr1_generate :
-    (N : intindex) -> (a : bare) -> Repr a -> FIInt N
- -> (int -> Writer a) -> Writer (arr N a);
-
 parallel_doall2 : (M N : intindex)
      -> (a b : bare)
      -> FIInt M
@@ -1799,17 +1822,8 @@ parallel_doall2 : (M N : intindex)
      -> (int -> int -> IEffect b)
      -> IEffect a;
 
-parallel_darr2_reduce :
-    (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
- -> (a -> a -> Writer a) -> a -> (int -> int -> Writer a)
- -> Writer a;
-
-parallel_darr2_generate :
-    (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
- -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
-
 -- Blocked parallel reduction, implemented in low-level.
-blocked_reduce :
+blocked_1d_reduce :
     (N : intindex)
  -> (acc : box)
  -> FIInt N		-- Size of range
@@ -1820,7 +1834,7 @@ blocked_reduce :
  -> acc;
 
 -- Blocked 2D parallel reduction
-blocked_reduce2 :
+blocked_2d_reduce :
     (M N : intindex)
  -> (acc : box)
  -> FIInt M		-- Size of range

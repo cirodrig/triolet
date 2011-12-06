@@ -165,204 +165,2863 @@ fromIndInt @(N : intindex) (ii : IInt N) -> FIInt N attribute(inline) =
     iNegInfty @N. except @(FIInt N)
   };
 
--- Compute the intersection of a slice with an interval.  The result is a new
--- interval and its mapping to points on the old interval.
---
--- A reference implementation of this function is in Slice.hs.
 
-intersectSliceWithRange @(lo hi : intindex)
-		        (range_lo_iint : IInt lo)
-                        (range_hi_iint : IInt hi)
-                        (slice_object : SliceObject)
-                        -> InternalSlice =
-  case slice_object of
+-- Test whether an interval is empty.
+isEmptyInterval (iv : Interval) -> bool =
+  case iv of interval (l : MaybeVal int) (u : MaybeVal int).
+  case l of {
+    justVal @int (ll : int).
+      case u of {
+        justVal @int (uu : int). ll ==# uu
+      ; nothingVal @int. False
+    }
+  ; nothingVal @int. False
+  };
+
+
+-- Decide whether 'i' is in the interval.
+inInterval (i : int) (iv : Interval) -> bool =
+  case iv of interval (l : MaybeVal int) (u : MaybeVal int).
+
+  -- Is 'i' within the lower bound?
+  if case l of {
+       nothingVal @int. True
+     ; justVal @int (ll : int). i >=# ll
+     }
+  then -- Is 'i' within the upper bound?
+       case u of {
+         nothingVal @int. True
+       ; justVal @int (uu : int). i <# uu
+       }
+  else False;
+
+
+-- Compute the intersection of two intervals.
+intersectInterval (iv1 : Interval) (iv2 : Interval) -> Interval =
+  case iv1 of interval (l1 : MaybeVal int) (u1 : MaybeVal int).
+  case iv2 of interval (l2 : MaybeVal int) (u2 : MaybeVal int).
+
+  -- Lower bound is the maximum of the two bounds
+  let l3 : MaybeVal int =
+        case l1 of {
+          nothingVal @int.
+            l2
+        ; justVal @int (ll1 : int).
+            case l2 of {
+              nothingVal @int.
+                l1
+            ; justVal @int (ll2 : int).
+                justVal @int (max_int ll1 ll2)
+            }
+        } in
+
+  -- Upper bound is the minimum of the two bounds
+  let u3 : MaybeVal int =
+        case u1 of {
+          nothingVal @int.
+            u2
+        ; justVal @int (uu1 : int).
+            case u2 of {
+              nothingVal @int.
+                u1
+            ; justVal @int (uu2 : int).
+                justVal @int (max_int uu1 uu2)
+            }
+        } in
+  case l3 of {
+    justVal @int (x : int).
+      case u3 of {
+        justVal @int (y : int).
+          if x ># y
+          then interval (justVal @int 0) (justVal @int 0) -- Empty interval
+          else interval l3 u3
+      ; nothingVal @int.
+          interval l3 u3
+      }
+  ; nothingVal @int.
+      interval l3 u3
+  };
+
+
+-- Decide whether 'i' is a member of the linear map's range.
+inLM (i : int) (m : LinearMap) -> bool =
+  case m of linearMap (s : int) (a : int). (i %# s) ==# (a %# s);
+  
+
+-- Evaluate a linear map at 'i'. 
+evalLM (i : int) (m : LinearMap) -> int =
+  case m of linearMap (s : int) (a : int). s *# i +# a;
+
+
+-- Evaluate the inverse of a linear map at 'i'.
+-- The result is undefined if 'i' is not in the range of the map.
+invEvalLM (i : int) (m : LinearMap) -> int =
+  case m of linearMap (s : int) (a : int). (i -# a) //# s;
+
+
+-- Compute the intersection of two linear maps.
+-- If the intersection is empty, 'Nothing' is returned.
+intersectLM (m1 : LinearMap) (m2 : LinearMap) -> MaybeVal LinearMap =
+  case m1 of linearMap (s1 : int) (a1 : int).
+  case m2 of linearMap (s2 : int) (a2 : int).
+
+  -- Special case handling when stride is 1
+  if s1 ==# 1 then justVal @LinearMap m2 else
+  if s2 ==# 1 then justVal @LinearMap m1 else
+
+  let g : int = gcd s1 s2 in
+  let align_remainder : int = (a2 -# a1) %# g in
+  let align_quot : int = (a2 -# a1) //# g in
+
+  -- Check if intersection is empty
+  if align_remainder /=# 0 then nothingVal @LinearMap else
+
+  let s1p : int = s1 //# g in
+  let s2p : int = s2 //# g in
+  let s3 : int = s1p *# s2 in
+  let yp : int = extgcd_x s1p s2p in
+  let y : int = align_quot *# yp in
+  let a3 : int = (s1 *# y +# a1) %# s3 in
+  justVal @LinearMap (linearMap s3 a3);
+
+
+trimInterval (iv : Interval) (m : LinearMap) -> Interval =
+  case iv of interval (l : MaybeVal int) (u : MaybeVal int).
+  case m of linearMap (s : int) (a : int).
+
+  let l2 : MaybeVal int =
+        case l of {
+          nothingVal @int. nothingVal @int
+        ; justVal @int (n : int). justVal @int (n +# (a -# n) %# s) 
+        } in
+  let u2 : MaybeVal int =
+        case u of {
+          nothingVal @int. nothingVal @int
+        ; justVal @int (n : int). justVal @int (n +# (a -# n) %# s) 
+        } in
+  interval l2 u2;
+
+
+-- Convert fields of an array object to a domain.
+-- The domain's linear map is the actual map from real to logical index.
+arrayDescToDim1 @(N : intindex) (lb : int) (stride : int) (size : FIInt N)
+  -> dim1 attribute(inline) =
+  case size of fiInt @N (size_i : int).
+
+  let ub : int = lb +# stride *# size_i in
+  mk_dim1 (interval (justVal @int lb) (justVal @int ub)) (linearMap stride lb);
+
+
+-- Convert a domain to fields of an array object
+dim1ToArrayDesc @(a : bare)
+  (shp : dim1)
+  (k : (N : intindex) -> int -> int -> FIInt N -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a attribute(inline) =
+
+  case shp of mk_dim1 (iv : Interval) (m : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case lb of {
+    justVal @int (lb_i : int).
+      case ub of {
+        justVal @int (ub_i : int).
+          case m of linearMap (stride : int) (alignment : int).
+          let size_i : int = (ub_i -# lb_i) //# stride in
+          case defineIntIndex size_i of
+            someIInt @(N : intindex) (size : FIInt N).
+          k @N lb_i stride size ret
+      ; nothingVal @int.
+          except @(IEffect a)
+      }
+  ; nothingVal @int.
+      except @(IEffect a)
+  };
+
+
+internalApplyListSlice (slice_obj : SliceObject) (dom : list_dim)
+  -> (list_dim, LinearMap) =
+  case slice_obj of
     sliceObject (m_slice_lo : MaybeVal int)
                 (m_slice_hi : MaybeVal int)
                 (m_m_stride : MaybeVal (MaybeVal int)).
-
-  let counting_up : bool =
+  case dom of mk_list_dim (list_size : MaybeVal int).
+  let stride : int =
         case m_m_stride of {
-          nothingVal @(MaybeVal int). True
+          nothingVal @(MaybeVal int). 1
         ; justVal @(MaybeVal int) (m_stride : MaybeVal int).
-            case m_stride of { nothingVal @int. True
-                             ; justVal @int (stride : int). stride ># 0
-                             }
+            case m_stride of {
+              nothingVal @int. 1
+            ; justVal @int (stride : int). stride
+            }
         } in
-
-  let lo_bound : MaybeVal int =
-        case range_lo_iint of {
-          iInt @lo (range_flo : FIInt lo).
-            case range_flo of fiInt @lo (range_lo : int).
-            if counting_up
-            then case m_slice_lo of {
-                   nothingVal @int.
-                     justVal @int range_lo
-                 ; justVal @int (slice_lo : int).
-                     justVal @int (max_int range_lo slice_lo)
-                 }
-            else case m_slice_hi of {
-                   nothingVal @int.
-                     justVal @int range_lo
-                 ; justVal @int (slice_hi : int).
-                     justVal @int (max_int range_lo (slice_hi +# 1))
-                 }
-        ; iNegInfty @lo.
-            if counting_up
-            then m_slice_lo
-            else case m_slice_hi of {
-                   nothingVal @int. nothingVal @int
-                 ; justVal @int (slice_hi : int).
-                     justVal @int (slice_hi +# 1)
-                 }
-        ; iPosInfty @lo.
-            except @(MaybeVal int)
-        } in
-
-  let hi_bound : MaybeVal int =
-        case range_hi_iint of {
-          iInt @hi (range_fhi : FIInt hi).
-            case range_fhi of fiInt @hi (range_hi : int).
-            if counting_up
-            then case m_slice_hi of {
-                   nothingVal @int.
-                     justVal @int range_hi
-                 ; justVal @int (slice_hi : int).
-                     justVal @int (min_int range_hi slice_hi)
-                 }
-            else case m_slice_lo of {
-                   nothingVal @int.
-                     justVal @int range_hi
-                 ; justVal @int (slice_lo : int).
-                     justVal @int (min_int range_hi (slice_lo +# 1))
-                 }
-        ; iPosInfty @hi.
-            if counting_up
-            then m_slice_hi
-            else case m_slice_lo of {
-                   nothingVal @int. nothingVal @int
-                 ; justVal @int (slice_lo : int).
-                     justVal @int (slice_lo +# 1)
-                 }
-        ; iNegInfty @hi.
-            except @(MaybeVal int)
-        } in
-
-  if case lo_bound of {
-       justVal @int (lo_bound_val : int).
-         case hi_bound of {
-           justVal @int (hi_bound_val : int).
-             lo_bound_val ># hi_bound_val
-         ; nothingVal @int. False
-         }
-     ; nothingVal @int. False
-     }
-  then emptySlice
-  else case m_m_stride of {
-         nothingVal @(MaybeVal int).
-           -- This is a range slice
-           letfun
-             k2 @(lo hi : intindex) (lo_ind : IInt lo) (hi_ind : IInt hi)
-               -> InternalSlice =
-               internalSlice @lo @hi lo_ind hi_ind 1 0 in
-
-           letfun
-             k1 @(lo : intindex) (lo_ind : IInt lo) -> InternalSlice =
-               case hi_bound of {
-                 justVal @int (hi_bound_val : int).
-                   case defineIntIndex hi_bound_val of
-                     someIInt @(hi : intindex) (hi_ind : FIInt hi).
-                   k2 @lo @hi lo_ind (iInt @hi hi_ind)
-               ; nothingVal @int.
-                   k2 @lo @pos_infty lo_ind (iPosInfty @pos_infty)
-               } in
-
-           case lo_bound of {
-             justVal @int (lo_bound_val : int).
-               case defineIntIndex lo_bound_val of
-                 someIInt @(lo : intindex) (lo_ind : FIInt lo).
-               k1 @lo (iInt @lo lo_ind)
-           ; nothingVal @int.
-               k1 @neg_infty (iNegInfty @neg_infty)
-           }
-
-       ; justVal @(MaybeVal int) (m_stride : MaybeVal int).
-           -- This is a strided slice
-           let stride : int =
-                 case m_stride of {
-                   justVal @int (stride : int).
-                     if stride ==# 0 then except @int else stride
-                 ; nothingVal @int. 1
-                 } in
-           intersectStrideSliceWithRange
-           lo_bound hi_bound m_slice_lo m_slice_hi stride
-       };
-
-intersectStrideSliceWithRange
-  (lo_bound : MaybeVal int)
-  (hi_bound : MaybeVal int)
-  (slice_lo_bound : MaybeVal int)
-  (slice_hi_bound : MaybeVal int)
-  (stride : int)
-  -> InternalSlice attribute(inline) =
-
+  if stride ==# 0 then except @(list_dim, LinearMap) else
   let counting_up : bool = stride ># 0 in
-  case if counting_up
-       then (1, lo_bound, hi_bound)
-       else (-1,
-             case hi_bound of {
-               nothingVal @int. nothingVal @int
-             ; justVal @int (hb : int). justVal @int (hb -# 1)},
-             case lo_bound of {
-               nothingVal @int. nothingVal @int
-             ; justVal @int (lb : int). justVal @int (lb -# 1)}) of
-    (sense : int, near_bound : MaybeVal int, far_bound : MaybeVal int).
 
-  let first_point : int =
-        case slice_lo_bound of {
-          nothingVal @int.
-            case near_bound of {
-              nothingVal @int. except @int
-            ; justVal @int (nb : int). nb
-            }
-        ; justVal @int (lb : int).
-            case near_bound of {
-              nothingVal @int. lb
-            ; justVal @int (nb : int).
-                if sense *# (nb -# lb) ># 0
-                then nb +# (lb -# nb) %# stride
-                else lb
+  -- Get the slice's inclusive lower bound.
+  -- There must be a lower bound, determined either by the slice or the
+  -- list domain.
+  let slice_lo : int =
+        if counting_up
+        then case m_slice_lo of {
+               nothingVal @int. 0
+             ; justVal @int (l : int). max_int 0 l
+             }
+        else case m_slice_lo of {
+               justVal @int (h : int).
+                 case list_size of {
+                   justVal @int (n : int). min_int h (n -# 1)
+                 ; nothingVal @int. h
+                 }
+             ; nothingVal @int.
+                 case list_size of {
+                   justVal @int (n : int). n -# 1
+                 ; nothingVal @int. except @int
+                 }
+             } in
+
+  -- Get the slice's exclusive upper bound.
+  let slice_hi : MaybeVal int =
+        if counting_up
+        then case m_slice_hi of {
+               nothingVal @int.
+                 list_size
+             ; justVal @int (h : int).
+                 case list_size of {
+                   nothingVal @int. justVal @int h
+                 ; justVal @int (n : int). justVal @int (min_int h n)
+                 }
+             }
+        else case m_slice_hi of {
+               nothingVal @int. justVal @int -1
+             ; justVal @int (h : int). justVal @int (max_int h -1)
+             } in
+
+  -- If the slice is nonempty, this is the map from slice member to list member
+  let linear_map : LinearMap = linearMap stride slice_lo in
+
+  -- Compute the new list size, which may be unbounded
+  let size : MaybeVal int =
+        case slice_hi of {
+          nothingVal @int. nothingVal @int
+        ; justVal @int (h : int).
+            let abs_stride : int = if counting_up
+                                   then stride
+                                   else AdditiveDict_int_negate stride in
+
+            let abs_delta : int =
+                  let delta : int = h -# slice_lo in
+                  if delta <# 0
+                  then AdditiveDict_int_negate delta
+                  else delta in
+
+            justVal @int ((abs_delta +# abs_stride -# 1) //# abs_stride)
+        } in
+  case size of {
+    justVal @int (n : int).
+      if n <# 0
+      then (mk_list_dim (justVal @int 0), linearMap 0 0)
+      else (mk_list_dim size, linear_map)
+  ; nothingVal @int. (mk_list_dim size, linear_map)
+  };
+
+
+sliceToDomain (slice_obj : SliceObject) -> dim1 =
+  case slice_obj of
+    sliceObject (m_slice_lo : MaybeVal int)
+                (m_slice_hi : MaybeVal int)
+                (m_m_stride : MaybeVal (MaybeVal int)).
+  let stride : int =
+        case m_m_stride of {
+          nothingVal @(MaybeVal int). 1
+        ; justVal @(MaybeVal int) (m_stride : MaybeVal int).
+            case m_stride of {
+              nothingVal @int. 1
+            ; justVal @int (stride : int). stride
             }
         } in
-
-  let end_point : MaybeVal int =
-        case slice_hi_bound of {
-          nothingVal @int. far_bound
-        ; justVal @int (hb : int).
-            case far_bound of {
-              nothingVal @int. justVal @int hb
-            ; justVal @int (fb : int).
-                justVal @int (if sense *# (fb -# hb) <# 0 then fb else hb)
-            }
+  let alignment : int =
+        case m_slice_lo of {
+          nothingVal @int. 0
+        ; justVal @int (n : int). n %# stride
         } in
 
+  -- Stride must be positive
+  if stride <=# 0 then except @dim1 else
+
+  let map : LinearMap = linearMap stride alignment in
+  let iv : Interval = trimInterval (interval m_slice_lo m_slice_hi) map in
+  mk_dim1 iv map;
+
+
+internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
+  let slice_dom : dim1 = sliceToDomain slice_obj in
+  ShapeDict_dim1_intersect slice_dom dom;
+
+-------------------------------------------------------------------------------
+-- Imperative computation
+
+intUpdateInPlace (dummy : NoneType)
+              -> UpdateInPlace (Stored int) (Stored NoneType) int
+              attribute(inline, inline_final) =
+  updateInPlace @(Stored int) @(Stored NoneType) @int
+  intUpdateInPlace_initializer
+  (\ (modify : int -> int) (ret : OutPtr (Stored int)) (ix : Stored NoneType)
+     (tok_in : EffTok) -> EffTok.
+     intUpdateInPlace_updater modify ret tok_in);
+
+
+floatUpdateInPlace (dummy : NoneType)
+              -> UpdateInPlace (Stored float) (Stored NoneType) float
+              attribute(inline, inline_final) =
+  updateInPlace @(Stored float) @(Stored NoneType) @float
+  floatUpdateInPlace_initializer
+  (\ (modify : float -> float) (ret : OutPtr (Stored float))
+     (ix : Stored NoneType) (tok_in : EffTok) -> EffTok.
+     floatUpdateInPlace_updater modify ret tok_in);
+
+
+arrUpdateInPlace @(N : intindex) @(s i : bare) @(a : val)
+  (size : FIInt N)
+  (repr : Repr s)
+  (elem_updater : UpdateInPlace s i a)
+  -> UpdateInPlace (arr N s) (PyonTuple2 (Stored int) i) a
+  attribute(inline, inline_final) =
+
+  case size of fiInt @N (u_size : int).
+
+  case elem_updater of
+    updateInPlace @s @i @a
+    (elem_init : (NoneType -> a) -> OutPtr s -> EffTok)
+    (elem_modify : (a -> a) -> OutPtr s -> i -> EffTok -> EffTok).
+
+  -- Initialize the array by running the initializer on every array element
   letfun
-    k @(size_index : intindex) (size_val : IInt size_index)
-      -> InternalSlice =
-      internalSlice @0 @size_index zero_ii size_val stride first_point
+    initialize_array
+      (get_init : NoneType -> a) (ret : OutPtr (arr N s)) -> EffTok =
+      toEffTok @(arr N s)
+      (doall @N @(arr N s) @s size
+       (\ (i : int) -> IEffect s.
+          let array_element : OutPtr s =
+            subscript_out @N @s repr ret i in
+          fromEffTok @s (elem_init get_init array_element)))
   in
 
-  -- Determine size of range, then build slice object
-  case end_point of {
-    nothingVal @int.
-      k @pos_infty (iPosInfty @pos_infty)
-  ; justVal @int (ep : int).
-      let delta : int = ep -# first_point in
-      let count : int = delta //# stride +#
-                        (if delta %# stride /=# 0 then 1 else 0) in
-      case defineIntIndex (max_int 0 count)
-        of someIInt @(size_index : intindex) (size_val : FIInt size_index).
-      k @size_index (iInt @size_index size_val)
+  -- Update the array by updating one array element.  If out of bounds,
+  -- then do nothing.
+  letfun
+    modify_array
+      (modify_value : a -> a)
+      (ret : OutPtr (arr N s))
+      (ix : PyonTuple2 (Stored int) i)
+      (token_in : EffTok)
+      -> EffTok =
+
+      -- Choose the array index
+      case ix of pyonTuple2 @(Stored int) @i (s_ix : Stored int) (ix2 : i).
+      case s_ix of stored @int (u_ix : int).
+
+      -- If out of bounds, do nothing.  Otherwise, modify an array element.
+      if or (u_ix <# 0) (u_ix >=# u_size)
+      then token_in
+      else let array_element : OutPtr s =
+             subscript_out @N @s repr ret u_ix in
+           elem_modify modify_value array_element ix2 token_in
+  in
+      
+  updateInPlace @(arr N s) @(PyonTuple2 (Stored int) i) @a
+  initialize_array modify_array;
+
+-------------------------------------------------------------------------------
+-- Traversable methods
+
+TraversableDict_Stream_build @(sh : box) @(a : bare)
+  (repr : Repr a) (s : Stream sh a)
+  -> Stream sh a attribute(inline) = s;
+
+
+TraversableDict_Stream_traverse @(sh : box) @(a : bare)
+  (repr : Repr a) (s : Stream sh a)
+  -> Stream sh a attribute(inline) = s;
+
+
+TraversableDict_view_list_dim_build
+  @(a : bare) (repr : Repr a) (s : Stream list_dim a) -> view list_dim a
+  attribute(inline) =
+  case s of {
+    viewStream @a (vw : view list_dim a). vw
+  ; sequenceStream @a (sq : Sequence a). sequenceToView @a repr sq
   };
+
+
+TraversableDict_view_list_dim_traverse
+  @(a : bare) (repr : Repr a) (vw : view list_dim a) -> Stream list_dim a
+  attribute(inline) =
+  viewStream @a vw;
+
+
+TraversableDict_view_dim0_build
+  @(a : bare) (repr : Repr a) (s : Stream dim0 a) -> view dim0 a
+  attribute(inline) =
+  s;
+
+
+TraversableDict_view_dim0_traverse
+  @(a : bare) (repr : Repr a) (vw : view dim0 a) -> Stream dim0 a
+  attribute(inline) =
+  vw;
+
+
+TraversableDict_view_dim1_build
+  @(a : bare) (repr : Repr a) (s : Stream dim1 a) -> view dim1 a
+  attribute(inline) =
+  s;
+
+
+TraversableDict_view_dim1_traverse
+  @(a : bare) (repr : Repr a) (vw : view dim1 a) -> Stream dim1 a
+  attribute(inline) =
+  vw;
+
+
+TraversableDict_view_dim2_build
+  @(a : bare) (repr : Repr a) (s : Stream dim2 a) -> view dim2 a
+  attribute(inline) =
+  s;
+
+
+TraversableDict_view_dim2_traverse
+  @(a : bare) (repr : Repr a) (vw : view dim2 a) -> Stream dim2 a
+  attribute(inline) =
+  vw;
+
+
+TraversableDict_list_build @(a : bare)
+  (repr : Repr a) (s : Stream list_dim a) (ret : OutPtr (list a))
+  -> IEffect (list a) attribute(inline) =
+  case s of {
+    sequenceStream @a (sq : Sequence a).
+      Sequence_build_list @a repr sq ret
+  ; viewStream @a (vw : view list_dim a).
+      build_list_dim_list @a repr vw ret
+  };
+
+-- List traversal.
+-- Loop over all list indices and return the corresponding array element.
+TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
+  -> Stream list_dim a attribute(inline) =
+  case ls of make_list @a @(N : intindex)
+                       (size : FIInt N) (aref : Referenced (arr N a)).
+  case aref of referenced @(arr N a) (ay : arr N a).
+  case size of fiInt @N (size_i : int).
+
+  let shp : list_dim = mk_list_dim (justVal @int size_i) in
+
+  viewStream @a
+  (view_generate @list_dim
+   ShapeDict_list_dim @a repr shp
+   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+     case si of stored @int (i : int).
+     copy @a repr (subscript @N @a repr ay i) ret));
+
+
+TraversableDict_array0_traverse
+  @(a : bare) (repr : Repr a) (ay : array0 a) -> view dim0 a attribute(inline) =
+  case ay of mk_array0 @a (x : a).
+  view_generate @dim0 ShapeDict_dim0 @a
+  repr mk_dim0
+  (\ (dummy_index : Stored NoneType) -> Writer a. copy @a repr x);
+
+
+TraversableDict_array0_build
+  @(a : bare) (repr : Repr a) (vw : view dim0 a) (ret : OutPtr (array0 a))
+  -> IEffect (array0 a) attribute(inline) =
+
+  case vw of mk_view @dim0 @a (dom : dim0) (f : Stored NoneType -> Writer a).
+  case boxed @(Stored NoneType) (stored @NoneType None) of
+    boxed @(Stored NoneType) (dummy_index : Stored NoneType).
+  mk_array0 @a (f dummy_index) ret;
+
+
+TraversableDict_array1_traverse
+  @(a : bare) (repr : Repr a) (ar : array1 a)
+  -> view dim1 a attribute(inline) =
+  case ar of
+    mk_array1 @a @(N : intindex)
+    (lo : int) (stride : int) (size : FIInt N)
+    (ayref : Referenced (arr N a)).
+  case ayref of referenced @(arr N a) (ay : arr N a).
+  
+  let linear_map : LinearMap = linearMap stride lo in
+
+  view_generate @dim1 ShapeDict_dim1 @a repr
+  (arrayDescToDim1 @N lo stride size)
+  (\ (ix : Stored int) (ret : OutPtr a) -> IEffect a.
+    case ix of stored @int (ix_i : int).
+
+    let real_ix : int = invEvalLM ix_i linear_map in
+    copy @a repr (subscript @N @a repr ay real_ix) ret);
+
+
+TraversableDict_array1_build
+  @(a : bare) (repr : Repr a) (s : view dim1 a) (ret : OutPtr (array1 a))
+  -> IEffect (array1 a) attribute(inline, inline_dimensionality) =
+  build_dim1_array @a repr s ret;
+
+
+TraversableDict_array2_traverse
+  @(a : bare) (repr : Repr a) (ar : array2 a)
+  -> view dim2 a attribute(inline) =
+  case ar of
+    mk_array2 @a @(M N : intindex)
+    (lo_y : int) (stride_y : int) (size_y : FIInt M)
+    (lo_x : int) (stride_x : int) (size_x : FIInt N)
+    (ayref : Referenced (arr M (arr N a))).
+  case ayref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
+
+  let linear_map_y : LinearMap = linearMap stride_y lo_y in
+  let linear_map_x : LinearMap = linearMap stride_x lo_x in
+  case size_x of fiInt @N (width : int).
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+  let type Sint = Stored int in
+
+  view_generate @dim2 ShapeDict_dim2 @a repr
+  (mk_dim2 (arrayDescToDim1 @M lo_y stride_y size_y)
+           (arrayDescToDim1 @N lo_x stride_x size_x))
+  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> IEffect a.
+     case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
+     case ix_y of stored @int (ix_y_i : int).
+     case ix_x of stored @int (ix_x_i : int).
+     let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
+     let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
+     copy @a repr 
+     (subscript @N @a repr
+      (subscript @M @(arr N a) row_repr ay real_ix_y) real_ix_x)
+     ret);
+
+
+TraversableDict_array2_build
+  @(a : bare) (repr : Repr a) (s : view dim2 a) (ret : OutPtr (array2 a))
+  -> IEffect (array2 a) attribute(inline, inline_dimensionality) =
+  
+  case s of mk_view @dim2 @a (dom : dim2) (f : index dim2 -> Writer a).
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+
+  -- Compute array parameters
+  dim1ToArrayDesc @(array2 a) dom_y
+  (\ @(M : intindex)
+     (lb_y : int) (stride_y : int) (size_y : FIInt M) (ret : OutPtr (array2 a))
+     -> IEffect (array2 a).
+     dim1ToArrayDesc @(array2 a) dom_x
+     (\ @(N : intindex)
+        (lb_x : int) (stride_x : int) (size_x : FIInt N) (ret : OutPtr (array2 a))
+        -> IEffect (array2 a).
+
+        let linear_map_y : LinearMap = linearMap stride_y lb_y in
+        let linear_map_x : LinearMap = linearMap stride_x lb_x in
+        let type out_arr = arr M (arr N a) in
+        let type Sint = Stored int in
+
+        mk_array2 @a @M @N lb_y stride_y size_y lb_x stride_x size_x
+        (referenced @out_arr
+         (arr2D_build @M @N @a repr size_y size_x
+          (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+             let logical_y : int = evalLM y linear_map_y in
+             let logical_x : int = evalLM x linear_map_x in
+             case boxed @(PyonTuple2 Sint Sint)
+                  (pyonTuple2 @Sint @Sint
+                   (stored @int logical_y) (stored @int logical_x)) of
+               boxed @(PyonTuple2 Sint Sint) (ix : PyonTuple2 Sint Sint).
+
+             -- Evaluate the function
+             f ix ret)))
+         ret)
+     ret)
+  ret;
+
+-------------------------------------------------------------------------------
+-- Shape dictionary methods
+
+ShapeDict_dim0_member (d : dim0) (i : index dim0) -> bool attribute(inline) =
+  True;
+
+ShapeDict_dim0_intersect (d : dim0) (x : dim0) -> dim0 attribute(inline) =
+  d;
+
+ShapeDict_dim0_generate @(a : bare)
+  (repr : Repr a) (d : dim0) (f : Stored NoneType -> Writer a)
+  -> Stream dim0 a attribute(inline) =
+  mk_view @dim0 @a mk_dim0 f;
+
+ShapeDict_dim0_flatten @(a : bare) (repr : Repr a) (s : Stream dim0 a)
+  -> Stream list_dim a attribute(inline) =
+  case s of mk_view @dim0 @a (d : dim0) (f : Stored NoneType -> Writer a).
+
+  let d : list_dim = mk_list_dim (justVal @int 1) in
+
+  ShapeDict_list_dim_generate @a repr d
+  (\ (i : Stored int) -> Writer a.
+    case boxed @(Stored NoneType) (stored @NoneType None) of
+      boxed @(Stored NoneType) (x : Stored NoneType).
+    f x);
+
+
+ShapeDict_dim0_map @(a b : bare)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (transformer : a -> Writer b)
+  (s : Stream dim0 a)
+  -> Stream dim0 b attribute(inline) =
+  case s of mk_view @dim0 @a (d : dim0) (f : Stored NoneType -> Writer a).
+  mk_view @dim0 @b d
+  (\ (i : Stored NoneType) -> Writer b.
+    case boxed @a (f i) of boxed @a (x : a). transformer x);
+
+
+ShapeDict_dim0_zipWith @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (transformer : a -> b -> Writer c)
+  (sA : Stream dim0 a)
+  (sB : Stream dim0 b)
+  -> Stream dim0 c attribute(inline) =
+  case sA of mk_view @dim0 @a (dA : dim0) (fA : Stored NoneType -> Writer a).
+  case sB of mk_view @dim0 @b (dB : dim0) (fB : Stored NoneType -> Writer b).
+  mk_view @dim0 @c dA
+  (\ (i : Stored NoneType) -> Writer c.
+    case boxed @a (fA i) of boxed @a (x : a).
+    case boxed @b (fB i) of boxed @b (y : b).
+    transformer x y);
+
+
+ShapeDict_dim0_zipWith3 @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (transformer : a -> b -> c -> Writer d)
+  (sA : Stream dim0 a)
+  (sB : Stream dim0 b)
+  (sC : Stream dim0 c)
+  -> Stream dim0 d attribute(inline) =
+  case sA of mk_view @dim0 @a (dA : dim0) (fA : Stored NoneType -> Writer a).
+  case sB of mk_view @dim0 @b (dB : dim0) (fB : Stored NoneType -> Writer b).
+  case sC of mk_view @dim0 @c (dC : dim0) (fC : Stored NoneType -> Writer c).
+  mk_view @dim0 @d dA
+  (\ (i : Stored NoneType) -> Writer d.
+    case boxed @a (fA i) of boxed @a (x : a).
+    case boxed @b (fB i) of boxed @b (y : b).
+    case boxed @c (fC i) of boxed @c (z : c).
+    transformer x y z);
+
+
+ShapeDict_dim0_zipWith4 @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
+  (transformer : a -> b -> c -> d -> Writer e)
+  (sA : Stream dim0 a)
+  (sB : Stream dim0 b)
+  (sC : Stream dim0 c)
+  (sD : Stream dim0 d)
+  -> Stream dim0 e attribute(inline) =
+  case sA of mk_view @dim0 @a (dA : dim0) (fA : Stored NoneType -> Writer a).
+  case sB of mk_view @dim0 @b (dB : dim0) (fB : Stored NoneType -> Writer b).
+  case sC of mk_view @dim0 @c (dC : dim0) (fC : Stored NoneType -> Writer c).
+  case sD of mk_view @dim0 @d (dD : dim0) (fD : Stored NoneType -> Writer d).
+  mk_view @dim0 @e dA
+  (\ (i : Stored NoneType) -> Writer e.
+    case boxed @a (fA i) of boxed @a (x : a).
+    case boxed @b (fB i) of boxed @b (y : b).
+    case boxed @c (fC i) of boxed @c (z : c).
+    case boxed @d (fD i) of boxed @d (w : d).
+    transformer x y z w);
+
+ShapeDict_dim0_slice @(t : bare -> bare) @(a : bare)
+  (has_shape : coerce @box (shape t) dim0)
+  (indexable : IndexableDict t)
+  (repr : Repr a)
+  (container : t a)
+  (sl : slice dim0)
+  -> view dim0 a attribute(inline) =
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  mk_view @dim0 @a mk_dim0
+  (\ (ix : Stored NoneType) -> Writer a.
+    at_index @a repr container (coerce @(index dim0) @(index (shape t)) ix));
+
+
+ShapeDict_list_dim_member
+  (sh : list_dim) (ix : Stored int) -> bool =
+  case ix of stored @int (ix_i : int).
+  case sh of mk_list_dim (m_size : MaybeVal int).
+  case m_size of {
+    nothingVal @int. ix_i >=# 0
+  ; justVal @int (size_i : int). and (ix_i >=# 0) (ix_i <# size_i)
+  };
+
+
+ShapeDict_list_dim_intersect (d1 : list_dim) (d2 : list_dim) -> list_dim =
+  case d1 of mk_list_dim (m_size1 : MaybeVal int).
+  case d2 of mk_list_dim (m_size2 : MaybeVal int).
+  mk_list_dim
+  (case m_size1 of {
+     justVal @int (size1 : int).
+       case m_size2 of {
+         justVal @int (size2 : int).
+           justVal @int (min_int size1 size2)
+       ; nothingVal @int.
+           justVal @int size1
+       }
+   ; nothingVal @int.
+       m_size2
+   });
+
+
+ShapeDict_list_dim_flatten @(a : bare) (repr : Repr a) (s : Stream list_dim a)
+  -> Stream list_dim a attribute(inline) = s;
+
+
+ShapeDict_list_dim_generate @(a : bare)
+  (repr : Repr a) (d : list_dim) (f : Stored int -> Writer a)
+  -> Stream list_dim a =
+  viewStream @a (view_generate @list_dim
+  ShapeDict_list_dim @a repr d f);
+
+
+ShapeDict_list_dim_map @(a b : bare)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (transformer : a -> Writer b)
+  (s : Stream list_dim a)
+  -> Stream list_dim b attribute(inline) =
+  case s of {
+    sequenceStream @a (sq : Sequence a).
+      sequenceStream @b (Sequence_map @a @b repr_a repr_b transformer sq)
+  ; viewStream @a (vw : view list_dim a).
+      viewStream @b
+      (view_map @list_dim
+       ShapeDict_list_dim @a @b repr_a repr_b transformer vw)
+  };
+
+
+ShapeDict_list_dim_zipWith @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (transformer : a -> b -> Writer c)
+  (sA : Stream list_dim a)
+  (sB : Stream list_dim b)
+  -> Stream list_dim c attribute(inline) =
+  case sA of {
+    sequenceStream @a (sqA : Sequence a).
+      let sqB : Sequence b =
+            case sB of {
+              sequenceStream @b (sqB : Sequence b). sqB
+            ; viewStream @b (vwB : view list_dim b). viewToSequence @b repr_b vwB
+            } in
+      sequenceStream @c
+      (Sequence_zipWith @a @b @c repr_a repr_b repr_c transformer sqA sqB)
+
+  ; viewStream @a (vwA : view list_dim a).
+      case sB of {
+        sequenceStream @b (sqB : Sequence b).
+          sequenceStream @c
+          (Sequence_zipWith @a @b @c repr_a repr_b repr_c transformer
+           (viewToSequence @a repr_a vwA) sqB)
+      ; viewStream @b (vwB : view list_dim b).
+          viewStream @c
+          (view_zipWith @list_dim
+           ShapeDict_list_dim
+           @a @b @c repr_a repr_b repr_c transformer vwA vwB)
+    }
+  };
+
+ShapeDict_list_dim_zipWith3 @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (transformer : a -> b -> c -> Writer d)
+  (sA : Stream list_dim a)
+  (sB : Stream list_dim b)
+  (sC : Stream list_dim c)
+  -> Stream list_dim d attribute(inline) =
+  case sA of {
+    sequenceStream @a (sqA : Sequence a).
+      let sqB : Sequence b =
+            case sB of {
+              sequenceStream @b (sqB : Sequence b). sqB
+            ; viewStream @b (vwB : view list_dim b). viewToSequence @b repr_b vwB
+            } in
+      let sqC : Sequence c =
+            case sC of {
+              sequenceStream @c (sqC : Sequence c). sqC
+            ; viewStream @c (vwC : view list_dim c). viewToSequence @c repr_c vwC
+            } in
+      sequenceStream @d
+      (Sequence_zipWith3 @a @b @c @d repr_a repr_b repr_c repr_d
+       transformer sqA sqB sqC)
+
+  ; viewStream @a (vwA : view list_dim a).
+      case sB of {
+        sequenceStream @b (sqB : Sequence b).
+          let sqC : Sequence c =
+                case sC of {
+                  sequenceStream @c (sqC : Sequence c). sqC
+                ; viewStream @c (vwC : view list_dim c). viewToSequence @c repr_c vwC
+                } in
+          sequenceStream @d
+          (Sequence_zipWith3 @a @b @c @d repr_a repr_b repr_c repr_d transformer
+           (viewToSequence @a repr_a vwA) sqB sqC)
+
+      ; viewStream @b (vwB : view list_dim b).
+          case sC of {
+            sequenceStream @c (sqC : Sequence c).
+              sequenceStream @d
+              (Sequence_zipWith3 @a @b @c @d
+               repr_a repr_b repr_c repr_d transformer
+               (viewToSequence @a repr_a vwA)
+               (viewToSequence @b repr_b vwB)
+               sqC)
+
+          ; viewStream @c (vwC : view list_dim c).
+              viewStream @d
+              (view_zipWith3 @list_dim
+               ShapeDict_list_dim
+               @a @b @c @d repr_a repr_b repr_c repr_d
+               transformer vwA vwB vwC)
+          }
+      }
+  };
+
+
+ShapeDict_list_dim_zipWith4 @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
+  (transformer : a -> b -> c -> d -> Writer e)
+  (sA : Stream list_dim a)
+  (sB : Stream list_dim b)
+  (sC : Stream list_dim c)
+  (sD : Stream list_dim d)
+  -> Stream list_dim e attribute(inline) =
+  case sA of {
+    sequenceStream @a (sqA : Sequence a).
+      let sqB : Sequence b =
+            case sB of {
+              sequenceStream @b (sqB : Sequence b). sqB
+            ; viewStream @b (vwB : view list_dim b). viewToSequence @b repr_b vwB
+            } in
+      let sqC : Sequence c =
+            case sC of {
+              sequenceStream @c (sqC : Sequence c). sqC
+            ; viewStream @c (vwC : view list_dim c). viewToSequence @c repr_c vwC
+            } in
+      let sqD : Sequence d =
+            case sD of {
+              sequenceStream @d (sqD : Sequence d). sqD
+            ; viewStream @d (vwD : view list_dim d). viewToSequence @d repr_d vwD
+            } in
+      sequenceStream @e
+      (Sequence_zipWith4 @a @b @c @d @e repr_a repr_b repr_c repr_d repr_e
+       transformer sqA sqB sqC sqD)
+
+  ; viewStream @a (vwA : view list_dim a).
+      case sB of {
+        sequenceStream @b (sqB : Sequence b).
+          let sqC : Sequence c =
+                case sC of {
+                  sequenceStream @c (sqC : Sequence c). sqC
+                ; viewStream @c (vwC : view list_dim c). viewToSequence @c repr_c vwC
+                } in
+          let sqD : Sequence d =
+                case sD of {
+                  sequenceStream @d (sqD : Sequence d). sqD
+                ; viewStream @d (vwD : view list_dim d). viewToSequence @d repr_d vwD
+                } in
+          sequenceStream @e
+          (Sequence_zipWith4 @a @b @c @d @e
+           repr_a repr_b repr_c repr_d repr_e transformer
+           (viewToSequence @a repr_a vwA) sqB sqC sqD)
+
+      ; viewStream @b (vwB : view list_dim b).
+          case sC of {
+            sequenceStream @c (sqC : Sequence c).
+              let sqD : Sequence d =
+                    case sD of {
+                      sequenceStream @d (sqD : Sequence d).
+                        sqD
+                    ; viewStream @d (vwD : view list_dim d).
+                        viewToSequence @d repr_d vwD
+                    } in
+              sequenceStream @e
+              (Sequence_zipWith4 @a @b @c @d @e
+               repr_a repr_b repr_c repr_d repr_e transformer
+               (viewToSequence @a repr_a vwA)
+               (viewToSequence @b repr_b vwB)
+               sqC sqD)
+
+          ; viewStream @c (vwC : view list_dim c).
+              case sD of {
+                sequenceStream @d (sqD : Sequence d).
+                  sequenceStream @e
+                  (Sequence_zipWith4 @a @b @c @d @e
+                   repr_a repr_b repr_c repr_d repr_e transformer
+                   (viewToSequence @a repr_a vwA)
+                   (viewToSequence @b repr_b vwB)
+                   (viewToSequence @c repr_c vwC)
+                   sqD)
+              ; viewStream @d (vwD : view list_dim d).
+                  viewStream @e
+                  (view_zipWith4 @list_dim
+                   ShapeDict_list_dim @a @b @c @d @e
+                   repr_a repr_b repr_c repr_d repr_e
+                   transformer vwA vwB vwC vwD)
+              }
+          }
+      }
+  };
+
+
+ShapeDict_list_dim_slice @(t : bare -> bare) @(a : bare)
+  (is_dim1 : coerce @box (shape t) list_dim)
+  (indexable : IndexableDict t)
+  (repr : Repr a)
+  (container : t a)
+  (slice_argument : slice list_dim)
+  -> view list_dim a attribute(inline) =
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  -- Compute parameters of the sliced list
+  case internalApplyListSlice slice_argument
+       (coerce @(shape t) @list_dim (get_shape @a container)) of
+    (view_domain : list_dim, view_map : LinearMap).
+
+  view_generate @list_dim
+  ShapeDict_list_dim @a repr view_domain
+  (\ (i : Stored int) (ret : OutPtr a) -> IEffect a.
+
+    -- Compute the index in the original object that holds the value at 'i'
+    let source_index : int =
+          case i of stored @int (u_i : int). evalLM u_i view_map in
+    case boxed @(Stored int) (stored @int source_index) of
+      boxed @(Stored int) (source_s_index : Stored int).
+    let s_index : index (shape t) =
+          coerce @(index list_dim) @(index (shape t)) source_s_index in
+
+    -- Retrieve the value
+    at_index @a repr container s_index ret);
+
+
+ShapeDict_dim1_member (dom : dim1) (ix : Stored int)
+  -> bool attribute(inline) =
+  case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case ix of stored @int (ix_i : int).
+
+  -- Point must be in the interval and in the linear map
+  if inInterval ix_i iv
+  then inLM ix_i lm
+  else False;
+
+
+ShapeDict_dim1_intersect (d : dim1) (e : dim1) -> dim1 =
+  case d of mk_dim1 (iv1 : Interval) (m1 : LinearMap).
+  case e of mk_dim1 (iv2 : Interval) (m2 : LinearMap).
+  case intersectLM m1 m2 of {
+    justVal @LinearMap (m3 : LinearMap).
+      let iv3 : Interval = trimInterval (intersectInterval iv1 iv2) m3 in
+      mk_dim1 iv3 m3
+  ; nothingVal @LinearMap.
+      mk_dim1 (interval (justVal @int 0) (justVal @int 0)) (linearMap 1 0)
+  };
+
+
+ShapeDict_dim1_flatten @(a : bare)
+  (repr : Repr a) (s : Stream dim1 a) -> Stream list_dim a
+  attribute(inline, inline_sequential) =
+  case s of mk_view @dim1 @a (dom : dim1) (f : Stored int -> Writer a).
+
+  -- Compute the size of the list
+  case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case lm of linearMap (stride : int) (alignment : int).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case case lb of {
+         justVal @int (lb_i : int).
+           case ub of {
+             justVal @int (ub_i : int).
+               -- Bounded list
+               (justVal @int ((ub_i -# lb_i) //# stride),
+                linearMap stride lb_i)
+           ; nothingVal @int.
+               -- Unbounded list
+               (nothingVal @int,
+                linearMap stride lb_i)
+         }
+       ; nothingVal @int. except @(MaybeVal int, LinearMap)
+       } of
+    (list_size : MaybeVal int, list_map : LinearMap).
+
+  viewStream @a
+  (view_generate @list_dim
+   ShapeDict_list_dim @a
+   repr (mk_list_dim list_size)
+   (\ (ix : Stored int) -> Writer a.
+      case ix of stored @int (ix_u : int).
+      case boxed @(Stored int) (stored @int (evalLM ix_u list_map)) of
+        boxed @(Stored int) (ix2 : Stored int).
+      f ix2));
+
+
+ShapeDict_dim1_generate @(a : bare)
+  (repr : Repr a) (dom : dim1) (f : index dim1 -> Writer a)
+  -> Stream dim1 a attribute(inline) =
+  view_generate @dim1
+  ShapeDict_dim1 @a repr dom f;
+
+
+ShapeDict_dim1_map @(a b : bare)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (transformer : a -> Writer b)
+  (s : Stream dim1 a)
+  -> Stream dim1 b attribute(inline) =
+  view_map @dim1
+  ShapeDict_dim1 @a @b repr_a repr_b transformer s;
+
+
+ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
+  (is_dim1 : coerce @box (shape t) dim1)
+  (indexable : IndexableDict t)
+  (repr : Repr a)
+  (container : t a)
+  (slice_argument : slice dim1)
+  -> view dim1 a attribute(inline) =
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  -- Compute the slice's domain
+  let dom : dim1 = coerce @(shape t) @dim1 (get_shape @a container) in
+  let slice_dom : dim1 = internalApplyArraySlice slice_argument dom in
+
+  view_generate @dim1
+  ShapeDict_dim1 @a repr slice_dom
+  (\ (i : index dim1) (ret : OutPtr a) -> IEffect a.
+    at_index @a repr container (coerce @(index dim1) @(index (shape t)) i) ret);
+
+
+ShapeDict_dim2_member (dom : dim2) (ix : index dim2) -> bool =
+  -- Take the conjunction of x and y membership conditions
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  case ix of pyonTuple2 @(Stored int) @(Stored int)
+             (ix_y : Stored int) (ix_x : Stored int).
+  if ShapeDict_dim1_member dom_y ix_y
+  then ShapeDict_dim1_member dom_x ix_x
+  else False;
+
+
+ShapeDict_dim2_intersect (domA : dim2) (domB : dim2) -> dim2 =
+  -- Take the intersection in each dimension
+  case domA of mk_dim2 (domA_y : dim1) (domA_x : dim1).
+  case domB of mk_dim2 (domB_y : dim1) (domB_x : dim1).
+  mk_dim2 (ShapeDict_dim1_intersect domA_y domB_y)
+          (ShapeDict_dim1_intersect domA_x domB_x);
+
+
+ShapeDict_dim2_generate @(a : bare)
+  (repr : Repr a) (dom : dim2) (f : index dim2 -> Writer a)
+  -> Stream dim2 a attribute(inline) =
+  view_generate @dim2 ShapeDict_dim2 @a repr dom f;
+
+
+ShapeDict_dim2_flatten @(a : bare)
+  (repr : Repr a) (s : Stream dim2 a) -> Stream list_dim a
+  attribute(inline, inline_dimensionality) =
+  case s of mk_view @dim2 @a (dom : dim2) (f : index dim2 -> Writer a).
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  case dom_x of mk_dim1 (iv_x : Interval) (lm_x : LinearMap).
+  case dom_y of mk_dim1 (iv_y : Interval) (lm_y : LinearMap).
+  case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+  case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case lm_x of linearMap (stride_x : int) (alignment_x : int).
+  case lm_y of linearMap (stride_y : int) (alignment_y : int).
+
+  -- Lower bound must be finite
+  case lb_x of {
+    justVal @int (lb_x_i : int).
+      case ub_x of {
+        justVal @int (ub_x_i : int).
+          -- Domain has finite x extent
+          let count_x : int = (ub_x_i -# lb_x_i) //# stride_x in
+
+          case lb_y of {
+            justVal @int (lb_y_i : int).
+
+              -- Compute the number of points in the domain
+              let list_size : MaybeVal int =
+                    case ub_y of {
+                      justVal @int (ub_y_i : int).
+                        -- Domain is bounded on all sides
+                        let count_y : int = (ub_y_i -# lb_y_i) //# stride_y in
+                        justVal @int (count_x *# count_y)
+                    ; nothingVal @int.
+
+                        -- Domain is unbounded in the y-dimensino
+                        nothingVal @int
+                    } in
+
+              viewStream @a
+              (mk_view @list_dim @a (mk_list_dim list_size)
+               (\ (si : Stored int) -> Writer a.
+                  -- Linearize the index
+                  case si of stored @int (i : int).
+                  let i_y : int = i //# count_x in
+                  let i_x : int = i %# count_x in
+
+                  -- Apply the stride to get an index in the domain
+                  let dim2_i_y : int = lb_y_i +# i_y *# stride_y in 
+                  let dim2_i_x : int = lb_x_i +# i_x *# stride_x in 
+                  case boxed @(PyonTuple2 (Stored int) (Stored int))
+                       (pyonTuple2 @(Stored int) @(Stored int)
+                        (stored @int dim2_i_y) (stored @int dim2_i_x))
+                  of boxed @(PyonTuple2 (Stored int) (Stored int))
+                     (index_2d : PyonTuple2 (Stored int) (Stored int)).
+                  f index_2d))
+
+          ; nothingVal @int.
+              except @(Stream list_dim a)
+          }
+
+      ; nothingVal @int.
+          -- Domain has infinite x extent
+          case lb_y of {
+            justVal @int (lb_y_i : int).
+              viewStream @a
+              (mk_view @list_dim @a (mk_list_dim (nothingVal @int))
+               (\ (si : Stored int) -> Writer a.
+                  case si of stored @int (i : int).
+                  let dim2_i_x : int = lb_x_i +# i *# stride_x in
+                  case boxed @(PyonTuple2 (Stored int) (Stored int))
+                       (pyonTuple2 @(Stored int) @(Stored int)
+                        (stored @int lb_y_i) (stored @int dim2_i_x))
+                  of boxed @(PyonTuple2 (Stored int) (Stored int))
+                     (index_2d : PyonTuple2 (Stored int) (Stored int)).
+                  f index_2d))
+          ; nothingVal @int.
+              except @(Stream list_dim a)
+          }
+      }
+
+  ; nothingVal @int.
+      except @(Stream list_dim a)
+  };
+
+
+ShapeDict_dim2_map @(a b : bare)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (transformer : a -> Writer b)
+  (s : Stream dim2 a)
+  -> Stream dim2 b attribute(inline) =
+  view_map @dim2
+  ShapeDict_dim2 @a @b repr_a repr_b transformer s;
+
+
+ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
+  (is_dim2 : coerce @box (shape t) dim2)
+  (indexable : IndexableDict t)
+  (repr : Repr a)
+  (container : t a)
+  (slice_argument : slice dim2)
+  -> view dim2 a attribute(inline) =
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  -- Compute the slice's domain
+  case slice_argument of
+    pyonTuple2 @SliceObject @SliceObject
+    (slice_y : SliceObject) (slice_x : SliceObject).
+
+  let dom : dim2 = coerce @(shape t) @dim2 (get_shape @a container) in
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  let slice_dom : dim2 =
+        mk_dim2 (internalApplyArraySlice slice_y dom_y)
+                (internalApplyArraySlice slice_x dom_x) in
+
+  view_generate @dim2
+  ShapeDict_dim2 @a repr slice_dom
+  (\ (i : index dim2) (ret : OutPtr a) -> IEffect a.
+    at_index @a repr container (coerce @(index dim2) @(index (shape t)) i) ret);
+
+-------------------------------------------------------------------------------
+-- Indexable dictionary functions
+
+IndexableDict_list_at_point @(a : bare)
+  (repr : Repr a) (ls : list a) (ix : Stored int) (ret : OutPtr a) -> IEffect a
+  attribute(inline) =
+  case ls of make_list @a @(N : intindex)
+             (n : FIInt N) (ayref : Referenced (arr N a)).
+  case ayref of referenced @(arr N a) (ay : arr N a).
+  case ix of stored @int (ix_i : int).
+  copy @a repr (subscript @N @a repr ay ix_i) ret;
+
+
+IndexableDict_list_get_shape @(a : bare) (ls : list a) -> list_dim
+  attribute(inline) =
+  case ls of make_list @a @(N : intindex)
+             (n : FIInt N) (ayref : Referenced (arr N a)).
+  case n of fiInt @N (size : int).
+  mk_list_dim (justVal @int size);
+
+
+IndexableDict_view_at_point @(sh : box) (dict : ShapeDict sh) ->
+  (a : bare) -> Repr a -> view sh a -> index sh -> Writer a =
+  \ @(a : bare)
+    (repr : Repr a) (vw : view sh a) (ix : index sh) -> Writer a.
+    case vw of mk_view @sh @a (dom : sh) (f : index sh -> Writer a).
+    f ix;
+
+
+IndexableDict_view_get_shape @(sh : box) (dict : ShapeDict sh) ->
+  (a : bare) -> view sh a -> sh =
+  \ @(a : bare) (vw : view sh a) -> sh.
+    case vw of mk_view @sh @a (dom : sh) (f : index sh -> Writer a).
+    dom;
+
+
+IndexableDict_array0_at_point @(a : bare)
+  (repr : Repr a) (ay : array0 a) (ix : Stored NoneType) (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  case ay of mk_array0 @a (x : a). copy @a repr x ret;
+
+
+IndexableDict_array0_get_shape @(a : bare)
+  (ay : array0 a) -> dim0
+  attribute(inline) =
+  mk_dim0;
+
+
+IndexableDict_array1_at_point @(a : bare)
+  (repr : Repr a) (ay : array1 a) (ix : Stored int) (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  case ay of mk_array1 @a @(N : intindex)
+             (lb : int) (stride : int) (size : FIInt N)
+             (ayref : Referenced (arr N a)).
+  case ayref of referenced @(arr N a) (ay : arr N a).
+
+  -- Compute real array index
+  case ix of stored @int (ix_i : int).
+  let real_index : int = (ix_i -# lb) //# stride in
+  copy @a repr (subscript @N @a repr ay real_index) ret;
+
+
+IndexableDict_array1_get_shape @(a : bare)
+  (ay : array1 a) -> dim1
+  attribute(inline) =
+  case ay of mk_array1 @a @(N : intindex)
+             (lb : int) (stride : int) (size : FIInt N)
+             (ayref : Referenced (arr N a)).
+  arrayDescToDim1 @N lb stride size;
+
+
+IndexableDict_array2_at_point @(a : bare)
+  (repr : Repr a)
+  (ay : array2 a)
+  (ix : PyonTuple2 (Stored int) (Stored int))
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  case ay of mk_array2 @a @(M N : intindex)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : Referenced (arr M (arr N a))).
+  case ayref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+
+  -- Compute real array indices
+  case ix of pyonTuple2 @(Stored int) @(Stored int)
+             (ix_y : Stored int) (ix_x : Stored int).
+  case ix_y of stored @int (ix_y_i : int).
+  let real_index_y : int = (ix_y_i -# lb_y) //# stride_y in
+  case ix_x of stored @int (ix_x_i : int).
+  let real_index_x : int = (ix_x_i -# lb_x) //# stride_x in
+
+  -- Copy the desired element
+  copy @a repr
+  (subscript @N @a repr (subscript @M @(arr N a) row_repr ay real_index_y)
+   real_index_x) ret;
+
+
+IndexableDict_array2_get_shape @(a : bare)
+  (ay : array2 a) -> dim2
+  attribute(inline) =
+  case ay of mk_array2 @a @(M N : intindex)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : Referenced (arr M (arr N a))).
+  mk_dim2 (arrayDescToDim1 @M lb_y stride_y size_y)
+          (arrayDescToDim1 @N lb_x stride_x size_x);
+
+-------------------------------------------------------------------------------
+-- High-level overloaded functions
+
+fun_reduce @(t : bare -> bare) @(a : bare)
+  (traversable : TraversableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (reducer : a -> a -> Writer a)
+  (init : a)
+  (input : t a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  let type sh = shape t in
+
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+       (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  let s : Stream1 a = shape_flatten @a repr (traverse @a repr input) in
+  case s of {
+    viewStream @a (vw : view list_dim a).
+      reduce_list_dim @a repr reducer init vw ret
+  ; sequenceStream @a (sq : Sequence a).
+      Sequence_reduce @a repr reducer init sq ret
+  };
+
+
+fun_reduce1 @(t : bare -> bare) @(a : bare)
+  (traversable : TraversableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (reducer : a -> a -> Writer a)
+  (input : t a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  let type sh = shape t in
+
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+       (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  let s : Stream1 a = shape_flatten @a repr (traverse @a repr input) in
+  case s of {
+    viewStream @a (vw : view list_dim a).
+      reduce1_list_dim @a repr reducer vw ret
+  ; sequenceStream @a (sq : Sequence a).
+      Sequence_reduce1 @a repr reducer sq ret
+  };
+
+
+fun_map @(t : bare -> bare)
+        @(a b : bare)
+        (traversable : TraversableDict t)
+        (shape_dict : ShapeDict (shape t))
+        (repr_a : Repr a)
+        (repr_b : Repr b)
+        (transformer : a -> Writer b)
+        (container : t a)
+	(ret : OutPtr (t b))
+        -> IEffect (t b)
+ 	attribute(inline) =
+  let type sh = shape t in
+
+  case traversable of
+    traversableDict @t
+    (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+    (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  build @b repr_b
+  (shape_map @a @b repr_a repr_b transformer
+   (traverse @a repr_a container))
+  ret;
+
+
+fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
+        (traversable1 : TraversableDict t1)
+        (traversable2 : TraversableDict t2)
+        (equal12 : coerce @box (shape t1) (shape t2))
+	(shape_dict : ShapeDict (shape t1))
+        (reprA : Repr a) (reprB : Repr b)
+        (inputA : t1 a) (inputB : t2 b)
+  -> Stream (shape t1) (PyonTuple2 a b)
+  attribute(inline) =
+  case traversable1
+  of traversableDict @t1
+       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
+       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
+  case traversable2
+  of traversableDict @t2
+       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
+       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
+  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
+  let stream2 : Stream (shape t1) b =
+        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
+	(traverse2 @b reprB inputB) in
+
+  let type sh = shape t1 in
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  letfun
+    transformer (x : a) (y : b) (ret : OutPtr (PyonTuple2 a b))
+    		-> IEffect (PyonTuple2 a b) =
+      pyonTuple2 @a @b (copy @a reprA x) (copy @b reprB y) ret
+  in
+
+  shape_zipWith @a @b @(PyonTuple2 a b)
+  reprA reprB (repr_PyonTuple2 @a @b reprA reprB)
+  transformer stream1 stream2;
+
+fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
+        (traversable1 : TraversableDict t1)
+        (traversable2 : TraversableDict t2)
+        (traversable3 : TraversableDict t3)
+        (equal12 : coerce @box (shape t1) (shape t2))
+        (equal23 : coerce @box (shape t2) (shape t3))
+	(shape_dict : ShapeDict (shape t1))
+        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c)
+        (inputA : t1 a) (inputB : t2 b) (inputC : t3 c)
+  -> Stream (shape t1) (PyonTuple3 a b c)
+  attribute(inline) =
+  case traversable1
+  of traversableDict @t1
+       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
+       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
+  case traversable2
+  of traversableDict @t2
+       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
+       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
+  case traversable3
+  of traversableDict @t3
+       (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
+       (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
+  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
+  let stream2 : Stream (shape t1) b =
+        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
+	(traverse2 @b reprB inputB) in
+  let stream3 : Stream (shape t1) c =
+        coerce @(Stream (shape t3) c) @(Stream (shape t1) c)
+	(traverse3 @c reprC inputC) in
+
+  let type sh = shape t1 in
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  letfun
+    transformer (x : a) (y : b) (z : c) (ret : OutPtr (PyonTuple3 a b c))
+    		-> IEffect (PyonTuple3 a b c) =
+      pyonTuple3 @a @b @c (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) ret
+  in
+
+  shape_zipWith3 @a @b @c @(PyonTuple3 a b c)
+  reprA reprB reprC (repr_PyonTuple3 @a @b @c reprA reprB reprC)
+  transformer stream1 stream2 stream3;
+
+
+fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
+        (traversable1 : TraversableDict t1)
+        (traversable2 : TraversableDict t2)
+        (traversable3 : TraversableDict t3)
+        (traversable4 : TraversableDict t4)
+        (equal12 : coerce @box (shape t1) (shape t2))
+        (equal23 : coerce @box (shape t2) (shape t3))
+        (equal34 : coerce @box (shape t3) (shape t4))
+	(shape_dict : ShapeDict (shape t1))
+        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c) (reprD : Repr d)
+        (inputA : t1 a) (inputB : t2 b) (inputC : t3 c) (inputD : t4 d)
+  -> Stream (shape t1) (PyonTuple4 a b c d)
+  attribute(inline) =
+  case traversable1
+  of traversableDict @t1
+       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
+       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
+  case traversable2
+  of traversableDict @t2
+       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
+       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
+  case traversable3
+  of traversableDict @t3
+       (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
+       (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
+  case traversable4
+  of traversableDict @t4
+       (traverse4 : (a : bare) -> Repr a -> t4 a -> Stream (shape t4) a)
+       (build4 : (a : bare) -> Repr a -> Stream (shape t4) a -> Writer (t4 a)).
+  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
+  let stream2 : Stream (shape t1) b =
+        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
+	(traverse2 @b reprB inputB) in
+  let stream3 : Stream (shape t1) c =
+        coerce @(Stream (shape t3) c) @(Stream (shape t1) c)
+	(traverse3 @c reprC inputC) in
+  let stream4 : Stream (shape t1) d =
+        coerce @(Stream (shape t4) d) @(Stream (shape t1) d)
+	(traverse4 @d reprD inputD) in
+
+  let type sh = shape t1 in
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  letfun
+    transformer (x : a) (y : b) (z : c) (w : d) (ret : OutPtr (PyonTuple4 a b c d))
+    		-> IEffect (PyonTuple4 a b c d) =
+      pyonTuple4 @a @b @c @d (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) (copy @d reprD w) ret
+  in
+
+  shape_zipWith4 @a @b @c @d @(PyonTuple4 a b c d)
+  reprA reprB reprC reprD (repr_PyonTuple4 @a @b @c @d reprA reprB reprC reprD)
+  transformer stream1 stream2 stream3 stream4;
+
+
+rows @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_is_dim2 : coerce @box (shape t) dim2)
+  (repr : Repr a)
+  (container : t a)
+  -> view dim1 (StoredBox (view dim1 a))
+  attribute(inline) =
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+  case coerce @(shape t) @dim2 (get_shape @a container) of
+    mk_dim2 (shape_y : dim1) (shape_x : dim1).
+
+  view_generate @dim1
+  ShapeDict_dim1 @(StoredBox (view dim1 a))
+  (repr_Box @(view dim1 a)) shape_y
+  (\ (s_y : Stored int) -> Writer (StoredBox (view dim1 a)).
+    storedBox @(view dim1 a)
+    (view_generate @dim1 ShapeDict_dim1
+     @a repr shape_x
+     (\ (s_x : Stored int) (ret : OutPtr a) -> IEffect a.
+       case boxed @(index dim2)
+            (pyonTuple2 @(Stored int) @(Stored int)
+             (copy @(Stored int) repr_int s_y)
+             (copy @(Stored int) repr_int s_x)) of
+         boxed @(index dim2) (ix : index dim2).
+       at_index @a repr container
+       (coerce @(index dim2) @(index (shape t)) ix)
+       ret)));
+  
+
+cols @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_is_dim2 : coerce @box (shape t) dim2)
+  (repr : Repr a)
+  (container : t a)
+  -> view dim1 (StoredBox (view dim1 a))
+  attribute(inline) =
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+  case coerce @(shape t) @dim2 (get_shape @a container) of
+    mk_dim2 (shape_y : dim1) (shape_x : dim1).
+
+  view_generate @dim1
+  ShapeDict_dim1 @(StoredBox (view dim1 a))
+  (repr_Box @(view dim1 a)) shape_x
+  (\ (s_x : Stored int) -> Writer (StoredBox (view dim1 a)).
+    storedBox @(view dim1 a)
+    (view_generate @dim1
+     ShapeDict_dim1 @a repr shape_y
+     (\ (s_y : Stored int) (ret : OutPtr a) -> IEffect a.
+       case boxed @(index dim2)
+            (pyonTuple2 @(Stored int) @(Stored int)
+             (copy @(Stored int) repr_int s_y)
+             (copy @(Stored int) repr_int s_x)) of
+         boxed @(index dim2) (ix : index dim2).
+       at_index @a repr container
+       (coerce @(index dim2) @(index (shape t)) ix)
+       ret)));
+
+
+outerproduct @(a b : bare)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (sa : Stream dim1 a)
+  (sb : Stream dim1 b)
+  -> Stream dim2 (PyonTuple2 a b)
+  attribute(inline, inline_dimensionality) =
+
+  case sa of mk_view @dim1 @a (domA : dim1) (fA : Stored int -> Writer a).
+  case sb of mk_view @dim1 @b (domB : dim1) (fB : Stored int -> Writer b).
+
+  let type Sint = Stored int in
+  let type out_type = PyonTuple2 a b in
+
+  view_generate @dim2 ShapeDict_dim2 @out_type
+  (repr_PyonTuple2 @a @b repr_a repr_b)
+  (mk_dim2 domA domB)
+  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr out_type) -> IEffect out_type.
+
+    -- Index each view with one component of the index
+    case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
+    pyonTuple2 @a @b (fA ix_y) (fB ix_x) ret);
+
+
+-------------------------------------------------------------------------------
+-- API functions
+
+range (length : int) -> Stream list_dim (Stored int)
+  attribute(inline) =
+  viewStream @(Stored int)
+  (view_generate @list_dim ShapeDict_list_dim @(Stored int) repr_int
+   (mk_list_dim (justVal @int length))
+   (\ (i : Stored int) -> Writer (Stored int).
+      copy @(Stored int) repr_int i));
+
+
+-------------------------------------------------------------------------------
+-- High-level list comprehension functions
+
+Stream1_empty @(a : bare) -> Stream1 a attribute(inline) =
+  sequenceStream @a (Sequence_empty @a);
+
+
+Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
+  attribute(inline) =
+  sequenceStream @a (Sequence_return @a repr w);
+
+
+Stream1_guard @(a : bare) (repr : Repr a) (condition : bool) (s : Stream1 a)
+  -> Stream1 a
+  attribute(inline) =
+  let sq : Sequence a =
+        case s of {
+	  viewStream @a (vw : view list_dim a). viewToSequence @a repr vw
+	; sequenceStream @a (sq : Sequence a). sq
+	} in
+  sequenceStream @a (Sequence_guard @a repr condition sq);
+
+
+Stream1_bind @(a b : bare)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (s : Stream1 a)
+  (t : a -> Stream1 b)
+  -> Stream1 b
+  attribute(inline) =
+  let sq : Sequence a =
+        case s of {
+	  viewStream @a (vw : view list_dim a). viewToSequence @a repr_a vw
+	; sequenceStream @a (sq : Sequence a). sq
+	} in
+  letfun
+    sq_t (x : a) -> Sequence b =
+      case t x of {
+	  viewStream @b (vw : view list_dim b). viewToSequence @b repr_b vw
+	; sequenceStream @b (sq : Sequence b). sq
+      } in
+  
+  sequenceStream @b (Sequence_bind @a @b repr_a sq sq_t);
+
+
+viewToSequence @(a : bare) (repr : Repr a) (vw : view list_dim a)
+  -> Sequence a attribute(inline, inline_dimensionality) =
+  case vw of
+    mk_view @list_dim @a (dom : list_dim) (f : Stored int -> Writer a).
+      Sequence_generate @a repr dom f;
+
+
+sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
+  -> view list_dim a attribute(inline, inline_dimensionality) =
+  -- Write the entire sequence to a list
+  case boxed @(list a) (Sequence_list_build @a repr sq)
+  of boxed @(list a) (ls : list a).
+
+  -- Then traverse the list
+  case ls of make_list @a @(N : intindex)
+                       (size : FIInt N) (aref : Referenced (arr N a)).
+  case aref of referenced @(arr N a) (ay : arr N a).
+
+  case size of fiInt @N (size_i : int).
+  let dom : list_dim = mk_list_dim (justVal @int size_i) in
+  view_generate @list_dim ShapeDict_list_dim @a repr dom
+  (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+     case si of stored @int (i : int).
+     copy @a repr (subscript @N @a repr ay i) ret);
+
+
+-------------------------------------------------------------------------------
+-- ShapeDict-like internal functions
+
+view_generate @(sh : box) (shape_dict : ShapeDict sh)
+  -> (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> view sh a
+  attribute(inline, inline_sequential) =
+
+  \ @(a : bare) (repr : Repr a) (dom : sh) (f : index sh -> Writer a)
+    -> view sh a.
+    mk_view @sh @a dom f;
+
+
+view_map @(sh : box) (shape_dict : ShapeDict sh)
+  -> (a b : bare) -> Repr a -> Repr b -> (a -> Writer b) -> view sh a -> view sh b
+  attribute(inline, inline_sequential) =
+
+  \ @(a b : bare) (repr_a : Repr a) (repr_a : Repr b) (t : a -> Writer b)
+    (s1 : view sh a) -> view sh b.
+
+    case s1 of mk_view @sh @a (d : sh) (f : index sh -> Writer a).
+    mk_view @sh @b d
+    (\ (ix : index sh) (ret : OutPtr b) -> IEffect b.
+       case boxed @a (f ix) of boxed @a (x : a).
+       t x ret);
+
+
+view_zipWith @(sh : box)
+  (shape_dict : ShapeDict sh)
+  -> (a b c : bare) -> Repr a -> Repr b -> Repr c ->
+     (a -> b -> Writer c) ->
+     view sh a ->
+     view sh b ->
+     view sh c
+  attribute(inline, inline_sequential) =
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  \ @(a b c : bare) (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+     (t : a -> b -> Writer c)
+     (sa : view sh a)
+     (sb : view sh b)
+     -> view sh c.
+    case sa of mk_view @sh @a (dA : sh) (fA : index sh -> Writer a).
+    case sb of mk_view @sh @b (dB : sh) (fB : index sh -> Writer b).
+    let dC : sh = shape_intersect dA dB in
+    mk_view @sh @c dC
+    (\ (ix : index sh) (ret : OutPtr c) -> IEffect c.
+      case boxed @a (fA ix) of boxed @a (x : a).
+      case boxed @b (fB ix) of boxed @b (y : b).
+      t x y ret);
+
+
+view_zipWith3 @(sh : box)
+  (shape_dict : ShapeDict sh)
+  -> (a b c d : bare) -> Repr a -> Repr b -> Repr c -> Repr d ->
+     (a -> b -> c -> Writer d) ->
+     view sh a ->
+     view sh b ->
+     view sh c ->
+     view sh d
+  attribute(inline, inline_sequential) =
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  \ @(a b c d : bare) (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+     (t : a -> b -> c -> Writer d)
+     (sa : view sh a)
+     (sb : view sh b)
+     (sc : view sh c)
+     -> view sh d.
+    case sa of mk_view @sh @a (dA : sh) (fA : index sh -> Writer a).
+    case sb of mk_view @sh @b (dB : sh) (fB : index sh -> Writer b).
+    case sc of mk_view @sh @c (dC : sh) (fC : index sh -> Writer c).
+    let dD : sh = shape_intersect (shape_intersect dA dB) dC in
+    mk_view @sh @d dD
+    (\ (ix : index sh) (ret : OutPtr d) -> IEffect d.
+      case boxed @a (fA ix) of boxed @a (x : a).
+      case boxed @b (fB ix) of boxed @b (y : b).
+      case boxed @c (fC ix) of boxed @c (z : c).
+      t x y z ret);
+
+
+view_zipWith4 @(sh : box)
+  (shape_dict : ShapeDict sh)
+  -> (a b c d e : bare) -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+     (a -> b -> c -> d -> Writer e) ->
+     view sh a ->
+     view sh b ->
+     view sh c ->
+     view sh d ->
+     view sh e
+  attribute(inline, inline_sequential) =
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  \ @(a b c d e : bare)
+     (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
+     (t : a -> b -> c -> d -> Writer e)
+     (sa : view sh a)
+     (sb : view sh b)
+     (sc : view sh c)
+     (sd : view sh d)
+     -> view sh e.
+    case sa of mk_view @sh @a (dA : sh) (fA : index sh -> Writer a).
+    case sb of mk_view @sh @b (dB : sh) (fB : index sh -> Writer b).
+    case sc of mk_view @sh @c (dC : sh) (fC : index sh -> Writer c).
+    case sd of mk_view @sh @d (dD : sh) (fD : index sh -> Writer d).
+    let dE : sh =
+          shape_intersect (shape_intersect (shape_intersect dA dB) dC) dD in
+    mk_view @sh @e dE
+    (\ (ix : index sh) (ret : OutPtr e) -> IEffect e.
+      case boxed @a (fA ix) of boxed @a (x : a).
+      case boxed @b (fB ix) of boxed @b (y : b).
+      case boxed @c (fC ix) of boxed @c (z : c).
+      case boxed @d (fD ix) of boxed @d (w : d).
+      t x y z w ret);
+
+
+Sequence_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
+          (transformer : a -> Writer b) (sq : Sequence a) -> Sequence b
+  attribute(inline, inline_final) =
+  case sq of
+    sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
+
+  letfun
+    go (state : st) -> StreamNext st b =
+      case next state of {
+        streamValue @st @a (next_state : st) (value : BoxedType a).
+          let output_value : BoxedType b =
+                case boxed @a (convertToBare @a repr_a value) of boxed @a (x : a).
+		convertToBoxed @b repr_b (transformer x)
+          in streamValue @st @b next_state output_value;
+
+        streamEmpty @st @a.
+          streamEmpty @st @b
+      }
+  in sequence @b @st state go;
+
+
+Sequence_zipWith
+  @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (transformer : a -> b -> Writer c)
+  (sqA : Sequence a)
+  (sqB : Sequence b)
+  -> Sequence c
+  attribute(inline, inline_final) =
+  case sqA
+  of sequence @a @(st_a : box)
+     (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
+  case sqB
+  of sequence @b @(st_b : box)
+     (state_b : st_b) (next_b : st_b -> StreamNext st_b b).
+
+  let type st_c = Stored (st_a, st_b) in
+  
+  letfun
+    go (state : Boxed st_c) -> StreamNext (Boxed st_c) c =
+      -- Unpack the state
+      case state of boxed @st_c (u_state : st_c).
+      case u_state of stored @(st_a, st_b) (i_state : (st_a, st_b)).
+      case i_state of (state_a : st_a, state_b : st_b).
+
+      -- Get next value of stream A
+      case next_a state_a of {
+        streamValue @st_a @a
+          (next_state_a : st_a) (value_a : BoxedType a).
+          
+	  -- Get next value of stream B
+	  case next_b state_b of {
+            streamValue @st_b @b
+	      (next_state_b : st_b) (value_b : BoxedType b).
+
+	      -- Create output value
+	      let value : BoxedType c =
+	            case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
+	            case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
+		    convertToBoxed @c repr_c (transformer x y) in
+	      let next_state : Boxed st_c =
+	            boxed @st_c (stored @(st_a, st_b) (next_state_a, next_state_b)) in
+	      streamValue @(Boxed st_c) @c next_state value;
+
+	    streamEmpty @st_b @b.
+	      streamEmpty @(Boxed st_c) @c
+          };
+
+	streamEmpty @st_a @a.
+	  streamEmpty @(Boxed st_c) @c
+      }
+  in sequence @c @(Boxed st_c)
+       (boxed @st_c (stored @(st_a, st_b) (state_a, state_b)))
+       go;
+
+
+Sequence_zipWith3
+  @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (transformer : a -> b -> c -> Writer d)
+  (sqA : Sequence a)
+  (sqB : Sequence b)
+  (sqC : Sequence c)
+  -> Sequence d
+  attribute(inline, inline_final) =
+  case sqA
+  of sequence @a @(st_a : box)
+     (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
+  case sqB
+  of sequence @b @(st_b : box)
+     (state_b : st_b) (next_b : st_b -> StreamNext st_b b).
+  case sqC
+  of sequence @c @(st_c : box)
+     (state_c : st_c) (next_c : st_c -> StreamNext st_c c).
+
+  let type st_d = Stored (st_a, st_b, st_c) in
+  
+  letfun
+    go (state : Boxed st_d) -> StreamNext (Boxed st_d) d =
+      -- Unpack the state
+      case state of boxed @st_d (u_state : st_d).
+      case u_state of stored @(st_a, st_b, st_c) (i_state : (st_a, st_b, st_c)).
+      case i_state of (state_a : st_a, state_b : st_b, state_c : st_c).
+
+      -- Get next value of stream A
+      case next_a state_a of {
+        streamValue @st_a @a
+          (next_state_a : st_a) (value_a : BoxedType a).
+
+	  -- Get next value of stream B
+	  case next_b state_b of {
+            streamValue @st_b @b
+	      (next_state_b : st_b) (value_b : BoxedType b).
+
+              -- Get next value of stream C
+              case next_c state_c of {
+                streamValue @st_c @c
+                  (next_state_c : st_c) (value_c : BoxedType c).
+
+                  -- Create output value
+                  let value : BoxedType d =
+                        case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
+                        case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
+                        case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
+                        convertToBoxed @d repr_d (transformer x y z) in
+                  let next_state : Boxed st_d =
+                        boxed @st_d (stored @(st_a, st_b, st_c) (next_state_a, next_state_b, next_state_c)) in
+                  streamValue @(Boxed st_d) @d next_state value;
+
+                  streamEmpty @st_c @c.
+                    streamEmpty @(Boxed st_d) @d
+                };
+
+              streamEmpty @st_b @b.
+                streamEmpty @(Boxed st_d) @d
+            };
+
+        streamEmpty @st_a @a.
+          streamEmpty @(Boxed st_d) @d
+      }
+  in sequence @d @(Boxed st_d)
+       (boxed @st_d (stored @(st_a, st_b, st_c) (state_a, state_b, state_c)))
+       go;
+
+
+Sequence_zipWith4
+  @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
+  (transformer : a -> b -> c -> d -> Writer e)
+  (sqA : Sequence a)
+  (sqB : Sequence b)
+  (sqC : Sequence c)
+  (sqD : Sequence d)
+  -> Sequence e
+  attribute(inline, inline_final) =
+  case sqA
+  of sequence @a @(st_a : box)
+     (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
+  case sqB
+  of sequence @b @(st_b : box)
+     (state_b : st_b) (next_b : st_b -> StreamNext st_b b).
+  case sqC
+  of sequence @c @(st_c : box)
+     (state_c : st_c) (next_c : st_c -> StreamNext st_c c).
+  case sqD
+  of sequence @d @(st_d : box)
+     (state_d : st_d) (next_d : st_d -> StreamNext st_d d).
+
+  let type st_e = Stored (st_a, st_b, st_c, st_d) in
+  
+  letfun
+    go (state : Boxed st_e) -> StreamNext (Boxed st_e) e =
+      -- Unpack the state
+      case state of boxed @st_e (u_state : st_e).
+      case u_state of stored @(st_a, st_b, st_c, st_d) (i_state : (st_a, st_b, st_c, st_d)).
+      case i_state of (state_a : st_a, state_b : st_b, state_c : st_c, state_d : st_d).
+
+      -- Get next value of stream A
+      case next_a state_a of {
+        streamValue @st_a @a
+          (next_state_a : st_a) (value_a : BoxedType a).
+
+	  -- Get next value of stream B
+	  case next_b state_b of {
+            streamValue @st_b @b
+	      (next_state_b : st_b) (value_b : BoxedType b).
+
+              -- Get next value of stream C
+              case next_c state_c of {
+                streamValue @st_c @c
+                  (next_state_c : st_c) (value_c : BoxedType c).
+
+                  -- Get next value of stream D
+                  case next_d state_d of {
+                    streamValue @st_d @d
+                      (next_state_d : st_d) (value_d : BoxedType d).
+
+                      -- Create output value
+                      let value : BoxedType e =
+                            case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
+                            case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
+                            case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
+                            case boxed @d (convertToBare @d repr_d value_d) of boxed @d (w : d).
+                            convertToBoxed @e repr_e (transformer x y z w) in
+                      let next_state : Boxed st_e =
+                            boxed @st_e (stored @(st_a, st_b, st_c, st_d) (next_state_a, next_state_b, next_state_c, next_state_d)) in
+                      streamValue @(Boxed st_e) @e next_state value;
+
+                      streamEmpty @st_d @d.
+                        streamEmpty @(Boxed st_e) @e
+                    };
+
+                  streamEmpty @st_c @c.
+                    streamEmpty @(Boxed st_e) @e
+                };
+
+              streamEmpty @st_b @b.
+                streamEmpty @(Boxed st_e) @e
+            };
+
+        streamEmpty @st_a @a.
+          streamEmpty @(Boxed st_e) @e
+      }
+  in sequence @e @(Boxed st_e)
+       (boxed @st_e (stored @(st_a, st_b, st_c, st_d) (state_a, state_b, state_c, state_d)))
+       go;
+
+
+
+-------------------------------------------------------------------------------
+-- View layer stream consumers
+
+build_list_dim_list @(a : bare)
+  (repr : Repr a) (vw : view list_dim a) (ret : OutPtr (list a))
+  -> IEffect (list a)
+  attribute(inline, inline_sequential) =
+  case vw of
+    mk_view @list_dim @a (dom : list_dim) (f : Stored int -> Writer a).
+  case dom of mk_list_dim (m_size : MaybeVal int).
+  case m_size of {
+    justVal @int (size : int).
+      -- Finite view
+      case defineIntIndex size of someIInt @(N : intindex) (sz : FIInt N).
+      make_list @a @N sz
+      (referenced @(arr N a)
+       (arr1D_build @N @a repr sz
+        (\ (i : int) (ret : OutPtr a) -> IEffect a.
+           case boxed @(Stored int) (stored @int i) of
+             boxed @(Stored int) (s_i : Stored int).
+           f s_i ret)))
+      ret
+
+  ; nothingVal @int.
+      -- Infinte views can't be turned into lists
+      except @(IEffect (list a))
+  };
+
+
+build_dim1_array @(a : bare)
+  (repr : Repr a) (vw : view dim1 a)
+  (ret : OutPtr (array1 a))
+  -> IEffect (array1 a)
+  attribute(inline, inline_sequential) =
+
+  case vw of mk_view @dim1 @a (dom : dim1) (f : Stored int -> Writer a).
+  dim1ToArrayDesc @(array1 a) dom
+  (\ @(N : intindex)
+     (lb : int) (stride : int) (size : FIInt N) (ret : OutPtr (array1 a))
+     -> IEffect (array1 a).
+
+     let linear_map : LinearMap = linearMap stride lb in
+
+     mk_array1 @a @N lb stride size
+     (referenced @(arr N a)
+      (arr1D_build @N @a repr size
+       (\ (i : int) (ret : OutPtr a) -> IEffect a.
+           -- Compute the logical index corresponding to array index 'i'
+           let logical_i : int = evalLM i linear_map in
+           case boxed @(Stored int) (stored @int logical_i) of
+             boxed @(Stored int) (s_i : Stored int).
+           f s_i ret)))
+      ret)
+  ret;
+
+
+reduce_list_dim @(a : bare)
+  (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (vw : view list_dim a)
+  -> Writer a
+  attribute(inline, inline_sequential) =
+  case vw of
+    mk_view @list_dim @a (dom : list_dim) (gen : Stored int -> Writer a).
+
+  primitive_list_dim_reduce @a repr dom gen f init;
+
+
+reduce1_list_dim @(a : bare)
+  (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (vw : view list_dim a)
+  -> Writer a
+  attribute(inline, inline_sequential) =
+  case vw of
+    mk_view @list_dim @a (dom : list_dim) (gen : Stored int -> Writer a).
+
+  primitive_list_dim_reduce1 @a repr dom gen f;
+
+
+-------------------------------------------------------------------------------
+-- Sequence layer
+
+Sequence_reduce @(a : bare)
+  (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (sq : Sequence a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  Sequence_fold @a @a repr repr f init sq ret;
+
+
+Sequence_reduce1 @(a : bare)
+  (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (sq : Sequence a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  -- Use the stream's first element as the initial value
+  case sq of
+    sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
+
+  case next state of {
+    streamValue @st @a (next_state : st) (init : BoxedType a).
+      case boxed @a (convertToBare @a repr init) of boxed @a (u_init : a).
+      let new_sequence : Sequence a =
+            sequence @a @st next_state next in
+      Sequence_fold @a @a repr repr f u_init new_sequence ret;
+
+    streamEmpty @st @a.
+      except @(IEffect a)
+  };
+
+
+Sequence_fold @(a acc : bare)
+  (repr_a : Repr a)
+  (repr_acc : Repr acc)
+  (f : acc -> a -> Writer acc)
+  (init : acc)
+  (src : Sequence a)
+  (ret : OutPtr acc)
+  -> IEffect acc
+  attribute(inline, inline_final) =
+  case src of
+    sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
+
+  letfun
+    go (state : st) (accumulator : BoxedType acc) (ret : OutPtr acc)
+      -> IEffect acc =
+      case next state of {
+
+        -- Obtain value from stream
+        streamValue @st @a (next_state : st) (result : BoxedType a).
+          -- Compute the new value
+          let new_accumulator : BoxedType acc =
+                case boxed @a (convertToBare @a repr_a result)
+                of boxed @a (y : a).
+                case boxed @acc (convertToBare @acc repr_acc accumulator)
+                of boxed @acc (x : acc).
+                convertToBoxed @acc repr_acc (f x y)
+
+          in go next_state new_accumulator ret;
+
+	-- Stream is depleted
+	streamEmpty @st @a.
+	  convertToBare @acc repr_acc accumulator ret
+      }
+  in go state (convertToBoxed @acc repr_acc (copy @acc repr_acc init)) ret;
+
+
+Sequence_generate @(a : bare)
+  (repr : Repr a) (size : list_dim) (f : index list_dim -> Writer a)
+  -> Sequence a
+  attribute(inline, inline_final) =
+
+  let type Sint = Stored int in
+  let type st = Boxed Sint in
+  case size of mk_list_dim (m_list_size : MaybeVal int).
+  case m_list_size of {
+    justVal @int (list_size : int).
+      -- Finite stream
+      letfun
+        next (state : st) -> StreamNext st a =
+	  case state of boxed @Sint (state_s : Sint).
+	  case state_s of stored @int (state_u : int).
+	  if state_u <# list_size
+	  then let next_value : BoxedType a =
+	             convertToBoxed @a repr (f state_s) in
+	       let next_state : st =
+	             boxed @Sint (stored @int (state_u +# 1)) in
+	       streamValue @st @a next_state next_value
+	  else streamEmpty @st @a
+      in
+      sequence @a @st (boxed @Sint (stored @int 0)) next
+
+  ; nothingVal @int.
+      -- Infinite stream
+      letfun
+        next (state : st) -> StreamNext st a =
+	  case state of boxed @Sint (state_s : Stored int).
+	  case state_s of stored @int (state_u : int).
+	  let next_value : BoxedType a =
+	        convertToBoxed @a repr (f state_s) in
+	  let next_state : st =
+	        boxed @Sint (stored @int (state_u +# 1)) in
+	  streamValue @st @a next_state next_value
+      in
+      sequence @a @st (boxed @Sint (stored @int 0)) next
+  };
+
+
+Sequence_bind @(a b : bare)
+  (repr : Repr a)
+  (src : Sequence a)
+  (trans : a -> Sequence b)
+  -> Sequence b
+  attribute(inline, inline_final) =
+  case src of
+    sequence @a @(src_st : box)
+    (src_state : src_st)
+    (src_next : src_st -> StreamNext src_st a).
+
+  let type bind_state = BindState src_st a b in
+
+  letfun {
+    next_from_source (src_state : src_st) -> StreamNext bind_state b =
+      case src_next src_state of {
+        streamValue @src_st @a (src_next_state : src_st) (src_value : BoxedType a).
+          case boxed @a (convertToBare @a repr src_value) of boxed @a (x : a).
+	  case trans x of
+	    sequence @b @(trans_st : box)
+	    (trans_state : trans_st)
+	    (trans_next : trans_st -> StreamNext trans_st b).
+	  next_from_trans @trans_st src_next_state trans_state trans_next
+      ; streamEmpty @src_st @a.
+	  streamEmpty @bind_state @b
+      };
+
+    next_from_trans @(trans_st : box)
+      (src_state : src_st)
+      (trans_state : trans_st)
+      (trans_next : trans_st -> StreamNext trans_st b)
+      -> StreamNext bind_state b =
+      case trans_next trans_state of {
+        streamValue @trans_st @b (trans_next_state : trans_st) (trans_value : BoxedType b).
+          let next_state : bind_state =
+	        bindFromTrans @src_st @a @b @trans_st
+		src_state trans_next_state trans_next in
+          streamValue @bind_state @b next_state trans_value
+      ; streamEmpty @trans_st @b.
+	  next_from_source src_state
+      };
+
+    next (state : bind_state) -> StreamNext bind_state b =
+      case state of {
+        bindFromSource @src_st @a @b (src_state : src_st).
+	  next_from_source src_state
+      ; bindFromTrans @src_st @a @b @(trans_st : box)
+      	(src_state : src_st)
+	(trans_state : trans_st)
+	(trans_next : trans_st -> StreamNext trans_st b).
+	  next_from_trans @trans_st src_state trans_state trans_next
+      }
+  } in
+
+  sequence @b @bind_state (bindFromSource @src_st @a @b src_state) next;
+
+
+Sequence_generate_bind @(a : bare)
+  (shp : list_dim) (transformer : Stored int -> Sequence a)
+  -> Sequence a
+  attribute(inline, inline_final) =
+  Sequence_bind @(Stored int) @a repr_int
+  (Sequence_generate @(Stored int) repr_int shp (copy @(Stored int) repr_int))
+  transformer;
+
+
+-- Wrapper around 'Sequence_parallel_reduce', used by a rewrite rule
+Sequence_parallel_reduce_helper @(a b : bare)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (dom : list_dim)
+  (f : b -> b -> Writer b)
+  (init : b)
+  (gen : Stored int -> Writer a)
+  (k : a -> Sequence b)
+  -> Writer b
+  attribute(inline) =
+  
+  Sequence_parallel_reduce @b repr_b dom f init
+  (\ (si : Stored int) -> Sequence b.
+     case boxed @a (gen si) of boxed @a (x : a).
+     k x);
+
+
+Sequence_parallel_reduce @(a : bare)
+  (repr : Repr a)
+  (dom : list_dim)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (g : Stored int -> Sequence a)
+  (ret : OutPtr a)
+  -> IEffect a =
+  case dom of mk_list_dim (list_size : MaybeVal int).
+  case list_size of {
+    justVal @int (size : int).
+      -- Create combiner and reducer functions using 'f' and 'g'
+      let type b = BoxedType a in
+      letfun
+        combiner (x : b) (y : b) -> b =
+          case boxed @a (convertToBare @a repr x) of boxed @a (bx : a).
+          case boxed @a (convertToBare @a repr y) of boxed @a (by : a).
+          convertToBoxed @a repr (f bx by)
+      in
+      letfun
+        reducer @(range_N : intindex)
+          (lb : int) (count : FIInt range_N) (acc_in : b) -> b =
+
+          -- Reduce over the sequence [lb, lb + count)
+          case boxed @a (convertToBare @a repr acc_in) of boxed @a (acc : a).
+          case count of fiInt @range_N (count_i : int).
+          convertToBoxed @a repr
+          (Sequence_reduce @a repr f acc
+           (Sequence_generate_bind @a (mk_list_dim (justVal @int count_i))
+            (\ (si : Stored int) -> Sequence a.
+               -- Add 'lb' to the index
+               case si of stored @int (i : int).
+               case boxed @(Stored int) (stored @int (lb +# i)) of
+                 boxed @(Stored int) (real_si : Stored int).
+               g real_si)))
+      in
+      case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
+      let boxed_init : b = convertToBoxed @a repr (copy @a repr init) in
+      convertToBare @a repr
+      (blocked_1d_reduce @N @b count combiner boxed_init reducer)
+      ret
+
+  ; nothingVal @int.
+      except @(IEffect a)
+  };
+
+-------------------------------------------------------------------------------
+-- Helper functions over the basic loop layer
+
+arr1D_build @(N : intindex) @(a : bare)
+  (repr : Repr a) (size : FIInt N) (f : int -> Writer a)
+  (arr_ptr : OutPtr (arr N a))
+  -> IEffect (arr N a)
+  attribute(inline) =
+
+  doall @N @(arr N a) @a size
+  (\ (i : int) -> IEffect a.
+     f i (subscript_out @N @a repr arr_ptr i));
+
+
+arr2D_build @(M N : intindex) @(a : bare)
+  (repr : Repr a)
+  (size_y : FIInt M) (size_x : FIInt N) (f : int -> int -> Writer a)
+  (arr_ptr : OutPtr (arr M (arr N a)))
+  -> IEffect (arr M (arr N a))
+  attribute(inline) =
+
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+  doall @M @(arr M (arr N a)) @(arr N a) size_y
+  (\ (y : int) -> IEffect (arr N a).
+     doall @N @(arr N a) @a size_x
+     (\ (x : int) -> IEffect a.
+        f y x
+        (subscript_out @N @a repr
+         (subscript_out @M @(arr N a) row_repr arr_ptr y) x)));
+
+-------------------------------------------------------------------------------
+-- Domain loops (sequential)
+
+primitive_list_dim_reduce @(a : bare)
+  (repr : Repr a)
+  (dom : list_dim)
+  (generator : Stored int -> Writer a)
+  (reducer : a -> a -> Writer a)
+  (init : a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  case dom of mk_list_dim (m_size : MaybeVal int).
+  case m_size of {
+    justVal @int (size : int).
+      case defineIntIndex size of someIInt @(N : intindex) (sz : FIInt N).
+
+      for @N @a repr sz init
+      (\ (i : int) (x : a) (loop_ret : OutPtr a) -> IEffect a.
+         case boxed @(Stored int) (stored @int i) of
+           boxed @(Stored int) (s_i : Stored int).
+         case boxed @a (generator s_i) of boxed @a (y : a).
+         reducer x y loop_ret)
+      ret
+
+  ; nothingVal @int.
+      -- Can't evaluate on an infinite domain
+      except @(IEffect a)
+  };
+
+
+primitive_list_dim_reduce1 @(a : bare)
+  (repr : Repr a)
+  (dom : list_dim)
+  (generator : Stored int -> Writer a)
+  (reducer : a -> a -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  case dom of mk_list_dim (m_size : MaybeVal int).
+  case m_size of {
+    justVal @int (size : int).
+      -- Can't reduce on empty range
+      if size ==# 0 then except @(IEffect a) else
+
+      -- Evaluate at index 0 to get initial value
+      case boxed @(Stored int) (stored @int 0) of
+        boxed @(Stored int) (s_zero : Stored int).
+      case boxed @a (generator s_zero) of
+        boxed @a (init : a).
+
+      -- Reduce remaining values
+      case defineIntIndex (size -# 1) of
+        someIInt @(N : intindex) (sz : FIInt N).
+
+      for @N @a repr sz init
+      (\ (i : int) (x : a) (loop_ret : OutPtr a) -> IEffect a.
+         case boxed @(Stored int) (stored @int (i +# 1)) of
+           boxed @(Stored int) (s_i : Stored int).
+         case boxed @a (generator s_i) of boxed @a (y : a).
+         reducer x y loop_ret)
+      ret
+
+  ; nothingVal @int.
+      -- Can't evaluate on an infinite domain
+      except @(IEffect a)
+  };
+
+
+primitive_dim1_reduce @(a : bare)
+  (repr : Repr a)
+  (dom : dim1)
+  (generator : Stored int -> Writer a)
+  (reducer : a -> a -> Writer a)
+  (init : a)
+  -> Writer a
+  attribute(inline, inline_final) =
+
+  dim1ToArrayDesc @a dom
+  (\ @(N : intindex)
+     (lb : int) (stride : int) (size : FIInt N) (ret : OutPtr a)
+     -> IEffect a.
+
+     let linear_map : LinearMap = linearMap stride lb in
+
+     for @N @a repr size init
+     (\ (i : int) (x : a) (loop_ret : OutPtr a) -> IEffect a.
+        let logical_i : int = evalLM i linear_map in
+        case boxed @(Stored int) (stored @int logical_i) of
+           boxed @(Stored int) (s_i : Stored int).
+         case boxed @a (generator s_i) of boxed @a (y : a).
+         reducer x y loop_ret)
+     ret);
+
+
+-------------------------------------------------------------------------------
+-- Domain loops (parallel)
+
+parallel_list_dim_reduce @(a : bare)
+  (repr : Repr a)
+  (dom : list_dim)
+  (g : Stored int -> Writer a)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (ret : OutPtr a)
+  -> IEffect a =
+
+  case dom of mk_list_dim (list_size : MaybeVal int).
+  case list_size of {
+    justVal @int (size : int).
+      -- Create combiner and reducer functions using 'f' and 'g'
+      let type b = BoxedType a in
+      letfun
+        combiner (x : b) (y : b) -> b =
+          case boxed @a (convertToBare @a repr x) of boxed @a (bx : a).
+          case boxed @a (convertToBare @a repr y) of boxed @a (by : a).
+          convertToBoxed @a repr (f bx by)
+      in
+      letfun
+        reducer @(range_N : intindex)
+          (lb : int) (count : FIInt range_N) (acc_in : b) -> b =
+          for_box @range_N @b count acc_in
+          (\ (i : int) (acc_loop : b) -> b.
+            -- Add the lower bound to get the real index
+            case boxed @(Stored int) (stored @int (i +# lb)) of
+              boxed @(Stored int) (real_index : Stored int).
+
+            -- Call 'g' to compute a value, and 'f' to combine it
+            case boxed @a (convertToBare @a repr acc_loop) of
+              boxed @a (x : a).
+            case boxed @a (g real_index) of boxed @a (y : a).
+            convertToBoxed @a repr (f x y))
+      in
+      case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
+      let boxed_init : b = convertToBoxed @a repr (copy @a repr init) in
+      convertToBare @a repr
+      (blocked_1d_reduce @N @b count combiner boxed_init reducer)
+      ret
+  };
+
+
+parallel_dim1_reduce @(a : bare)
+  (repr : Repr a)
+  (dom : dim1)
+  (g : Stored int -> Writer a)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+
+  case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case lm of linearMap (stride : int) (alignemnt : int).
+  case iv of
+    interval (lower_bound : MaybeVal int) (upper_bound : MaybeVal int).
+  case lower_bound of {
+    justVal @int (lb : int).
+      case upper_bound of {
+        justVal @int (ub : int).          
+          -- Create combiner and reducer functions using 'f' and 'g'
+          let type b = BoxedType a in
+          letfun
+            combiner (x : b) (y : b) -> b =
+              case boxed @a (convertToBare @a repr x) of boxed @a (bx : a).
+              case boxed @a (convertToBare @a repr y) of boxed @a (by : a).
+              convertToBoxed @a repr (f bx by)
+          in
+          letfun
+            reducer @(range_N : intindex)
+              (lb : int) (count : FIInt range_N) (acc_in : b) -> b =
+              for_box @range_N @b count acc_in
+              (\ (i : int) (acc_loop : b) -> b.
+                -- Compute the real index from iteration 'i'
+                let real_index_u : int = lb +# i *# stride in
+                case boxed @(Stored int) (stored @int real_index_u) of
+                  boxed @(Stored int) (real_index : Stored int).
+
+                -- Call 'g' to compute a value, and 'f' to combine it
+                case boxed @a (convertToBare @a repr acc_loop) of
+                  boxed @a (x : a).
+                case boxed @a (g real_index) of boxed @a (y : a).
+                convertToBoxed @a repr (f x y))
+          in
+          let size : int = (ub -# lb) //# stride in
+          case defineIntIndex size of
+            someIInt @(N : intindex) (count : FIInt N).
+          let boxed_init : b = convertToBoxed @a repr (copy @a repr init) in
+          convertToBare @a repr
+          (blocked_1d_reduce @N @b count combiner boxed_init reducer)
+          ret
+
+      ; nothingVal @int.
+          except @(IEffect a)
+      }
+  ; nothingVal @int.
+      except @(IEffect a)
+  };
+
+
+-------------------------------------------------------------------------------
+-- Sequential loops
+
+for @(N : intindex) @(acc : bare)
+  (repr : Repr acc) (count : FIInt N) (init : acc)
+  (f : int -> acc -> Writer acc) (ret : OutPtr acc)
+  -> IEffect acc
+  attribute(inline, inline_final) =
+
+  -- Unpack the indexed int
+  case count of fiInt @N (bound : int).
+
+  -- Main loop
+  letfun
+    loop (i : int) (x : acc) (r : OutPtr acc) -> IEffect acc =
+      if EqDict_int_eq i bound
+      then copy @acc repr x r
+      else case boxed @acc (f i x) of boxed @acc (y : acc).
+           loop (AdditiveDict_int_add i 1) y r
+  in loop 0 init ret;
+
+
+for_box @(N : intindex) @(acc : box)
+  (count : FIInt N)
+  (init : acc)
+  (f : int -> acc -> acc)
+  -> acc
+  attribute(inline, inline_final) =
+
+  -- Unpack the indexed int
+  case count of fiInt @N (bound : int).
+
+  -- Main loop
+  letfun
+    loop (i : int) (x : acc) -> acc =
+      if EqDict_int_eq i bound
+      then x
+      else loop (AdditiveDict_int_add i 1) (f i x)
+  in loop 0 init;
+
+-------------------------------------------------------------------------------
+-- Parallel loops
+
+parallel_doall @(N : intindex) @(a b : bare)
+  (count : FIInt N)
+  (f : int -> IEffect b)
+  -> IEffect a
+  attribute(inline, inline_sequential) =
+
+  letfun
+    do_range @(M : intindex)
+      (lb : int) (range_count : FIInt M)
+      -> IEffect b =
+    doall @M @b @b range_count
+    (\ (range_i : int) -> IEffect b. f (range_i +# lb))
+  in
+  blocked_doall @N @a @b count do_range;
+
+
+
+{-
+
 
 
 safeIndex @(t : bare -> bare) @(a : bare)
@@ -454,80 +3113,6 @@ safeSlice @(t : bare -> bare) @(a : bare)
   indexable repr container sl;
 
 -------------------------------------------------------------------------------
--- Imperative computation
-
-intUpdateInPlace (dummy : NoneType)
-              -> UpdateInPlace (Stored int) (Stored NoneType) int
-              attribute(inline, inline_final) =
-  updateInPlace @(Stored int) @(Stored NoneType) @int
-  intUpdateInPlace_initializer
-  (\ (modify : int -> int) (ret : OutPtr (Stored int)) (ix : Stored NoneType)
-     (tok_in : EffTok) -> EffTok.
-     intUpdateInPlace_updater modify ret tok_in);
-
-
-floatUpdateInPlace (dummy : NoneType)
-              -> UpdateInPlace (Stored float) (Stored NoneType) float
-              attribute(inline, inline_final) =
-  updateInPlace @(Stored float) @(Stored NoneType) @float
-  floatUpdateInPlace_initializer
-  (\ (modify : float -> float) (ret : OutPtr (Stored float))
-     (ix : Stored NoneType) (tok_in : EffTok) -> EffTok.
-     floatUpdateInPlace_updater modify ret tok_in);
-
-
-arrUpdateInPlace @(N : intindex) @(s i : bare) @(a : val)
-  (size : FIInt N)
-  (repr : Repr s)
-  (elem_updater : UpdateInPlace s i a)
-  -> UpdateInPlace (arr N s) (PyonTuple2 (Stored int) i) a
-  attribute(inline, inline_final) =
-
-  case size of fiInt @N (u_size : int).
-
-  case elem_updater of
-    updateInPlace @s @i @a
-    (elem_init : (NoneType -> a) -> OutPtr s -> EffTok)
-    (elem_modify : (a -> a) -> OutPtr s -> i -> EffTok -> EffTok).
-
-  -- Initialize the array by running the initializer on every array element
-  letfun
-    initialize_array
-      (get_init : NoneType -> a) (ret : OutPtr (arr N s)) -> EffTok =
-      toEffTok @(arr N s)
-      (doall @N @(arr N s) @s size
-       (\ (i : int) -> IEffect s.
-          let array_element : OutPtr s =
-            subscript_out @N @s repr ret i in
-          fromEffTok @s (elem_init get_init array_element)))
-  in
-
-  -- Update the array by updating one array element.  If out of bounds,
-  -- then do nothing.
-  letfun
-    modify_array
-      (modify_value : a -> a)
-      (ret : OutPtr (arr N s))
-      (ix : PyonTuple2 (Stored int) i)
-      (token_in : EffTok)
-      -> EffTok =
-
-      -- Choose the array index
-      case ix of pyonTuple2 @(Stored int) @i (s_ix : Stored int) (ix2 : i).
-      case s_ix of stored @int (u_ix : int).
-
-      -- If out of bounds, do nothing.  Otherwise, modify an array element.
-      if or (u_ix <# 0) (u_ix >=# u_size)
-      then token_in
-      else let array_element : OutPtr s =
-             subscript_out @N @s repr ret u_ix in
-           elem_modify modify_value array_element ix2 token_in
-  in
-      
-  updateInPlace @(arr N s) @(PyonTuple2 (Stored int) i) @a
-  initialize_array modify_array;
-
--------------------------------------------------------------------------------
 -- Conversions
 
 view1ToDarr1 @(a b : bare)
@@ -565,39 +3150,6 @@ darr1ToView1 @(N : intindex) @(a : bare)
   case darr of mk_darr1 @N @a (f : int -> Writer a).
   mk_view1 @a @0 @N zero_ii (iInt @N size) f;
 
-
-viewToSequence @(a : bare) (repr : Repr a) (vw : view1 a)
-  -> Sequence a attribute(inline, inline_dimensionality) =
-  case vw of {
-    mk_view1 @a @(lo hi : intindex)
-    (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-      let dim : dim1 = mk_dim1 @lo @hi ilo ihi in
-      Sequence_generate @a repr dim
-      (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
-        case si of stored @int (i : int). f i ret)
-
-  ; empty_view1 @a.
-      Sequence_empty @a
-  };
-
-
-sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
-  -> view1 a attribute(inline, inline_dimensionality) =
-  -- Write the entire sequence to a list
-  case boxed @(list a) (Sequence_list_build @a repr sq)
-  of boxed @(list a) (ls : list a).
-
-  -- Then traverse the list
-  case ls of make_list @a @(N : intindex)
-                       (size : FIInt N) (aref : Referenced (arr N a)).
-  case aref of referenced @(arr N a) (ay : arr N a).
-
-  darr1ToView1 @N @a size (arr1D_traverse @N @a repr size ay);
-
-
-view1_empty @(a : bare) (repr : Repr a) -> view1 a
-  attribute(inline, inline_dimensionality) =
-  empty_view1 @a;
 
 -------------------------------------------------------------------------------
 -- Traversable methods
@@ -669,824 +3221,8 @@ Old array builder function, using a stream to write the array
   in fromEffTok @(arr N a) (go 0 stream_state);
 -}
 
-TraversableDict_Stream_build @(sh : box) @(a : bare)
-  (repr : Repr a) (s : Stream sh a)
-  -> Stream sh a attribute(inline) = s;
-
-TraversableDict_Stream_traverse @(sh : box) @(a : bare)
-  (repr : Repr a) (s : Stream sh a)
-  -> Stream sh a attribute(inline) = s;
-
-TraversableDict_list_build @(a : bare)
-  (repr : Repr a) (s : Stream dim1 a) (ret : OutPtr (list a))
-  -> IEffect (list a) attribute(inline) =
-  case s of {
-    sequenceStream @a (sq : Sequence a).
-      Sequence_list_build @a repr sq ret
-  ; viewStream @a (vw : view1 a).
-      view1_list_build @a repr vw ret
-  };
-
--- List traversal.
--- Loop over all list indices and return the corresponding array element.
-TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
-  -> Stream dim1 a attribute(inline) =
-  case ls of make_list @a @(N : intindex)
-                       (size : FIInt N) (aref : Referenced (arr N a)).
-  case aref of referenced @(arr N a) (ay : arr N a).
-
-  let list_dim : dim1 = mk_dim1 @0 @N zero_ii (iInt @N size) in
-
-  viewStream @a
-  (view1_generate @a repr list_dim
-   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
-     case si of stored @int (i : int).
-     copy @a repr (subscript @N @a repr ay i) ret));
-
-
-TraversableDict_view0_build
-  @(a : bare) (repr : Repr a) (v : view0 a) -> view0 a attribute(inline) = v;
-
-TraversableDict_view0_traverse
-  @(a : bare) (repr : Repr a) (v : view0 a) -> view0 a attribute(inline) = v;
-
-TraversableDict_view1_build
-  @(a : bare) (repr : Repr a) (s : Stream1 a) -> view1 a attribute(inline) =
-  case s of {
-    viewStream @a (v : view1 a). v
-
-  ; sequenceStream @a (sq : Sequence a).
-      -- Convert to a list, then read the list
-      case boxed @(list a) (Sequence_list_build @a repr sq)
-      of boxed @(list a) (ls : list a).
-      case ls of
-        make_list @a @(N : intindex) (size : FIInt N) (ayref : Referenced (arr N a)).
-      case ayref of referenced @(arr N a) (ay : arr N a).
-      darr1ToView1 @N @a size (arr1D_traverse @N @a repr size ay)
-  };
-
-TraversableDict_view1_traverse
-  @(a : bare) (repr : Repr a) (v : view1 a) -> Stream1 a attribute(inline) =
-  viewStream @a v;
-
-TraversableDict_view2_domain
-  @(a : bare) (repr : Repr a) (v : view2 a) -> dim2
-  attribute(inline) =
-  case v of {
-    mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (mlo : IInt Mlo) (mhi : IInt Mhi) (nlo : IInt Nlo) (nhi : IInt Nhi)
-    (f : int -> int -> Writer a).
-      mk_dim2 @Mlo @Mhi @Nlo @Nhi mlo mhi nlo nhi
-
-  ; empty_view2 @a.
-      mk_dim2 @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-  };
-
-TraversableDict_view2_build
-  @(a : bare) (repr : Repr a) (v : view2 a) -> view2 a attribute(inline) = v;
-
-TraversableDict_view2_traverse
-  @(a : bare) (repr : Repr a) (v : view2 a) -> view2 a attribute(inline) = v;
-
-TraversableDict_array0_traverse
-  @(a : bare) (repr : Repr a) (ay : array0 a) -> view0 a attribute(inline) =
-  case ay of mk_array0 @a (x : a).
-  mk_view0 @a (\ (none : NoneType) -> Writer a. copy @a repr x);
-
-TraversableDict_array0_build
-  @(a : bare) (repr : Repr a) (vw : view0 a) (ret : OutPtr (array0 a))
-  -> IEffect (array0 a) attribute(inline) =
-
-  case vw of mk_view0 @a (f : NoneType -> Writer a).
-  mk_array0 @a (f None) ret;
-
-TraversableDict_array1_traverse
-  @(a : bare) (repr : Repr a) (ar : array1 a) -> Stream1 a attribute(inline) =
-  case ar of
-    mk_array1 @a @(lo hi : intindex)
-    (flo : FIInt lo) (fhi : FIInt hi)
-    (ayref : Referenced (arr (minus_i hi lo) a)).
-  let type N = minus_i hi lo in
-  case ayref of referenced @(arr N a) (ay : arr N a).
-  
-  -- Get the origin of the array
-  case flo of fiInt @lo (lo_i : int).
-
-  viewStream @a
-  (mk_view1 @a @lo @hi (iInt @lo flo) (iInt @hi fhi)
-   (\ (i : int) (ret : OutPtr a) -> IEffect a.
-      let index : int = i -# lo_i in
-      copy @a repr (subscript @N @a repr ay index) ret));
-
-TraversableDict_array1_build
-  @(a : bare) (repr : Repr a) (s : Stream1 a) (ret : OutPtr (array1 a))
-  -> IEffect (array1 a) attribute(inline) =
-  case s of {
-    viewStream @a (v : view1 a).
-      view1_array1_build @a repr v ret
-
-  ; sequenceStream @a (sq : Sequence a).
-      -- Convert to an array1
-      Sequence_array1_build @a repr sq ret
-  };
-
-TraversableDict_array2_traverse
-  @(a : bare) (repr : Repr a) (ar : array2 a) -> view2 a attribute(inline) =
-  case ar of
-    mk_array2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (fMlo : FIInt Mlo) (fMhi : FIInt Mhi)
-    (fNlo : FIInt Nlo) (fNhi : FIInt Nhi)
-    (ayref : Referenced (arr (minus_i Mhi Mlo) (arr (minus_i Nhi Nlo) a))).
-  let type M = minus_i Mhi Mlo in
-  let type N = minus_i Nhi Nlo in
-  let width : FIInt N = minus_fii @Nhi @Nlo fNhi fNlo in
-  case ayref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
-
-  let row_repr : Repr (arr N a) = repr_arr @N @a width repr in
-  case fMlo of fiInt @Mlo (Mlo_i : int).
-  case fNlo of fiInt @Nlo (Nlo_i : int).
-
-  mk_view2 @a @Mlo @Mhi @Nlo @Nhi
-  (iInt @Mlo fMlo) (iInt @Mhi fMhi) (iInt @Nlo fNlo) (iInt @Nhi fNhi)
-  (\ (j : int) (i : int) -> Writer a.
-     let index_m : int = j -# Mlo_i in
-     let index_n : int = i -# Nlo_i in
-
-     copy @a repr
-     (subscript @N @a repr
-      (subscript @M @(arr N a) row_repr ay index_m) index_n));
-
-TraversableDict_array2_build
-  @(a : bare) (repr : Repr a) (v : view2 a) (ret : OutPtr (array2 a))
-  -> IEffect (array2 a) attribute(inline, inline_dimensionality) =
-  case v of {
-    mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (iMlo : IInt Mlo) (iMhi : IInt Mhi)
-    (iNlo : IInt Nlo) (iNhi : IInt Nhi)
-    (f : int -> int -> Writer a).
-      let fMlo : FIInt Mlo = fromIndInt @Mlo iMlo in
-      let fMhi : FIInt Mhi = fromIndInt @Mhi iMhi in
-      let fNlo : FIInt Nlo = fromIndInt @Nlo iNlo in
-      let fNhi : FIInt Nhi = fromIndInt @Nhi iNhi in
-
-      let type M = minus_i Mhi Mlo in
-      let type N = minus_i Nhi Nlo in
-      let height : FIInt M = minus_fii @Mhi @Mlo fMhi fMlo in
-      let width : FIInt N = minus_fii @Nhi @Nlo fNhi fNlo in
-
-      case fMlo of fiInt @Mlo (Mlo_i : int).
-      case fNlo of fiInt @Nlo (Nlo_i : int).
-
-      -- The loop is zero-indexed, but the loop body is not.
-      -- Add the offset.
-      letfun
-        f2 (j : int) (i : int) -> Writer a =
-          f (j +# Mlo_i) (i +# Nlo_i)
-      in
-
-      mk_array2 @a @Mlo @Mhi @Nlo @Nhi fMlo fMhi fNlo fNhi
-      (referenced @(arr M (arr N a))
-       (arr2D_build @M @N @a repr height width (mk_darr2 @M @N @a f2)))
-      ret
-
-  ; empty_view2 @a.
-      mk_array2 @a @0 @0 @0 @0 zero_fii zero_fii zero_fii zero_fii
-      (referenced @(arr 0 (arr 0 a))
-       (\ (r : OutPtr (arr 0 (arr 0 a))) -> IEffect (arr 0 (arr 0 a)).
-         fromEffTok @(arr 0 (arr 0 a)) emptyEffTok))
-      ret
-  };
-
 -------------------------------------------------------------------------------
 -- Indexable methods
-
-IndexableDict_list_at_point
-  @(a : bare)
-  (repr : Repr a)
-  (ls : list a)
-  (index : Stored int)
-  (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
-  case ls of
-    make_list @a @(N : intindex) (size : FIInt N) (ayref : Referenced (arr N a)).
-  case ayref of referenced @(arr N a) (ay : arr N a).
-  case index of stored @int (index_i : int).
-  copy @a repr (subscript @N @a repr ay index_i) ret;
-
-
-IndexableDict_list_get_shape
-  @(a : bare)
-  (ls : list a)
-  -> dim1 attribute(inline) =
-  case ls of
-    make_list @a @(N : intindex) (size : FIInt N) (ayref : Referenced (arr N a)).
-  mk_dim1 @0 @N zero_ii (iInt @N size);
-
-IndexableDict_view0_at_point
-  @(a : bare)
-  (repr : Repr a)
-  (vw : view0 a)
-  (index : Stored NoneType)
-  (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
-  case vw of mk_view0 @a (f : NoneType -> Writer a). f None ret;
-
-
-IndexableDict_view0_get_shape
-  @(a : bare)
-  (vw : view0 a)
-  -> dim0 attribute(inline) =
-  mk_dim0;
-
-
-IndexableDict_view1_at_point
-  @(a : bare)
-  (repr : Repr a)
-  (vw : view1 a)
-  (index : Stored int)
-  (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
-  case vw of {
-    mk_view1 @a @(lo hi : intindex)
-    (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-      case index of stored @int (index_i : int).
-      f index_i ret;
-
-    empty_view1 @a.
-      except @(IEffect a)
-  };
-
-
-IndexableDict_view1_get_shape
-  @(a : bare)
-  (vw : view1 a)
-  -> dim1 attribute(inline) =
-  case vw of {
-    mk_view1 @a @(lo hi : intindex)
-    (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-      mk_dim1 @lo @hi ilo ihi
-
-  ; empty_view1 @a.
-      mk_dim1 @0 @0 zero_ii zero_ii
-  };
-
-
-IndexableDict_view2_at_point
-  @(a : bare)
-  (repr : Repr a)
-  (vw : view2 a)
-  (index : PyonTuple2 (Stored int) (Stored int))
-  (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
-  case vw of {
-    mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (imlo : IInt Mlo) (imhi : IInt Mhi)
-    (inlo : IInt Nlo) (inhi : IInt Nhi)
-    (f : int -> int -> Writer a).
-      case index of pyonTuple2 @(Stored int) @(Stored int)
-                    (ix_y : Stored int) (ix_x : Stored int).
-      case ix_y of stored @int (ix_y_i : int).
-      case ix_x of stored @int (ix_x_i : int).
-      f ix_y_i ix_x_i ret
-
-  ; empty_view2 @a.
-      except @(IEffect a)
-  };
-
-
-IndexableDict_view2_get_shape
-  @(a : bare)
-  (vw : view2 a)
-  -> dim2 attribute(inline) =
-  case vw of {
-    mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (imlo : IInt Mlo) (imhi : IInt Mhi)
-    (inlo : IInt Nlo) (inhi : IInt Nhi)
-    (f : int -> int -> Writer a).
-      mk_dim2 @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
-
-  ; empty_view2 @a.
-      mk_dim2 @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
-  };
-
-
-IndexableDict_array0_at_point
-  @(a : bare)
-  (repr : Repr a)
-  (ary : array0 a)
-  (index : Stored NoneType)
-  (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
-  case ary of mk_array0 @a (x : a). copy @a repr x ret;
-
-
-IndexableDict_array0_get_shape
-  @(a : bare)
-  (ary : array0 a)
-  -> dim0 attribute(inline) =
-  mk_dim0;
-
-
-IndexableDict_array1_at_point
-  @(a : bare)
-  (repr : Repr a)
-  (ary : array1 a)
-  (index : Stored int)
-  (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
-  case ary of
-    mk_array1 @a @(lo hi : intindex)
-    (flo : FIInt lo) (fhi : FIInt hi) (ayref : Referenced (arr (minus_i hi lo) a)).
-  let type N = minus_i hi lo in
-  case ayref of referenced @(arr N a) (ay : arr N a).
-  case index of stored @int (index_i : int).
-  copy @a repr (subscript @N @a repr ay index_i) ret;
-
-
-IndexableDict_array1_get_shape
-  @(a : bare)
-  (ary : array1 a)
-  -> dim1 attribute(inline) =
-  case ary of
-    mk_array1 @a @(lo hi : intindex)
-    (flo : FIInt lo) (fhi : FIInt hi) (ayref : Referenced (arr (minus_i hi lo) a)).
-  let type N = minus_i hi lo in
-  mk_dim1 @lo @hi (iInt @lo flo) (iInt @hi fhi);
-
-
-IndexableDict_array2_at_point
-  @(a : bare)
-  (repr : Repr a)
-  (ary : array2 a)
-  (index : PyonTuple2 (Stored int) (Stored int))
-  (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
-  case ary of
-    mk_array2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (fmlo : FIInt Mlo) (fmhi : FIInt Mhi)
-    (fnlo : FIInt Nlo) (fnhi : FIInt Nhi)
-    (ayref : Referenced (arr (minus_i Mhi Mlo) (arr (minus_i Nhi Nlo) a))).
-  let type M = minus_i Mhi Mlo in
-  let type N = minus_i Nhi Nlo in
-  let width : FIInt N = minus_fii @Nhi @Nlo fnhi fnlo in
-  case ayref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
-
-  let row_repr : Repr (arr N a) = repr_arr @N @a width repr in
-
-  case index of pyonTuple2 @(Stored int) @(Stored int)
-                (ix_y : Stored int) (ix_x : Stored int).
-  case ix_y of stored @int (ix_y_i : int).
-  case ix_x of stored @int (ix_x_i : int).
-  copy @a repr (subscript @N @a repr
-                (subscript @M @(arr N a) row_repr ay ix_y_i) ix_x_i) ret;
-
-
-IndexableDict_array2_get_shape
-  @(a : bare)
-  (ary : array2 a)
-  -> dim2 attribute(inline) =
-  case ary of
-    mk_array2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (fmlo : FIInt Mlo) (fmhi : FIInt Mhi)
-    (fnlo : FIInt Nlo) (fnhi : FIInt Nhi)
-    (ayref : Referenced (arr (minus_i Mhi Mlo) (arr (minus_i Nhi Nlo) a))).
-  mk_dim2 @Mlo @Mhi @Nlo @Nhi
-  (iInt @Mlo fmlo) (iInt @Mhi fmhi)
-  (iInt @Nlo fnlo) (iInt @Nhi fnhi);
-
--------------------------------------------------------------------------------
--- Shape functions
-
-ShapeDict_dim0_flatten @(a : bare) (repr : Repr a) (s : Stream dim0 a)
-  -> Stream dim1 a attribute(inline) =
-  case s of mk_view0 @a (f : NoneType -> Writer a).
-  viewStream @a
-  (mk_view1 @a @0 @1 zero_ii one_ii (\ (i : int) -> Writer a. f None));
-
-
-ShapeDict_dim0_map @(a b : bare)
-  (repr_a : Repr a) (repr_b : Repr b)
-  (transformer : a -> Writer b)
-  (s : Stream dim0 a)
-  -> Stream dim0 b attribute(inline) =
-  case s of mk_view0 @a (f : NoneType -> Writer a).
-  mk_view0 @b
-  (\ (i : NoneType) -> Writer b.
-    case boxed @a (f None) of boxed @a (x : a). transformer x);
-
-
-ShapeDict_dim0_zipWith @(a b c : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
-  (transformer : a -> b -> Writer c)
-  (sA : Stream dim0 a)
-  (sB : Stream dim0 b)
-  -> Stream dim0 c attribute(inline) =
-  case sA of mk_view0 @a (fA : NoneType -> Writer a).
-  case sB of mk_view0 @b (fB : NoneType -> Writer b).
-  mk_view0 @c
-  (\ (i : NoneType) -> Writer c.
-    case boxed @a (fA None) of boxed @a (x : a).
-    case boxed @b (fB None) of boxed @b (y : b).
-    transformer x y);
-
-
-ShapeDict_dim0_zipWith3 @(a b c d : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
-  (transformer : a -> b -> c -> Writer d)
-  (sA : Stream dim0 a)
-  (sB : Stream dim0 b)
-  (sC : Stream dim0 c)
-  -> Stream dim0 d attribute(inline) =
-  case sA of mk_view0 @a (fA : NoneType -> Writer a).
-  case sB of mk_view0 @b (fB : NoneType -> Writer b).
-  case sC of mk_view0 @c (fC : NoneType -> Writer c).
-  mk_view0 @d
-  (\ (i : NoneType) -> Writer d.
-    case boxed @a (fA None) of boxed @a (x : a).
-    case boxed @b (fB None) of boxed @b (y : b).
-    case boxed @c (fC None) of boxed @c (z : c).
-    transformer x y z);
-
-
-ShapeDict_dim0_zipWith4 @(a b c d e : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
-  (transformer : a -> b -> c -> d -> Writer e)
-  (sA : Stream dim0 a)
-  (sB : Stream dim0 b)
-  (sC : Stream dim0 c)
-  (sD : Stream dim0 d)
-  -> Stream dim0 e attribute(inline) =
-  case sA of mk_view0 @a (fA : NoneType -> Writer a).
-  case sB of mk_view0 @b (fB : NoneType -> Writer b).
-  case sC of mk_view0 @c (fC : NoneType -> Writer c).
-  case sD of mk_view0 @d (fD : NoneType -> Writer d).
-  mk_view0 @e
-  (\ (i : NoneType) -> Writer e.
-    case boxed @a (fA None) of boxed @a (x : a).
-    case boxed @b (fB None) of boxed @b (y : b).
-    case boxed @c (fC None) of boxed @c (z : c).
-    case boxed @d (fD None) of boxed @d (w : d).
-    transformer x y z w);
-
-ShapeDict_dim0_inRange (sh : dim0) (ix : Stored NoneType)
-  -> bool attribute(inline) =
-  True;
-
-ShapeDict_dim0_slice @(t : bare -> bare) @(a : bare)
-  (has_shape : coerce @box (shape t) dim0)
-  (indexable : IndexableDict t)
-  (repr : Repr a)
-  (container : t a)
-  (sl : slice dim0)
-  -> view0 a attribute(inline) =
-  case indexable of
-    indexableDict @t
-    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (get_shape : (a : bare) -> t a -> shape t).
-
-  mk_view0 @a
-  (\ (i : NoneType) -> Writer a.
-    case boxed @(Stored NoneType) (stored @NoneType None) of
-      boxed @(Stored NoneType) (ix : Stored NoneType).
-    at_index @a repr container (coerce @(index dim0) @(index (shape t)) ix));
-
-
-ShapeDict_dim1_flatten @(a : bare) (repr : Repr a) (s : Stream dim1 a)
-  -> Stream dim1 a attribute(inline) =
-  case s of {
-    sequenceStream @a (sq : Sequence a).
-      s
-  ; viewStream @a (vw : view1 a).
-      view1_flatten @a repr vw
-  };
-
-
-ShapeDict_dim1_map @(a b : bare)
-  (repr_a : Repr a) (repr_b : Repr b)
-  (transformer : a -> Writer b)
-  (s : Stream dim1 a)
-  -> Stream dim1 b attribute(inline) =
-  case s of {
-    sequenceStream @a (sq : Sequence a).
-      sequenceStream @b (Sequence_map @a @b repr_a repr_b transformer sq)
-  ; viewStream @a (vw : view1 a).
-      viewStream @b (view1_map @a @b repr_a repr_b transformer vw)
-  };
-
-
-ShapeDict_dim1_zipWith @(a b c : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
-  (transformer : a -> b -> Writer c)
-  (sA : Stream dim1 a)
-  (sB : Stream dim1 b)
-  -> Stream dim1 c attribute(inline) =
-  case sA of {
-    sequenceStream @a (sqA : Sequence a).
-      let sqB : Sequence b =
-            case sB of {
-              sequenceStream @b (sqB : Sequence b). sqB
-            ; viewStream @b (vwB : view1 b). viewToSequence @b repr_b vwB
-            } in
-      sequenceStream @c
-      (Sequence_zipWith @a @b @c repr_a repr_b repr_c transformer sqA sqB)
-
-  ; viewStream @a (vwA : view1 a).
-      case sB of {
-        sequenceStream @b (sqB : Sequence b).
-          sequenceStream @c
-          (Sequence_zipWith @a @b @c repr_a repr_b repr_c transformer
-           (viewToSequence @a repr_a vwA) sqB)
-      ; viewStream @b (vwB : view1 b).
-          viewStream @c
-          (view1_zipWith @a @b @c repr_a repr_b repr_c transformer vwA vwB)
-    }
-  };
-
-ShapeDict_dim1_zipWith3 @(a b c d : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
-  (transformer : a -> b -> c -> Writer d)
-  (sA : Stream dim1 a)
-  (sB : Stream dim1 b)
-  (sC : Stream dim1 c)
-  -> Stream dim1 d attribute(inline) =
-  case sA of {
-    sequenceStream @a (sqA : Sequence a).
-      let sqB : Sequence b =
-            case sB of {
-              sequenceStream @b (sqB : Sequence b). sqB
-            ; viewStream @b (vwB : view1 b). viewToSequence @b repr_b vwB
-            } in
-      let sqC : Sequence c =
-            case sC of {
-              sequenceStream @c (sqC : Sequence c). sqC
-            ; viewStream @c (vwC : view1 c). viewToSequence @c repr_c vwC
-            } in
-      sequenceStream @d
-      (Sequence_zipWith3 @a @b @c @d repr_a repr_b repr_c repr_d
-       transformer sqA sqB sqC)
-
-  ; viewStream @a (vwA : view1 a).
-      case sB of {
-        sequenceStream @b (sqB : Sequence b).
-          let sqC : Sequence c =
-                case sC of {
-                  sequenceStream @c (sqC : Sequence c). sqC
-                ; viewStream @c (vwC : view1 c). viewToSequence @c repr_c vwC
-                } in
-          sequenceStream @d
-          (Sequence_zipWith3 @a @b @c @d repr_a repr_b repr_c repr_d transformer
-           (viewToSequence @a repr_a vwA) sqB sqC)
-
-      ; viewStream @b (vwB : view1 b).
-          case sC of {
-            sequenceStream @c (sqC : Sequence c).
-              sequenceStream @d
-              (Sequence_zipWith3 @a @b @c @d
-               repr_a repr_b repr_c repr_d transformer
-               (viewToSequence @a repr_a vwA)
-               (viewToSequence @b repr_b vwB)
-               sqC)
-
-          ; viewStream @c (vwC : view1 c).
-              viewStream @d
-              (view1_zipWith3 @a @b @c @d repr_a repr_b repr_c repr_d
-               transformer vwA vwB vwC)
-          }
-      }
-  };
-
-
-ShapeDict_dim1_zipWith4 @(a b c d e : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
-  (transformer : a -> b -> c -> d -> Writer e)
-  (sA : Stream dim1 a)
-  (sB : Stream dim1 b)
-  (sC : Stream dim1 c)
-  (sD : Stream dim1 d)
-  -> Stream dim1 e attribute(inline) =
-  case sA of {
-    sequenceStream @a (sqA : Sequence a).
-      let sqB : Sequence b =
-            case sB of {
-              sequenceStream @b (sqB : Sequence b). sqB
-            ; viewStream @b (vwB : view1 b). viewToSequence @b repr_b vwB
-            } in
-      let sqC : Sequence c =
-            case sC of {
-              sequenceStream @c (sqC : Sequence c). sqC
-            ; viewStream @c (vwC : view1 c). viewToSequence @c repr_c vwC
-            } in
-      let sqD : Sequence d =
-            case sD of {
-              sequenceStream @d (sqD : Sequence d). sqD
-            ; viewStream @d (vwD : view1 d). viewToSequence @d repr_d vwD
-            } in
-      sequenceStream @e
-      (Sequence_zipWith4 @a @b @c @d @e repr_a repr_b repr_c repr_d repr_e
-       transformer sqA sqB sqC sqD)
-
-  ; viewStream @a (vwA : view1 a).
-      case sB of {
-        sequenceStream @b (sqB : Sequence b).
-          let sqC : Sequence c =
-                case sC of {
-                  sequenceStream @c (sqC : Sequence c). sqC
-                ; viewStream @c (vwC : view1 c). viewToSequence @c repr_c vwC
-                } in
-          let sqD : Sequence d =
-                case sD of {
-                  sequenceStream @d (sqD : Sequence d). sqD
-                ; viewStream @d (vwD : view1 d). viewToSequence @d repr_d vwD
-                } in
-          sequenceStream @e
-          (Sequence_zipWith4 @a @b @c @d @e
-           repr_a repr_b repr_c repr_d repr_e transformer
-           (viewToSequence @a repr_a vwA) sqB sqC sqD)
-
-      ; viewStream @b (vwB : view1 b).
-          case sC of {
-            sequenceStream @c (sqC : Sequence c).
-              let sqD : Sequence d =
-                    case sD of {
-                      sequenceStream @d (sqD : Sequence d).
-                        sqD
-                    ; viewStream @d (vwD : view1 d).
-                        viewToSequence @d repr_d vwD
-                    } in
-              sequenceStream @e
-              (Sequence_zipWith4 @a @b @c @d @e
-               repr_a repr_b repr_c repr_d repr_e transformer
-               (viewToSequence @a repr_a vwA)
-               (viewToSequence @b repr_b vwB)
-               sqC sqD)
-
-          ; viewStream @c (vwC : view1 c).
-              case sD of {
-                sequenceStream @d (sqD : Sequence d).
-                  sequenceStream @e
-                  (Sequence_zipWith4 @a @b @c @d @e
-                   repr_a repr_b repr_c repr_d repr_e transformer
-                   (viewToSequence @a repr_a vwA)
-                   (viewToSequence @b repr_b vwB)
-                   (viewToSequence @c repr_c vwC)
-                   sqD)
-              ; viewStream @d (vwD : view1 d).
-                  viewStream @e
-                  (view1_zipWith4 @a @b @c @d @e
-                   repr_a repr_b repr_c repr_d repr_e
-                   transformer vwA vwB vwC vwD)
-              }
-          }
-      }
-  };
-
-
-ShapeDict_dim1_inRange (extent : dim1) (ix : Stored int)
-  -> bool attribute(inline) =
-  case extent of
-    mk_dim1 @(Nlo Nhi : intindex) (ilo : IInt Nlo) (ihi : IInt Nhi).
-  case ix of stored @int (ix_i : int).
-  let in_range_lo : bool =
-        case ilo of {
-          iInt @Nlo (flo : FIInt Nlo). 
-            case flo of fiInt @Nlo (lo_i : int). ix_i >=# lo_i
-        ; iNegInfty @Nlo.
-            True
-        ; iPosInfty @Nlo.
-            except @bool
-        } in
-  let in_range_hi : bool =
-        case ihi of {
-          iInt @Nhi (fhi : FIInt Nhi).
-            case fhi of fiInt @Nhi (hi_i : int). ix_i <# hi_i
-        ; iPosInfty @Nhi.
-            True
-        ; iNegInfty @Nhi.
-            except @bool
-        } in
-  and in_range_lo in_range_hi;
-
-
-ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
-  (is_dim1 : coerce @box (shape t) dim1)
-  (indexable : IndexableDict t)
-  (repr : Repr a)
-  (container : t a)
-  (slice_argument : slice dim1)
-  -> view1 a attribute(inline) =
-  case indexable of
-    indexableDict @t
-    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (get_shape : (a : bare) -> t a -> shape t).
-  case coerce @(shape t) @dim1 (get_shape @a container) of
-    mk_dim1 @(Nlo Nhi : intindex) (i_nlo : IInt Nlo) (i_nhi : IInt Nhi).
-
-  case intersectSliceWithRange @Nlo @Nhi i_nlo i_nhi slice_argument of {
-    internalSlice @(Slo Shi : intindex)
-                  (i_slo : IInt Slo) (i_shi : IInt Shi)
-                  (stride : int)
-                  (offset : int).
-
-      let slice_shape : dim1 = mk_dim1 @Slo @Shi i_slo i_shi in
-
-      view1_generate @a repr slice_shape
-      (\ (si : Stored int) -> Writer a.
-        case si of stored @int (i : int).
-        let i2 : int = i *# stride +# offset in
-        case boxed @(Stored int) (stored @int i2) of
-          boxed @(Stored int) (i2_s : Stored int).
-        let co_i2 : index (shape t) =
-          coerce @(index dim1) @(index (shape t)) i2_s in
-        at_index @a repr container co_i2)
-  ; emptySlice.
-      view1_empty @a repr
-  };
-
-
-ShapeDict_dim2_indices (dim : dim2) -> Stream dim2 (index dim2)
-  attribute(inline) =
-
-  case dim of
-    mk_dim2 @(Mlo Mhi Nlo Nhi : intindex)
-      (imlo : IInt Mlo) (imhi : IInt Mhi)
-      (inlo : IInt Nlo) (inhi : IInt Nhi).
-  mk_view2 @(index dim2) @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
-  (\ (y : int) (x : int) (ret : OutPtr (index dim2)) -> IEffect (index dim2).
-    pyonTuple2 @(Stored int) @(Stored int)
-    (stored @int y) (stored @int x) ret);
-
-
-ShapeDict_dim2_flatten @(a : bare) (repr : Repr a) (s : Stream dim2 a)
-  -> Stream dim1 a attribute(inline, inline_dimensionality) =
-  case s of {
-    mk_view2 @a @(Mlo Mhi Nlo Nhi : intindex)
-    (imlo : IInt Mlo) (imhi : IInt Mhi)
-    (inlo : IInt Nlo) (inhi : IInt Nhi)
-    (f : int -> int -> Writer a).
-      let fmlo : FIInt Mlo = fromIndInt @Mlo imlo in
-      let fnlo : FIInt Nlo = fromIndInt @Nlo inlo in
-      case inhi of {
-        iInt @Nhi (fnhi : FIInt Nhi).
-          -- Flatten a 2D stream that is finite in the X dimension
-          case fmlo of fiInt @Mlo (mlo_i : int).
-          case fnlo of fiInt @Nlo (nlo_i : int).
-          case fnhi of fiInt @Nhi (nhi_i : int).
-          let size_n : int = nhi_i -# nlo_i in
-
-          letfun
-            flattened_f (y : int) (x : int) (ret : OutPtr a) -> IEffect a =
-            f (mlo_i +# y) (nlo_i +# x) ret
-          in
-          case imhi of {
-            iInt @Mhi (fmhi : FIInt Mhi).
-              -- Finite height and width
-
-              case fmhi of fiInt @Mhi (mhi_i : int).
-              let size_m : int = mhi_i -# mlo_i in
-              let size : int = size_n *# size_m in
-              case defineIntIndex size of
-                someIInt @(MN : intindex) (size_mn : FIInt MN).
-
-              let type delta_M = minus_i Mhi Mlo in
-              let type delta_N = minus_i Nhi Nlo in
-
-              viewStream @a
-              (darr1ToView1 @MN @a
-               size_mn
-               (darr2_flatten @delta_M @delta_N @MN @a
-                (minus_fii @Mhi @Mlo fmhi fmlo)
-                (minus_fii @Nhi @Nlo fnhi fnlo)
-                (mk_darr2 @delta_M @delta_N @a flattened_f)))
-
-          ; iPosInfty @Mhi.
-              -- Infinite height, finite width
-              viewStream @a
-              (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
-               (primitive_darr2_flatten @pos_infty @(minus_i Nhi Nlo) @a
-                (minus_fii @Nhi @Nlo fnhi fnlo)
-                flattened_f))
-
-          ; iNegInfty @Mhi.
-              except @(Stream dim1 a)
-          }
-
-      ; iPosInfty @Nhi.
-          -- Create a view spanning the N dimension only,
-          -- since the extent in the N dimension is infinite
-          case fmlo of fiInt @Mlo (mlo_i : int).
-          case fnlo of fiInt @Nlo (nlo_i : int).
-          viewStream @a
-          (mk_view1 @a @0 @pos_infty zero_ii (iPosInfty @pos_infty)
-           (\ (i : int) -> Writer a. f mlo_i (i +# nlo_i)))
-
-      ; iNegInfty @Nhi.
-          except @(Stream dim1 a)
-      }
-
-  ; empty_view2 @a.
-      viewStream @a (view1_empty @a repr)
-  };
-
 
 ShapeDict_dim2_map @(a b : bare)
   (repr_a : Repr a) (repr_b : Repr b)
@@ -1801,860 +3537,6 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
   };
 
 -------------------------------------------------------------------------------
--- ShapeDict-like internal functions
-
-view1_flatten @(a : bare) (repr : Repr a) (vw : view1 a) -> Stream dim1 a
-  attribute(inline) =
-  -- Shift the indices so that the first index is 0
-  viewStream @a (view1_normalize @a vw);
-
-
-view1_generate @(a : bare) (repr_a : Repr a) (shape : dim1)
-  (generator : Stored int -> Writer a) -> view1 a
-  attribute(inline, inline_dimensionality) =
-
-  case shape of
-    mk_dim1 @(lo : intindex) @(hi : intindex)
-    (ilo : IInt lo) (ihi : IInt hi).
-
-  mk_view1 @a @lo @hi ilo ihi
-  (\ (i : int) (ret : OutPtr a) -> IEffect a.
-     case boxed @(Stored int) (stored @int i) of
-       boxed @(Stored int) (si : Stored int).
-     generator si ret);
-
-
-view1_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
-          (transformer : a -> Writer b) (vw : view1 a) -> view1 b
-  attribute(inline, inline_dimensionality) =
-  case vw of {
-    mk_view1 @a @(lo hi : intindex)
-                 (Nlo : IInt lo) (Nhi : IInt hi) (f : int -> Writer a).
-      mk_view1 @b @lo @hi Nlo Nhi
-      (\ (i : int) -> Writer b.
-        case boxed @a (f i) of boxed @a (x : a). transformer x);
-
-    empty_view1 @a.
-      empty_view1 @b
-  };
-
-
-view1_zipWith @(a b c : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
-  (transformer : a -> b -> Writer c) (vwA : view1 a) (vwB : view1 b)
-  -> view1 c
-  attribute(inline, inline_dimensionality) =
-  case vwA of {
-    mk_view1 @a @(loA hiA : intindex)
-             (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
-      case vwB of {
-        mk_view1 @b @(loB hiB : intindex)
-                 (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
-          let type loC = max_i loA loB in
-          let type hiC = min_i hiA hiB in
-          let iloC : IInt loC = max_ii @loA @loB iloA iloB in
-          let ihiC : IInt hiC = min_ii @hiA @hiB ihiA ihiB in
-          if range_nonempty_ii @loC @hiC iloC ihiC
-          then mk_view1 @c @loC @hiC iloC ihiC
-               (\ (i : int) -> Writer c.
-                 case boxed @a (fA i) of boxed @a (x : a).
-                 case boxed @b (fB i) of boxed @b (y : b).
-                 transformer x y)
-          else empty_view1 @c;
-
-        empty_view1 @b.
-	  empty_view1 @c
-      };
-
-    empty_view1 @a.
-      empty_view1 @c
-  };
-
-
-view1_zipWith3 @(a b c d : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
-  (transformer : a -> b -> c -> Writer d)
-  (vwA : view1 a) (vwB : view1 b) (vwC : view1 c)
-  -> view1 d
-  attribute(inline, inline_dimensionality) =
-  case vwA of {
-    mk_view1 @a @(loA hiA : intindex)
-             (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
-      case vwB of {
-        mk_view1 @b @(loB hiB : intindex)
-                 (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
-          case vwC of {
-            mk_view1 @c @(loC hiC : intindex)
-                     (iloC : IInt loC) (ihiC : IInt hiC) (fC : int -> Writer c).
-              let type loD = max_i (max_i loA loB) loC in
-              let type hiD = min_i (min_i hiA hiB) hiC in
-              let iloD : IInt loD = max_ii @(max_i loA loB) @loC
-                                    (max_ii @loA @loB iloA iloB) iloC in
-              let ihiD : IInt hiD = min_ii @(min_i hiA hiB) @hiC
-                                    (min_ii @hiA @hiB ihiA ihiB) ihiC in
-              if range_nonempty_ii @loD @hiD iloD ihiD
-              then mk_view1 @d @loD @hiD iloD ihiD
-                   (\ (i : int) -> Writer d.
-                     case boxed @a (fA i) of boxed @a (x : a).
-                     case boxed @b (fB i) of boxed @b (y : b).
-                     case boxed @c (fC i) of boxed @c (z : c).
-                     transformer x y z)
-              else empty_view1 @d;
-
-            empty_view1 @c.
-	      empty_view1 @d
-	  };
-
-        empty_view1 @b.
-          empty_view1 @d
-      };
-
-    empty_view1 @a.
-      empty_view1 @d
-  };
-
-view1_zipWith4 @(a b c d e : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
-  (transformer : a -> b -> c -> d -> Writer e)
-  (vwA : view1 a) (vwB : view1 b) (vwC : view1 c) (vwD : view1 d)
-  -> view1 e
-  attribute(inline, inline_dimensionality) =
-  case vwA of {
-    mk_view1 @a @(loA hiA : intindex)
-             (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
-      case vwB of {
-        mk_view1 @b @(loB hiB : intindex)
-                 (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
-          case vwC of {
-            mk_view1 @c @(loC hiC : intindex)
-                     (iloC : IInt loC) (ihiC : IInt hiC) (fC : int -> Writer c).
-              case vwD of {
-                mk_view1 @d @(loD hiD : intindex)
-                         (iloD : IInt loD) (ihiD : IInt hiD) (fD : int -> Writer d).
-                  let type loE = max_i (max_i (max_i loA loB) loC) loD in
-                  let type hiE = min_i (min_i (min_i hiA hiB) hiC) hiD in
-                  let iloE : IInt loE = max_ii @(max_i (max_i loA loB) loC) @loD
-                                        (max_ii @(max_i loA loB) @loC
-                                         (max_ii @loA @loB iloA iloB) iloC) iloD in
-                  let ihiE : IInt hiE = min_ii @(min_i (min_i hiA hiB) hiC) @hiD
-                                        (min_ii @(min_i hiA hiB) @hiC
-                                         (min_ii @hiA @hiB ihiA ihiB) ihiC) ihiD in
-                  if range_nonempty_ii @loE @hiE iloE ihiE
-                  then mk_view1 @e @loE @hiE iloE ihiE
-                       (\ (i : int) -> Writer e.
-                         case boxed @a (fA i) of boxed @a (x : a).
-                         case boxed @b (fB i) of boxed @b (y : b).
-                         case boxed @c (fC i) of boxed @c (z : c).
-                         case boxed @d (fD i) of boxed @d (w : d).
-                         transformer x y z w)
-                  else empty_view1 @e;
-
-		empty_view1 @d.
-                  empty_view1 @e
-              };
-
-	    empty_view1 @c.
-              empty_view1 @e
-          };
-
-	empty_view1 @b.
-          empty_view1 @e
-      };
-
-    empty_view1 @a.
-      empty_view1 @e
-  };
-
-Sequence_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
-          (transformer : a -> Writer b) (sq : Sequence a) -> Sequence b
-  attribute(inline, inline_final) =
-  case sq of
-    sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
-
-  letfun
-    go (state : st) -> StreamNext st b =
-      case next state of {
-        streamValue @st @a (next_state : st) (value : BoxedType a).
-          let output_value : BoxedType b =
-                case boxed @a (convertToBare @a repr_a value) of boxed @a (x : a).
-		convertToBoxed @b repr_b (transformer x)
-          in streamValue @st @b next_state output_value;
-
-        streamEmpty @st @a.
-          streamEmpty @st @b
-      }
-  in sequence @b @st state go;
-
-
-Sequence_zipWith
-  @(a b c : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
-  (transformer : a -> b -> Writer c)
-  (sqA : Sequence a)
-  (sqB : Sequence b)
-  -> Sequence c
-  attribute(inline, inline_final) =
-  case sqA
-  of sequence @a @(st_a : box)
-     (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
-  case sqB
-  of sequence @b @(st_b : box)
-     (state_b : st_b) (next_b : st_b -> StreamNext st_b b).
-
-  let type st_c = Stored (st_a, st_b) in
-  
-  letfun
-    go (state : Boxed st_c) -> StreamNext (Boxed st_c) c =
-      -- Unpack the state
-      case state of boxed @st_c (u_state : st_c).
-      case u_state of stored @(st_a, st_b) (i_state : (st_a, st_b)).
-      case i_state of (state_a : st_a, state_b : st_b).
-
-      -- Get next value of stream A
-      case next_a state_a of {
-        streamValue @st_a @a
-          (next_state_a : st_a) (value_a : BoxedType a).
-          
-	  -- Get next value of stream B
-	  case next_b state_b of {
-            streamValue @st_b @b
-	      (next_state_b : st_b) (value_b : BoxedType b).
-
-	      -- Create output value
-	      let value : BoxedType c =
-	            case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
-	            case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
-		    convertToBoxed @c repr_c (transformer x y) in
-	      let next_state : Boxed st_c =
-	            boxed @st_c (stored @(st_a, st_b) (next_state_a, next_state_b)) in
-	      streamValue @(Boxed st_c) @c next_state value;
-
-	    streamEmpty @st_b @b.
-	      streamEmpty @(Boxed st_c) @c
-          };
-
-	streamEmpty @st_a @a.
-	  streamEmpty @(Boxed st_c) @c
-      }
-  in sequence @c @(Boxed st_c)
-       (boxed @st_c (stored @(st_a, st_b) (state_a, state_b)))
-       go;
-
-
-Sequence_zipWith3
-  @(a b c d : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
-  (transformer : a -> b -> c -> Writer d)
-  (sqA : Sequence a)
-  (sqB : Sequence b)
-  (sqC : Sequence c)
-  -> Sequence d
-  attribute(inline, inline_final) =
-  case sqA
-  of sequence @a @(st_a : box)
-     (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
-  case sqB
-  of sequence @b @(st_b : box)
-     (state_b : st_b) (next_b : st_b -> StreamNext st_b b).
-  case sqC
-  of sequence @c @(st_c : box)
-     (state_c : st_c) (next_c : st_c -> StreamNext st_c c).
-
-  let type st_d = Stored (st_a, st_b, st_c) in
-  
-  letfun
-    go (state : Boxed st_d) -> StreamNext (Boxed st_d) d =
-      -- Unpack the state
-      case state of boxed @st_d (u_state : st_d).
-      case u_state of stored @(st_a, st_b, st_c) (i_state : (st_a, st_b, st_c)).
-      case i_state of (state_a : st_a, state_b : st_b, state_c : st_c).
-
-      -- Get next value of stream A
-      case next_a state_a of {
-        streamValue @st_a @a
-          (next_state_a : st_a) (value_a : BoxedType a).
-
-	  -- Get next value of stream B
-	  case next_b state_b of {
-            streamValue @st_b @b
-	      (next_state_b : st_b) (value_b : BoxedType b).
-
-              -- Get next value of stream C
-              case next_c state_c of {
-                streamValue @st_c @c
-                  (next_state_c : st_c) (value_c : BoxedType c).
-
-                  -- Create output value
-                  let value : BoxedType d =
-                        case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
-                        case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
-                        case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
-                        convertToBoxed @d repr_d (transformer x y z) in
-                  let next_state : Boxed st_d =
-                        boxed @st_d (stored @(st_a, st_b, st_c) (next_state_a, next_state_b, next_state_c)) in
-                  streamValue @(Boxed st_d) @d next_state value;
-
-                  streamEmpty @st_c @c.
-                    streamEmpty @(Boxed st_d) @d
-                };
-
-              streamEmpty @st_b @b.
-                streamEmpty @(Boxed st_d) @d
-            };
-
-        streamEmpty @st_a @a.
-          streamEmpty @(Boxed st_d) @d
-      }
-  in sequence @d @(Boxed st_d)
-       (boxed @st_d (stored @(st_a, st_b, st_c) (state_a, state_b, state_c)))
-       go;
-
-
-Sequence_zipWith4
-  @(a b c d e : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
-  (transformer : a -> b -> c -> d -> Writer e)
-  (sqA : Sequence a)
-  (sqB : Sequence b)
-  (sqC : Sequence c)
-  (sqD : Sequence d)
-  -> Sequence e
-  attribute(inline, inline_final) =
-  case sqA
-  of sequence @a @(st_a : box)
-     (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
-  case sqB
-  of sequence @b @(st_b : box)
-     (state_b : st_b) (next_b : st_b -> StreamNext st_b b).
-  case sqC
-  of sequence @c @(st_c : box)
-     (state_c : st_c) (next_c : st_c -> StreamNext st_c c).
-  case sqD
-  of sequence @d @(st_d : box)
-     (state_d : st_d) (next_d : st_d -> StreamNext st_d d).
-
-  let type st_e = Stored (st_a, st_b, st_c, st_d) in
-  
-  letfun
-    go (state : Boxed st_e) -> StreamNext (Boxed st_e) e =
-      -- Unpack the state
-      case state of boxed @st_e (u_state : st_e).
-      case u_state of stored @(st_a, st_b, st_c, st_d) (i_state : (st_a, st_b, st_c, st_d)).
-      case i_state of (state_a : st_a, state_b : st_b, state_c : st_c, state_d : st_d).
-
-      -- Get next value of stream A
-      case next_a state_a of {
-        streamValue @st_a @a
-          (next_state_a : st_a) (value_a : BoxedType a).
-
-	  -- Get next value of stream B
-	  case next_b state_b of {
-            streamValue @st_b @b
-	      (next_state_b : st_b) (value_b : BoxedType b).
-
-              -- Get next value of stream C
-              case next_c state_c of {
-                streamValue @st_c @c
-                  (next_state_c : st_c) (value_c : BoxedType c).
-
-                  -- Get next value of stream D
-                  case next_d state_d of {
-                    streamValue @st_d @d
-                      (next_state_d : st_d) (value_d : BoxedType d).
-
-                      -- Create output value
-                      let value : BoxedType e =
-                            case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
-                            case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
-                            case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
-                            case boxed @d (convertToBare @d repr_d value_d) of boxed @d (w : d).
-                            convertToBoxed @e repr_e (transformer x y z w) in
-                      let next_state : Boxed st_e =
-                            boxed @st_e (stored @(st_a, st_b, st_c, st_d) (next_state_a, next_state_b, next_state_c, next_state_d)) in
-                      streamValue @(Boxed st_e) @e next_state value;
-
-                      streamEmpty @st_d @d.
-                        streamEmpty @(Boxed st_e) @e
-                    };
-
-                  streamEmpty @st_c @c.
-                    streamEmpty @(Boxed st_e) @e
-                };
-
-              streamEmpty @st_b @b.
-                streamEmpty @(Boxed st_e) @e
-            };
-
-        streamEmpty @st_a @a.
-          streamEmpty @(Boxed st_e) @e
-      }
-  in sequence @e @(Boxed st_e)
-       (boxed @st_e (stored @(st_a, st_b, st_c, st_d) (state_a, state_b, state_c, state_d)))
-       go;
-
--------------------------------------------------------------------------------
--- High-level overloaded functions
-
-fun_reduce @(t : bare -> bare) @(a : bare)
-  (traversable : TraversableDict t)
-  (shape_dict : ShapeDict (shape t))
-  (repr : Repr a)
-  (reducer : a -> a -> Writer a)
-  (init : a)
-  (input : t a)
-  (ret : OutPtr a)
-  -> IEffect a
-  attribute(inline) =
-  let type sh = shape t in
-
-  case traversable
-  of traversableDict @t
-       (domain : (a : bare) -> Repr a -> t a -> sh)
-       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
-       (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
-
-  case shape_dict of shapeDict @sh
-    (index_repr : Repr (index sh))
-    (slice_repr : Repr (slice sh))
-    (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
-    (shape_map : (a b : bare) ->
-                 Repr a -> Repr b ->
-		 (a -> Writer b) -> Stream sh a -> Stream sh b)
-    (shape_zipWith : (a b c : bare) ->
-    		     Repr a -> Repr b -> Repr c ->
-		     (a -> b -> Writer c) ->
-		     Stream sh a -> Stream sh b -> Stream sh c)
-    (shape_zipWith3 : (a b c d : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d ->
-		      (a -> b -> c -> Writer d) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
-    (shape_zipWith4 : (a b c d e : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-		      (a -> b -> c -> d -> Writer e) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
-    (shape_at_index : sh -> index sh -> bool)
-    (shape_slice : (t : bare -> bare) -> (a : bare) ->
-    		   coerce @box (shape t) sh ->
-		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
-
-  fun_reduce_Stream @a repr reducer init
-  (shape_flatten @a repr (traverse @a repr input))
-  ret;
-
-
-fun_reduce1 @(t : bare -> bare) @(a : bare)
-  (traversable : TraversableDict t)
-  (shape_dict : ShapeDict (shape t))
-  (repr : Repr a)
-  (reducer : a -> a -> Writer a)
-  (input : t a)
-  (ret : OutPtr a)
-  -> IEffect a
-  attribute(inline) =
-  let type sh = shape t in
-
-  case traversable
-  of traversableDict @t
-       (domain : (a : bare) -> Repr a -> t a -> sh)
-       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
-       (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
-
-  case shape_dict of shapeDict @sh
-    (index_repr : Repr (index sh))
-    (slice_repr : Repr (slice sh))
-    (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
-    (shape_map : (a b : bare) ->
-                 Repr a -> Repr b ->
-		 (a -> Writer b) -> Stream sh a -> Stream sh b)
-    (shape_zipWith : (a b c : bare) ->
-    		     Repr a -> Repr b -> Repr c ->
-		     (a -> b -> Writer c) ->
-		     Stream sh a -> Stream sh b -> Stream sh c)
-    (shape_zipWith3 : (a b c d : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d ->
-		      (a -> b -> c -> Writer d) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
-    (shape_zipWith4 : (a b c d e : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-		      (a -> b -> c -> d -> Writer e) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
-    (shape_at_index : sh -> index sh -> bool)
-    (shape_slice : (t : bare -> bare) -> (a : bare) ->
-    		   coerce @box (shape t) sh ->
-		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
-
-  fun_reduce1_Stream @a repr reducer
-  (shape_flatten @a repr (traverse @a repr input))
-  ret;
-
-
-fun_map @(t : bare -> bare)
-        @(a b : bare)
-        (traversable : TraversableDict t)
-        (shape_dict : ShapeDict (shape t))
-        (repr_a : Repr a)
-        (repr_b : Repr b)
-        (transformer : a -> Writer b)
-        (container : t a)
-	(ret : OutPtr (t b))
-        -> IEffect (t b)
- 	attribute(inline) =
-  let type sh = shape t in
-
-  case traversable of
-    traversableDict @t
-    (domain : (a : bare) -> Repr a -> t a -> sh)
-    (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
-    (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
-
-  case shape_dict of shapeDict @sh
-    (index_repr : Repr (index sh))
-    (slice_repr : Repr (slice sh))
-    (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
-    (shape_map : (a b : bare) ->
-                 Repr a -> Repr b ->
-		 (a -> Writer b) -> Stream sh a -> Stream sh b)
-    (shape_zipWith : (a b c : bare) ->
-    		     Repr a -> Repr b -> Repr c ->
-		     (a -> b -> Writer c) ->
-		     Stream sh a -> Stream sh b -> Stream sh c)
-    (shape_zipWith3 : (a b c d : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d ->
-		      (a -> b -> c -> Writer d) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
-    (shape_zipWith4 : (a b c d e : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-		      (a -> b -> c -> d -> Writer e) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
-    (shape_at_index : sh -> index sh -> bool)
-    (shape_slice : (t : bare -> bare) -> (a : bare) ->
-    		   coerce @box (shape t) sh ->
-		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
-
-  build @b repr_b
-  (shape_map @a @b repr_a repr_b transformer
-   (traverse @a repr_a container))
-  ret;
-
-
-fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
-        (traversable1 : TraversableDict t1)
-        (traversable2 : TraversableDict t2)
-        (equal12 : coerce @box (shape t1) (shape t2))
-	(shape_dict : ShapeDict (shape t1))
-        (reprA : Repr a) (reprB : Repr b)
-        (inputA : t1 a) (inputB : t2 b)
-  -> Stream (shape t1) (PyonTuple2 a b)
-  attribute(inline) =
-  case traversable1
-  of traversableDict @t1
-       (domain1 : (a : bare) -> Repr a -> t1 a -> shape t1)
-       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
-       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
-  case traversable2
-  of traversableDict @t2
-       (domain2 : (a : bare) -> Repr a -> t2 a -> shape t2)
-       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
-       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
-  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
-  let stream2 : Stream (shape t1) b =
-        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
-	(traverse2 @b reprB inputB) in
-
-  let type sh = shape t1 in
-  case shape_dict of shapeDict @sh
-    (index_repr : Repr (index sh))
-    (slice_repr : Repr (slice sh))
-    (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
-    (shape_map : (a b : bare) ->
-                 Repr a -> Repr b ->
-		 (a -> Writer b) -> Stream sh a -> Stream sh b)
-    (shape_zipWith : (a b c : bare) ->
-    		     Repr a -> Repr b -> Repr c ->
-		     (a -> b -> Writer c) ->
-		     Stream sh a -> Stream sh b -> Stream sh c)
-    (shape_zipWith3 : (a b c d : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d ->
-		      (a -> b -> c -> Writer d) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
-    (shape_zipWith4 : (a b c d e : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-		      (a -> b -> c -> d -> Writer e) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
-    (shape_at_index : sh -> index sh -> bool)
-    (shape_slice : (t : bare -> bare) -> (a : bare) ->
-    		   coerce @box (shape t) sh ->
-		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
-
-  letfun
-    transformer (x : a) (y : b) (ret : OutPtr (PyonTuple2 a b))
-    		-> IEffect (PyonTuple2 a b) =
-      pyonTuple2 @a @b (copy @a reprA x) (copy @b reprB y) ret
-  in
-
-  shape_zipWith @a @b @(PyonTuple2 a b)
-  reprA reprB (repr_PyonTuple2 @a @b reprA reprB)
-  transformer stream1 stream2;
-
-fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
-        (traversable1 : TraversableDict t1)
-        (traversable2 : TraversableDict t2)
-        (traversable3 : TraversableDict t3)
-        (equal12 : coerce @box (shape t1) (shape t2))
-        (equal23 : coerce @box (shape t2) (shape t3))
-	(shape_dict : ShapeDict (shape t1))
-        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c)
-        (inputA : t1 a) (inputB : t2 b) (inputC : t3 c)
-  -> Stream (shape t1) (PyonTuple3 a b c)
-  attribute(inline) =
-  case traversable1
-  of traversableDict @t1
-       (domain1 : (a : bare) -> Repr a -> t1 a -> shape t1)
-       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
-       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
-  case traversable2
-  of traversableDict @t2
-       (domain2 : (a : bare) -> Repr a -> t2 a -> shape t2)
-       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
-       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
-  case traversable3
-  of traversableDict @t3
-       (domain3 : (a : bare) -> Repr a -> t3 a -> shape t3)
-       (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
-       (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
-  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
-  let stream2 : Stream (shape t1) b =
-        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
-	(traverse2 @b reprB inputB) in
-  let stream3 : Stream (shape t1) c =
-        coerce @(Stream (shape t3) c) @(Stream (shape t1) c)
-	(traverse3 @c reprC inputC) in
-
-  let type sh = shape t1 in
-  case shape_dict of shapeDict @sh
-    (index_repr : Repr (index sh))
-    (slice_repr : Repr (slice sh))
-    (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
-    (shape_map : (a b : bare) ->
-                 Repr a -> Repr b ->
-		 (a -> Writer b) -> Stream sh a -> Stream sh b)
-    (shape_zipWith : (a b c : bare) ->
-    		     Repr a -> Repr b -> Repr c ->
-		     (a -> b -> Writer c) ->
-		     Stream sh a -> Stream sh b -> Stream sh c)
-    (shape_zipWith3 : (a b c d : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d ->
-		      (a -> b -> c -> Writer d) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
-    (shape_zipWith4 : (a b c d e : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-		      (a -> b -> c -> d -> Writer e) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
-    (shape_at_index : sh -> index sh -> bool)
-    (shape_slice : (t : bare -> bare) -> (a : bare) ->
-    		   coerce @box (shape t) sh ->
-		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
-
-  letfun
-    transformer (x : a) (y : b) (z : c) (ret : OutPtr (PyonTuple3 a b c))
-    		-> IEffect (PyonTuple3 a b c) =
-      pyonTuple3 @a @b @c (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) ret
-  in
-
-  shape_zipWith3 @a @b @c @(PyonTuple3 a b c)
-  reprA reprB reprC (repr_PyonTuple3 @a @b @c reprA reprB reprC)
-  transformer stream1 stream2 stream3;
-
-
-fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
-        (traversable1 : TraversableDict t1)
-        (traversable2 : TraversableDict t2)
-        (traversable3 : TraversableDict t3)
-        (traversable4 : TraversableDict t4)
-        (equal12 : coerce @box (shape t1) (shape t2))
-        (equal23 : coerce @box (shape t2) (shape t3))
-        (equal34 : coerce @box (shape t3) (shape t4))
-	(shape_dict : ShapeDict (shape t1))
-        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c) (reprD : Repr d)
-        (inputA : t1 a) (inputB : t2 b) (inputC : t3 c) (inputD : t4 d)
-  -> Stream (shape t1) (PyonTuple4 a b c d)
-  attribute(inline) =
-  case traversable1
-  of traversableDict @t1
-       (domain1 : (a : bare) -> Repr a -> t1 a -> shape t1)
-       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
-       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
-  case traversable2
-  of traversableDict @t2
-       (domain2 : (a : bare) -> Repr a -> t2 a -> shape t2)
-       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
-       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
-  case traversable3
-  of traversableDict @t3
-       (domain3 : (a : bare) -> Repr a -> t3 a -> shape t3)
-       (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
-       (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
-  case traversable4
-  of traversableDict @t4
-       (domain4 : (a : bare) -> Repr a -> t4 a -> shape t4)
-       (traverse4 : (a : bare) -> Repr a -> t4 a -> Stream (shape t4) a)
-       (build4 : (a : bare) -> Repr a -> Stream (shape t4) a -> Writer (t4 a)).
-  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
-  let stream2 : Stream (shape t1) b =
-        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
-	(traverse2 @b reprB inputB) in
-  let stream3 : Stream (shape t1) c =
-        coerce @(Stream (shape t3) c) @(Stream (shape t1) c)
-	(traverse3 @c reprC inputC) in
-  let stream4 : Stream (shape t1) d =
-        coerce @(Stream (shape t4) d) @(Stream (shape t1) d)
-	(traverse4 @d reprD inputD) in
-
-  let type sh = shape t1 in
-  case shape_dict of shapeDict @sh
-    (index_repr : Repr (index sh))
-    (slice_repr : Repr (slice sh))
-    (shape_indices : sh -> Stream sh (index sh))
-    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream dim1 a)
-    (shape_map : (a b : bare) ->
-                 Repr a -> Repr b ->
-		 (a -> Writer b) -> Stream sh a -> Stream sh b)
-    (shape_zipWith : (a b c : bare) ->
-    		     Repr a -> Repr b -> Repr c ->
-		     (a -> b -> Writer c) ->
-		     Stream sh a -> Stream sh b -> Stream sh c)
-    (shape_zipWith3 : (a b c d : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d ->
-		      (a -> b -> c -> Writer d) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
-    (shape_zipWith4 : (a b c d e : bare) ->
-    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-		      (a -> b -> c -> d -> Writer e) ->
-		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
-    (shape_at_index : sh -> index sh -> bool)
-    (shape_slice : (t : bare -> bare) -> (a : bare) ->
-    		   coerce @box (shape t) sh ->
-		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
-
-  letfun
-    transformer (x : a) (y : b) (z : c) (w : d) (ret : OutPtr (PyonTuple4 a b c d))
-    		-> IEffect (PyonTuple4 a b c d) =
-      pyonTuple4 @a @b @c @d (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) (copy @d reprD w) ret
-  in
-
-  shape_zipWith4 @a @b @c @d @(PyonTuple4 a b c d)
-  reprA reprB reprC reprD (repr_PyonTuple4 @a @b @c @d reprA reprB reprC reprD)
-  transformer stream1 stream2 stream3 stream4;
-
-
-rows @(t : bare -> bare) @(a : bare)
-  (indexable : IndexableDict t)
-  (shape_is_dim2 : coerce @box (shape t) dim2)
-  (repr : Repr a)
-  (container : t a)
-  -> view1 (StoredBox (view1 a))
-  attribute(inline) =
-  case indexable of
-    indexableDict @t
-    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (get_shape : (a : bare) -> t a -> shape t).
-  case coerce @(shape t) @dim2 (get_shape @a container) of
-    mk_dim2 @(Mlo Mhi Nlo Nhi : intindex)
-      (imlo : IInt Mlo) (imhi : IInt Mhi)
-      (inlo : IInt Nlo) (inhi : IInt Nhi).
-
-  mk_view1 @(StoredBox (view1 a)) @Mlo @Mhi imlo imhi
-  (\ (y : int) -> Writer (StoredBox (view1 a)).
-    storedBox @(view1 a)
-    (mk_view1 @a @Nlo @Nhi inlo inhi
-     (\ (x : int) (ret : OutPtr a) -> IEffect a.
-       case boxed @(index dim2)
-            (pyonTuple2 @(Stored int) @(Stored int)
-             (stored @int y) (stored @int x)) of
-         boxed @(index dim2) (ix : index dim2).
-       at_index @a repr container
-       (coerce @(index dim2) @(index (shape t)) ix)
-       ret)));
-  
-
-cols @(t : bare -> bare) @(a : bare)
-  (indexable : IndexableDict t)
-  (shape_is_dim2 : coerce @box (shape t) dim2)
-  (repr : Repr a)
-  (container : t a)
-  -> view1 (StoredBox (view1 a))
-  attribute(inline) =
-  case indexable of
-    indexableDict @t
-    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (get_shape : (a : bare) -> t a -> shape t).
-  case coerce @(shape t) @dim2 (get_shape @a container) of
-    mk_dim2 @(Mlo Mhi Nlo Nhi : intindex)
-      (imlo : IInt Mlo) (imhi : IInt Mhi)
-      (inlo : IInt Nlo) (inhi : IInt Nhi).
-
-  mk_view1 @(StoredBox (view1 a)) @Nlo @Nhi inlo inhi
-  (\ (x : int) -> Writer (StoredBox (view1 a)).
-    storedBox @(view1 a)
-    (mk_view1 @a @Mlo @Mhi imlo imhi
-     (\ (y : int) (ret : OutPtr a) -> IEffect a.
-       case boxed @(index dim2)
-            (pyonTuple2 @(Stored int) @(Stored int)
-             (stored @int y) (stored @int x)) of
-         boxed @(index dim2) (ix : index dim2).
-       at_index @a repr container
-       (coerce @(index dim2) @(index (shape t)) ix)
-       ret)));
-
-
-outerproduct @(a b c : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
-  (transformer : a -> b -> Writer c)
-  (sa : Stream dim1 a)
-  (sb : Stream dim1 b)
-  -> Stream dim2 c
-  attribute(inline) =
-
-  -- Convert arguments to views
-  let viewA : view1 a =
-    case sa of {
-      sequenceStream @a (sq : Sequence a). sequenceToView @a repr_a sq;
-      viewStream @a (vw : view1 a). vw
-    } in
-  let viewB : view1 b =
-    case sb of {
-      sequenceStream @b (sq : Sequence b). sequenceToView @b repr_b sq;
-      viewStream @b (vw : view1 b). vw
-    } in
-
-  -- Create a view2 combining the inputs
-  case viewA of {
-    mk_view1 @a @(Mlo Mhi : intindex)
-    	     (imlo : IInt Mlo) (imhi : IInt Mhi) (fA : int -> Writer a).
-      case viewB of {
-        mk_view1 @b @(Nlo Nhi : intindex)
-        	     (inlo : IInt Nlo) (inhi : IInt Nhi) (fB : int -> Writer b).
-
-          mk_view2 @c @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
-          (\ (y : int) (x : int) (ret : OutPtr c) -> IEffect c.
-             case boxed @a (fA y) of boxed @a (value_a : a).
-             case boxed @b (fB x) of boxed @b (value_b : b).
-             transformer value_a value_b ret);
-
-        empty_view1 @b.
-          empty_view2 @c
-      };
-
-    empty_view1 @a.
-      empty_view2 @c
-  };
-
--------------------------------------------------------------------------------
 -- Internal constructor-like methods
 
 create_view2 @(a : bare)
@@ -2704,7 +3586,7 @@ fun_reduce_Stream @(a : bare) (repr : Repr a)
   attribute(inline) =
   case s of {
     viewStream @a (vw : view1 a).
-      view1_reduce @a repr f init vw ret
+      reduce_list_dim @a repr f init vw ret
   ; sequenceStream @a (sq : Sequence a).
       Sequence_reduce @a repr f init sq ret
   };
@@ -2718,7 +3600,7 @@ fun_reduce1_Stream @(a : bare) (repr : Repr a)
   attribute(inline) =
   case s of {
     viewStream @a (vw : view1 a).
-      view1_reduce1 @a repr f vw ret
+      reduce1_list_dim @a repr f vw ret
 
   ; sequenceStream @a (sq : Sequence a).
       Sequence_reduce1 @a repr f sq ret
@@ -3097,73 +3979,7 @@ view1_fold @(a acc : bare)
   ret;
 
 
-Sequence_reduce @(a : bare)
-  (repr : Repr a)
-  (f : a -> a -> Writer a)
-  (init : a)
-  (sq : Sequence a)
-  (ret : OutPtr a)
-  -> IEffect a
-  attribute(inline, inline_final) =
-  Sequence_fold @a @a repr repr f init sq ret;
 
-Sequence_reduce1 @(a : bare)
-  (repr : Repr a)
-  (f : a -> a -> Writer a)
-  (sq : Sequence a)
-  (ret : OutPtr a)
-  -> IEffect a
-  attribute(inline, inline_final) =
-  -- Use the stream's first element as the initial value
-  case sq of
-    sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
-
-  case next state of {
-    streamValue @st @a (next_state : st) (init : BoxedType a).
-      case boxed @a (convertToBare @a repr init) of boxed @a (u_init : a).
-      let new_sequence : Sequence a =
-            sequence @a @st next_state next in
-      Sequence_fold @a @a repr repr f u_init new_sequence ret;
-
-    streamEmpty @st @a.
-      except @(IEffect a)
-  };
-
-
-Sequence_fold @(a acc : bare)
-  (repr_a : Repr a)
-  (repr_acc : Repr acc)
-  (f : acc -> a -> Writer acc)
-  (init : acc)
-  (src : Sequence a)
-  (ret : OutPtr acc)
-  -> IEffect acc
-  attribute(inline, inline_final) =
-  case src of
-    sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
-
-  letfun
-    go (state : st) (accumulator : BoxedType acc) (ret : OutPtr acc)
-      -> IEffect acc =
-      case next state of {
-
-        -- Obtain value from stream
-        streamValue @st @a (next_state : st) (result : BoxedType a).
-          -- Compute the new value
-          let new_accumulator : BoxedType acc =
-                case boxed @a (convertToBare @a repr_a result)
-                of boxed @a (y : a).
-                case boxed @acc (convertToBare @acc repr_acc accumulator)
-                of boxed @acc (x : acc).
-                convertToBoxed @acc repr_acc (f x y)
-
-          in go next_state new_accumulator ret;
-
-	-- Stream is depleted
-	streamEmpty @st @a.
-	  convertToBare @acc repr_acc accumulator ret
-      }
-  in go state (convertToBoxed @acc repr_acc (copy @acc repr_acc init)) ret;
 
 
 darr2_flatten @(M N MN : intindex) @(a : bare)
@@ -3279,48 +4095,6 @@ range (n : int) -> Stream dim1 (Stored int)
                -> IEffect (Stored int).
                copy @(Stored int) repr_int si ret) in
   viewStream @(Stored int) vw;
-
-
-Stream1_empty @(a : bare) -> Stream1 a attribute(inline) =
-  sequenceStream @a (Sequence_empty @a);
-
-
-Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
-  attribute(inline) =
-  sequenceStream @a (Sequence_return @a repr w);
-
-
-Stream1_guard @(a : bare) (repr : Repr a) (condition : bool) (s : Stream1 a)
-  -> Stream1 a
-  attribute(inline) =
-  let sq : Sequence a =
-        case s of {
-	  viewStream @a (vw : view1 a). viewToSequence @a repr vw
-	; sequenceStream @a (sq : Sequence a). sq
-	} in
-  sequenceStream @a (Sequence_guard @a repr condition sq);
-
-
-Stream1_bind @(a b : bare)
-  (repr_a : Repr a)
-  (repr_b : Repr b)
-  (s : Stream1 a)
-  (t : a -> Stream1 b)
-  -> Stream1 b
-  attribute(inline) =
-  let sq : Sequence a =
-        case s of {
-	  viewStream @a (vw : view1 a). viewToSequence @a repr_a vw
-	; sequenceStream @a (sq : Sequence a). sq
-	} in
-  letfun
-    sq_t (x : a) -> Sequence b =
-      case t x of {
-	  viewStream @b (vw : view1 b). viewToSequence @b repr_b vw
-	; sequenceStream @b (sq : Sequence b). sq
-      } in
-  
-  sequenceStream @b (Sequence_bind @a @b repr_a sq sq_t);
 
 
 Sequence_empty @(a : bare) -> Sequence a
@@ -3910,64 +4684,6 @@ shift2D @(t : bare -> bare) @(a : bare)
 -------------------------------------------------------------------------------
 -- Loops
 
-for @(N : intindex) @(acc : bare)
-  (repr : Repr acc) (count : IInt N) (init : acc)
-  (f : int -> acc -> Writer acc) (ret : OutPtr acc)
-  -> IEffect acc
-  attribute(inline, inline_final) =
-
-  -- Unpack the indexed int
-  case count of {
-    iInt @N (fin : FIInt N).
-      case fin of fiInt @N (bound : int).
-
-      -- Main loop
-      letfun
-        loop (i : int) (x : acc) (r : OutPtr acc) -> IEffect acc =
-          if EqDict_int_eq i bound
-          then copy @acc repr x r
-          else case boxed @acc (f i x) of boxed @acc (y : acc).
-               loop (AdditiveDict_int_add i 1) y r
-      in loop 0 init ret;
-
-    -- An infinite loop will fail
-    iPosInfty @N.
-      except @(IEffect acc);
-
-    -- Negative trip counts are not valid
-    iNegInfty @N.
-      except @(IEffect acc)
-  };
-
-
-for_box @(N : intindex) @(acc : box)
-  (count : IInt N)
-  (init : acc)
-  (f : int -> acc -> acc)
-  -> acc
-  attribute(inline, inline_final) =
-
-  -- Unpack the indexed int
-  case count of {
-    iInt @N (fin : FIInt N).
-      case fin of fiInt @N (bound : int).
-
-      -- Main loop
-      letfun
-        loop (i : int) (x : acc) -> acc =
-          if EqDict_int_eq i bound
-          then x
-          else loop (AdditiveDict_int_add i 1) (f i x)
-      in loop 0 init;
-
-    -- An infinite loop will fail
-    iPosInfty @N. except @acc;
-
-    -- Negative trip counts are not valid
-    iNegInfty @N. except @acc
-  };
-
-
 parallel_doall @(N : intindex) @(a b : bare)
   (count : FIInt N)
   (f : int -> IEffect b)
@@ -4231,3 +4947,5 @@ parallel_doall2 @(M N : intindex) @(a b : bare)
   blocked_doall2 @M @N @a @b count_y count_x do_range;
 
 
+
+-}

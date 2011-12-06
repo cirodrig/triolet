@@ -276,8 +276,9 @@ function inline doall (FinIndInt ix, owned f) -> () {
 };
 
 function inline for
-  (owned acc_repr, IndInt ix, pointer init, owned f, pointer ret) -> () {
-  count = int primcall from_finite_IndInt(ix);
+  (owned acc_repr, FinIndInt ix, pointer init, owned f, pointer ret) -> () {
+
+  FinIndInt{count} = ix;
   // The for loop has an 'input' and an 'output' accumulator, and swaps
   // between them.
   acc_size = acc_repr @! PassConv.size;
@@ -316,7 +317,7 @@ function inline for
 
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.
-function blocked_reduce
+function blocked_1d_reduce
   (FinIndInt size, owned reducer, owned init, owned generator) -> owned
 {
   data BlockedReduceData reduce_data;
@@ -344,7 +345,7 @@ procedure blocked_reduce_reduce
   owned call (dat @! BlockedReduceData.reducer) (x, y);
 };
 
-function blocked_reduce2
+function blocked_2d_reduce
   (FinIndInt size_y, FinIndInt size_x, owned reducer, owned init, owned generator) -> owned
 {
   data BlockedReduceData reduce_data;

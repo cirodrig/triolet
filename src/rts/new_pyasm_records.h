@@ -134,6 +134,25 @@ record MPyonTuple4(a, b, c, d) {
   d member4;
 };
 
+// Pyon 5-tuples
+record PyonTuple5(a, b, c, d, e, f) {
+  const a member1;
+  const b member2;
+  const c member3;
+  const d member4;
+  const e member5;
+};
+
+// Pyon 6-tuples
+record PyonTuple6(a, b, c, d, e, f) {
+  const a member1;
+  const b member2;
+  const c member3;
+  const d member4;
+  const e member5;
+  const f member6;
+};
+
 // A Maybe object
 record Maybe(a) {
   uint8 isjust;			// 0 = Nothing; 1 = Just
@@ -181,13 +200,12 @@ record PyonArray0(a) {
 
 /* 1D arrays
  *
- * An array has a lower and upper bound in each dimension.
- * The lower bound is inclusive and the upper bound is not.
- * The upper bound is greater than or equal to the lower bound.
+ * An array has a lower bound, stride, and size.
  */
 record PyonArray1 {
-  FinIndInt bound_min;
-  FinIndInt bound_end;
+  int first;
+  int stride;
+  FinIndInt size;
   pointer contents;		// Pointer to matrix contents
 };
 
@@ -200,10 +218,12 @@ record PyonArray1 {
  * Array elements are consecutive in the X dimension.
  */
 record PyonArray2 {
-  FinIndInt bound_ymin;
-  FinIndInt bound_yend;
-  FinIndInt bound_xmin;
-  FinIndInt bound_xend;
+  int first_y;
+  int stride_y;
+  FinIndInt size_y;
+  int first_x;
+  int stride_x;
+  FinIndInt size_x;
   pointer contents;		// Pointer to matrix contents
 };
 

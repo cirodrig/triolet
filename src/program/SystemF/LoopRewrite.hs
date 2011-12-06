@@ -77,16 +77,21 @@ parLoopOperator, otherLoopOperator :: Var -> Bool
 parLoopOperator v =
   v `elem` [pyonBuiltin The_parallel_doall,
             pyonBuiltin The_parallel_doall2,
-            pyonBuiltin The_blocked_reduce,
+            pyonBuiltin The_blocked_1d_reduce,
+            pyonBuiltin The_blocked_2d_reduce,
+            pyonBuiltin The_blocked_1d_reduce1,
+            pyonBuiltin The_blocked_2d_reduce1,
             pyonBuiltin The_blocked_doall,
             pyonBuiltin The_blocked_doall2,
+            pyonBuiltin The_parallel_list_dim_reduce,
             pyonBuiltin The_parallel_dim1_reduce,
+            pyonBuiltin The_parallel_dim2_reduce,
+            pyonBuiltin The_parallel_list_dim_reduce1,
             pyonBuiltin The_parallel_dim1_reduce1,
-            pyonBuiltin The_parallel_darr1_reduce,
-            pyonBuiltin The_parallel_darr1_reduce1,
-            pyonBuiltin The_parallel_darr1_generate,
-            pyonBuiltin The_parallel_darr2_reduce,
-            pyonBuiltin The_parallel_darr2_generate
+            pyonBuiltin The_parallel_dim2_reduce1,
+            pyonBuiltin The_parallel_list_dim_list,
+            pyonBuiltin The_parallel_dim1_array,
+            pyonBuiltin The_parallel_dim2_array
            ] 
   
 otherLoopOperator v =
@@ -95,15 +100,17 @@ otherLoopOperator v =
             pyonBuiltin The_histogram,
             pyonBuiltin The_histogramArray,
             pyonBuiltin The_fun_reduce,
-            pyonBuiltin The_fun_reduce_Stream,
             pyonBuiltin The_fun_reduce1,
-            pyonBuiltin The_fun_reduce1_Stream,
             pyonBuiltin The_TraversableDict_list_build,
-            pyonBuiltin The_primitive_darr1_reduce,
-            pyonBuiltin The_primitive_darr1_reduce1,
-            pyonBuiltin The_primitive_darr1_generate,
-            pyonBuiltin The_primitive_darr2_reduce,
-            pyonBuiltin The_primitive_darr2_generate
+            pyonBuiltin The_primitive_list_dim_reduce,
+            pyonBuiltin The_primitive_dim1_reduce,
+            pyonBuiltin The_primitive_dim2_reduce,
+            pyonBuiltin The_primitive_list_dim_reduce1,
+            pyonBuiltin The_primitive_dim1_reduce1,
+            pyonBuiltin The_primitive_dim2_reduce1,
+            pyonBuiltin The_primitive_list_dim_list,
+            pyonBuiltin The_primitive_dim1_array,
+            pyonBuiltin The_primitive_dim2_array
             ]
 
 -- | Use rewrite rules on an application
@@ -155,16 +162,24 @@ replaceWithParallelApp inf op_var ty_args args =
              _ -> False
 
     parallel_function_table =
-      [ (pyonBuiltin The_primitive_darr1_reduce,
-         ReplaceWith $ pyonBuiltin The_parallel_darr1_reduce)
-      , (pyonBuiltin The_primitive_darr1_reduce1,
-         ReplaceWith $ pyonBuiltin The_parallel_darr1_reduce1)
-      , (pyonBuiltin The_primitive_darr1_generate,
-         ReplaceWith $ pyonBuiltin The_parallel_darr1_generate)
-      , (pyonBuiltin The_primitive_darr2_generate,
-         ReplaceWith $ pyonBuiltin The_parallel_darr2_generate)
-      , (pyonBuiltin The_primitive_darr2_reduce,
-         ReplaceWith $ pyonBuiltin The_parallel_darr2_reduce)
+      [ (pyonBuiltin The_primitive_list_dim_reduce,
+         ReplaceWith $ pyonBuiltin The_parallel_list_dim_reduce)
+      , (pyonBuiltin The_primitive_dim1_reduce,
+         ReplaceWith $ pyonBuiltin The_parallel_dim1_reduce)
+      , (pyonBuiltin The_primitive_dim2_reduce,
+         ReplaceWith $ pyonBuiltin The_parallel_dim2_reduce)
+      , (pyonBuiltin The_primitive_list_dim_reduce1,
+         ReplaceWith $ pyonBuiltin The_parallel_list_dim_reduce1)
+      , (pyonBuiltin The_primitive_dim1_reduce1,
+         ReplaceWith $ pyonBuiltin The_parallel_dim1_reduce1)
+      , (pyonBuiltin The_primitive_dim2_reduce1,
+         ReplaceWith $ pyonBuiltin The_parallel_dim2_reduce1)
+      , (pyonBuiltin The_primitive_list_dim_list,
+         ReplaceWith $ pyonBuiltin The_parallel_list_dim_list)
+      , (pyonBuiltin The_primitive_dim1_array,
+         ReplaceWith $ pyonBuiltin The_parallel_dim1_array)
+      , (pyonBuiltin The_primitive_dim2_array,
+         ReplaceWith $ pyonBuiltin The_parallel_dim2_array)
       , (pyonBuiltin The_doall,
          ReplaceWith $ pyonBuiltin The_parallel_doall)
       , (pyonBuiltin The_Sequence_reduce,
@@ -174,7 +189,7 @@ replaceWithParallelApp inf op_var ty_args args =
 -- | Attempt to rewrite a reduction over a sequence.
 --
 --   Try to match the pattern @reduce (bind (generate d _) _)@ and
---   replace it with @parallel_dim1_reduce d (\d2. bind (generate d2 _) _)@.
+--   replace it with @parallel_reduce d (\l n. bind (generate n _) \x -> )@.
 rewriteSequenceReduce inf [ty] (repr : reducer : init : source : other_args) =
   case unpackVarAppM source
   of Just (op, [bind_ty, _], [repr_bind, bind_source, bind_transformer])
@@ -187,33 +202,12 @@ rewriteSequenceReduce inf [ty] (repr : reducer : init : source : other_args) =
               _ -> return Nothing
      _ -> return Nothing
   where
-    parallel_app bind_ty repr_bind range generator bind_transformer = do
-      dim_var <- newAnonymousVar ObjectLevel
-      let range_exp = ExpM $ VarE defaultExpInfo dim_var
-          generate_exp =
-            ExpM $ AppE inf
-            (ExpM $ VarE defaultExpInfo (pyonBuiltin The_Sequence_generate))
-            [bind_ty] [repr_bind, range_exp, generator]
-          bind_exp =
-            ExpM $ AppE inf
-            (ExpM $ VarE defaultExpInfo (pyonBuiltin The_Sequence_bind))
-            [bind_ty, ty] [repr_bind, generate_exp, bind_transformer]
-          reduce_exp =
-            ExpM $ AppE inf
-            (ExpM $ VarE defaultExpInfo (pyonBuiltin The_Sequence_reduce))
-            [ty] [repr, reducer, init, bind_exp]
-          reduce_fun =
-            ExpM $ LamE inf $ FunM $
-            Fun { funInfo = inf
-                , funTyParams = []
-                , funParams = [patM (dim_var ::: VarT (pyonBuiltin The_dim1))]
-                , funReturn = writerType ty
-                , funBody = reduce_exp}
-          parallel_exp =
-            ExpM $ AppE inf
-            (ExpM $ VarE defaultExpInfo (pyonBuiltin The_parallel_dim1_reduce))
-            [ty] (repr : range : reducer : init : reduce_fun : other_args)
-      return $ Just parallel_exp
+    parallel_app bind_ty repr_bind range generator bind_transformer =
+      return $ Just $
+      appE defaultExpInfo (ExpM $ VarE defaultExpInfo
+                           (pyonBuiltin The_Sequence_parallel_reduce_helper))
+      [bind_ty, ty]
+      (repr_bind : repr : range : reducer : init : generator : bind_transformer : other_args)
 
 -------------------------------------------------------------------------------
 -- Traversal

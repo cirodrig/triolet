@@ -423,22 +423,34 @@ instance Substitutable ConsumerOp where
 deconstructStreamType :: Type -> TypeEvalM (StreamType, [Type], Type)
 deconstructStreamType ty = do
   ty' <- reduceToWhnf ty
-  return $! case fromVarApp ty'
-            of Just (op, [arg])
-                 | op `isPyonBuiltin` The_Sequence -> (SequenceType, [], arg)
-                 | op `isPyonBuiltin` The_view1 -> (ViewType 1, [], arg)
-                 | op `isPyonBuiltin` The_view2 -> (ViewType 2, [], arg)
+  case fromVarApp ty' of
+    Just (op, [arg])
+      | op `isPyonBuiltin` The_Sequence -> return (SequenceType, [], arg)
 
-               -- Don't know how to handle other types
-               _ -> internalError "deconstructStreamType"
+    Just (op, [shape_arg, arg])
+      | op `isPyonBuiltin` The_view -> do
+          shp <- reduceToWhnf shape_arg
+          case shp of
+            VarT v
+              | v `isPyonBuiltin` The_dim0 -> return (ViewType 0, [], arg)
+              | v `isPyonBuiltin` The_dim1 -> return (ViewType 1, [], arg)
+              | v `isPyonBuiltin` The_dim2 -> return (ViewType 2, [], arg)
+
+    -- Don't know how to handle other types
+    _ -> internalError "deconstructStreamType"
 
 reconstructStreamType :: StreamType -> [Type] -> Type -> Type
 reconstructStreamType stream_type [] ty =
-  let op = case stream_type
-           of SequenceType -> pyonBuiltin The_Sequence
-              ViewType 1   -> pyonBuiltin The_view1
-              ViewType 2   -> pyonBuiltin The_view2
-  in varApp op [ty]
+  case stream_type
+  of SequenceType ->
+       varApp (pyonBuiltin The_Sequence) [ty]
+     ViewType n ->
+       let shape_arg =
+             case n
+             of 0 -> VarT $ pyonBuiltin The_dim0
+                1 -> VarT $ pyonBuiltin The_dim1
+                2 -> VarT $ pyonBuiltin The_dim2
+       in varApp (pyonBuiltin The_view) [shape_arg, ty]
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -576,7 +588,7 @@ streamOpTable :: IntMap.IntMap StreamOpInterpreter
 streamOpTable =
   IntMap.fromList [(fromIdent $ varID v, f) | (v, f) <- list]
   where
-    list = [ (pyonBuiltin The_view1_generate, interpretGen (PolyViewType 1))
+    list = [ {- (pyonBuiltin The_view1_generate, interpretGen (PolyViewType 1))
            , (pyonBuiltin The_view1_map, interpretZip (PolyViewType 1) 1)
            , (pyonBuiltin The_view1_zipWith, interpretZip (PolyViewType 1) 2)
            , (pyonBuiltin The_view1_zipWith3, interpretZip (PolyViewType 1) 3)
@@ -599,7 +611,7 @@ streamOpTable =
            , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 PolySequenceType)
            , (pyonBuiltin The_Sequence_array1_build, interpretBuild PolySequenceType ArrayType)
            , (pyonBuiltin The_Sequence_list_build, interpretBuild PolySequenceType ListType)
-           , (pyonBuiltin The_viewToSequence, interpretToSequence (PolyViewType 1))
+           , (pyonBuiltin The_viewToSequence, interpretToSequence (PolyViewType 1)) -}
            ]
 
 interpretGen stream_type = StreamOpInterpreter check_arity interpret
@@ -843,7 +855,7 @@ embedOp :: StreamOp -> (Var, [Type])
 embedOp (GenerateOp stream_type output_type) = let
   op = case stream_type
        of SequenceType -> pyonBuiltin The_Sequence_generate
-          ViewType 1 -> pyonBuiltin The_view1_generate
+          -- ViewType 1 -> pyonBuiltin The_view1_generate
   in (op, extractShapeIndices stream_type ++ [output_type])
 
 embedOp (ZipOp stream_type input_types output_type) = let
@@ -855,13 +867,13 @@ embedOp (ZipOp stream_type input_types output_type) = let
                2 -> pyonBuiltin The_Sequence_zipWith
                3 -> pyonBuiltin The_Sequence_zipWith3
                4 -> pyonBuiltin The_Sequence_zipWith4
-          ViewType 1 ->
+          {- ViewType 1 ->
             case n_input_types
             of 1 -> pyonBuiltin The_view1_map
                2 -> pyonBuiltin The_view1_zipWith
                3 -> pyonBuiltin The_view1_zipWith3
                4 -> pyonBuiltin The_view1_zipWith4
-          {-ViewType 2 ->
+          ViewType 2 ->
             case n_input_types
             of 1 -> pyonBuiltin The_view2_map
                2 -> pyonBuiltin The_view2_zipWith
@@ -925,11 +937,11 @@ embedOp (ConsumeOp st (Build container_type ty)) =
            of SequenceType ->
                 case container_type
                 of ListType -> pyonBuiltin The_Sequence_list_build
-                   ArrayType -> pyonBuiltin The_Sequence_array1_build
+                   -- ArrayType -> pyonBuiltin The_Sequence_array1_build
               ViewType 1 ->
                 case container_type
-                of ListType -> pyonBuiltin The_view1_list_build
-                   ArrayType -> pyonBuiltin The_view1_array1_build
+                of ListType -> pyonBuiltin The_view_list_build
+                   -- ArrayType -> pyonBuiltin The_view1_array1_build
   in (op, extractShapeIndices st ++ [ty])
 
 embedStreamExp :: ExpS -> ExpM
