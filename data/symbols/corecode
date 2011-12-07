@@ -1920,8 +1920,8 @@ range (length : int) -> Stream list_dim (Stored int)
 -------------------------------------------------------------------------------
 -- High-level list comprehension functions
 
-Stream1_empty @(a : bare) -> Stream1 a attribute(inline) =
-  sequenceStream @a (Sequence_empty @a);
+Stream1_empty @(a : bare) (repr : Repr a) -> Stream1 a attribute(inline) =
+  sequenceStream @a (Sequence_empty @a repr);
 
 
 Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
@@ -1993,7 +1993,7 @@ sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
 
 view_generate @(sh : box) (shape_dict : ShapeDict sh)
   -> (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> view sh a
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   \ @(a : bare) (repr : Repr a) (dom : sh) (f : index sh -> Writer a)
     -> view sh a.
@@ -2002,7 +2002,7 @@ view_generate @(sh : box) (shape_dict : ShapeDict sh)
 
 view_map @(sh : box) (shape_dict : ShapeDict sh)
   -> (a b : bare) -> Repr a -> Repr b -> (a -> Writer b) -> view sh a -> view sh b
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   \ @(a b : bare) (repr_a : Repr a) (repr_a : Repr b) (t : a -> Writer b)
     (s1 : view sh a) -> view sh b.
@@ -2021,7 +2021,7 @@ view_zipWith @(sh : box)
      view sh a ->
      view sh b ->
      view sh c
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
@@ -2072,7 +2072,7 @@ view_zipWith3 @(sh : box)
      view sh b ->
      view sh c ->
      view sh d
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
@@ -2127,7 +2127,7 @@ view_zipWith4 @(sh : box)
      view sh c ->
      view sh d ->
      view sh e
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   case shape_dict of shapeDict @sh
     (index_repr : Repr (index sh))
@@ -2469,7 +2469,7 @@ reduce_list_dim @(a : bare)
   (init : a)
   (vw : view list_dim a)
   -> Writer a
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
   case vw of
     mk_view @list_dim @a (dom : list_dim) (gen : Stored int -> Writer a).
 
@@ -2481,7 +2481,7 @@ reduce1_list_dim @(a : bare)
   (f : a -> a -> Writer a)
   (vw : view list_dim a)
   -> Writer a
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
   case vw of
     mk_view @list_dim @a (dom : list_dim) (gen : Stored int -> Writer a).
 
@@ -2490,6 +2490,38 @@ reduce1_list_dim @(a : bare)
 
 -------------------------------------------------------------------------------
 -- Sequence layer
+
+Sequence_guard @(a : bare)
+  (repr : Repr a) (condition : bool) (s : Sequence a) -> Sequence a
+  attribute(inline) =
+  if condition then s else Sequence_empty @a repr;
+
+
+Sequence_empty @(a : bare) (repr : Repr a) -> Sequence a
+  attribute(inline, inline_final) =
+  let type st = Boxed (Stored NoneType) in
+  sequence @a @st
+  (boxed @(Stored NoneType) (stored @NoneType None))
+  (\ (x : st) -> StreamNext st a. streamEmpty @st @a);
+
+
+Sequence_return @(a : bare)
+  (repr : Repr a)
+  (ret : Writer a)
+  -> Sequence a
+  attribute(inline, inline_final) =
+  let type st = Boxed (Stored bool) in
+  sequence @a @st
+  (boxed @(Stored bool) (stored @bool False))
+  (\ (depleted : st) -> StreamNext st a.
+     case depleted of boxed @(Stored bool) (depleted_s : Stored bool).
+     case depleted_s of stored @bool (depleted_u : bool).
+     if depleted_u
+     then streamEmpty @st @a
+     else streamValue @st @a
+     	  (boxed @(Stored bool) (stored @bool True))
+	  (convertToBoxed @a repr ret));
+
 
 Sequence_reduce @(a : bare)
   (repr : Repr a)
@@ -2668,23 +2700,6 @@ Sequence_generate_bind @(a : bare)
   transformer;
 
 
--- Wrapper around 'Sequence_parallel_reduce', used by a rewrite rule
-Sequence_parallel_reduce_helper @(a b : bare)
-  (repr_a : Repr a) (repr_b : Repr b)
-  (dom : list_dim)
-  (f : b -> b -> Writer b)
-  (init : b)
-  (gen : Stored int -> Writer a)
-  (k : a -> Sequence b)
-  -> Writer b
-  attribute(inline) =
-  
-  Sequence_parallel_reduce @b repr_b dom f init
-  (\ (si : Stored int) -> Sequence b.
-     case boxed @a (gen si) of boxed @a (x : a).
-     k x);
-
-
 Sequence_parallel_reduce @(a : bare)
   (repr : Repr a)
   (dom : list_dim)
@@ -2830,6 +2845,34 @@ primitive_list_dim_reduce1 @(a : bare)
   };
 
 
+primitive_list_dim_fold @(acc : bare)
+  (repr : Repr acc)
+  (d : list_dim)
+  (f : index list_dim -> acc -> Writer acc)
+  (init : acc)
+  (ret : OutPtr acc)
+  -> IEffect acc
+  attribute(inline) =
+
+  case d of mk_list_dim (list_size : MaybeVal int).
+  case list_size of {
+    justVal @int (size : int).
+      case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
+      
+      for @N @acc repr count init
+      (\ (i : int) (loop_acc : acc) (ret : OutPtr acc) -> IEffect acc.
+         case boxed @(Stored int) (stored @int i) of
+           boxed @(Stored int) (real_index : Stored int).
+
+         -- Accumulate value
+         f real_index loop_acc ret)
+      ret
+
+  ; nothingVal @int.
+      except @(IEffect acc)
+  };
+
+
 primitive_dim1_reduce @(a : bare)
   (repr : Repr a)
   (dom : dim1)
@@ -2855,6 +2898,31 @@ primitive_dim1_reduce @(a : bare)
          reducer x y loop_ret)
      ret);
 
+
+primitive_dim1_fold @(acc : bare)
+  (repr : Repr acc)
+  (d : dim1)
+  (f : index dim1 -> acc -> Writer acc)
+  (init : acc)
+  -> Writer acc
+  attribute(inline) =
+
+  -- Loop over the domain
+  dim1ToArrayDesc @acc d
+  (\ @(N : intindex)
+     (lb : int) (stride : int) (count : FIInt N) (ret : OutPtr acc)
+     -> IEffect acc.
+
+     for @N @acc repr count init
+     (\ (i : int) (loop_acc : acc) (ret : OutPtr acc) -> IEffect acc.
+
+        -- Compute the real index in this loop iteration
+        case boxed @(Stored int) (stored @int (lb +# i *# stride)) of
+          boxed @(Stored int) (real_index : Stored int).
+
+        -- Accumulate value
+        f real_index loop_acc ret)
+     ret);
 
 -------------------------------------------------------------------------------
 -- Domain loops (parallel)
@@ -2899,6 +2967,9 @@ parallel_list_dim_reduce @(a : bare)
       convertToBare @a repr
       (blocked_1d_reduce @N @b count combiner boxed_init reducer)
       ret
+
+  ; nothingVal @int.
+      except @(IEffect a)
   };
 
 
@@ -2955,6 +3026,94 @@ parallel_dim1_reduce @(a : bare)
       ; nothingVal @int.
           except @(IEffect a)
       }
+  ; nothingVal @int.
+      except @(IEffect a)
+  };
+
+
+parallel_list_dim_reduce1 @(a : bare)
+  (repr : Repr a)
+  (dom : list_dim)
+  (g : Stored int -> Writer a)
+  (f : a -> a -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a =
+
+  let mrepr : Repr (Maybe a) = repr_Maybe @a repr in
+  case dom of mk_list_dim (list_size : MaybeVal int).
+  case list_size of {
+    justVal @int (size : int).
+      -- Create combiner and reducer functions using 'f' and 'g'
+      let type ma = Maybe a in
+      let type b = BoxedType ma in
+      letfun
+        combiner (x : b) (y : b) -> b =
+          -- Combine 'Maybe' values.  Use 'f' if both values are 'Just'.
+          case boxed @ma (convertToBare @ma mrepr x) of
+            boxed @ma (maybe_x : ma).
+          case maybe_x of {
+            just @a (bx : a).
+              case boxed @ma (convertToBare @ma mrepr y) of
+                boxed @ma (maybe_y : ma).
+              case maybe_y of {
+                just @a (by : a). convertToBoxed @ma mrepr (just @a (f bx by))
+              ; nothing @a. x
+            }
+          ; nothing @a. y
+          }
+      in
+      letfun
+        reducer @(range_N : intindex)
+          (lb : int) (count : FIInt range_N) (acc_in : b) -> b =
+          case boxed @ma (convertToBare @ma mrepr acc_in) of
+            boxed @ma (m_acc_in : ma).
+
+          letfun
+            reduce_with_initial_value @(subrange_N : intindex)
+              (subrange_lb : int)
+              (subrange_count : FIInt subrange_N)
+              (subrange_acc : a)
+              -> b =
+            convertToBoxed @ma mrepr
+            (just @a
+             (for @subrange_N @a repr subrange_count subrange_acc
+              (\ (i : int) (x : a) (ret : OutPtr a) -> IEffect a.
+                 -- Add the lower bound to get the real index
+                 case boxed @(Stored int) (stored @int (i +# subrange_lb)) of
+                   boxed @(Stored int) (real_index : Stored int).
+               
+                 -- Call 'g' to compute a value, and 'f' to combine it
+                 case boxed @a (g real_index) of boxed @a (y : a).
+                 f x y ret)))
+          in
+          -- Get an initial value.  The value comes from either
+          -- the given accumulator or the beginning of the range.
+          -- We know the range is nonempty.
+          case m_acc_in of {
+            just @a (b_acc_in : a).
+              reduce_with_initial_value @range_N lb count b_acc_in
+          ; nothing @a.
+              case boxed @(Stored int) (stored @int lb) of
+                boxed @(Stored int) (first_index : Stored int).
+              case boxed @a (g first_index) of boxed @a (b_acc_in : a).
+
+              reduce_with_initial_value @(minus_i range_N 1)
+              (lb +# 1)
+              (minus_fii @range_N @1 count one_fii)
+              b_acc_in
+          }
+      in
+      case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
+      let boxed_init : b = convertToBoxed @ma mrepr (nothing @a) in
+      case boxed @ma
+           (convertToBare @ma mrepr
+            (blocked_1d_reduce @N @b count combiner boxed_init reducer)) of
+        boxed @ma (m_result : Maybe a).
+      case m_result of {
+        just @a (result : a). copy @a repr result ret
+      ; nothing @a. except @(IEffect a)
+      }
+
   ; nothingVal @int.
       except @(IEffect a)
   };
@@ -4095,38 +4254,6 @@ range (n : int) -> Stream dim1 (Stored int)
                -> IEffect (Stored int).
                copy @(Stored int) repr_int si ret) in
   viewStream @(Stored int) vw;
-
-
-Sequence_empty @(a : bare) -> Sequence a
-  attribute(inline, inline_final) =
-  let type st = Boxed (Stored NoneType) in
-  sequence @a @st
-  (boxed @(Stored NoneType) (stored @NoneType None))
-  (\ (x : st) -> StreamNext st a. streamEmpty @st @a);
-
-
-Sequence_return @(a : bare)
-  (repr : Repr a)
-  (ret : Writer a)
-  -> Sequence a
-  attribute(inline, inline_final) =
-  let type st = Boxed (Stored bool) in
-  sequence @a @st
-  (boxed @(Stored bool) (stored @bool False))
-  (\ (depleted : st) -> StreamNext st a.
-     case depleted of boxed @(Stored bool) (depleted_s : Stored bool).
-     case depleted_s of stored @bool (depleted_u : bool).
-     if depleted_u
-     then streamEmpty @st @a
-     else streamValue @st @a
-     	  (boxed @(Stored bool) (stored @bool True))
-	  (convertToBoxed @a repr ret));
-
-
-Sequence_guard @(a : bare)
-  (repr : Repr a) (condition : bool) (s : Sequence a) -> Sequence a
-  attribute(inline) =
-  if condition then s else Sequence_empty @a;
 
 
 Sequence_generate @(a : bare)

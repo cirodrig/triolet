@@ -447,13 +447,13 @@ rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
 --   In later compiler phases, @Sequence@ methods are rewritten to sequential
 --   loops.  Other stream methods are inlined and don't require special
 --   transformations.
-interpretStreamInSimplifier inf op_var ty_args args = LR $ \env -> do
+interpretStreamInSimplifier inf op ty_args args = LR $ \env -> do
   let phase = lrPhase $ lrConstants env
   x <- runTypeEvalM (interpret_stream phase) (lrIdSupply $ lrConstants env) (lrTypeEnv env)
   return $ Just x
   where
     interpret_stream phase = do
-      ms <- interpretStreamAppExp inf op_var ty_args args
+      ms <- interpretStreamAppExp inf op ty_args args
       case ms of
         Nothing -> return Nothing
         Just s -> 
@@ -1397,46 +1397,47 @@ rwAppWithOperator' is_stream_arg inf op op_val ty_args args =
                     consumeFuel     -- A term has been rewritten
                     rwExp is_stream_arg $ deferEmptySubstitution new_expr
 
-                  -- Perform stream transformations.
-                  -- However, if this application is a subexpression of another
-                  -- stream expression, skip this step.  The entire nested 
-                  -- expression will be processed when the outermost application
-                  -- is processed.
-                  Nothing | not is_stream_arg && is_stream_app -> do
-                    (args', arg_values) <- rwExps is_stream_app args
-                    m_stream_exp <-
-                      interpretStreamInSimplifier inf op_var ty_args args'
-                    case m_stream_exp of
-                      Just stream_exp -> do
-                        consumeFuel
-                        return (stream_exp, topCode)
-                      Nothing -> rebuild_app args' arg_values
-
-                  Nothing -> unknown_app
-
-          _ -> unknown_app
+                  Nothing ->
+                    try_rewrite_stream_expression
+          _ -> try_rewrite_stream_expression
   where
     -- If out of fuel, then don't simplify this expression.  Process arguments.
     -- Operator is already processed.
     use_fuel m = useFuel' unknown_app m
 
+    -- Perform stream transformations.
+    -- However, if this application is a subexpression of another
+    -- stream expression, skip this step.  The entire nested 
+    -- expression will be processed when the outermost application
+    -- is processed.
+    try_rewrite_stream_expression
+      | not is_stream_arg && is_stream_app = do
+          (args', arg_values) <- rwExps is_stream_app args
+          m_stream_exp <- interpretStreamInSimplifier inf op ty_args args'
+          case m_stream_exp of
+            Just stream_exp -> do
+              consumeFuel
+              return (stream_exp, topCode)
+            Nothing -> rebuild_app args' arg_values
+
+      | otherwise = unknown_app
+
+    -- No simplifications are applicable to this term
     unknown_app = do
       (args', arg_values) <- rwExps is_stream_app args
       rebuild_app args' arg_values
 
-    -- True if the application expression is a fully applied stream operator
-    -- (except that output parameters may be missing)
-    is_stream_app =
-      case op
-      of ExpM (VarE _ v) -> isStreamAppExp v ty_args args
-         _ -> False
-
+    -- Reconstruct an application term
     rebuild_app args' arg_values = do
       -- Compute the application's value, and detect if it raises an exception
       new_value <- interpretComputation' $ applyCode op_val ty_args arg_values
 
       let new_exp = appE inf op ty_args args'
       return (new_exp, new_value)
+
+    -- True if the application expression is a fully applied stream operator
+    -- (except that output parameters may be missing)
+    is_stream_app = isStreamAppExp op ty_args args
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.

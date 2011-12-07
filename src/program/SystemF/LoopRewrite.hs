@@ -188,26 +188,22 @@ replaceWithParallelApp inf op_var ty_args args =
 
 -- | Attempt to rewrite a reduction over a sequence.
 --
---   Try to match the pattern @reduce (bind (generate d _) _)@ and
---   replace it with @parallel_reduce d (\l n. bind (generate n _) \x -> )@.
+--   Try to match the pattern @reduce (generate_bind d f) g@ and
+--   replace it with @parallel_reduce d f g@.
 rewriteSequenceReduce inf [ty] (repr : reducer : init : source : other_args) =
   case unpackVarAppM source
-  of Just (op, [bind_ty, _], [repr_bind, bind_source, bind_transformer])
-       | op `isPyonBuiltin` The_Sequence_bind ->
-           case unpackVarAppM bind_source
-           of Just (op, [_], [_, range, generator])
-                | op `isPyonBuiltin` The_Sequence_generate ->
-                    -- Pattern was matched
-                    parallel_app bind_ty repr_bind range generator bind_transformer
-              _ -> return Nothing
+  of Just (op, [_], [range, transformer])
+       | op `isPyonBuiltin` The_Sequence_generate_bind -> do
+         -- Pattern was matched
+         parallel_app range transformer
      _ -> return Nothing
   where
-    parallel_app bind_ty repr_bind range generator bind_transformer =
+    parallel_app range transformer =
       return $ Just $
       appE defaultExpInfo (ExpM $ VarE defaultExpInfo
-                           (pyonBuiltin The_Sequence_parallel_reduce_helper))
-      [bind_ty, ty]
-      (repr_bind : repr : range : reducer : init : generator : bind_transformer : other_args)
+                           (pyonBuiltin The_Sequence_parallel_reduce))
+      [ty]
+      (repr : range : reducer : init : transformer : other_args)
 
 -------------------------------------------------------------------------------
 -- Traversal

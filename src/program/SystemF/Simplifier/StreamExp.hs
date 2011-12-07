@@ -1,5 +1,5 @@
 
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, ViewPatterns #-}
 module SystemF.Simplifier.StreamExp
        (isStreamAppExp,
         interpretStreamAppExp,
@@ -59,8 +59,6 @@ data instance Exp Stream =
   | OpSE
     { sexpInfo :: ExpInfo
     , sexpOp :: !StreamOp
-      -- | Shape arguments describing the run-time shape of streams.
-    , sexpShapeArgs :: [ExpM]
       -- | Repr arguments describing the data types manipulated by this
       --   stream operation.
     , sexpReprArgs :: [ExpM]
@@ -101,7 +99,6 @@ data instance Exp Stream =
   | ExceptSE
     { sexpInfo :: ExpInfo
     , sexpStreamType :: !StreamType
-    , sexpShape :: [Type]
     , sexpElementType :: Type
     }
 
@@ -109,8 +106,8 @@ instance Renameable (Exp Stream) where
   rename rn expression =
     case expression
     of OtherSE e -> OtherSE $ rename rn e
-       OpSE inf op shape_args repr_args misc_args stream_args ret_arg ->
-         OpSE inf (rename rn op) (rename rn shape_args) (rename rn repr_args)
+       OpSE inf op repr_args misc_args stream_args ret_arg ->
+         OpSE inf (rename rn op) (rename rn repr_args)
          (rename rn misc_args) (rename rn stream_args) (rename rn ret_arg)
        LamSE inf f ->
          LamSE inf (rename rn f)
@@ -123,8 +120,8 @@ instance Renameable (Exp Stream) where
          LetfunSE inf defs' (rename rn' body)
        CaseSE inf scr alts ->
          CaseSE inf (rename rn scr) (map (rename rn) alts)
-       ExceptSE inf st shape ty ->
-         ExceptSE inf (rename rn st) (rename rn shape) (rename rn ty)
+       ExceptSE inf st ty ->
+         ExceptSE inf (rename rn st) (rename rn ty)
 
 instance Renameable (Fun Stream) where
   rename rn (FunS fun) =
@@ -164,14 +161,13 @@ instance Substitutable (Exp Stream) where
   substituteWorker s expression =
     case expression
     of OtherSE e -> OtherSE `liftM` substitute s e 
-       OpSE inf op shape_args repr_args misc_args stream_args return_arg -> do
+       OpSE inf op repr_args misc_args stream_args return_arg -> do
          op' <- substitute (typeSubst s) op
-         shape_args' <- substitute s shape_args
          repr_args' <- substitute s repr_args
          misc_args' <- substitute s misc_args
          stream_args' <- substitute s stream_args
          return_arg' <- substitute s return_arg
-         return $ OpSE inf op' shape_args' repr_args' misc_args' stream_args' return_arg'
+         return $ OpSE inf op' repr_args' misc_args' stream_args' return_arg'
        LamSE inf f ->
          LamSE inf `liftM` substitute s f
        LetSE inf b rhs body -> do
@@ -187,12 +183,11 @@ instance Substitutable (Exp Stream) where
          scr' <- substitute s scr
          alts' <- substitute s alts
          return $ CaseSE inf scr' alts'
-       ExceptSE inf st shape ty -> do
+       ExceptSE inf st ty -> do
          let type_subst = typeSubst s
          st' <- substitute type_subst st
-         shape' <- substitute type_subst shape
          ty' <- substitute type_subst ty
-         return $ ExceptSE inf st' shape' ty'
+         return $ ExceptSE inf st' ty'
 
 instance Substitutable (Fun Stream) where
   type Substitution (Fun Stream) = Subst
@@ -215,38 +210,20 @@ instance Substitutable (Alt Stream) where
       body' <- substitute s' body
       return $ AltS $ Alt con' (map PatS params') body'
 
-data PolyStreamType =
-    PolySequenceType
-  | PolyViewType {-# UNPACK #-}!Int
-  | PolyDArrType {-# UNPACK #-}!Int
-
+-- | A stream type encodes the shape and implementation of a stream.
+--
+--   In most domains, there's a one-to-one correspondence between shape
+--   and stream type.  The domain @list_dim@ has two stream types,
+--   'SequenceType' and 'ListViewType'.
 data StreamType =
     -- | 1D sequence type
     SequenceType
 
+    -- | List view type
+  | ListViewType
+
     -- | N-dimensional view type
-  | ViewType {-#UNPACK#-} !Int
-
-    -- | N-dimensional delayed array type.
-    --   The arguments are the size indices in each dimension.
-  | DArrType [Type]
-
--- | Apply the given shape indices to the shape-polymorphic stream type to get
---   a shape-monomorphic stream type.
-applyShapeIndices :: [Type] -> PolyStreamType -> StreamType
-applyShapeIndices ts pst =
-  case (pst, ts)
-  of (PolySequenceType, []) -> SequenceType
-     (PolyViewType n, []) -> ViewType n
-     (PolyDArrType n, ts) | n == length ts -> DArrType ts
-     _ -> internalError "applyShape: Argument length mismatch"
-
--- | Get the shape indices from a 'StreamType'.  The shape indices are the
---   types that were passed to 'applyShapeIndices' to create the 'StreamType'.
-extractShapeIndices :: StreamType -> [Type]
-extractShapeIndices SequenceType = []
-extractShapeIndices (ViewType _) = []
-extractShapeIndices (DArrType xs) = xs
+  | ArrViewType {-#UNPACK#-} !Int
 
 streamShapeType, streamIndexType :: StreamType -> Type
 
@@ -254,28 +231,30 @@ streamShapeType, streamIndexType :: StreamType -> Type
 --   by 'shape'.
 streamShapeType st =
   case st
-  of SequenceType -> dim1
-     ViewType 0 -> dim0
-     ViewType 1 -> dim1
+  of SequenceType -> list_dim
+     ListViewType -> list_dim
+     ArrViewType 0 -> dim0
+     ArrViewType 1 -> dim1
+     ArrViewType 2 -> dim2
   where
+    list_dim = VarT $ pyonBuiltin The_list_dim
     dim0 = VarT $ pyonBuiltin The_dim0
     dim1 = VarT $ pyonBuiltin The_dim1
+    dim2 = VarT $ pyonBuiltin The_dim2
 
--- | Return the shape type of the stream, the same type that would be returned
+-- | Return the index type of the stream, the same type that would be returned
 --   by 'index'.
 streamIndexType st =
   case st
   of SequenceType -> ix1
-     ViewType 0 -> ix0
-     ViewType 1 -> ix1
+     ListViewType -> ix1
+     ArrViewType 0 -> ix0
+     ArrViewType 1 -> ix1
+     ArrViewType 2 -> ix2
   where
     ix0 = varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_NoneType]
     ix1 = varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
-
--- | A value of this type, combined with a shape,
---   determines a container type of kind @bare -> bare@.
-data ContainerType =
-  ListType | ArrayType
+    ix2 = varApp (pyonBuiltin The_PyonTuple2) [ix1, ix1]
 
 data ConsumerOp =
     -- | Reduce using a reducer and initial value
@@ -298,7 +277,7 @@ data ConsumerOp =
   | Fold Type Type
 
     -- | Build a data structure
-  | Build ContainerType Type
+  | Build Type
 
 data StreamOp =
     -- | Generate a stream.
@@ -330,13 +309,10 @@ data StreamOp =
     -- > return @{output type} {output repr} {output writer} {}
   | ReturnOp !Type
 
-    -- | Produce a 1D sequence of size 0.
-  | EmptyOp !Type
-
-    -- | Produce a view of size 0.
+    -- | Produce a stream of size 0.
     --
     -- > empty @{output type} {output repr} {} {}
-  | EmptyViewOp !Int !Type
+  | EmptyOp !StreamType !Type
 
     -- | The bind operation on sequences.
     --
@@ -365,22 +341,19 @@ instance Renameable StreamOp where
        ToSequenceOp st ty -> ToSequenceOp (rename rn st) (rename rn ty)
        ToView1Op st ty -> ToView1Op (rename rn st) (rename rn ty)
        ReturnOp ty -> ReturnOp (rename rn ty)
-       EmptyOp ty -> EmptyOp (rename rn ty)
-       EmptyViewOp n ty -> EmptyViewOp n (rename rn ty)
+       EmptyOp st ty -> EmptyOp (rename rn st) (rename rn ty)
        BindOp t1 t2 -> BindOp (rename rn t1) (rename rn t2)
        GenerateBindOp t -> GenerateBindOp (rename rn t)
        ConsumeOp st r -> ConsumeOp (rename rn st) (rename rn r)
 
 instance Renameable StreamType where
-  rename rn SequenceType = SequenceType
-  rename rn (ViewType n) = ViewType n
-  rename rn (DArrType ts) = DArrType (rename rn ts)
+  rename _ t = t
 
 instance Renameable ConsumerOp where
   rename rn (Reduce t) = Reduce (rename rn t)
   rename rn (Reduce1 t) = Reduce1 (rename rn t)
   rename rn (Fold t1 t2) = Fold (rename rn t1) (rename rn t2)
-  rename rn (Build ct t) = Build ct (rename rn t)
+  rename rn (Build t) = Build (rename rn t)
 
 instance Substitutable StreamOp where
   type Substitution StreamOp = Substitute.TypeSubst
@@ -396,10 +369,8 @@ instance Substitutable StreamOp where
          ToView1Op `liftM` substitute s st `ap` substitute s ty
        ReturnOp ty ->
          ReturnOp `liftM` substitute s ty
-       EmptyOp ty ->
-         EmptyOp `liftM` substitute s ty
-       EmptyViewOp n ty ->
-         EmptyViewOp n `liftM` substitute s ty
+       EmptyOp st ty ->
+         EmptyOp `liftM` substitute s st `ap` substitute s ty
        BindOp t1 t2 ->
          BindOp `liftM` substitute s t1 `ap` substitute s t2
        GenerateBindOp t ->
@@ -409,48 +380,50 @@ instance Substitutable StreamOp where
 
 instance Substitutable StreamType where
   type Substitution StreamType = Substitute.TypeSubst
-  substituteWorker s SequenceType = return SequenceType
-  substituteWorker s (ViewType n) = return (ViewType n)
-  substituteWorker s (DArrType ts) = DArrType `liftM` substitute s ts
+  substituteWorker _ t = return t
   
 instance Substitutable ConsumerOp where
   type Substitution ConsumerOp = Substitute.TypeSubst
   substituteWorker s (Reduce t) = Reduce `liftM` substitute s t
   substituteWorker s (Reduce1 t) = Reduce1 `liftM` substitute s t
   substituteWorker s (Fold t1 t2) = Fold `liftM` substitute s t1 `ap` substitute s t2
-  substituteWorker s (Build ct t) = Build ct `liftM` substitute s t
+  substituteWorker s (Build t) = Build `liftM` substitute s t
 
-deconstructStreamType :: Type -> TypeEvalM (StreamType, [Type], Type)
+-- | Decompose a stream type into its shape and contents
+deconstructStreamType :: Type -> TypeEvalM (StreamType, Type)
 deconstructStreamType ty = do
   ty' <- reduceToWhnf ty
   case fromVarApp ty' of
     Just (op, [arg])
-      | op `isPyonBuiltin` The_Sequence -> return (SequenceType, [], arg)
+      | op `isPyonBuiltin` The_Sequence -> return (SequenceType, arg)
 
     Just (op, [shape_arg, arg])
       | op `isPyonBuiltin` The_view -> do
           shp <- reduceToWhnf shape_arg
           case shp of
             VarT v
-              | v `isPyonBuiltin` The_dim0 -> return (ViewType 0, [], arg)
-              | v `isPyonBuiltin` The_dim1 -> return (ViewType 1, [], arg)
-              | v `isPyonBuiltin` The_dim2 -> return (ViewType 2, [], arg)
+              | v `isPyonBuiltin` The_list_dim -> return (ListViewType, arg)
+              | v `isPyonBuiltin` The_dim0 -> return (ArrViewType 0, arg)
+              | v `isPyonBuiltin` The_dim1 -> return (ArrViewType 1, arg)
+              | v `isPyonBuiltin` The_dim2 -> return (ArrViewType 2, arg)
 
     -- Don't know how to handle other types
     _ -> internalError "deconstructStreamType"
 
-reconstructStreamType :: StreamType -> [Type] -> Type -> Type
-reconstructStreamType stream_type [] ty =
+reconstructStreamType :: StreamType -> Type -> Type
+reconstructStreamType stream_type ty =
   case stream_type
   of SequenceType ->
        varApp (pyonBuiltin The_Sequence) [ty]
-     ViewType n ->
-       let shape_arg =
-             case n
-             of 0 -> VarT $ pyonBuiltin The_dim0
-                1 -> VarT $ pyonBuiltin The_dim1
-                2 -> VarT $ pyonBuiltin The_dim2
-       in varApp (pyonBuiltin The_view) [shape_arg, ty]
+     ListViewType -> view_type (VarT $ pyonBuiltin The_list_dim)
+     ArrViewType n ->
+       view_type $!
+       case n
+       of 0 -> VarT $ pyonBuiltin The_dim0
+          1 -> VarT $ pyonBuiltin The_dim1
+          2 -> VarT $ pyonBuiltin The_dim2
+  where
+    view_type shape_arg = varApp (pyonBuiltin The_view) [shape_arg, ty]
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -473,10 +446,8 @@ pprParenList xs = parens $ sep $ punctuate (text ",") xs
 
 pprStreamType :: StreamType -> PrecDoc
 pprStreamType SequenceType = text "Sequence" `hasPrec` atomicPrec
-pprStreamType (ViewType n) = text "view" <> int n `hasPrec` atomicPrec
-pprStreamType (DArrType ts) =
-  let op = text "darr" <> int (length ts) `hasPrec` atomicPrec
-  in asApplication (op : map pprTypePrec ts)
+pprStreamType ListViewType = text "list_view" `hasPrec` atomicPrec
+pprStreamType (ArrViewType n) = text "view" <> int n `hasPrec` atomicPrec
 
 pprStreamOp :: StreamOp -> PrecDoc
 pprStreamOp op = asApplication $ pprStreamOp' op
@@ -506,29 +477,24 @@ pprStreamOp' (GenerateBindOp t) =
 pprStreamOp' (ReturnOp t) =
   nameApplication "return" [pprTypePrec t]
 
-pprStreamOp' (EmptyOp t) =
-  nameApplication "empty" [pprTypePrec t]
-
-pprStreamOp' (EmptyViewOp n t) =
-  nameApplication "empty_view" [int n `hasPrec` atomicPrec, pprTypePrec t]
+pprStreamOp' (EmptyOp st t) =
+  nameApplication "empty" [pprStreamType st, pprTypePrec t]
 
 pprStreamOp' (ConsumeOp st op) =
   let (name, tys) = case op
                     of Reduce ty -> ("reduce", [ty])
                        Reduce1 ty -> ("reduce1", [ty])
                        Fold in_ty acc_ty -> ("fold", [in_ty, acc_ty])
-                       Build ListType ty -> ("build_list", [ty])
-                       Build ArrayType ty -> ("build_array", [ty])
+                       Build ty -> ("build", [ty])
   in nameApplication name (pprStreamType st : map pprTypePrec tys)
 
 pprExpSPrec :: ExpS -> PrecDoc  
 pprExpSPrec expression = 
   case expression
   of OtherSE e -> pprExpPrec e
-     OpSE _ op shape_args repr_args misc_args stream_args ret_arg ->
+     OpSE _ op repr_args misc_args stream_args ret_arg ->
        let arg_group xs = braces (sep $ map pprExp xs) `hasPrec` atomicPrec
        in asApplication $ pprStreamOp' op ++
-                          arg_group shape_args :
                           arg_group repr_args :
                           arg_group misc_args :
                           map pprExpSPrec stream_args ++
@@ -541,8 +507,8 @@ pprExpSPrec expression =
      CaseSE _ scr alts ->
        text "case" <+> pprExp scr $$
        text "of" <+> vcat (map pprAltS alts) `hasPrec` stmtPrec
-     ExceptSE _ st shape ty ->
-       asApplication $ nameApplication "except" (pprStreamType st : map pprTypePrec (shape ++ [ty]))
+     ExceptSE _ st ty ->
+       asApplication $ nameApplication "except" [pprStreamType st, pprTypePrec ty]
 
 pprAltS :: AltS -> Doc
 pprAltS (AltS (Alt decon params body)) =
@@ -566,17 +532,24 @@ pprExpS e = pprExpSPrec e ? outerPrec
 -------------------------------------------------------------------------------
 -- Converting ordinary expressions to stream expressions
 
-numShapeIndices pst =
-  case pst
-  of PolySequenceType -> 0
-     PolyViewType _ -> 0
-     PolyDArrType n -> n
+interpretViewShape :: Type -> TypeEvalM (Maybe StreamType)
+interpretViewShape ty = do
+  ty' <- reduceToWhnf ty
+  case ty' of
+    VarT v
+      | v `isPyonBuiltin` The_list_dim ->
+          return $ Just ListViewType
+      | v `isPyonBuiltin` The_dim1 ->
+          return $ Just (ArrViewType 1)
+      | v `isPyonBuiltin` The_dim2 ->
+          return $ Just (ArrViewType 2)
+    _ -> return Nothing
 
-takeShapeIndices :: PolyStreamType -> [Type] -> Maybe ([Type], [Type])
-takeShapeIndices pst tys = breakAt (numShapeIndices pst) tys
-
-takeShapeArguments :: PolyStreamType -> [ExpM] -> Maybe ([ExpM], [ExpM])
-takeShapeArguments pst tys = breakAt (numShapeIndices pst) tys
+interpretViewShape' :: Type -> TypeEvalM StreamType
+interpretViewShape' ty = interpretViewShape ty >>= check
+  where
+    check Nothing  = internalError "interpretViewShape': Unrecognized type"
+    check (Just t) = return t
 
 data StreamOpInterpreter =
   StreamOpInterpreter
@@ -588,116 +561,173 @@ streamOpTable :: IntMap.IntMap StreamOpInterpreter
 streamOpTable =
   IntMap.fromList [(fromIdent $ varID v, f) | (v, f) <- list]
   where
-    list = [ {- (pyonBuiltin The_view1_generate, interpretGen (PolyViewType 1))
-           , (pyonBuiltin The_view1_map, interpretZip (PolyViewType 1) 1)
-           , (pyonBuiltin The_view1_zipWith, interpretZip (PolyViewType 1) 2)
-           , (pyonBuiltin The_view1_zipWith3, interpretZip (PolyViewType 1) 3)
-           , (pyonBuiltin The_view1_zipWith4, interpretZip (PolyViewType 1) 4)
-           , (pyonBuiltin The_view1_reduce, interpretReduce (PolyViewType 1))
-           , (pyonBuiltin The_view1_reduce1, interpretReduce1 (PolyViewType 1))
-           , (pyonBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
-           , (pyonBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
-           , (pyonBuiltin The_view1_empty, interpretEmptyView)
-           , (pyonBuiltin The_Sequence_generate, interpretGen PolySequenceType)
-           , (pyonBuiltin The_Sequence_map, interpretZip PolySequenceType 1)
-           , (pyonBuiltin The_Sequence_zipWith, interpretZip PolySequenceType 2)
-           , (pyonBuiltin The_Sequence_zipWith3, interpretZip PolySequenceType 3)
-           , (pyonBuiltin The_Sequence_zipWith4, interpretZip PolySequenceType 4)
+    list = [ (pyonBuiltin The_reduce_list_dim, interpretReduce ListViewType)
+           , (pyonBuiltin The_reduce1_list_dim, interpretReduce1 ListViewType)
+           , (pyonBuiltin The_Sequence_reduce, interpretReduce SequenceType)
+           , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 SequenceType)
+           , (pyonBuiltin The_Sequence_generate, interpretSequenceGenerate)
+           , (pyonBuiltin The_Sequence_map, interpretSequenceZip 1)
+           , (pyonBuiltin The_Sequence_zipWith, interpretSequenceZip 2)
+           , (pyonBuiltin The_Sequence_zipWith3, interpretSequenceZip 3)
+           , (pyonBuiltin The_Sequence_zipWith4, interpretSequenceZip 4)
+           , (pyonBuiltin The_viewToSequence, interpretToSequence ListViewType)
            , (pyonBuiltin The_Sequence_bind, interpretBind)
            , (pyonBuiltin The_Sequence_generate_bind, interpretGenerateBind)
            , (pyonBuiltin The_Sequence_return, interpretReturn)
-           , (pyonBuiltin The_Sequence_empty, interpretEmpty)
-           , (pyonBuiltin The_Sequence_reduce, interpretReduce PolySequenceType)
-           , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 PolySequenceType)
+           , (pyonBuiltin The_Sequence_empty, interpretEmpty SequenceType)
+             {-, (pyonBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
+           , (pyonBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
+           , (pyonBuiltin The_view1_empty, interpretEmptyView)
            , (pyonBuiltin The_Sequence_array1_build, interpretBuild PolySequenceType ArrayType)
-           , (pyonBuiltin The_Sequence_list_build, interpretBuild PolySequenceType ListType)
-           , (pyonBuiltin The_viewToSequence, interpretToSequence (PolyViewType 1)) -}
+           , (pyonBuiltin The_Sequence_list_build, interpretBuild PolySequenceType ListType) -}
            ]
 
-interpretGen stream_type = StreamOpInterpreter check_arity interpret
+-- | Overloaded view operations
+viewOpTable :: IntMap.IntMap StreamOpInterpreter
+viewOpTable =
+  IntMap.fromList [(fromIdent $ varID v, f) | (v, f) <- list]
+  where
+    list = [ (pyonBuiltin The_view_generate, interpretViewGenerate)
+           , (pyonBuiltin The_view_map, interpretViewZip 1)
+           , (pyonBuiltin The_view_zipWith, interpretViewZip 2)
+           , (pyonBuiltin The_view_zipWith3, interpretViewZip 3)
+           , (pyonBuiltin The_view_zipWith4, interpretViewZip 4)
+           ]
+
+interpretViewGenerate = StreamOpInterpreter check_arity interpret
+  where
+    check_arity ty_args args = ty_args == 2 && args == 4
+    
+    interpret inf ty_args args = do
+      let [stream_shape, ty] = ty_args
+          [shape_dict, repr, dom, f] = args
+      sh <- interpretViewShape' stream_shape
+      let op = GenerateOp sh ty
+      return $ OpSE inf op [repr] [dom, f] [] Nothing
+
+interpretSequenceGenerate = StreamOpInterpreter check_arity interpret
+  where
+    check_arity ty_args args = ty_args == 1 && args == 3
+    
+    interpret inf ty_args args = do
+      let [ty] = ty_args
+          [repr, dom, f] = args
+      let op = GenerateOp SequenceType ty
+      return $ OpSE inf op [repr] [dom, f] [] Nothing
+
+interpretSequenceZip n_inputs = StreamOpInterpreter check_arity interpret
   where
     check_arity ty_args args = ty_args == n_ty_args && args == n_args
 
     interpret inf ty_args args = do
-      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
-          Just (shape_args, args') = takeShapeArguments stream_type args
-          [output_type] = ty_args'
-          [repr, shape, generator] = args'
-          op = GenerateOp (applyShapeIndices shape_indices stream_type)
-               output_type
-      return $ OpSE inf op shape_args [repr] [shape, generator] [] Nothing
+      let input_types = init ty_args
+          output_type = last ty_args
+          Just (repr_args, transformer : inputs) = breakAt (1 + n_inputs) args
+      let op = ZipOp SequenceType input_types output_type
+      stream_exps <- mapM interpretStreamSubExp inputs
+      return $ OpSE inf op repr_args [transformer] stream_exps Nothing
+    
+    n_ty_args = n_inputs + 1
+    n_args = 2 * n_inputs + 2
 
-    n_shape_indices = numShapeIndices stream_type
-    n_ty_args = n_shape_indices + 1
-    n_args = n_shape_indices + 3
-       
-interpretZip stream_type n_inputs = StreamOpInterpreter check_arity interpret 
+interpretViewZip n_inputs = StreamOpInterpreter check_arity interpret
   where
     check_arity ty_args args = ty_args == n_ty_args && args == n_args
     
     interpret inf ty_args args = do
-      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
-          Just (shape_args, args') = takeShapeArguments stream_type args
-          Just (repr_args, transformer : inputs) = breakAt (1 + n_inputs) args
+      let (stream_shape : ty_args') = ty_args
           input_types = init ty_args'
           output_type = last ty_args'
-          op = ZipOp (applyShapeIndices shape_indices stream_type)
-               input_types output_type
-
+          (shape_dict_arg : args') = args
+          Just (repr_args, transformer : inputs) = breakAt (1 + n_inputs) args'
+      sh <- interpretViewShape' stream_shape
+      let op = ZipOp sh input_types output_type
       stream_exps <- mapM interpretStreamSubExp inputs
-      return $ OpSE inf op shape_args repr_args [transformer] stream_exps Nothing
-
-    n_shape_indices = numShapeIndices stream_type
-    n_ty_args = n_shape_indices + n_inputs + 1
-    n_args = n_shape_indices + 2 * n_inputs + 2
+      return $ OpSE inf op repr_args [transformer] stream_exps Nothing
+    
+    n_ty_args = n_inputs + 2
+    n_args = 2 * n_inputs + 3
 
 interpretReduce stream_type = StreamOpInterpreter check_arity interpret
   where
     -- There is one optional argument for the output pointer
-    check_arity ty_args args =
-      ty_args == n_ty_args && (args == n_args || args == n_args + 1)
+    check_arity ty_args args = ty_args == 1 && (args == 4 || args == 5)
 
     interpret inf ty_args args = do
-      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
-          Just (shape_args, args') = takeShapeArguments stream_type args
-          [ty] = ty_args'
-          repr : reducer : init : source : args'' = args'
-          maybe_return_arg = case args''
+      let [ty] = ty_args
+          repr : reducer : init : source : other_args = args
+          maybe_return_arg = case other_args
                              of [] -> Nothing
                                 [x] -> Just x
-          op = ConsumeOp (applyShapeIndices shape_indices stream_type)
-               (Reduce ty)
+          op = ConsumeOp stream_type (Reduce ty)
 
       stream_exp <- interpretStreamSubExp source
-      return $ OpSE inf op shape_args [repr] [reducer, init] [stream_exp] maybe_return_arg
-
-    n_shape_indices = numShapeIndices stream_type
-    n_ty_args = n_shape_indices + 1
-    n_args = n_shape_indices + 4
+      return $ OpSE inf op [repr] [reducer, init] [stream_exp] maybe_return_arg
 
 interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
   where
     -- There is one optional argument for the output pointer
     check_arity ty_args args =
-      ty_args == n_ty_args && (args == n_args || args == n_args + 1)
+      ty_args == 1 && (args == 3 || args == 4)
 
     interpret inf ty_args args = do
-      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
-          Just (shape_args, args') = takeShapeArguments stream_type args
-          [ty] = ty_args'
-          repr : reducer : source : args'' = args'
-          maybe_return_arg = case args''
+      let [ty] = ty_args
+          repr : reducer : source : other_args = args
+          maybe_return_arg = case other_args
                              of [] -> Nothing
                                 [x] -> Just x
-          op = ConsumeOp (applyShapeIndices shape_indices stream_type)
-               (Reduce1 ty)
+          op = ConsumeOp stream_type (Reduce1 ty)
 
       stream_exp <- interpretStreamSubExp source
-      return $ OpSE inf op shape_args [repr] [reducer] [stream_exp] maybe_return_arg
+      return $ OpSE inf op [repr] [reducer] [stream_exp] maybe_return_arg
 
-    n_shape_indices = numShapeIndices stream_type
-    n_ty_args = n_shape_indices + 1
-    n_args = n_shape_indices + 3
+interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
+  where
+    check_arity ty_args args = ty_args == 1 && args == 2
+    
+    interpret inf ty_args args = do
+      let [ty] = ty_args
+          [repr, src] = args
+          op = ToSequenceOp stream_type ty
+      src_stream <- interpretStreamSubExp src
+      return $ OpSE inf op [repr] [] [src_stream] Nothing
+
+interpretBind = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 2 3 = True
+    check_arity _ _ = False
+    
+    interpret inf [t1, t2] [repr, producer, transformer] = do
+      producer' <- interpretStreamSubExp producer
+      transformer' <- interpretStreamSubExp transformer
+      return $ OpSE inf (BindOp t1 t2) [repr] [] [producer', transformer'] Nothing
+
+interpretGenerateBind = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 2 = True
+    check_arity _ _ = False
+    
+    interpret inf [t] [shape, transformer] = do
+      transformer' <- interpretStreamSubExp transformer
+      return $ OpSE inf (GenerateBindOp t) [] [shape] [transformer'] Nothing
+
+interpretReturn = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 2 = True
+    check_arity _ _ = False
+    
+    interpret inf [ty] [repr, gen] = do
+      return $ OpSE inf (ReturnOp ty) [repr] [gen] [] Nothing
+
+interpretEmpty stream_type = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 1 = True
+    check_arity _ _ = False
+    
+    interpret inf [ty] [repr] = do
+      return $ OpSE inf (EmptyOp stream_type ty) [repr] [] [] Nothing
+
+{-
 
 interpretBuild stream_type container_type =
   StreamOpInterpreter check_arity interpret
@@ -724,55 +754,6 @@ interpretBuild stream_type container_type =
     n_ty_args = n_shape_indices + 1
     n_args = n_shape_indices + 2
 
-interpretBind = StreamOpInterpreter check_arity interpret
-  where
-    check_arity 2 3 = True
-    check_arity _ _ = False
-    
-    interpret inf [t1, t2] [repr, producer, transformer] = do
-      producer' <- interpretStreamSubExp producer
-      transformer' <- interpretStreamSubExp transformer
-      return $ OpSE inf (BindOp t1 t2) [] [repr] [] [producer', transformer'] Nothing
-
-interpretGenerateBind = StreamOpInterpreter check_arity interpret
-  where
-    check_arity 1 2 = True
-    check_arity _ _ = False
-    
-    interpret inf [t] [shape, transformer] = do
-      transformer' <- interpretStreamSubExp transformer
-      return $ OpSE inf (GenerateBindOp t) [] [] [shape] [transformer'] Nothing
-
-interpretReturn = StreamOpInterpreter check_arity interpret
-  where
-    check_arity 1 2 = True
-    check_arity _ _ = False
-    
-    interpret inf [ty] [repr, gen] = do
-      return $ OpSE inf (ReturnOp ty) [] [repr] [gen] [] Nothing
-
-interpretEmpty = StreamOpInterpreter check_arity interpret
-  where
-    check_arity 1 0 = True
-    check_arity _ _ = False
-    
-    interpret inf [ty] [] = do
-      return $ OpSE inf (EmptyOp ty) [] [] [] [] Nothing
-
-interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
-  where
-    check_arity ty_args args =
-      ty_args == 1 + n_shape_indices && args == 2 + n_shape_indices
-    
-    interpret inf ty_args args = do
-      let Just (shape_indices, [ty]) = takeShapeIndices stream_type ty_args
-          Just (shape_args, [repr, src]) = takeShapeArguments stream_type args
-          op = ToSequenceOp (applyShapeIndices shape_indices stream_type) ty
-      src_stream <- interpretStreamSubExp src
-      return $ OpSE inf op shape_args [repr] [] [src_stream] Nothing
-
-    n_shape_indices = numShapeIndices stream_type
-
 interpretEmptyView = StreamOpInterpreter check_arity interpret
   where
     check_arity 1 1 = True
@@ -780,15 +761,21 @@ interpretEmptyView = StreamOpInterpreter check_arity interpret
     
     interpret inf [ty] [repr] = do
       return $ OpSE inf (EmptyViewOp 1 ty) [] [repr] [] [] Nothing
+-}
 
 interpretStreamSubExp :: ExpM -> TypeEvalM ExpS
 interpretStreamSubExp expression =
   case fromExpM expression of
-    AppE inf (ExpM (VarE _ op_var)) ty_args args ->
-      interpret_app inf op_var ty_args args
-    AppE {} ->
-      embed_expression
-    VarE inf op_var -> interpret_app inf op_var [] []
+    AppE inf op ty_args args -> do
+      interpreted <- interpretStreamAppExp inf op ty_args args
+      case interpreted of
+        Just e  -> return e
+        Nothing -> embed_expression
+    VarE inf op_var -> do
+      interpreted <- interpretStreamAppExp inf expression [] []
+      case interpreted of
+        Just e  -> return e
+        Nothing -> embed_expression
     LamE inf f -> do
       liftM (LamSE inf) $ interpretStreamFun f
     LetE inf pat rhs body -> do
@@ -798,18 +785,11 @@ interpretStreamSubExp expression =
       alts' <- mapM interpretStreamAlt alts
       return $ CaseSE inf scr alts'
     ExceptE inf ty -> do
-      (stream_type, shape_types, element_type) <- deconstructStreamType ty
-      return $ ExceptSE inf stream_type shape_types element_type
+      (stream_type, element_type) <- deconstructStreamType ty
+      return $ ExceptSE inf stream_type element_type
     _ -> embed_expression
   where
     embed_expression = return $ OtherSE expression
-
-    interpret_app inf op_var ty_args args
-      | Just interpreter <-
-          IntMap.lookup (fromIdent $ varID op_var) streamOpTable,
-        checkArity interpreter (length ty_args) (length args) =
-          interpretOp interpreter inf ty_args args
-      | otherwise = embed_expression
 
 interpretStreamFun :: FunM -> TypeEvalM FunS
 interpretStreamFun (FunM fun) =
@@ -831,127 +811,152 @@ interpretStreamAlt (AltM alt) =
 
 -- | Interpret a stream expression that is a function application.
 --   If the expression can't be interpeted as a stream, return Nothing.
-interpretStreamAppExp :: ExpInfo -> Var -> [Type] -> [ExpM]
+interpretStreamAppExp :: ExpInfo -> ExpM -> [Type] -> [ExpM]
                       -> TypeEvalM (Maybe ExpS)
 interpretStreamAppExp inf op ty_args args =
-  case IntMap.lookup (fromIdent $ varID op) streamOpTable 
-  of Just interpreter | checkArity interpreter (length ty_args) (length args) ->
-       liftM Just $ interpretOp interpreter inf ty_args args
+  case op
+  of -- Match a known function call
+     ExpM (VarE _ op_var) ->
+       case IntMap.lookup (fromIdent $ varID op_var) streamOpTable 
+       of Just interpreter
+            | checkArity interpreter (length ty_args) (length args) ->
+                liftM Just $ interpretOp interpreter inf ty_args args
+          _ -> return Nothing
+
+     -- Match a shape-polymorphic function call.  The operator is a function
+     -- application term.
+     (unpackVarAppM -> Just (op_var, [ty_arg], [arg])) ->
+       case IntMap.lookup (fromIdent $ varID op_var) viewOpTable 
+       of Just interpreter
+            | checkArity interpreter (1 + length ty_args) (1 + length args) ->
+                liftM Just $
+                interpretOp interpreter inf (ty_arg : ty_args) (arg : args)
+          _ -> return Nothing
+
      _ -> return Nothing
 
 -- | Interpret a stream expression that is a function application.
 --   If the expression can't be interpeted as a stream, return Nothing.
-isStreamAppExp :: Var -> [Type] -> [ExpSM] -> Bool
-isStreamAppExp op_var tys args =
-  case IntMap.lookup (fromIdent $ varID op_var) streamOpTable
-  of Nothing -> False
-     Just interpreter -> checkArity interpreter (length tys) (length args)
+isStreamAppExp :: ExpM -> [Type] -> [ExpSM] -> Bool
+isStreamAppExp op tys args =
+  case op
+  of -- Match a known function call
+     ExpM (VarE _ op_var) ->
+       case IntMap.lookup (fromIdent $ varID op_var) streamOpTable
+       of Nothing -> False
+          Just interpreter -> checkArity interpreter (length tys) (length args)
+
+     -- Match a shape-polymorphic function call.  The operator is a function
+     -- application term.
+     (unpackVarAppM -> Just (op_var, ty_arg, arg)) ->
+       case IntMap.lookup (fromIdent $ varID op_var) viewOpTable 
+       of Just interpreter ->
+            checkArity interpreter (1 + length tys) (1 + length args)
+          Nothing -> False
+
+     _ -> False
 
 -------------------------------------------------------------------------------
 -- Convert a stream expression to a System F expression
 
+-- | Instantiate a shape-polymorphic view operation
+embedViewOp :: Var -> StreamType -> ExpM
+embedViewOp op stream_type =
+  let (shape, dict) =
+        case stream_type
+        of ListViewType -> (pyonBuiltin The_list_dim,
+                            pyonBuiltin The_ShapeDict_list_dim)
+           ArrViewType 1 -> (pyonBuiltin The_dim1,
+                             pyonBuiltin The_ShapeDict_dim1)
+           ArrViewType 2 -> (pyonBuiltin The_dim2,
+                             pyonBuiltin The_ShapeDict_dim2)
+  in appE' (varE' op) [VarT shape] [varE' dict]
+
 -- | Convert a stream operator to a function and set of type parameters
-embedOp :: StreamOp -> (Var, [Type])
+embedOp :: StreamOp -> (ExpM, [Type])
 embedOp (GenerateOp stream_type output_type) = let
   op = case stream_type
-       of SequenceType -> pyonBuiltin The_Sequence_generate
-          -- ViewType 1 -> pyonBuiltin The_view1_generate
-  in (op, extractShapeIndices stream_type ++ [output_type])
+       of SequenceType -> varE' (pyonBuiltin The_Sequence_generate)
+          ListViewType -> view_op
+          ArrViewType _ -> view_op
+
+  view_op = embedViewOp (pyonBuiltin The_view_generate) stream_type
+  in (op, [output_type])
 
 embedOp (ZipOp stream_type input_types output_type) = let
   n_input_types = length input_types
   op = case stream_type
        of SequenceType ->
             case n_input_types
-            of 1 -> pyonBuiltin The_Sequence_map
-               2 -> pyonBuiltin The_Sequence_zipWith
-               3 -> pyonBuiltin The_Sequence_zipWith3
-               4 -> pyonBuiltin The_Sequence_zipWith4
-          {- ViewType 1 ->
-            case n_input_types
-            of 1 -> pyonBuiltin The_view1_map
-               2 -> pyonBuiltin The_view1_zipWith
-               3 -> pyonBuiltin The_view1_zipWith3
-               4 -> pyonBuiltin The_view1_zipWith4
-          ViewType 2 ->
-            case n_input_types
-            of 1 -> pyonBuiltin The_view2_map
-               2 -> pyonBuiltin The_view2_zipWith
-               3 -> pyonBuiltin The_view2_zipWith3
-               4 -> pyonBuiltin The_view2_zipWith4
-          DArrType [_] ->
-            case n_input_types
-            of 1 -> pyonBuiltin The_darr1_map
-               2 -> pyonBuiltin The_darr1_zipWith
-               3 -> pyonBuiltin The_darr1_zipWith3
-               4 -> pyonBuiltin The_darr1_zipWith4
-          DArrType [_, _] ->
-            case n_input_types
-            of 1 -> pyonBuiltin The_darr2_map
-               2 -> pyonBuiltin The_darr2_zipWith
-               3 -> pyonBuiltin The_darr2_zipWith3
-               4 -> pyonBuiltin The_darr2_zipWith4-}
-  in (op, extractShapeIndices stream_type ++ input_types ++ [output_type])
+            of 1 -> varE' $ pyonBuiltin The_Sequence_map
+               2 -> varE' $ pyonBuiltin The_Sequence_zipWith
+               3 -> varE' $ pyonBuiltin The_Sequence_zipWith3
+               4 -> varE' $ pyonBuiltin The_Sequence_zipWith4
+          ListViewType -> view_op
+          ArrViewType _ -> view_op
+  view_op = 
+    let op = case n_input_types
+             of 1 -> pyonBuiltin The_view_map
+                2 -> pyonBuiltin The_view_zipWith
+                3 -> pyonBuiltin The_view_zipWith3
+                4 -> pyonBuiltin The_view_zipWith4
+    in embedViewOp op stream_type
+  in (op, input_types ++ [output_type])
 
 embedOp (ToSequenceOp st ty) =
   let op = case st
-           of ViewType 1 -> pyonBuiltin The_viewToSequence
-  in (op, extractShapeIndices st ++ [ty])
+           of ListViewType -> pyonBuiltin The_viewToSequence
+  in (varE' op, [ty])
 
 embedOp (ToView1Op st ty) =
   let op = case st
-           of ViewType 1 -> pyonBuiltin The_sequenceToView
-  in (op, extractShapeIndices st ++ [ty])
+           of SequenceType -> pyonBuiltin The_sequenceToView
+  in (varE' op, [ty])
 
 embedOp (ReturnOp ty) =
-  (pyonBuiltin The_Sequence_return, [ty])
+  (varE' $ pyonBuiltin The_Sequence_return, [ty])
 
-embedOp (EmptyOp ty) =
-  (pyonBuiltin The_Sequence_empty, [ty])
-
-embedOp (EmptyViewOp n ty) =
-  let op = case n
-           of 1 -> pyonBuiltin The_view1_empty
+embedOp (EmptyOp st ty) =
+  let op = case st
+           of SequenceType -> varE' $ pyonBuiltin The_Sequence_empty
+              ListViewType -> varE' $ pyonBuiltin The_empty_list_dim_view
   in (op, [ty])
 
 embedOp (BindOp t1 t2) =
-  (pyonBuiltin The_Sequence_bind, [t1, t2])
+  (varE' $ pyonBuiltin The_Sequence_bind, [t1, t2])
 
 embedOp (GenerateBindOp t) =
-  (pyonBuiltin The_Sequence_generate_bind, [t])
+  (varE' $ pyonBuiltin The_Sequence_generate_bind, [t])
 
 embedOp (ConsumeOp st (Reduce ty)) =
   let op = case st
            of SequenceType -> pyonBuiltin The_Sequence_reduce
-              ViewType 1 -> pyonBuiltin The_view1_reduce
-  in (op, extractShapeIndices st ++ [ty])
+              ListViewType -> pyonBuiltin The_reduce_list_dim
+              ArrViewType 1 -> pyonBuiltin The_reduce_dim1
+  in (varE' op, [ty])
 
 embedOp (ConsumeOp st (Reduce1 ty)) =
   let op = case st
            of SequenceType -> pyonBuiltin The_Sequence_reduce1
-              ViewType 1 -> pyonBuiltin The_view1_reduce1
-  in (op, extractShapeIndices st ++ [ty])
+              ListViewType -> pyonBuiltin The_reduce1_list_dim
+              ArrViewType 1 -> pyonBuiltin The_reduce1_dim1
+  in (varE' op, [ty])
 
-embedOp (ConsumeOp st (Build container_type ty)) =
+embedOp (ConsumeOp st (Build ty)) =
   let op = case st
-           of SequenceType ->
-                case container_type
-                of ListType -> pyonBuiltin The_Sequence_list_build
-                   -- ArrayType -> pyonBuiltin The_Sequence_array1_build
-              ViewType 1 ->
-                case container_type
-                of ListType -> pyonBuiltin The_view_list_build
-                   -- ArrayType -> pyonBuiltin The_view1_array1_build
-  in (op, extractShapeIndices st ++ [ty])
+           of SequenceType -> pyonBuiltin The_Sequence_list_build
+              ListViewType -> pyonBuiltin The_build_list_dim_list
+              ArrViewType 1 -> pyonBuiltin The_build_dim1_array
+  in (varE' op, [ty])
 
 embedStreamExp :: ExpS -> ExpM
 embedStreamExp expression =
   case expression
-  of OpSE inf op shape_args reprs misc_args streams ret_args ->
-       let (op_var, ty_args) = embedOp op
+  of OpSE inf op reprs misc_args streams ret_args ->
+       let (embedded_op, ty_args) = embedOp op
            stream_args = map embedStreamExp streams
-       in appE inf (ExpM $ VarE inf op_var) ty_args
-          (shape_args ++ reprs ++ misc_args ++ stream_args ++ maybeToList ret_args)
+       in appE inf embedded_op ty_args
+          (reprs ++ misc_args ++ stream_args ++ maybeToList ret_args)
      OtherSE e -> e
      LamSE inf f -> 
        ExpM $ LamE inf (embedStreamFun f)
@@ -959,8 +964,8 @@ embedStreamExp expression =
        ExpM $ LetE inf b rhs (embedStreamExp body)
      CaseSE inf scr alts ->
        ExpM $ CaseE inf scr (map embedStreamAlt alts)
-     ExceptSE inf stream_type shape_types element_type ->
-       let ty = reconstructStreamType stream_type shape_types element_type
+     ExceptSE inf stream_type element_type ->
+       let ty = reconstructStreamType stream_type element_type
        in ExpM $ ExceptE inf ty
 
 embedStreamFun (FunS f) =
@@ -1081,9 +1086,9 @@ simplifyExp input_expression = do
   case expression of
      -- Map operation: try to fuse with its producer
      OpSE inf op@(ZipOp st [in_type] out_type)
-       shape_args repr_args@[in_repr, out_repr] [f] [in_stream] Nothing -> do
+       repr_args@[in_repr, out_repr] [f] [in_stream] Nothing -> do
        (progress, e) <-
-         fuseMapWithProducer st shape_args in_type out_type in_repr out_repr f in_stream
+         fuseMapWithProducer st in_type out_type in_repr out_repr f in_stream
 
        -- If the expression was transformed, then re-simplify it.
        -- Otherwise, process subexpressions.
@@ -1092,7 +1097,7 @@ simplifyExp input_expression = do
          else simplify_subexpressions e
 
      -- Zip operation: if any argument is empty, the entire stream is empty
-     OpSE inf op@(ZipOp st _ out_type) _ reprs _ stream_args _ -> do
+     OpSE inf op@(ZipOp st _ out_type) reprs _ stream_args _ -> do
        let out_repr = last reprs
        stream_args' <- mapM simplifyExp stream_args
        if any isEmptyStream stream_args'
@@ -1101,7 +1106,7 @@ simplifyExp input_expression = do
 
      -- Convert to sequence: Try to replace the source stream with the
      -- equivalent sequence stream
-     OpSE inf op@(ToSequenceOp st ty) shape_args [repr] [] [s] Nothing -> do
+     OpSE inf op@(ToSequenceOp st ty) [repr] [] [s] Nothing -> do
        e <- convertToSequenceOp s
        case e of
          Just e' -> simplifyExp e'
@@ -1113,16 +1118,13 @@ simplifyExp input_expression = do
 
      -- Sequence bind: Try to fuse with 'generate'
      OpSE inf op@(BindOp producer_ty transformer_ty)
-       [] [repr] [] [producer, transformer] Nothing -> do
+       [repr] [] [producer, transformer] Nothing -> do
        simplifyBindOp inf op repr producer transformer
 
      _ -> simplify_subexpressions expression
   where
-    empty_stream inf SequenceType ty _ =
-      OpSE inf (EmptyOp ty) [] [] [] [] Nothing
-      
-    empty_stream inf (ViewType n) ty repr =
-      OpSE inf (EmptyViewOp n ty) [] [repr] [] [] Nothing
+    empty_stream inf shape ty repr =
+      OpSE inf (EmptyOp shape ty) [repr] [] [] Nothing
 
     simplify_subexpressions e =
       case e
@@ -1147,103 +1149,100 @@ simplifyStreamFun (FunS fun) =
     body <- simplifyExp $ funBody fun
     return $ FunS $ fun {funBody = body}
 
-fuseMapWithProducer :: StreamType -> [ExpM]
+fuseMapWithProducer :: StreamType
                     -> Type -> Type -> ExpM -> ExpM -> ExpM -> ExpS
                     -> TypeEvalM (Bool, ExpS)
-fuseMapWithProducer shape shape_args in_type ty in_repr repr map_f producer =
-  fuse_with_producer shape shape_args producer
+fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
+  fuse_with_producer shape producer
   where
-    fuse_with_producer :: StreamType -> [ExpM] -> ExpS -> TypeEvalM (Bool, ExpS)
-    fuse_with_producer shape shape_args producer =
+    fuse_with_producer :: StreamType -> ExpS -> TypeEvalM (Bool, ExpS)
+    fuse_with_producer shape producer =
       case producer
       of OpSE inf (GenerateOp st producer_ty)
-           shape_args [producer_repr] [dim, gen_f] [] Nothing -> do
+           [producer_repr] [dim, gen_f] [] Nothing -> do
            new_gen_f <- fuse_with_generator [streamIndexType st] producer_ty gen_f
 
-           progress $ OpSE inf (GenerateOp st ty) shape_args [repr] [dim, new_gen_f] [] Nothing
+           progress $ OpSE inf (GenerateOp st ty) [repr] [dim, new_gen_f] [] Nothing
 
          OpSE inf (ZipOp st zip_tys producer_ty)
-           shape_args zip_and_producer_reprs [zip_f] zip_streams Nothing -> do
+           zip_and_producer_reprs [zip_f] zip_streams Nothing -> do
            new_zip_f <- fuse_with_generator zip_tys producer_ty zip_f
            let zip_reprs = init zip_and_producer_reprs
 
-           progress $ OpSE inf (ZipOp st zip_tys ty) shape_args (zip_reprs ++ [repr]) [new_zip_f] zip_streams Nothing
+           progress $ OpSE inf (ZipOp st zip_tys ty) (zip_reprs ++ [repr]) [new_zip_f] zip_streams Nothing
 
          OpSE inf (BindOp producer_ty transformer_ty)
-           [] [producer_repr] [] [producer, transformer] Nothing -> do
+           [producer_repr] [] [producer, transformer] Nothing -> do
            -- Fuse with the transformer
            m_transformer <- runMaybeT $ freshenUnaryStreamFunction transformer
            case m_transformer of
              Just (var, s) -> do
-               (_, s') <- fuse_with_producer SequenceType [] s
+               (_, s') <- fuse_with_producer SequenceType s
                let return_type = varApp (pyonBuiltin The_Sequence) [ty]
-               progress $ OpSE inf (BindOp producer_ty ty) [] [producer_repr] []
+               progress $ OpSE inf (BindOp producer_ty ty) [producer_repr] []
                  [producer, mkUnaryStreamFunction defaultExpInfo var producer_ty
                             return_type s'] Nothing
              Nothing ->
-               build_map_expression shape shape_args producer
+               build_map_expression shape producer
 
          OpSE inf (GenerateBindOp transformer_ty)
-           [] [] [shp] [transformer] Nothing -> do
+           [] [shp] [transformer] Nothing -> do
            -- Fuse with the transformer
            m_transformer <- runMaybeT $ freshenUnaryStreamFunction transformer
            case m_transformer of
              Just (var, s) -> do
-               (_, s') <- fuse_with_producer SequenceType [] s
+               (_, s') <- fuse_with_producer SequenceType s
                let stored_int_type =
                      varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
                    return_type = varApp (pyonBuiltin The_Sequence) [ty]
-               progress $ OpSE inf (GenerateBindOp ty) [] [] [shp]
+               progress $ OpSE inf (GenerateBindOp ty) [] [shp]
                  [mkUnaryStreamFunction defaultExpInfo var stored_int_type return_type s'] Nothing
              Nothing ->
-               build_map_expression shape shape_args producer
+               build_map_expression shape producer
 
-         OpSE inf (EmptyOp _) [] [] [] [] Nothing -> 
-           progress $ OpSE inf (EmptyOp ty) [] [] [] [] Nothing
+         OpSE inf (EmptyOp st _) [_] [] [] Nothing -> 
+           progress $ OpSE inf (EmptyOp st ty) [repr] [] [] Nothing
 
-         OpSE inf (EmptyViewOp n _) [] [_] [] [] Nothing -> 
-           progress $ OpSE inf (EmptyViewOp n ty) [] [repr] [] [] Nothing
-
-         OpSE inf (ToSequenceOp st _) shape_args [_] [] [s] Nothing -> do
-           (_, s') <- fuse_with_producer st shape_args s
-           progress $ OpSE inf (ToSequenceOp st ty) shape_args [repr] [] [s'] Nothing
+         OpSE inf (ToSequenceOp st _) [_] [] [s] Nothing -> do
+           (_, s') <- fuse_with_producer st s
+           progress $ OpSE inf (ToSequenceOp st ty) [repr] [] [s'] Nothing
 
          LetSE inf pat rhs body -> do
            (_, body') <- assumePatM pat $
-                         fuse_with_producer shape shape_args body
+                         fuse_with_producer shape body
            progress $ LetSE inf pat rhs body'
 
          LetfunSE inf defs body -> do
            (_, (_, body')) <- assumeDefGroup defs (return ()) $
-                              fuse_with_producer shape shape_args body
+                              fuse_with_producer shape body
            progress $ LetfunSE inf defs body'
          
          CaseSE inf scr alts -> do
            (progress_list, alts') <-
-             mapAndUnzipM (fuse_with_alt shape shape_args) alts
+             mapAndUnzipM (fuse_with_alt shape) alts
 
            -- If any case alternatives introduced the potential for further
            -- optimization, then keep the change.
            -- Otherwise, leave the expression where it is.
            if or progress_list
              then progress $ CaseSE inf scr alts'
-             else build_map_expression shape shape_args producer
+             else build_map_expression shape producer
 
-         ExceptSE inf stream_type shape_types _ ->
+         ExceptSE inf stream_type _ ->
            -- Return type of the exception statement is changed
-           progress $ ExceptSE inf stream_type shape_types ty
+           progress $ ExceptSE inf stream_type ty
 
-         _ -> build_map_expression shape shape_args producer
+         _ -> build_map_expression shape producer
 
-    build_map_expression shape shape_args producer =
+    build_map_expression shape producer =
       no_progress $ OpSE defaultExpInfo (ZipOp shape [in_type] ty)
-      shape_args [in_repr, repr] [map_f] [producer] Nothing
+      [in_repr, repr] [map_f] [producer] Nothing
 
-    fuse_with_alt shape shape_args alt = do 
+    fuse_with_alt shape alt = do 
       AltS (Alt decon params body) <- freshen alt
       (b, body') <- assumeBinders (deConExTypes decon) $
                     assumePatMs (map fromPatS params) $
-                    fuse_with_producer shape shape_args body
+                    fuse_with_producer shape body
       return (b, AltS $ Alt decon params body')
 
     -- Fuse with generator function
@@ -1258,8 +1257,8 @@ fuseMapWithProducer shape shape_args in_type ty in_repr repr map_f producer =
           let arg_value_vars = init args
               out_ptr = last args
           in localE producer_ty
-             (appExp (return gen_f) [] (map varE arg_value_vars)) $ \x ->
-             appExp (return map_f') [] [varE x, varE out_ptr])
+             (appExp (return gen_f) [] (map mkVarE arg_value_vars)) $ \x ->
+             appExp (return map_f') [] [mkVarE x, mkVarE out_ptr])
 
     progress x = return (True, x)
     no_progress x = return (False, x)
@@ -1269,12 +1268,12 @@ fuseMapWithProducer shape shape_args in_type ty in_repr repr map_f producer =
 convertToSequenceOp :: ExpS -> TypeEvalM (Maybe ExpS)
 convertToSequenceOp expression =
   case expression
-  of OpSE inf (GenerateOp st ty) _ repr_args misc_args [] Nothing ->
+  of OpSE inf (GenerateOp st ty) repr_args misc_args [] Nothing ->
        case st
-       of ViewType 1 ->
-            -- Convert view1_generate to Sequence_Generate
+       of ListViewType ->
+            -- Convert view_generate to Sequence_Generate
             return $ Just $
-            OpSE inf (GenerateOp SequenceType ty) [] repr_args misc_args [] Nothing
+            OpSE inf (GenerateOp SequenceType ty) repr_args misc_args [] Nothing
           _ -> return Nothing
      _ -> return Nothing
 
@@ -1283,7 +1282,7 @@ simplifyBindOp :: ExpInfo -> StreamOp -> ExpM -> ExpS -> ExpS
 simplifyBindOp inf bind_op@(BindOp producer_ty transformer_ty) repr producer transformer = do
   producer' <- simplifyExp producer
   case producer' of
-    OpSE _ (GenerateOp SequenceType _) [] [_] [shp, gen_f] [] Nothing -> do
+    OpSE _ (GenerateOp SequenceType _) [_] [shp, gen_f] [] Nothing -> do
       -- Fuse the bind and generate operations together
       m_transformer <- runMaybeT $ freshenUnaryStreamFunction transformer
       case m_transformer of
@@ -1302,16 +1301,16 @@ simplifyBindOp inf bind_op@(BindOp producer_ty transformer_ty) repr producer tra
           let new_transformer =
                 fuse_bind_generate gen_f ix_var transformer_var transformer_body'
           return $ OpSE inf (GenerateBindOp transformer_ty)
-            [] [] [shp] [new_transformer] Nothing
+            [] [shp] [new_transformer] Nothing
 
     _ | isEmptyStream producer' ->
-      return $ OpSE inf (EmptyOp transformer_ty) [] [] [] [] Nothing
+      return $ OpSE inf (EmptyOp SequenceType transformer_ty) [] [] [] Nothing
 
     _ -> simplify_subexpressions producer'
   where
     simplify_subexpressions producer' = do
       transformer' <- simplifyStreamExp transformer
-      return $ OpSE inf bind_op [] [repr] [] [producer', transformer'] Nothing
+      return $ OpSE inf bind_op [repr] [] [producer', transformer'] Nothing
 
     fuse_bind_generate gen_f ix_var trans_var trans_body = let
       index_type = varApp (pyonBuiltin The_index) [VarT $ pyonBuiltin The_dim1]
@@ -1327,12 +1326,11 @@ simplifyBindOp inf bind_op@(BindOp producer_ty transformer_ty) repr producer tra
 
 -- | Check whether the given expression is an empty stream.
 --
---   We look through stream expressions, but not through function calls.
+ --   We look through stream expressions, but not through function calls.
 --   If a stream function call is equivalent to the empty stream, that should
 --   be detected when the function call is transformed (not here).
 isEmptyStream :: ExpS -> Bool
-isEmptyStream (OpSE {sexpOp = EmptyOp _}) = True
-isEmptyStream (OpSE {sexpOp = EmptyViewOp _ _}) = True
+isEmptyStream (OpSE {sexpOp = EmptyOp _ _}) = True
 isEmptyStream (LetSE {sexpBody = s}) = isEmptyStream s
 isEmptyStream (LetfunSE {sexpBody = s}) = isEmptyStream s
 isEmptyStream (CaseSE {sexpAlternatives = [AltS (Alt _ _ s)]}) = isEmptyStream s
@@ -1346,7 +1344,7 @@ isEmptyStream _ = False
 sequentializeStreamExp :: ExpS -> TypeEvalM (Maybe ExpM)
 sequentializeStreamExp expression =
   case expression
-  of OpSE inf (ConsumeOp st op) shape_args repr_args misc_args [src] ret_arg ->
+  of OpSE inf (ConsumeOp st op) repr_args misc_args [src] ret_arg ->
        case op
        of Reduce ty -> runMaybeT $ do
             let [reducer, init] = misc_args
@@ -1381,41 +1379,41 @@ sequentializeFold :: Type       -- ^ Accumulator type
                   -> MaybeT TypeEvalM ExpM
 sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
   case source
-  of OpSE inf (GenerateOp _ _) _ _ [shape, f] [] Nothing -> do
+  of OpSE inf (GenerateOp _ _) _ [shape, f] [] Nothing -> do
        -- Create a @for@ loop
        tenv <- getTypeEnv
-       varAppE (pyonBuiltin The_dim1_fold)
+       varAppE (pyonBuiltin The_primitive_list_dim_fold)
          [acc_ty]
-         [varE acc_repr_var,
+         [mkVarE acc_repr_var,
           return shape,
           lamE $ mkFun []
           (\ [] -> return ([stored_int_type, acc_ty, outType acc_ty],
                            initEffectType acc_ty))
           (\ [] [i_var, a_var, r_var] ->
             -- > let x = f i in combiner acc x ret
-            localE acc_ty (appExp (return f) [] [varE i_var]) $ \x_var ->
-            appExp (return combiner) [] [varE a_var, varE x_var, varE r_var]),
+            localE acc_ty (appExp (return f) [] [mkVarE i_var]) $ \x_var ->
+            return $ appE' combiner [] [varE' a_var, varE' x_var, varE' r_var]),
         return acc]
 
      -- Sequentialize 'map'
-     OpSE inf (ZipOp _ [in_ty] _) _ [in_repr, _] [zip_f] [in_stream] Nothing -> do
+     OpSE inf (ZipOp _ [in_ty] _) [in_repr, _] [zip_f] [in_stream] Nothing -> do
        -- Apply the function to whatever 'in_stream' returns.
        map_combiner <-
          lamE $ mkFun []
          (\ [] -> return ([acc_ty, in_ty, outType acc_ty], initEffectType acc_ty))
          (\ [] [acc_var, in_var, r_var] ->
-             localE a_ty (appExp (return zip_f) [] [varE in_var]) $ \x_var ->
-             appExp (return combiner) [] [varE acc_var, varE x_var, varE r_var])
+             localE a_ty (appExp (return zip_f) [] [mkVarE in_var]) $ \x_var ->
+             return $ appE' combiner [] [varE' acc_var, varE' x_var, varE' r_var])
        sequentializeFold acc_ty in_ty acc_repr_var in_repr acc map_combiner in_stream
 
-     OpSE inf (ReturnOp _) _ _ [w] [] Nothing ->
+     OpSE inf (ReturnOp _) _ [w] [] Nothing ->
        -- Accumulate the written value
        localE a_ty (return w) $ \x_var ->
-       appExp (return combiner) [] [return acc, varE x_var]
-     OpSE inf (EmptyOp _) _ _ _ [] Nothing ->
+       return $ appE' combiner [] [acc, varE' x_var]
+     OpSE inf (EmptyOp _ _) _ _ [] Nothing ->
        -- Return the accumulator
-       varAppE (pyonBuiltin The_copy) [acc_ty] [varE acc_repr_var, return acc]
-     OpSE inf (BindOp p_ty _) _ [p_repr] [] [producer, transformer] Nothing -> do
+       varAppE (pyonBuiltin The_copy) [acc_ty] [mkVarE acc_repr_var, return acc]
+     OpSE inf (BindOp p_ty _) [p_repr] [] [producer, transformer] Nothing -> do
        -- The "bind" operator is what makes sequentializing folds interesting.
        -- This transformation is performed:
        -- T [| bind s (\x. t) |] z c =
@@ -1427,7 +1425,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
          acc_ty a_ty acc_repr_var a_repr acc t_combiner producer
 
      OpSE inf (GenerateBindOp transformer_ty)
-       _ [] [shp] [transformer] Nothing -> do
+       [] [shp] [transformer] Nothing -> do
        -- Fused 'bind' and generate'
        -- Create a combiner from the transformer
        let stored_int_repr =
@@ -1438,16 +1436,16 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
 
        -- Create a @for@ loop that uses the combiner
        tenv <- getTypeEnv
-       varAppE (pyonBuiltin The_dim1_fold)
+       varAppE (pyonBuiltin The_primitive_list_dim_fold)
          [acc_ty]
-         [varE acc_repr_var,
+         [mkVarE acc_repr_var,
           return shp,
           lamE $ mkFun []
           (\ [] -> return ([stored_int_type, acc_ty, outType acc_ty],
                            initEffectType acc_ty))
           (\ [] [i_var, a_var, r_var] ->
             -- > t_combiner acc i ret
-            appExp (return t_combiner) [] [varE a_var, varE i_var, varE r_var]),
+            return $ appE' t_combiner [] [varE' a_var, varE' i_var, varE' r_var]),
           return acc]
 
      OpSE {} -> internalError "sequentializeFold: Unsupported stream"
@@ -1460,7 +1458,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
        alts' <- mapM (sequentializeFoldCaseAlternative
                       acc_ty a_ty acc_repr_var a_repr acc combiner) alts
        return $ ExpM $ CaseE inf scr alts'
-     ExceptSE inf _ _ _ ->
+     ExceptSE inf _ _ ->
        -- Raise an exception
        return $ ExpM $ ExceptE inf (writerType acc_ty)
      OtherSE _ -> mzero

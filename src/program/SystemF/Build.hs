@@ -20,8 +20,8 @@ type MkFunM = FreshVarM FunM
 {-# SPECIALIZE INLINE appExp :: MkExpM -> [Type] -> [MkExpM] -> MkExpM #-}
 {-# SPECIALIZE INLINE varAppE :: Var -> [Type] -> [MkExpM] -> MkExpM #-}
 
-varE :: (Supplies m VarID) => Var -> m ExpM
-varE v = return $ ExpM $ VarE defaultExpInfo v
+mkVarE :: (Supplies m VarID) => Var -> m ExpM
+mkVarE v = return $ ExpM $ VarE defaultExpInfo v
 
 litE :: (Supplies m VarID) => Lit -> m ExpM
 litE l = return $ ExpM $ LitE defaultExpInfo l

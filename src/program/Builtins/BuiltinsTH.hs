@@ -436,7 +436,6 @@ pyonBuiltinVariableNames =
     -- Inserted by rewrites or inlining
   , "sequenceToView"
   , "viewToSequence"
-  , "view1_empty"
   , "view1ToDarr1"
   , "darr1ToView1"
   , "view2ToDarr2"
@@ -445,6 +444,7 @@ pyonBuiltinVariableNames =
   , "view_array1_build"
   , "Sequence_list_build"
   , "Sequence_array1_build"
+  , "empty_list_dim_view"
     
     -- Sequence functions
   , "Stream1_empty"
@@ -460,7 +460,6 @@ pyonBuiltinVariableNames =
   , "Sequence_reduce"
   , "Sequence_reduce1"
   , "Sequence_fold"
-  , "Sequence_parallel_reduce_helper"
   , "Sequence_parallel_reduce"
 
     -- Fold-like functions
@@ -481,6 +480,8 @@ pyonBuiltinVariableNames =
   , "primitive_list_dim_reduce1"
   , "primitive_dim1_reduce1"
   , "primitive_dim2_reduce1"
+  , "primitive_list_dim_fold"
+  , "primitive_dim1_fold"
   , "primitive_list_dim_list"
   , "primitive_dim1_array"
   , "primitive_dim2_array"
@@ -497,7 +498,6 @@ pyonBuiltinVariableNames =
   --, "fun_fold_Stream"
   --, "fun_reduce_Stream"
   --, "fun_reduce1_Stream"
-  , "dim1_fold"
   --, "primitive_darr1_reduce"
   --, "primitive_darr1_reduce1"
   --, "primitive_darr1_generate"
@@ -538,7 +538,6 @@ pyonBuiltinVariableNames =
   , "doall"
   , "for"
   , "for_box"
-  , "view1_normalize"
   --, "parallel_dim1_reduce"
   --, "parallel_dim1_reduce1"
   --, "parallel_darr1_reduce"
