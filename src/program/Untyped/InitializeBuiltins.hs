@@ -898,7 +898,7 @@ mkPassableClass = do
               (internalError "Class 'Repr' has no dictionary constructor")
               []
               [int_instance, float_instance, bool_instance, none_instance,
-               maybe_val_instance,
+               maybe_val_instance, maybe_instance,
                complex_instance, sliceobject_instance,
                list_dim_instance,
                dim1_instance, dim2_instance,
@@ -946,6 +946,11 @@ mkPassableClass = do
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_MaybeVal) @@ ConTy b)
           (pyonBuiltin SystemF.The_repr_MaybeVal)
+          []
+  ; let maybe_instance =
+          polyExplicitInstance [b] [passable $ ConTy b] cls
+          (ConTy (tiBuiltin the_con_Maybe) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_Maybe)
           []
   ; let list_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
@@ -1002,6 +1007,22 @@ mkPassableClass = do
 -- Global function initialization
 
 passable t = t `IsInst` tiBuiltin the_c_Repr
+
+mkJustType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy a] (ConTy (tiBuiltin the_con_Maybe) @@ ConTy a))
+
+mkNothingType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)], ConTy (tiBuiltin the_con_Maybe) @@ ConTy a)
+
+mkIsJustType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy (tiBuiltin the_con_Maybe) @@ ConTy a]
+   (ConTy (tiBuiltin the_con_bool)))
+
+mkFromJustType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy (tiBuiltin the_con_Maybe) @@ ConTy a] (ConTy a))
 
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
@@ -1432,7 +1453,22 @@ initializeTIBuiltins = do
           globals =
             -- All global variables
             -- Their Hindley-Milner type schemes and System F translations.
-            [ ("map", [| mkMapType |]
+            [ ("Just", [| mkJustType |]
+              , [| pyonBuiltin SystemF.The_fun_just |]
+              ),
+              ("Nothing", [| mkNothingType |]
+              , [| pyonBuiltin SystemF.The_fun_nothing |]
+              ),
+              ("isJust", [| mkIsJustType |]
+              , [| pyonBuiltin SystemF.The_fun_isJust |]
+              ),
+              ("isNothing", [| mkIsJustType |]
+              , [| pyonBuiltin SystemF.The_fun_isNothing |]
+              ),
+              ("fromJust", [| mkFromJustType |]
+              , [| pyonBuiltin SystemF.The_fun_fromJust |]
+              ),
+              ("map", [| mkMapType |]
               , [| pyonBuiltin SystemF.The_fun_map |]
               ),
               ("reduce", [| mkReduceType |]

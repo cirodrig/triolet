@@ -3178,6 +3178,42 @@ parallel_doall @(N : intindex) @(a b : bare)
   blocked_doall @N @a @b count do_range;
 
 
+-------------------------------------------------------------------------------
+-- Data structure functions
+
+fun_just @(a : bare) (repr : Repr a) (x : Writer a)
+  -> Writer (Maybe a) attribute(inline) =
+  just @a x;
+
+
+fun_nothing @(a : bare) (repr : Repr a)
+  -> Writer (Maybe a) attribute(inline) =
+  nothing @a;
+
+
+fun_isNothing @(a : bare) (repr : Repr a) (x : Maybe a)
+  -> bool attribute(inline) =
+  case x of {
+    just @a (value : a). False
+  ; nothing @a. True
+  };
+
+
+fun_isJust @(a : bare) (repr : Repr a) (x : Maybe a)
+  -> bool attribute(inline) =
+  case x of {
+    just @a (value : a). True
+  ; nothing @a. False
+  };
+  
+
+fun_fromJust @(a : bare) (repr : Repr a) (x : Maybe a) (ret : OutPtr a)
+  -> IEffect a attribute(inline) =
+  case x of {
+    just @a (value : a). copy @a repr value ret
+  ; nothing @a. except @(IEffect a)
+  };
+
 
 {-
 

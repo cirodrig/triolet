@@ -32,7 +32,12 @@ pyonOtherTypes =
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]
 pyonSourceGlobals =
-  [ "map"
+  [ "Just"
+  , "Nothing"
+  , "isJust"
+  , "isNothing"
+  , "fromJust"
+  , "map"
   , "reduce"
   , "reduce1"
   , "zip"
