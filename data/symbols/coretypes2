@@ -1438,6 +1438,8 @@ fun_reduce1 : (t : bare -> bare)
            -> t a
            -> Writer a;
 
+fun_indices : (sh : box) -> ShapeDict sh -> sh -> Stream sh (index sh);
+
 -------------------------------------------------------------------------------
 -- Domain loops
 
@@ -1677,7 +1679,17 @@ cols : (t : bare -> bare) -> (a : bare)
     -> Repr a
     -> t a -> view dim1 (StoredBox (view dim1 a));
 
-outerproduct : (a b : bare) -> Repr a -> Repr b
+outerproduct : (t u : bare -> bare) -> (a b : bare)
+            -> TraversableDict t -> TraversableDict u
+            -> coerce @box (shape t) dim1
+            -> coerce @box (shape u) dim1
+            -> Repr a -> Repr b
+	    -> t a
+	    -> u b
+	    -> Stream dim2 (PyonTuple2 a b);
+
+outerproductStream : (a b : bare)
+            -> Repr a -> Repr b
 	    -> Stream dim1 a
 	    -> Stream dim1 b
 	    -> Stream dim2 (PyonTuple2 a b);

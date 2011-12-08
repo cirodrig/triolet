@@ -429,6 +429,7 @@ pyonBuiltinVariableNames =
   , "rows"
   , "cols"
   , "outerproduct"
+  , "outerproductStream"
   , "transpose"
   , "stencil2D"
   , "extend2D"

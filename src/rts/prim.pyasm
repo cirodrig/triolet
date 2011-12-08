@@ -266,6 +266,35 @@ procedure inline minus_fii (FinIndInt x, FinIndInt y) -> FinIndInt {
   FinIndInt {x_data - y_data};
 };
 
+// Compute the GCD of two positive or negative numbers
+function gcd (int x, int y) -> int {
+  // Get absolute value of arguments
+  ax = if (x < int 0) { -x;} else { x; };
+  ay = if (y < int 0) { -y;} else { y; };
+
+  (x, _) = while (int x = ax, int y = ay) (y != int 0) {
+    (y, x % y);
+  };
+  x;
+};
+
+// Compute a number 'a' such that a*x + b*y = gcd a b
+function extgcd_x (int x, int y) -> int {
+  // Get absolute value of arguments
+  ax = if (x < int 0) { -x;} else { x; };
+  ay = if (y < int 0) { -y;} else { y; };
+
+  (_, lastx, _, _) =
+    while (int x = int 0, int lastx = int 1, int a = ax, int b = ay)
+          (b != int 0) {
+    q = a %/ b;
+    r = a % b;
+    x2 = lastx - q * x;
+    (x2, x, b, r);
+  };
+  lastx;
+};
+
 function inline doall (FinIndInt ix, owned f) -> () {
   FinIndInt {count} = ix;
   _ = while (int n = int 0) (n < count) {

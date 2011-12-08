@@ -339,7 +339,8 @@ dim1ToArrayDesc @(a : bare)
 
 
 internalApplyListSlice (slice_obj : SliceObject) (dom : list_dim)
-  -> (list_dim, LinearMap) =
+  -> (list_dim, LinearMap)
+  attribute(inline, inline_final) =
   case slice_obj of
     sliceObject (m_slice_lo : MaybeVal int)
                 (m_slice_hi : MaybeVal int)
@@ -425,7 +426,8 @@ internalApplyListSlice (slice_obj : SliceObject) (dom : list_dim)
   };
 
 
-sliceToDomain (slice_obj : SliceObject) -> dim1 =
+sliceToDomain (slice_obj : SliceObject) -> dim1
+  attribute(inline, inline_final) =
   case slice_obj of
     sliceObject (m_slice_lo : MaybeVal int)
                 (m_slice_hi : MaybeVal int)
@@ -1290,6 +1292,40 @@ ShapeDict_dim1_map @(a b : bare)
   ShapeDict_dim1 @a @b repr_a repr_b transformer s;
 
 
+ShapeDict_dim1_zipWith @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (transformer : a -> b -> Writer c)
+  (sa : Stream dim1 a)
+  (sb : Stream dim1 b)
+  -> Stream dim1 c attribute(inline) =
+  view_zipWith @dim1 ShapeDict_dim1 @a @b @c
+  repr_a repr_b repr_c transformer sa sb;
+
+
+ShapeDict_dim1_zipWith3 @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (transformer : a -> b -> c -> Writer d)
+  (sa : Stream dim1 a)
+  (sb : Stream dim1 b)
+  (sc : Stream dim1 c)
+  -> Stream dim1 d attribute(inline) =
+  view_zipWith3 @dim1 ShapeDict_dim1 @a @b @c @d
+  repr_a repr_b repr_c repr_d transformer sa sb sc;
+
+
+ShapeDict_dim1_zipWith4 @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (repr_e : Repr e)
+  (transformer : a -> b -> c -> d -> Writer e)
+  (sa : Stream dim1 a)
+  (sb : Stream dim1 b)
+  (sc : Stream dim1 c)
+  (sd : Stream dim1 d)
+  -> Stream dim1 e attribute(inline) =
+  view_zipWith4 @dim1 ShapeDict_dim1 @a @b @c @d @e
+  repr_a repr_b repr_c repr_d repr_e transformer sa sb sc sd;
+
+
 ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
   (is_dim1 : coerce @box (shape t) dim1)
   (indexable : IndexableDict t)
@@ -1673,6 +1709,39 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
   };
 
 
+fun_indices @(sh : box) (shape_dict : ShapeDict sh) (shp : sh)
+  -> Stream sh (index sh)
+  attribute(inline) =
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  shape_generate @(index sh) index_repr shp (copy @(index sh) index_repr);
+
+
 fun_map @(t : bare -> bare)
         @(a b : bare)
         (traversable : TraversableDict t)
@@ -1993,7 +2062,37 @@ cols @(t : bare -> bare) @(a : bare)
        ret)));
 
 
-outerproduct @(a b : bare)
+outerproduct @(t u : bare -> bare) @(a b : bare)
+  (traversable_t : TraversableDict t)
+  (traversable_u : TraversableDict u)
+  (t_is_linear : coerce @box (shape t) dim1)
+  (u_is_linear : coerce @box (shape u) dim1)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (container_t : t a)
+  (container_u : u b)
+  -> Stream dim2 (PyonTuple2 a b)
+  attribute(inline) =
+
+  case traversable_t
+  of traversableDict @t
+       (traverseT : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (buildT : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  case traversable_u
+  of traversableDict @u
+       (traverseU : (a : bare) -> Repr a -> u a -> Stream (shape u) a)
+       (buildU : (a : bare) -> Repr a -> Stream (shape u) a -> Writer (u a)).
+
+  let sa : Stream dim1 a =
+        coerce @(Stream (shape t) a) @(Stream dim1 a)
+        (traverseT @a repr_a container_t) in
+  let sb : Stream dim1 b =
+        coerce @(Stream (shape u) b) @(Stream dim1 b)
+        (traverseU @b repr_b container_u) in
+
+  outerproductStream @a @b repr_a repr_b sa sb;
+
+
+outerproductStream @(a b : bare)
   (repr_a : Repr a) (repr_b : Repr b)
   (sa : Stream dim1 a)
   (sb : Stream dim1 b)
@@ -2018,6 +2117,112 @@ outerproduct @(a b : bare)
 
 -------------------------------------------------------------------------------
 -- API functions
+
+safeIndex @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (container : t a)
+  (ix : index (shape t))
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+
+  let type sh = shape t in
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index sh -> Writer a)
+    (get_shape : (a : bare) -> t a -> sh).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  let container_shape : sh = get_shape @a container in
+  if shape_member container_shape ix
+  then at_index @a repr container ix ret
+  else except @(IEffect a);
+
+
+safeSlice @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (container : t a)
+  (sl : slice (shape t))
+  -> view (shape t) a
+  attribute(inline) =
+  
+  let type sh = shape t in
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  shape_slice @t @a (unsafeMakeCoercion @sh @sh) indexable repr container sl;
+
+
+len @(t : bare -> bare) @(a : bare)
+  (is_linear : coerce @box (shape t) list_dim)
+  (indexable : IndexableDict t)
+  (container : t a)
+  -> int
+  attribute(inline) =
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  let sh : list_dim = coerce @(shape t) @list_dim (get_shape @a container) in
+  case sh of mk_list_dim (list_size : MaybeVal int).
+  case list_size of {
+    justVal @int (n : int). n
+  ; nothingVal @int. except @int
+  };
+
 
 range (length : int) -> Stream list_dim (Stored int)
   attribute(inline) =
@@ -4535,22 +4740,6 @@ generate @(N : intindex) @(a : bare)
   };
 
 
-len @(t : bare -> bare) @(a : bare)
-  (is_linear : coerce @box (shape t) dim1)
-  (indexable : IndexableDict t)
-  (container : t a)
-  -> int
-  attribute(inline) =
-  case indexable of
-    indexableDict @t 
-    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (get_shape : (a : bare) -> t a -> shape t).
-
-  let sh : dim1 = coerce @(shape t) @dim1 (get_shape @a container) in
-  case sh of mk_dim1 @(Nlo Nhi : intindex) (ilo : IInt Nlo) (ihi : IInt Nhi).
-  case fromIndInt @Nlo ilo of fiInt @Nlo (lo : int).
-  case fromIndInt @Nhi ihi of fiInt @Nhi (hi : int).
-  hi -# lo;
 
 
 width @(t : bare -> bare) @(a : bare)

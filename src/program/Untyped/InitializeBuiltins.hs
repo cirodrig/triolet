@@ -1190,7 +1190,7 @@ mkLenType =
   let tT = ConTy t
       aT = ConTy a
       int_type = ConTy $ tiBuiltin the_con_int
-  in ([shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim1), 
+  in ([shapeType tT `IsEqual` ConTy (tiBuiltin the_con_list_dim),
        tT `IsInst` tiBuiltin the_c_Indexable],
       functionType [tT @@ aT] int_type)
 
@@ -1204,14 +1204,17 @@ mkWidthHeightType =
       functionType [tT @@ aT] int_type)
 
 mkOuterProductType =
-  forallType [Star, Star] $ \[a, b] ->
-  let aT = ConTy a
+  forallType [Star :-> Star, Star :-> Star, Star, Star] $ \[t, u, a, b] ->
+  let tT = ConTy t
+      uT = ConTy u
+      aT = ConTy a
       bT = ConTy b
-  in ([passable aT, passable bT],
-      functionType [ConTy (tiBuiltin the_con_iter) @@
-                    ConTy (tiBuiltin the_con_dim1) @@ aT,
-                    ConTy (tiBuiltin the_con_iter) @@
-                    ConTy (tiBuiltin the_con_dim1) @@ bT]
+  in ([tT `IsInst` tiBuiltin the_c_Traversable,
+       uT `IsInst` tiBuiltin the_c_Traversable,
+       shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim1),
+       shapeType uT `IsEqual` ConTy (tiBuiltin the_con_dim1),
+       passable aT, passable bT],
+      functionType [tT @@ aT, uT @@ bT]
       (ConTy (tiBuiltin the_con_iter) @@
        ConTy (tiBuiltin the_con_dim2) @@ (TupleTy 2 @@ aT @@ bT)))
 

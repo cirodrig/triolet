@@ -5,12 +5,6 @@ def sum(xs):
 def mm(M, N):
   def dotprod(r, c): return sum(x * y for (x, y) in zip(r, c))
 
-  return __build__(outerproduct(dotprod, __iter__(rows(M)), __iter__(cols(N))))
-
-# def mm(M, N):
-#   def dotprod(r, c): return sum(x * y for (x, y) in zip(r, c))
-#
-#   return matrix(outerproduct(dotprod, rows(M)), cols(N))
-
+  return [dotprod(r,c) for (r, c) in outerproduct(rows(M), cols(N))]
 
 export ccall mm : array2(float) * array2(float) -> array2(float)

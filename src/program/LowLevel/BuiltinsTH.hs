@@ -294,6 +294,10 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_min_ii) |])
   , (PyonName module_prim "minus_ii",
      Right [| pyonBuiltin (SystemF.The_minus_ii) |])
+  , (PyonName module_prim "gcd",
+     Right [| pyonBuiltin (SystemF.The_gcd) |])
+  , (PyonName module_prim "extgcd_x",
+     Right [| pyonBuiltin (SystemF.The_extgcd_x) |])
 
   , (PyonName module_prim "doall",
      Right [| pyonBuiltin (SystemF.The_doall) |])
