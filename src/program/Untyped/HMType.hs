@@ -336,7 +336,7 @@ unifyTyVar v t
 
   writeIORef (getTyVarRep v) (TypeRep t)
 
--- | Convert a flexible type variable to a canonical expression
+-- | Convert a flexible type variable to a reduced expression
 canonicalizeTyVar :: TyCon -> IO HMType
 canonicalizeTyVar v = do
   return . makeType =<< canonicalizeTyVarRep (getTyVarRep v)
@@ -360,13 +360,20 @@ canonicalizeTyVarRep rep_ref = do
   case rep of
     NoRep      -> return rep
     TyVarRep v -> update_self rep =<< canonicalizeTyVarRep (getTyVarRep v)
-    TypeRep t  -> return rep
+    TypeRep t  -> -- The type 't' is not guaranteed to be canonical.
+                  -- If 't' is a type application, it may be reducible now.
+                  -- Ensure that the returned type is canonical.
+                  update_type =<< canonicalizeHead t
   where
+    update_type new_type = do let rep = TypeRep new_type
+                              writeIORef rep_ref rep
+                              return rep
+
     update_self old_rep NoRep   = return old_rep
     update_self _       new_rep = do writeIORef rep_ref new_rep
                                      return new_rep
 
-canonicalizeHead :: HMType -> IO HMType 
+canonicalizeHead :: HMType -> IO HMType
 canonicalizeHead (ConTy v) 
   | isFlexibleTyVar v = canonicalizeTyVar v
 canonicalizeHead t@(TFunAppTy f ts) =
@@ -407,7 +414,7 @@ instance Unifiable HMType where
   matchSubst subst t1 t2 = do
     t1_c <- canonicalizeHead t1
     t2_c <- canonicalizeHead t2
-        
+
     case (t1_c, t2_c) of
       (ConTy v, _) | isFlexibleTyVar v ->
         -- Semi-unification of a variable with t2_c

@@ -40,20 +40,14 @@ import Type.Level
 import Type.Var
 import Globals
 
+-- | Flag turns on debugging dumps during context reduction
+debugContextReduction = False
+
 pprList :: [Doc] -> Doc
 pprList xs = brackets $ sep $ punctuate (text ",") xs
 
 pprPredicate :: Predicate -> Ppr Doc
-pprPredicate = uShow {-
-pprPredicate (t `IsInst` cls) = do
-  t_doc <- uShow t
-  return $ text (clsName $ clsSignature cls) <+> parens t_doc
-
-pprPredicate (IsFamily fam arg t) = do
-  arg_doc <- uShow arg
-  t_doc <- uShow t
-  return $ text (clsName $ tfSignature fam) <+> parens arg_doc <+>
-           text "~" <+> t_doc -}
+pprPredicate = uShow
 
 pprContext :: [Predicate] -> Ppr Doc
 pprContext []  = return (parens Text.PrettyPrint.HughesPJ.empty)
@@ -352,6 +346,10 @@ equalityUnify (t1, t2) = do
 -- head-normal form with no redundant constraints.
 reduceContext :: Constraint -> IO Constraint
 reduceContext csts = do 
+  when debugContextReduction $ do
+    old_context <- runPpr (pprContext csts)
+    print $ text "Start context reduction:" <+> old_context
+  
   -- Simplify equality constraints and other constraints using separate
   -- procedures
   let (equalities, others) = partition isEqualityPredicate csts
@@ -359,10 +357,11 @@ reduceContext csts = do
   others' <- foldM addToContext [] others
   let csts' = equalities' ++ others'
 
-  -- DEBUG
-  -- putStrLn "reduceContext"
-  -- print =<< runPpr (pprContext csts)
-  -- print =<< runPpr (pprContext csts')
+  when debugContextReduction $ do
+    old_context <- runPpr (pprContext csts)
+    new_context <- runPpr (pprContext csts')
+    print $ hang (text "End context reduction:" <+> old_context) 4 new_context
+
   return csts'
 
 -- | Add the extra information from a predicate to the context.  The 
@@ -378,12 +377,22 @@ addToContextHNF ctx pred = do
              of IsInst {} -> entailsInstancePredicate ctx pred
                 IsEqual {} -> entailsEqualityPredicate ctx pred
   case new_cst of
-    Nothing ->
+    Nothing -> do
       -- Not a redundant predicate
+      debug_show_constraint [pred]
       return (pred : ctx)
-    Just new_ctx ->
+    Just new_ctx -> do
       -- Predicate is redundant wrt context
+      debug_show_constraint new_ctx
       return (new_ctx ++ ctx)
+  where
+    -- Print how context was changed 
+    debug_show_constraint new_ctx
+      | debugContextReduction = do
+          (pred_doc, new_ctx_doc) <-
+            runPpr $ liftM2 (,) (uShow pred) (pprContext new_ctx)
+          print $ hang (text "addToContext" <+> pred_doc) 4 new_ctx_doc
+      | otherwise = return ()
 
 data InstanceReductionStep =
     NotReduced
@@ -537,7 +546,14 @@ splitConstraint cst fvars qvars = do
       -- Otherwise the predicate is ambiguous; try to resolve it by
       -- defaulting.
       case () of
-        _ | fv `Set.isSubsetOf` fvars -> return Defer
+        _ | Set.null fv -> do
+              -- A predicate with no free variables should have been
+              -- either resolved or reported as unsatisfiable
+              doc <- runPpr $ uShow prd
+              internalError $
+                "splitConstraint: Found unresolved\
+                \ predicate with no free variables:\n" ++ show doc
+          | fv `Set.isSubsetOf` fvars -> return Defer
           | fv `Set.isSubsetOf` Set.union fvars qvars -> return Retain
           | isDefaultable prd -> return Default
           | otherwise -> return Ambiguous
