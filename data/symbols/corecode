@@ -458,6 +458,117 @@ internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
   ShapeDict_dim1_intersect slice_dom dom;
 
 -------------------------------------------------------------------------------
+-- Cartesian methods
+
+CartesianDict_dim0_loBound (dom : dim0) -> Writer (Maybe (index dim0))
+  attribute(inline) =
+  just @(Stored NoneType) (stored @NoneType None);
+
+
+CartesianDict_dim0_hiBound (dom : dim0) -> Writer (Maybe (index dim0))
+  attribute(inline) =
+  just @(Stored NoneType) (stored @NoneType None);
+
+
+CartesianDict_dim0_arrayRange (lo : index dim0) (hi : index dim0) -> dim0
+  attribute(inline) =
+  mk_dim0;
+
+
+CartesianDict_dim1_loBound (dom : dim1) (ret : OutPtr (Maybe (index dim1)))
+  -> IEffect (Maybe (index dim1))
+  attribute(inline) =
+  case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case lb of {
+    justVal @int (x : int).  just @(Stored int) (stored @int x) ret
+  ; nothingVal @int. nothing @(Stored int) ret
+  };
+
+
+CartesianDict_dim1_hiBound (dom : dim1) (ret : OutPtr (Maybe (index dim1)))
+  -> IEffect (Maybe (index dim1))
+  attribute(inline) =
+  case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case ub of {
+    justVal @int (x : int).  just @(Stored int) (stored @int x) ret
+  ; nothingVal @int. nothing @(Stored int) ret
+  };
+
+
+CartesianDict_dim1_arrayRange (lo : index dim1) (hi : index dim1) -> dim1
+  attribute(inline) =
+  case lo of stored @int (lo_i : int).
+  case hi of stored @int (hi_i : int).
+  mk_dim1 (interval (justVal @int lo_i) (justVal @int hi_i))
+          (linearMap 1 0);
+
+
+CartesianDict_dim2_loBound (dom : dim2) (ret : OutPtr (Maybe (index dim2)))
+  -> IEffect (Maybe (index dim2))
+  attribute(inline) =
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
+  case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case lb_y of {
+    justVal @int (y : int).
+      case dom_x of mk_dim1 (iv_x : Interval) (lm : LinearMap).
+      case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+      case lb_x of {
+        justVal @int (x : int).
+          just @(PyonTuple2 (Stored int) (Stored int))
+               (pyonTuple2 @(Stored int) @(Stored int)
+                (stored @int y) (stored @int x)) ret
+      ; nothingVal @int.
+          nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+      }
+  ; nothingVal @int.
+      nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+  };
+  
+
+CartesianDict_dim2_hiBound (dom : dim2) (ret : OutPtr (Maybe (index dim2)))
+  -> IEffect (Maybe (index dim2))
+  attribute(inline) =
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
+  case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case ub_y of {
+    justVal @int (y : int).
+      case dom_x of mk_dim1 (iv_x : Interval) (lm : LinearMap).
+      case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+      case ub_x of {
+        justVal @int (x : int).
+          just @(PyonTuple2 (Stored int) (Stored int))
+               (pyonTuple2 @(Stored int) @(Stored int)
+               (stored @int y) (stored @int x)) ret
+      ; nothingVal @int.
+          nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+      }
+  ; nothingVal @int.
+      nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+  };
+
+
+CartesianDict_dim2_arrayRange (lo : index dim2) (hi : index dim2) -> dim2
+  attribute(inline) =
+  case lo of
+    pyonTuple2 @(Stored int) @(Stored int)
+               (lo_y : Stored int) (lo_x : Stored int).
+  case lo_y of stored @int (lo_y_i : int).
+  case lo_x of stored @int (lo_x_i : int).
+  case hi of
+    pyonTuple2 @(Stored int) @(Stored int)
+               (hi_y : Stored int) (hi_x : Stored int).
+  case hi_y of stored @int (hi_y_i : int).
+  case hi_x of stored @int (hi_x_i : int).
+  mk_dim2 (mk_dim1 (interval (justVal @int lo_y_i) (justVal @int hi_y_i))
+                   (linearMap 1 0))
+          (mk_dim1 (interval (justVal @int lo_x_i) (justVal @int hi_x_i))
+                   (linearMap 1 0));
+
+-------------------------------------------------------------------------------
 -- Imperative computation
 
 intUpdateInPlace (dummy : NoneType)

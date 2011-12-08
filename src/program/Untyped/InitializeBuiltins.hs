@@ -789,7 +789,7 @@ mkFloatingClass = do
                pyonBuiltin SystemF.The_FloatingDict_Complex_pi]
   
   return cls
-  
+
 mkVectorClass = do
   rec a <- newTyVar Star Nothing
       let float_type = ConTy $ tiBuiltin the_con_float
@@ -831,6 +831,49 @@ mkVectorClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_VectorDict_Complex_dot]
 
+  return cls
+
+mkCartesianClass = do
+  a <- newTyVar Star Nothing
+  let index_type = TFunAppTy (tiBuiltin the_con_index) [ConTy a]
+      maybe_index_type = ConTy (tiBuiltin the_con_Maybe) @@ index_type
+  let bound_scheme =
+        monomorphic $ functionType [ConTy a] maybe_index_type
+      range_scheme =
+        monomorphic $ functionType [index_type, index_type] (ConTy a)
+  rec let cls =
+            mkClass "Cartesian" a []
+            (pyonBuiltin SystemF.The_CartesianDict)
+            (pyonBuiltin SystemF.The_cartesianDict)
+            [loBound, hiBound, arrayRange]
+            [dim0_instance, dim1_instance, dim2_instance]
+      loBound <- mkClassMethod cls 0 "loBound" bound_scheme
+      hiBound <- mkClassMethod cls 1 "hiBound" bound_scheme
+      arrayRange <- mkClassMethod cls 2 "arrayRange" range_scheme
+      let dim0_instance =
+            monomorphicInstance cls (ConTy (tiBuiltin the_con_dim0))
+            [ InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_loBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_hiBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_arrayRange]
+      let dim1_instance =
+            monomorphicInstance cls (ConTy (tiBuiltin the_con_dim1))
+            [ InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_loBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_hiBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_arrayRange]
+      let dim2_instance =
+            monomorphicInstance cls (ConTy (tiBuiltin the_con_dim2))
+            [ InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_loBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_hiBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_arrayRange]
   return cls
 
 mkRemainderClass = do
@@ -1447,6 +1490,7 @@ initializeTIBuiltins = do
             , ("Fractional", [| mkFractionalClass |])
             , ("Floating", [| mkFloatingClass |])
             , ("Vector", [| mkVectorClass |])
+            , ("Cartesian", [| mkCartesianClass |])
             , ("Repr", [| mkPassableClass |])
             ]
 
@@ -1599,6 +1643,7 @@ initializeTIBuiltins = do
                                     "exp", "log", "sqrt",
                                     "sin", "cos", "tan", "pi"])
             , ([| the_c_Vector |], ["scale", "magnitude", "dot"])
+            , ([| the_c_Cartesian |], ["loBound", "hiBound", "arrayRange"])
             ]
 
           -- Construct initializers

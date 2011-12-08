@@ -250,6 +250,16 @@ data VectorDict : bare -> box
    a -> a -> float);
 };
 
+-- Cartesian domains
+data CartesianDict : box -> box
+{
+  cartesianDict
+  (sh : box) ()
+  (sh -> Maybe (index sh),
+   sh -> Maybe (index sh),
+   index sh -> index sh -> sh);
+};
+
 data TraversableDict : (bare -> bare) -> box
 {
   traversableDict (t : bare -> bare) ()
@@ -1068,6 +1078,16 @@ VectorDict_Complex_dot :
  -> Complex a
  -> Complex a
  -> float;
+
+CartesianDict_dim0_loBound : dim0 -> Writer (Maybe (index dim0));
+CartesianDict_dim0_hiBound : dim0 -> Writer (Maybe (index dim0));
+CartesianDict_dim0_arrayRange : index dim0 -> index dim0 -> dim0;
+CartesianDict_dim1_loBound : dim1 -> Writer (Maybe (index dim1));
+CartesianDict_dim1_hiBound : dim1 -> Writer (Maybe (index dim1));
+CartesianDict_dim1_arrayRange : index dim1 -> index dim1 -> dim1;
+CartesianDict_dim2_loBound : dim2 -> Writer (Maybe (index dim2));
+CartesianDict_dim2_hiBound : dim2 -> Writer (Maybe (index dim2));
+CartesianDict_dim2_arrayRange : index dim2 -> index dim2 -> dim2;
 
 -------------------------------------------------------------------------------
 -- other arithmetic

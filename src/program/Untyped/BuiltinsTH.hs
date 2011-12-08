@@ -89,6 +89,9 @@ pyonSourceGlobals =
   , "scale"
   , "magnitude"
   , "dot"
+  , "loBound"
+  , "hiBound"
+  , "arrayRange"
   , "__fromfloat__"
   , "__power__"
   , "exp"
@@ -121,7 +124,8 @@ pyonClasses =
    "Additive", "Multiplicative",
    "Remainder", "Fractional",
    "Floating",
-   "Vector"]
+   "Vector",
+   "Cartesian"]
 
 -- Global variable fields are not strict because some of them are built 
 -- using fields of the builtins table.  Class fields are strict, but most 

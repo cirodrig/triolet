@@ -88,6 +88,7 @@ pyonBuiltinTypeNames =
   , "FractionalDict"
   , "FloatingDict"
   , "VectorDict"
+  , "CartesianDict"
   ]
 
 pyonBuiltinVariableNames =
@@ -155,6 +156,7 @@ pyonBuiltinVariableNames =
   , "fractionalDict"
   , "floatingDict"
   , "vectorDict"
+  , "cartesianDict"
 
     -- Class instances
   , "repr_bool"
@@ -334,6 +336,15 @@ pyonBuiltinVariableNames =
   , "VectorDict_Complex_scale"
   , "VectorDict_Complex_magnitude"
   , "VectorDict_Complex_dot"
+  , "CartesianDict_dim0_loBound"
+  , "CartesianDict_dim0_hiBound"
+  , "CartesianDict_dim0_arrayRange"
+  , "CartesianDict_dim1_loBound"
+  , "CartesianDict_dim1_hiBound"
+  , "CartesianDict_dim1_arrayRange"
+  , "CartesianDict_dim2_loBound"
+  , "CartesianDict_dim2_hiBound"
+  , "CartesianDict_dim2_arrayRange"
 
     -- Constructor-like functions
   , "create_view2"
