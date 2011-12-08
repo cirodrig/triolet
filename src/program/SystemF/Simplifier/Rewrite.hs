@@ -1287,10 +1287,10 @@ generalizedZipStream2 out_type out_repr transformer shape_type streams = do
 rwDefineIntIndex :: RewriteRule
 rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
   let IntL m _ = lit
-      fin_int = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin The_fiInt))
-                [IntT m] [integer_value]
-      package = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin The_someIInt))
-                [IntT m] [fin_int]
+      fin_int = conE inf (VarCon (pyonBuiltin The_fiInt) [IntT m] [])
+                [integer_value]
+      package = conE inf (VarCon (pyonBuiltin The_someIInt) [] [IntT m])
+                [fin_int]
   in return $! Just $! package
 
 rwDefineIntIndex _ _ _ = return Nothing
