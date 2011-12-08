@@ -3497,16 +3497,6 @@ parallel_doall @(N : intindex) @(a b : bare)
 -------------------------------------------------------------------------------
 -- Data structure functions
 
-fun_just @(a : bare) (repr : Repr a) (x : Writer a)
-  -> Writer (Maybe a) attribute(inline) =
-  just @a x;
-
-
-fun_nothing @(a : bare) (repr : Repr a)
-  -> Writer (Maybe a) attribute(inline) =
-  nothing @a;
-
-
 fun_isNothing @(a : bare) (repr : Repr a) (x : Maybe a)
   -> bool attribute(inline) =
   case x of {

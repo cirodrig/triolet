@@ -405,8 +405,6 @@ pyonBuiltinVariableNames =
   , "oper_BITWISEOR"
   , "oper_BITWISEXOR"
   , "fun_undefined"
-  , "fun_just"
-  , "fun_nothing"
   , "fun_isNothing"
   , "fun_isJust"
   , "fun_fromJust"

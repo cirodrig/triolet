@@ -1500,13 +1500,7 @@ initializeTIBuiltins = do
           globals =
             -- All global variables
             -- Their Hindley-Milner type schemes and System F translations.
-            [ ("Just", [| mkJustType |]
-              , [| pyonBuiltin SystemF.The_fun_just |]
-              ),
-              ("Nothing", [| mkNothingType |]
-              , [| pyonBuiltin SystemF.The_fun_nothing |]
-              ),
-              ("isJust", [| mkIsJustType |]
+            [ ("isJust", [| mkIsJustType |]
               , [| pyonBuiltin SystemF.The_fun_isJust |]
               ),
               ("isNothing", [| mkIsJustType |]
@@ -1618,6 +1612,12 @@ initializeTIBuiltins = do
           datacons =
             [ ("complex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.The_complex |]
+              ),
+              ("Just", [| mkJustType |]
+              , [| pyonBuiltin SystemF.The_just |]
+              ),
+              ("Nothing", [| mkNothingType |]
+              , [| pyonBuiltin SystemF.The_nothing |]
               ),
               ("justVal", [| mkJustValType |]
               , [| pyonBuiltin SystemF.The_justVal |]

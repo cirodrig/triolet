@@ -1539,8 +1539,6 @@ deadBox : (a : box) -> a;
 -- A dummy referenced object that is used as a placeholder for a dead value.
 deadRef : (a : bare) -> Writer a;
 
-fun_just : (a : bare) -> Repr a -> Writer a -> Writer (Maybe a);
-fun_nothing : (a : bare) -> Repr a -> Writer (Maybe a);
 fun_isNothing : (a : bare) -> Repr a -> Maybe a -> bool;
 fun_isJust : (a : bare) -> Repr a -> Maybe a -> bool;
 fun_fromJust : (a : bare) -> Repr a -> Maybe a -> Writer a;
