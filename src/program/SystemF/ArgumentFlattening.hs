@@ -559,24 +559,24 @@ packParameterWrite' pat flat_arg =
 
 -- | Pack a parameter, so that the result is readable
 packParametersRead :: (ReprDictMonad m, EvalMonad m) =>
-                      FlatArgs -> m ([ExpM], ExpM -> ExpM)
+                      FlatArgs -> m (ExpM -> ExpM)
 packParametersRead (arg : args) = do
-  (val, ctx) <- packParameterRead arg
-  (vals, ctxs) <- assumePackedArg arg $ packParametersRead args
-  return (maybe id (:) val vals, ctx . ctxs)
+  ctx <- packParameterRead arg
+  ctxs <- assumePackedArg arg $ packParametersRead args
+  return (ctx . ctxs)
 
-packParametersRead [] = return ([], id)
+packParametersRead [] = return id
 
 -- | Pack a parameter
 --
 --   TODO: Don't return the parameter expression.  It's always just the
 --   pattern variable.
 packParameterRead :: (ReprDictMonad m, EvalMonad m) =>
-                     FlatArg -> m (Maybe ExpM, ExpM -> ExpM)
+                     FlatArg -> m (ExpM -> ExpM)
 packParameterRead (FlatArg pat flat_arg) =
   case flat_arg
   of IdDecomp ->
-       return (Just (var_exp $ patMVar pat), id)
+       return id
      DeconDecomp (VarDeCon con_var types ex_types) fields ->
        assumeBinders ex_types $ do
          exps <- packParametersWrite fields
@@ -586,18 +586,16 @@ packParameterRead (FlatArg pat flat_arg) =
          -- If this is a bare type, define a local variable with the
          -- packed parameter.  Otherwise, just assign a local variable.
          tenv <- getTypeEnv
-         return (Just (var_exp $ patMVar pat),
-                 bindVariable tenv (patMBinder pat) packed)
+         return (bindVariable tenv (patMBinder pat) packed)
 
      DeadDecomp e -> do
        -- Assign the expression to a temporary variable
        tenv <- getTypeEnv
-       return (Just (var_exp $ patMVar pat),
-               bindVariable tenv (patMBinder pat) e)
+       return (bindVariable tenv (patMBinder pat) e)
   where
     var_exp v = ExpM $ VarE defaultExpInfo v
 
-packParameterRead (DummyArg _) = return (Nothing, id)
+packParameterRead (DummyArg _) = return id
 
 -- | Transform an expression's return value to flattened form.  Deconstruct
 --   the return value into its component fields, then pack the
@@ -1175,7 +1173,7 @@ flattenBoxedValue boxed_var (FlatLocal arg) =
 --   variables
 packLocal :: (ReprDictMonad m, EvalMonad m) => FlatLocal -> ExpM -> m ExpM
 packLocal (FlatLocal flat_arg) consumer = do
-  (_, packing_context) <- packParameterRead flat_arg
+  packing_context <- packParameterRead flat_arg
   return $ packing_context consumer
 
 -- | Determine how to decompose a let-bound value based on its type.
@@ -1432,7 +1430,7 @@ mkWorkerFunction plan annotation worker_name original_body = do
                            in appE defaultExpInfo flat_body [] [out_exp]
 
       -- Repack the parameters
-      (_, param_context) <- packParametersRead $ flatParams plan
+      param_context <- packParametersRead $ flatParams plan
       return $ param_context worker_body
 
 -------------------------------------------------------------------------------
