@@ -182,9 +182,10 @@ toHnf pos pred = do
     of IsInst {} ->
          -- Perform reduction based on the set of known class instances
          instanceReduction pos pred
-       IsEqual {} ->
+       IsEqual {} -> do
          -- Perform reduction based on the set of known family instances
-         equalityReduction pos pred
+         cst <- equalitySimplification pos [pred]
+         return (EqualityDerivation pred, cst)
 
 -- | Convert a constraint to HNF and ignore how it was derived
 toHnfConstraint :: Predicate -> IO Constraint
@@ -229,6 +230,9 @@ instanceReduction pos pred = do
         let derivation = FunPassConvDerivation { conclusion = pred }
         in return (derivation, [])
 
+-------------------------------------------------------------------------------
+-- Equality constraint solving
+
 -- | Simplify a set of equality constraints as much as possible
 equalitySimplification :: SourcePos -> Constraint -> IO Constraint
 equalitySimplification pos csts =
@@ -237,105 +241,151 @@ equalitySimplification pos csts =
   repeat_until_convergence csts
   where
     repeat_until_convergence csts = do
-      (csts', progress) <- one_pass False id csts
+      (csts', progress) <-
+        applyEqualityReductionRule equalityReductionRules pos csts
       if progress then repeat_until_convergence csts' else return csts'
 
-    -- Simplify all predicates once
-    one_pass progress new_cst (prd:cst) = do
-      (prd', prd_progress) <- try_reduce prd
-      one_pass (progress || prd_progress) (new_cst . (prd' ++)) cst
-    
-    one_pass progress new_cst [] = return (new_cst [], progress)
-
-    -- Try to simplify one predicate
-    try_reduce :: Predicate -> IO (Constraint, Bool)
-    try_reduce prd = runMaybeT (equalityReduction1 prd) >>= continue
-      where
-        continue Nothing         = return ([prd], False) -- No progress
-        continue (Just (_, cst)) = return (cst, True)    -- Progress
-
--- | Attempt to derive a solution for a single equality constraint
-equalityReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
-equalityReduction pos pred@(IsEqual {}) = do
-  -- Try to decompose this predicate, eliminate trivial predicates,
-  -- and unify variables
-  result <- runMaybeT $ do
-    (deriv, csts) <- equalityReduction1 pred
-    csts' <- lift $ equalitySimplification pos csts
-    return (deriv, csts')
-
-  return $ fromMaybe (IdDerivation pred, [pred]) result
-
--- | Try to apply any single reduction rule to an equality predicate
-equalityReduction1 :: Predicate -> MaybeT IO (Derivation, Constraint)
-equalityReduction1 prd@(IsEqual t1 t2) =
-  equalityDecomp (t1, t2) `mplus`
-  equalityTrivial (t1, t2) `mplus`
-  equalityUnify (t1, t2)
-
--- | If LHS and RHS of an equality constraint are equal, discard it
-equalityTrivial :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
-equalityTrivial (t1, t2) = do
-  b <- lift $ uEqual t1 t2
-  if b then return (EqualityDerivation (IsEqual t1 t2), []) else mzero
-
--- | If the LHS and RHS are equal data constructors, decompose the
---   constraint.
-equalityDecomp :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
-equalityDecomp (t1, t2) = do
-  (t1_head, t1_args) <- lift $ inspectTypeApplication t1
-  (t2_head, t2_args) <- lift $ inspectTypeApplication t2
-  let decompose = do_decompose t1_args t2_args
-  case (t1_head, t2_head) of
-    (ConTy c1, ConTy c2) 
-      | isDataCon c1 && isDataCon c2 && c1 == c2 -> decompose
-    (TupleTy n1, TupleTy n2)
-      | n1 == n2 -> decompose
-    (FunTy n1, FunTy n2)
-      | n1 == n2 -> decompose
-    (AnyTy k1, AnyTy k2) -> decompose
-      
-    -- If one of the parameters involves a type variable or type function,
-    -- we cannot decompose the equality constraint
-    (ConTy c1, _)
-      | not (isDataCon c1) -> mzero
-    (_, ConTy c2)
-      | not (isDataCon c2) -> mzero
-
-    -- Otherwise, we have two mismatched data or type constructors, which is
-    -- an error
-    _ -> contradiction
+-- | Apply an equality reduction rule to all predicates in a constraint
+applyEqualityReductionRule :: EqualityReductionRule
+                           -> SourcePos
+                           -> Constraint
+                           -> IO (Constraint, Bool)
+applyEqualityReductionRule rule pos cst = go False id cst
   where
-    do_decompose t1_args t2_args =
-      -- Equality of matching data constructors: C a b = C c d.
-      -- Decompose into equality of arguments: a = c, b = d.
-      let new_constraints = zipWith IsEqual t1_args t2_args
-      in return (EqualityDerivation (IsEqual t1 t2), new_constraints)
+    go progress new_cst (prd@(t1 `IsEqual` t2) : cst) = do
+      prd_result <- runEqualityReductionRule rule pos t1 t2
+      case prd_result of
+        -- No change: go to next constraint
+        Nothing        -> go progress (new_cst . (prd:)) cst
 
-    contradiction =
-      -- Unsolvable constraint
-      lift $ fail "Unsolvable type equality constraint detected"
-  
--- | If the LHS or RHS is a flexible type variable, then unify it.
---   If one side is a flexible type variable, unify it with the other side.
-equalityUnify :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
-equalityUnify (t1, t2) = do
-  (t1_c) <- lift $ canonicalizeHead t1
-  (t2_c) <- lift $ canonicalizeHead t2
-  case (t1_c, t2_c) of
-    (ConTy c1, ConTy c2)
-      | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do
-          lift $ unifyTyVars c1 c2
-          return (EqualityDerivation (IsEqual t1_c t2_c), [])
-    (ConTy c1, _)
-      | isFlexibleTyVar c1 -> do
-          lift $ unifyTyVar c1 t2
-          return (EqualityDerivation (IsEqual t1_c t2_c), [])
-    (_, ConTy c2)
-      | isFlexibleTyVar c2 -> do
-          lift $ unifyTyVar c2 t1
-          return (EqualityDerivation (IsEqual t1_c t2_c), [])
-    _ -> mzero
+        -- Reduced: continue processing the reduced constraints
+        Just (_, cst') -> go True new_cst (cst' ++ cst)
+
+    go progress new_cst [] = return (new_cst [], progress)
+
+newtype EqualityReductionRule =
+  EqualityReductionRule 
+  {runEqualityReductionRule :: SourcePos
+                            -> HMType
+                            -> HMType
+                            -> IO (Maybe (Derivation, Constraint))}
+
+equalityReductionRules =
+  anyRule [decompRule, trivRule, unifyRule, funSwapRule]
+
+-- | Try to run any rule in the list
+anyRule :: [EqualityReductionRule] -> EqualityReductionRule
+anyRule (r : rs) =
+  EqualityReductionRule $ \ pos t1 t2 -> do
+    result <- runEqualityReductionRule r pos t1 t2
+    case result of
+      Nothing -> runEqualityReductionRule (anyRule rs) pos t1 t2
+      Just x  -> return result
+
+anyRule [] = EqualityReductionRule $ \_ _ _ -> return Nothing
+
+trivRule :: EqualityReductionRule
+trivRule = EqualityReductionRule $ \pos t1 t2 -> do
+  b <- uEqual t1 t2
+  return $! if b
+            then Just (EqualityDerivation (IsEqual t1 t2), [])
+            else Nothing
+
+-- | Reorient equations of the form @t ~ F t u v@, that is,
+--   the RHS is a function application and the LHS appears somewhere under it.
+--
+--   (Other reorienting rules appear in 'decompRule').
+funSwapRule :: EqualityReductionRule
+funSwapRule = EqualityReductionRule $ \pos t1 t2 ->
+  let swap =
+        return $ Just (EqualityDerivation (IsEqual t1 t2), [t2 `IsEqual` t1])
+  in do
+    (t2_head, t2_args) <- inspectTypeApplication t2
+    case t2_head of
+      TFunAppTy tyfun tyfun_args ->
+        -- Does t1 appear anywhere under t2?
+        ifM (anyM (subexpressionCheck t1) (tyfun_args ++ t2_args))
+        swap
+        (return Nothing)
+      _ -> return Nothing
+
+decompRule :: EqualityReductionRule
+decompRule = EqualityReductionRule $ \pos t1 t2 ->
+  let -- The equality predicate relates two matching data constructors:
+      -- @C a b ~ C x y@.
+      -- Decompose into fquality of arguments: @a ~ x, b ~ y@.
+      decompose t1_args t2_args =
+        let new_constraints = zipWith IsEqual t1_args t2_args
+        in return (Just (EqualityDerivation (IsEqual t1 t2), new_constraints))
+
+      -- Swap the LHS and RHS of the equality predicate so that it's usable as
+      -- a left-to-right rewrite rule.
+      swap =
+        return (Just (EqualityDerivation (IsEqual t1 t2), [t2 `IsEqual` t1]))
+
+      -- The predicate is unsolvable because it relates two different injective
+      -- data constructors
+      contradiction = do
+        (t1_doc, t2_doc) <- runPpr $ liftM2 (,) (uShow t1) (uShow t2)
+        print (t1_doc <+> text "=" <+> t2_doc)
+        fail "Unsolvable type equality constraint detected"
+  in do
+    (t1_head, t1_args) <- inspectTypeApplication t1
+    (t2_head, t2_args) <- inspectTypeApplication t2
+    case (t1_head, t2_head) of
+      _ | equalInjConstructors t1_head t2_head ->
+        decompose t1_args t2_args
+
+      (_, ConTy tyvar) | isInjConstructor t1_head && isTyVar tyvar ->
+        swap
+
+      (_, TFunAppTy tyfun tyfun_args) | isInjConstructor t1_head ->
+        swap
+
+      _ | isInjConstructor t1_head && isInjConstructor t2_head ->
+        contradiction
+
+      _ | otherwise ->
+        return Nothing
+
+unifyRule :: EqualityReductionRule
+unifyRule = EqualityReductionRule $ \pos t1 t2 ->
+  let success = return $ Just (EqualityDerivation (IsEqual t1 t2), [])
+  in do
+    t1_c <- canonicalizeHead t1
+    t2_c <- canonicalizeHead t2
+    case (t1_c, t2_c) of
+      (ConTy c1, ConTy c2) | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do
+        unifyTyVars c1 c2
+        success
+      (ConTy c1, _) | isFlexibleTyVar c1 -> do
+        unifyTyVar c1 t2
+        success
+      (_, ConTy c2) | isFlexibleTyVar c2 -> do
+        unifyTyVar c2 t1
+        success
+      _ -> return Nothing
+
+-- | Return 'True' if both arguments are equal injective constructors.
+--   The arguments should be canonicalized.
+--   Only injective constructors return 'True'.  Type variables, functions,
+--   and applications always return 'False'.
+equalInjConstructors (ConTy c1) (ConTy c2) =
+  isDataCon c1 && isDataCon c2 && c1 == c2
+
+equalInjConstructors (TupleTy n1) (TupleTy n2) = n1 == n2
+equalInjConstructors (FunTy n1) (FunTy n2) = n1 == n2
+equalInjConstructors (AnyTy k1) (AnyTy k2) = True
+equalInjConstructors _ _ = False
+
+-- | Return 'True' if the argument is an injective constructor and
+--   not an application.
+isInjConstructor (ConTy c) = isDataCon c
+isInjConstructor (TupleTy _) = True
+isInjConstructor (FunTy _) = True
+isInjConstructor (AnyTy _) = True
+
+
 
 -------------------------------------------------------------------------------
 -- Context reduction

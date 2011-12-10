@@ -20,7 +20,10 @@ module Untyped.HMType
         uncurryTypeApplication,
         inspectTypeApplication,
         hmTypeKind,
-        -- hmTypeMap, hmTypeMapM,
+        containsFlexibleVar,
+        isTFAppOfFlexibleVar,
+        substituteType,
+        subexpressionCheck,
         canonicalizeHead,
         Type(..),
         unifiableTypeVariables,
@@ -289,6 +292,57 @@ instance Type HMType where
                         return $ Set.union s1 s2
       TFunAppTy _ ts -> liftM Set.unions $ mapM freeTypeVariables ts 
       _ -> return Set.empty
+
+-- | @subexpressionCheck s t@ evaluates to True when @s@ is a subexpression
+--   of @t@.
+subexpressionCheck :: HMType -> HMType -> IO Bool
+subexpressionCheck t1 t2 = do
+  t2_c <- canonicalizeHead t2
+
+  -- Test whether types are equal
+  uEqual t1 t2_c >||>
+  
+    -- Recursively test subexpressions
+    case t2_c
+    of AppTy a b -> subexpressionCheck t1 a >||> subexpressionCheck t1 b
+       TFunAppTy _ t2s -> anyM (subexpressionCheck t1) t2s
+       _ -> return False
+
+-- | Return 'True' if the expression is a type function application
+--   containing a flexible variable somewhere among its arguments.
+isTFAppOfFlexibleVar :: HMType -> IO Bool
+isTFAppOfFlexibleVar ty = do
+  (head, args) <- inspectTypeApplication ty
+  case head of
+    TFunAppTy _ ts -> anyM containsFlexibleVar (ts ++ args)
+    _ -> return False
+
+-- | Return 'True' if the expression mentions a flexible variable.
+containsFlexibleVar :: HMType -> IO Bool
+containsFlexibleVar ty = do
+  ty_c <- canonicalizeHead ty
+  case ty_c of
+    ConTy v | isFlexibleTyVar v -> return True
+    AppTy t1 t2 -> containsFlexibleVar t1 >||> containsFlexibleVar t2
+    TFunAppTy _ ts -> anyM containsFlexibleVar ts
+    _ -> return False
+
+-- | Replace one type by another wherever it appears in the given type.
+substituteType :: HMType -> HMType -> HMType -> IO HMType
+substituteType old new ty = do
+  ty_c <- canonicalizeHead ty
+
+  -- If the type matches, then substitute
+  ifM (uEqual old ty_c) (return new) $
+
+    -- Otherwise, recursively substitute subexpressions
+    case ty_c of
+      AppTy t1 t2 ->
+        liftM2 AppTy (substituteType old new t1) (substituteType old new t2)
+      TFunAppTy tf tys -> do
+        tys' <- mapM (substituteType old new) tys
+        return $ TFunAppTy tf tys'
+      _ -> return ty
 
 -------------------------------------------------------------------------------
 -- Unification
