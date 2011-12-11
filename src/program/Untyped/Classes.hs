@@ -5,6 +5,8 @@
 module Untyped.Classes
        (pprPredicate, pprContext,
         isInstancePredicate, isEqualityPredicate,
+        instantiateClassConstraint,
+        andSuperclassEqualityPredicates,
         reduceTypeFunction,
         toHnf,
         dependentTypeVariables,
@@ -68,6 +70,12 @@ isEqualityPredicate _ = False
 -- for object layout information. 
 isPassableClass cls = clsName (clsSignature cls) == "Repr"
 
+-- | Instantiate a class signature's constraint to a given type
+instantiateClassConstraint :: ClassSig -> HMType -> IO Constraint
+instantiateClassConstraint sig instance_type =
+  let substitution = substitutionFromList [(clsParam sig, instance_type)]
+  in renameList substitution (clsConstraint sig)
+
 -------------------------------------------------------------------------------
 -- Type function evalution
 
@@ -93,21 +101,36 @@ reduceTypeFunction family [arg] = runMaybeT $ do
 -------------------------------------------------------------------------------
 -- Context reduction
 
-prdSignature :: Predicate -> ClassSig
-prdSignature (IsInst _ cls) = clsSignature cls
-
 -- | Get all superclass predicates of a given class predicate
-superclassPredicates :: Predicate -> [Predicate]
-superclassPredicates prd =
-  concatMap andSuperclassPredicates $ clsConstraint $ prdSignature prd
+superclassPredicates :: Predicate -> IO [Predicate]
+superclassPredicates (IsInst ty cls) = do
+  -- Get the actual class constraint for this type
+  constraint <- instantiateClassConstraint (clsSignature cls) ty
+
+  -- Find all superclasses
+  liftM concat $ mapM andSuperclassPredicates constraint
 
 superclassPredicates _ = internalError "Not an instance predicate"
 
 -- | Get a class and its superclass predicates
-andSuperclassPredicates :: Predicate -> [Predicate]
-andSuperclassPredicates p@(IsInst {}) = p : superclassPredicates p
-andSuperclassPredicates _ =
-  internalError "andSuperclassPredicates: Not an instance predicate"
+andSuperclassPredicates :: Predicate -> IO [Predicate]
+andSuperclassPredicates p@(IsInst {}) = liftM (p:) $ superclassPredicates p
+andSuperclassPredicates p@(IsEqual {}) = return [p]
+
+-- | Get a class and its superclass equality predicates.
+--   Superclass instance predicates are searched, but not included in the
+--   result.
+--
+--   This function is used when instantiating type signatures in order to
+--   find the equality constraints implied by the type signature's class
+--   context.  Equality constraints implied by /instance/ contexts, on the
+--   other hand, are only discovered while solving constraints.
+andSuperclassEqualityPredicates :: Predicate -> IO [Predicate]
+andSuperclassEqualityPredicates p@(IsInst {}) = do
+  cst <- superclassPredicates p
+  return $ p : filter isEqualityPredicate cst
+
+andSuperclassEqualityPredicates p@(IsEqual {}) = return [p]
 
 -- | Decide whether the constraint entails the predicate, which must be a class
 --   instance predicate.
@@ -115,12 +138,15 @@ andSuperclassPredicates _ =
 --   return new, derived predicates.
 --   Otherwise, return Nothing.
 entailsInstancePredicate :: Constraint -> Predicate -> IO (Maybe Constraint)
-ps `entailsInstancePredicate` p@(IsInst _ _) =
+ps `entailsInstancePredicate` p@(IsInst _ _) = do
   -- True if the predicate is in the context, including superclasses
   let inst_ps = filter isInstancePredicate ps
-      context = concatMap andSuperclassPredicates inst_ps
-  in do b <- anyM (p `uEqual`) context
-        return $! if b then Just [] else Nothing
+  b <- anyM p_implied_by inst_ps
+  return $! if b then Just [] else Nothing
+  where
+    p_implied_by p' = do
+      context <- andSuperclassPredicates p'
+      anyM (p `uEqual`) context
 
 _ `entailsInstancePredicate` _ =
   internalError "entailsInstancePredicate: Not an instance predicate"
@@ -130,11 +156,11 @@ _ `entailsInstancePredicate` _ =
 --   If the constraint entails the predicate, then eliminate the predicate and
 --   return new, derived predicates.
 --   Otherwise, return Nothing.
-entailsEqualityPredicate :: Constraint -> Predicate -> IO (Maybe Constraint)
+{-entailsEqualityPredicate :: Constraint -> Predicate -> IO (Maybe Constraint)
 ps `entailsEqualityPredicate` p@(IsEqual s1 t1) = do
   -- Check both the predicate and its mirrored equivalent
   b <- anyM (p `uEqual`) ps >||> anyM (IsEqual t1 s1 `uEqual`) ps
-  return $! if b then Just [] else Nothing
+  return $! if b then Just [] else Nothing-}
 
 -- | Determine whether a class instance predicate is in H98-style
 --   head-normal form.
@@ -241,9 +267,12 @@ equalitySimplification pos csts =
   repeat_until_convergence csts
   where
     repeat_until_convergence csts = do
-      (csts', progress) <-
+      (csts', progress1) <-
         applyEqualityReductionRule equalityReductionRules pos csts
-      if progress then repeat_until_convergence csts' else return csts'
+      (progress2, csts'') <- substituteConstraint csts'
+      if progress1 || progress2
+        then repeat_until_convergence csts''
+        else return csts''
 
 -- | Apply an equality reduction rule to all predicates in a constraint
 applyEqualityReductionRule :: EqualityReductionRule
@@ -302,9 +331,9 @@ funSwapRule = EqualityReductionRule $ \pos t1 t2 ->
   in do
     (t2_head, t2_args) <- inspectTypeApplication t2
     case t2_head of
-      TFunAppTy tyfun tyfun_args ->
+      ConTy c | isTyFun c ->
         -- Does t1 appear anywhere under t2?
-        ifM (anyM (subexpressionCheck t1) (tyfun_args ++ t2_args))
+        ifM (anyM (subexpressionCheck t1) t2_args)
         swap
         (return Nothing)
       _ -> return Nothing
@@ -336,10 +365,8 @@ decompRule = EqualityReductionRule $ \pos t1 t2 ->
       _ | equalInjConstructors t1_head t2_head ->
         decompose t1_args t2_args
 
-      (_, ConTy tyvar) | isInjConstructor t1_head && isTyVar tyvar ->
-        swap
-
-      (_, TFunAppTy tyfun tyfun_args) | isInjConstructor t1_head ->
+      (_, ConTy c)
+        | isInjConstructor t1_head && (isTyVar c || isTyFun c) ->
         swap
 
       _ | isInjConstructor t1_head && isInjConstructor t2_head ->
@@ -351,6 +378,20 @@ decompRule = EqualityReductionRule $ \pos t1 t2 ->
 unifyRule :: EqualityReductionRule
 unifyRule = EqualityReductionRule $ \pos t1 t2 ->
   let success = return $ Just (EqualityDerivation (IsEqual t1 t2), [])
+
+      -- Unify a variable with a type only if the variable does not occur in
+      -- the type.  It's not an error for a variable to occur under a type
+      -- function.
+      unify_with_type v ty =
+        -- If the variable does not occur in the type, then unify
+        ifM (liftM not $ occursCheck v ty) (unifyTyVar v ty >> success) $
+
+        -- If the variable occurs under injective type constructors, then error
+        ifM (occursInjectively v ty)
+          (fail "Occurs check failed in equality constraint") $
+
+        return Nothing
+
   in do
     t1_c <- canonicalizeHead t1
     t2_c <- canonicalizeHead t2
@@ -358,12 +399,9 @@ unifyRule = EqualityReductionRule $ \pos t1 t2 ->
       (ConTy c1, ConTy c2) | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do
         unifyTyVars c1 c2
         success
-      (ConTy c1, _) | isFlexibleTyVar c1 -> do
-        unifyTyVar c1 t2
-        success
-      (_, ConTy c2) | isFlexibleTyVar c2 -> do
-        unifyTyVar c2 t1
-        success
+
+      (ConTy c1, _) | isFlexibleTyVar c1 -> unify_with_type c1 t2_c
+      (_, ConTy c2) | isFlexibleTyVar c2 -> unify_with_type c2 t1_c
       _ -> return Nothing
 
 -- | Return 'True' if both arguments are equal injective constructors.
@@ -385,7 +423,82 @@ isInjConstructor (TupleTy _) = True
 isInjConstructor (FunTy _) = True
 isInjConstructor (AnyTy _) = True
 
+-- | Perform substitution in the entire constraint.  Return True if any
+--   substitution occurred.
+substituteConstraint :: Constraint -> IO (Bool, Constraint)
+substituteConstraint [] = return (False, [])
 
+substituteConstraint (p:cst) = go False [] p cst
+  where
+    -- Process one predicate at a time
+    go changed visited prd unvisited = do
+      result <- substituteEqualityCoercion prd visited unvisited
+      let (changed', visited', unvisited') =
+            case result
+            of Nothing     -> (changed, visited, unvisited)
+               Just (v, u) -> (True, v, u)
+      case unvisited' of
+        []         -> return (changed', prd : visited')
+        prd' : cst -> go changed' (prd : visited') prd' cst
+
+-- | Given an equality coercion satisfying some criteria, exhaustively
+--   apply the coercion as a rewrite rule to all other equality predicates
+--   in the context.
+--
+--   If any substitutions were made, then return the substituted constraints.
+substituteEqualityCoercion :: Predicate
+                           -> Constraint
+                           -> Constraint
+                           -> IO (Maybe (Constraint, Constraint))
+substituteEqualityCoercion (IsEqual lhs rhs) cst_l cst_r =
+
+  -- Test whether the predicate should be applied as a rewrite rule
+  -- Require that LHS is a type function application containing a type variable
+  ifM (liftM not $ isTFAppOfFlexibleVar lhs) (return Nothing) $
+
+  -- Require that LHS is not a subexpression of RHS
+  ifM (subexpressionCheck lhs rhs) (return Nothing) $ do
+
+    -- Apply the substitution to all other predicates
+    (change1, cst_l') <- substitute_exhaustively_list cst_l
+    (change2, cst_r') <- substitute_exhaustively_list cst_r
+    return $! if change1 || change2 then Just (cst_l', cst_r') else Nothing
+
+  where
+    substitute_exhaustively_list (p:ps) = do
+      (p_change, p') <- substitutePredicateExhaustively lhs rhs p
+      (ps_change, ps') <- substitute_exhaustively_list ps
+      return (p_change || ps_change, p' : ps')
+    
+    substitute_exhaustively_list [] = return (False, [])
+
+-- Exhaustively perform substitution in a predicate.
+-- Return 'True' if any substitutions have been made.
+substitutePredicateExhaustively :: HMType
+                                -> HMType
+                                -> Predicate
+                                -> IO (Bool, Predicate)
+substitutePredicateExhaustively old new prd = go False prd
+  where
+    -- Use 'change_acc' to keep track of whether anything has changed
+    go change_acc prd@(IsEqual t1 t2) = do
+      (change1, t1') <- substituteType old new t1
+      (change2, t2') <- substituteType old new t2
+
+      -- If any substitutions were made this time, retry to find additional
+      -- substitution opportunities
+      if change1 || change2
+        then go True (IsEqual t1' t2')
+        else return (change_acc, prd)
+
+    go change_acc prd@(IsInst t cls) = do
+      (change, t') <- substituteType old new t
+
+      -- If any substitutions were made this time, retry to find additional
+      -- substitution opportunities
+      if change
+        then go True (IsInst t' cls)
+        else return (change_acc, prd)
 
 -------------------------------------------------------------------------------
 -- Context reduction
@@ -400,12 +513,8 @@ reduceContext csts = do
     old_context <- runPpr (pprContext csts)
     print $ text "Start context reduction:" <+> old_context
   
-  -- Simplify equality constraints and other constraints using separate
-  -- procedures
   let (equalities, others) = partition isEqualityPredicate csts
-  equalities' <- equalitySimplification noSourcePos equalities
-  others' <- foldM addToContext [] others
-  let csts' = equalities' ++ others'
+  csts' <- fixed_point_reduce equalities others
 
   when debugContextReduction $ do
     old_context <- runPpr (pprContext csts)
@@ -413,6 +522,20 @@ reduceContext csts = do
     print $ hang (text "End context reduction:" <+> old_context) 4 new_context
 
   return csts'
+  where
+    fixed_point_reduce equalities others = do
+      equalities' <- equalitySimplification noSourcePos equalities
+      others' <- foldM addToContext [] others
+
+      -- If class reduction introduced new equality predicates, then repeat
+      if any isEqualityPredicate others'
+        then let (new_equalities, others'') =
+                   partition isEqualityPredicate others'
+             in fixed_point_reduce (new_equalities ++ equalities') others''
+        else return (equalities' ++ others')
+
+  -- Simplify equality constraints and other constraints using separate
+  -- procedures
 
 -- | Add the extra information from a predicate to the context.  The 
 -- context must be in head-normal form.
@@ -423,9 +546,11 @@ addToContext ctx pred = foldM addToContextHNF ctx =<< toHnfConstraint pred
 -- context and predicate must be in head-normal form.
 addToContextHNF :: Constraint -> Predicate -> IO Constraint
 addToContextHNF ctx pred = do
+  -- If it's a class predicate,
+  -- then reduce it WRT the rest of the class context
   new_cst <- case pred
              of IsInst {} -> entailsInstancePredicate ctx pred
-                IsEqual {} -> entailsEqualityPredicate ctx pred
+                IsEqual {} -> return Nothing -- entailsEqualityPredicate ctx pred
   case new_cst of
     Nothing -> do
       -- Not a redundant predicate
@@ -680,6 +805,7 @@ toProof pos env derivation =
   of IdDerivation {conclusion = prd} ->
        -- Get it from the environment
        lookupProof prd env >>= returnIdProof prd
+
      InstanceDerivation { conclusion = prd@(IsInst inst_type cls)
                         , derivedInstance = inst
                         , instancePremises = i_premises

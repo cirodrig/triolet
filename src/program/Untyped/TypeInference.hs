@@ -520,18 +520,66 @@ makePolymorphicFunction _ _ _ _ =
   -- The argument function must not have type parameters
   internalError "makePolymorphicFunction"
 
+-- | Construct the proof environment corresponding to a constraint.
+
 constraintToProofEnvironment :: Constraint 
                              -> IO (ProofEnvironment, ProofBinding)
-constraintToProofEnvironment cst = mapAndUnzipM convert cst
+constraintToProofEnvironment cst = do
+  (proofs, bindings) <- mapAndUnzipM convert cst
+  return (concat proofs, bindings)
   where
+    -- Create a dictionary expression for each predicate in the context
+    -- and its superclasses.
+    -- Create a binding for each predicate in the context. 
+    -- The superclasses do not need bindings; they're derived from their 
+    -- subclass.
     convert prd = do
       -- Create a variable to hold the proof object
       v_id <- withTheNewVarIdentSupply supplyValue
       let v = mkAnonymousVar v_id ObjectLevel
+
+      -- Create a variable binding to pass it as a parameter
+      let binding = (prd, mkVarP v (convertPredicate prd))
+
+      -- The proof object is just the variable
+      let proof_value = mkVarE noSourcePos v
+      let proof_assoc = (prd, proof_value)
+
+      -- Get superclass proof objects
+      superclasses <- superclassDictionaries noSourcePos prd proof_value
       
-      let exp = mkVarE noSourcePos v
-          pat = mkVarP v (convertPredicate prd) 
-      return ((prd, exp), (prd, pat))
+      return (proof_assoc : superclasses, binding)
+
+-- | Given a class dictionary, get expressions for class dictionaries 
+--   of all its superclasses
+superclassDictionaries :: SourcePos -> Predicate -> TIExp
+                       -> IO ProofEnvironment
+superclassDictionaries pos (IsInst ty cls) dict = do
+  -- Get the actual class constraint for this type
+  constraint <- instantiateClassConstraint (clsSignature cls) ty
+
+  -- Construct a case expression to get the class's fields
+  make_case_statement <- mkCaseOfDict pos cls ty dict
+
+  -- Construct a dictionary expression for each immediate superclass.
+  -- Each constraint is a member of the class.
+  superclass_env <- forM (zip [0..] constraint) $ \(i, prd) -> do
+    (expression, ()) <-
+      make_case_statement $ \sc_vars _ ->
+      return (mkVarE pos (sc_vars !! i), ())
+
+    return (prd, expression)
+
+  -- Transitively get all superclasses of each superclass in the constraint
+  transitive_superclasses <-
+    liftM concat $
+    forM superclass_env $ \(sc_prd, sc_dict) ->
+    superclassDictionaries pos sc_prd sc_dict
+
+  return (superclass_env ++ transitive_superclasses)
+
+-- Equality constraints have no superclasses
+superclassDictionaries pos (IsEqual t1 t2) dict = return []
 
 inferDefGroup :: Bool -> [FunctionDef] -> ([TIDef] -> Inf a) -> Inf a
 inferDefGroup is_top_level defs k =

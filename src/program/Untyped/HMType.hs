@@ -21,6 +21,8 @@ module Untyped.HMType
         inspectTypeApplication,
         hmTypeKind,
         containsFlexibleVar,
+        occursInjectively,
+        occursCheck,
         isTFAppOfFlexibleVar,
         substituteType,
         subexpressionCheck,
@@ -30,6 +32,7 @@ module Untyped.HMType
         Unifiable(..),
         tyVarToSystemF,
         tyConToSystemF,
+        pprAbbreviatedType,
         pprTyCon,
         pprTyScheme
        )
@@ -314,7 +317,7 @@ isTFAppOfFlexibleVar :: HMType -> IO Bool
 isTFAppOfFlexibleVar ty = do
   (head, args) <- inspectTypeApplication ty
   case head of
-    TFunAppTy _ ts -> anyM containsFlexibleVar (ts ++ args)
+    ConTy c | isTyFun c -> anyM containsFlexibleVar args
     _ -> return False
 
 -- | Return 'True' if the expression mentions a flexible variable.
@@ -327,22 +330,44 @@ containsFlexibleVar ty = do
     TFunAppTy _ ts -> anyM containsFlexibleVar ts
     _ -> return False
 
+-- | Check whether a variable (which should be in canonical form) appears
+--   in the type under injective constructors (such as data type constructors).
+--   This function differs from 'occursCheck' only in its handling of type
+--   function applications.
+occursInjectively :: TyCon -> HMType -> IO Bool
+occursInjectively v ty = do assertCanonicalTyVar v
+                            occ ty
+  where
+    occ t = do t_c <- canonicalizeHead t 
+               case t_c of
+                 ConTy v2  -> return $ v == v2
+                 AppTy a b -> occ a >||> occ b
+                 _ -> return False
+
 -- | Replace one type by another wherever it appears in the given type.
-substituteType :: HMType -> HMType -> HMType -> IO HMType
+--   Return the substituted type and 'True' if any substitutions were made,
+--   'False' otherwise.
+substituteType :: HMType -> HMType -> HMType -> IO (Bool, HMType)
 substituteType old new ty = do
   ty_c <- canonicalizeHead ty
 
   -- If the type matches, then substitute
-  ifM (uEqual old ty_c) (return new) $
+  ifM (uEqual old ty_c) (return (True, new)) $
 
     -- Otherwise, recursively substitute subexpressions
     case ty_c of
-      AppTy t1 t2 ->
-        liftM2 AppTy (substituteType old new t1) (substituteType old new t2)
+      AppTy t1 t2 -> do
+        (change1, t1') <- substituteType old new t1
+        (change2, t2') <- substituteType old new t2
+        if change1 || change2
+          then return (True, AppTy t1' t2')
+          else return (False, ty_c)
       TFunAppTy tf tys -> do
-        tys' <- mapM (substituteType old new) tys
-        return $ TFunAppTy tf tys'
-      _ -> return ty
+        (changes, tys') <- mapAndUnzipM (substituteType old new) tys
+        if or changes
+          then return (True, TFunAppTy tf tys')
+          else return (False, ty_c)
+      _ -> return (False, ty)
 
 -------------------------------------------------------------------------------
 -- Unification
@@ -451,6 +476,7 @@ occursCheck v t = do assertCanonicalTyVar v
                case t_c of
                  ConTy v2  -> return $ v == v2
                  AppTy a b -> occ a >||> occ b
+                 TFunAppTy _ ts -> anyM occ ts
                  _ -> return False
 
 instance Unifiable HMType where
@@ -588,30 +614,44 @@ pprTyScheme (TyScheme qvars cst ty) = do
     text "=>" <+> ty_doc
 
 pprType :: HMType -> Ppr Doc
-pprType ty = prType 0 ty
+pprType ty = prType Nothing 0 ty
 
-prType :: Int -> HMType -> Ppr Doc
-prType prec t = do
+-- | Print a type up to a certain nesting depth.
+--   Useful to print infinite types, when such types are accidentally
+--   constructed due to unification.
+pprAbbreviatedType :: Int -> HMType -> Ppr Doc
+pprAbbreviatedType f ty 
+  | f > 0     = prType (Just f) 0 ty
+  | otherwise = return $ text "..."
+
+prType :: Maybe Int             -- ^ Fuel, to limit maximum nesting depth
+       -> Int                   -- ^ Precedence
+       -> HMType                -- ^ Type
+       -> Ppr Doc               -- ^ Printer of the type
+-- Out of fuel: stop printing
+prType (Just 0) _ _ = return $ text "..."
+prType fuel prec t = do
   -- Uncurry the type application and put the head in canonical form
   (hd, params) <- liftIO $ inspectTypeApplication t
   case hd of
-    ConTy c -> application <$> pprTyCon c <*> traverse (prType app_prec) params
+    ConTy c ->
+      application <$> pprTyCon c <*> traverse (continue app_prec) params
     FunTy n
       | n + 1 == length params ->
         let domain = sep . intersperse (text "*") <$>
-                     traverse (prType prod_prec) (init params)
-            range = prType arrow_prec $ last params
+                     traverse (continue prod_prec) (init params)
+            range = continue arrow_prec $ last params
         in parenthesize arrow_prec <$> domain `arrow` range
       | otherwise ->
           application (parens (text ("FunTy " ++ show n))) <$>
-          traverse (prType app_prec) params
+          traverse (continue app_prec) params
     TupleTy n
       | n == length params ->
         parens . sep . punctuate (text ",") <$>
-        traverse (prType outer_prec) params
+        traverse (continue outer_prec) params
       | otherwise ->
         application (parens (text ("TupleTy " ++ show n))) <$>
-        traverse (prType outer_prec) params
+        traverse (continue outer_prec) params
     AppTy _ _ -> 
       -- Should not happen after uncurrying
       internalError "prType"
@@ -620,6 +660,10 @@ prType prec t = do
     AnyTy k ->
       return $ parens (text "AnyTy" <+> text (showKind k))
   where
+    continue prec t =
+      -- Consume fel
+      prType (fmap (subtract 1) fuel) prec t
+
     parenthesize expr_prec doc
       | prec >= expr_prec = parens doc
       | otherwise = doc

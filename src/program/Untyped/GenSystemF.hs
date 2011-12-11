@@ -36,6 +36,7 @@ import Untyped.HMType
 import Untyped.Kind
 import Untyped.Unification
 import Untyped.Data
+import {-# SOURCE #-} Untyped.Classes
 import qualified Untyped.Syntax as Untyped
 import qualified SystemF.Syntax as SystemF
 import SystemF.Syntax(ExpInfo, mkExpInfo)
@@ -80,7 +81,12 @@ instantiate (TyScheme qvars cst ty) = do
   -- Apply the substitution to the type
   ty' <- rename substitution ty
   cst' <- mapM (rename substitution) cst
-  return $ (new_qvars, cst', ty')
+
+  -- Include superclass equality coercions in the constraint, since
+  -- they can help in type refinement
+  superclass_cst <- liftM concat $ mapM andSuperclassEqualityPredicates cst'
+
+  return $ (new_qvars, superclass_cst, ty')
 
 -- | Instantiate a type scheme and match it to some other type.
 -- Throw an error if types do not match.
@@ -290,6 +296,63 @@ mkDictE pos cls inst_type scs methods =
   -- Apply the dictionary constructor to the instance type and all arguments
   mkConE pos (clsDictCon cls) [inst_type] [] (scs ++ methods)
 
+-- | Get the type of a class dictionary's fields.
+--
+--   The fields are the superclasses and the methods.
+classDictionaryFieldTypes :: Class  -- ^ Class to inspect
+                          -> HMType -- ^ Type of the class instance
+                          -> IO ([TIType], [TIType])
+classDictionaryFieldTypes cls inst_type = do
+  let cls_sig = clsSignature cls
+  let instantiation = substitutionFromList [(clsParam cls_sig, inst_type)]
+
+  -- Superclass dictionary and coercion types
+  sc_types <- forM (clsConstraint cls_sig) $ \prd -> do
+    liftM convertPredicate $ rename instantiation prd
+
+  -- Method types
+  m_types <- forM (clsMethods cls) $ \method -> do
+    liftM convertTyScheme $ renameTyScheme instantiation (clmSignature method)
+
+  return (sc_types, m_types)
+
+-- | Create an expression to deconstruct a class dictionary.
+--
+--   The fields of the class dictionary are bound to variables that may be
+--   used to construct the body.
+mkCaseOfDict :: forall a.
+                SourcePos
+             -> Class           -- ^ The class whose dictionary is being used
+             -> HMType          -- ^ The class instance's type
+             -> TIExp           -- ^ The class dictionary expression
+             -> IO (([Var] -> [Var] -> IO (TIExp, a)) -> IO (TIExp, a))
+mkCaseOfDict pos cls inst_type dict = do
+  (sc_types, m_types) <- classDictionaryFieldTypes cls inst_type
+
+  -- Create anonymous parameter variables
+  sc_vars <- replicateM (length sc_types) $ do
+    var_id <- withTheNewVarIdentSupply supplyValue
+    return $ mkAnonymousVar var_id ObjectLevel
+
+  m_vars <- replicateM (length m_types) $ do
+    var_id <- withTheNewVarIdentSupply supplyValue
+    return $ mkAnonymousVar var_id ObjectLevel
+
+  -- Create binders for the parameters
+  let mkParameter var ty = TIVarP var ty
+      parameters = zipWith mkParameter sc_vars sc_types ++
+                   zipWith mkParameter m_vars m_types
+
+  let make_case_expression :: forall. ([Var] -> [Var] -> IO (TIExp, a)) -> IO (TIExp, a)
+      make_case_expression make_body = do
+        let ty_param = convertHMType inst_type
+        (body, x) <- make_body sc_vars m_vars
+        let alt = TIAlt (TIDeConInst (clsDictCon cls) [ty_param] [])
+                  parameters body
+            case_exp = CaseTE (mkExpInfo pos) dict [alt]
+        return (case_exp, x)
+  return make_case_expression
+  
 -- | Create an expression that selects and instantiates a class method.
 -- Return the expression and the placeholders produced by instantiation.
 mkMethodInstanceE :: SourcePos
@@ -305,38 +368,26 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
   let cls_sig = clsSignature cls
       num_superclasses = length $ clsConstraint cls_sig
       num_methods = length $ clsMethods cls
-      
+
   when (index >= num_methods) $
     internalError "mkMethodInstanceE: index out of range"
-
-  -- Get the type of each field.  Rename the class variable to match
-  -- this instance.
-  let instantiation = substitutionFromList [(clsParam cls_sig, inst_type)]
-  sc_types <- mapM (return . convertPredicate <=< rename instantiation) $
-              clsConstraint cls_sig
-  m_types <- mapM (return . convertTyScheme <=< renameTyScheme instantiation . clmSignature) $ clsMethods cls
-
-  -- Create anonymous parameter variables
-  parameter_vars <- replicateM (num_superclasses + num_methods) $ do
-    var_id <- withTheNewVarIdentSupply supplyValue
-    return $ mkAnonymousVar var_id ObjectLevel
-
-  -- Create binders for the parameters
-  let mkParameter var ty = TIVarP var ty
-      parameters = zipWith mkParameter parameter_vars (sc_types ++ m_types)
 
   -- Create a case expression that matches against the class dictionary,
   -- selects one of its fields, and instantiates the field to a monomorphic
   -- type
-  let method_var =
-        mkVarE pos $ parameter_vars !! (num_superclasses + index)
-  (placeholders, alt_body) <-
-    instanceExpression pos ty_params constraint method_var
-      
-  let alt = TIAlt (TIDeConInst (clsDictCon cls) [convertHMType inst_type] [])
-            parameters alt_body
+  make_case_expression <- mkCaseOfDict pos cls inst_type dict
 
-  return (placeholders, CaseTE (mkExpInfo pos) dict [alt])
+  -- Select a field and instantiate it to a monotype
+  let get_instance_var _ method_vars = do
+        let field_expr = mkVarE pos (method_vars !! index)
+
+        -- Instantiate the field
+        (placeholders, alt_body) <-
+          instanceExpression pos ty_params constraint field_expr
+        return (alt_body, placeholders)
+
+  (case_exp, placeholders) <- make_case_expression get_instance_var
+  return (placeholders, case_exp)
 
 -- | Create a placeholder for a recursive variable.  The variable is assumed
 -- to have a monomorphic type, which is later generalized.
@@ -537,4 +588,4 @@ instanceExpressionWithProofs env pos ty_params constraint exp = do
       case mprf of
         Just prf -> return prf
         Nothing -> internalError "Cannot find class dictionary"
-      
+
