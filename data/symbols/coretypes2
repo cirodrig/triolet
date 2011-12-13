@@ -250,14 +250,20 @@ data VectorDict : bare -> box
    a -> a -> float);
 };
 
--- Cartesian domains
+-- Cartesian domains, indexed by their index type
 data CartesianDict : box -> box
 {
   cartesianDict
-  (sh : box) ()
-  (sh -> Maybe (index sh),
-   sh -> Maybe (index sh),
-   index sh -> index sh -> sh);
+  (sh : box)
+  ()
+  (coerce @box (cartesianDomain (index sh)) sh,
+   sh -> Writer (Maybe (index sh)),
+   sh -> Writer (Maybe (index sh)),
+   index sh -> index sh -> sh,
+   sh -> index sh -> sh,
+   sh -> int -> sh,
+   sh -> int -> sh,
+   sh);
 };
 
 data TraversableDict : (bare -> bare) -> box
@@ -325,7 +331,8 @@ data IndexableDict : (bare -> bare) -> box
    (a : bare) -> t a -> shape t);
 };
 
-
+-- The cartesian domain corresponding to an index type
+type cartesianDomain : bare -> box;
 type index : box -> bare;
 type slice : box -> bare;
 
@@ -898,6 +905,36 @@ AdditiveDict_float_sub : float -> float -> float;
 AdditiveDict_float_negate : float -> float;
 AdditiveDict_float_zero : float;
 
+AdditiveDict_PyonTuple2_add : (a b : bare)
+                           -> Repr a
+                           -> Repr b
+                           -> AdditiveDict a
+                           -> AdditiveDict b
+                           -> PyonTuple2 a b
+                           -> PyonTuple2 a b
+                           -> Writer (PyonTuple2 a b);
+AdditiveDict_PyonTuple2_sub : (a b : bare)
+                           -> Repr a
+                           -> Repr b
+                           -> AdditiveDict a
+                           -> AdditiveDict b
+                           -> PyonTuple2 a b
+                           -> PyonTuple2 a b
+                           -> Writer (PyonTuple2 a b);
+AdditiveDict_PyonTuple2_negate : (a b : bare)
+                              -> Repr a
+                              -> Repr b
+                              -> AdditiveDict a
+                              -> AdditiveDict b
+                              -> PyonTuple2 a b
+                              -> Writer (PyonTuple2 a b);
+AdditiveDict_PyonTuple2_zero : (a b : bare)
+                            -> Repr a
+                            -> Repr b
+                            -> AdditiveDict a
+                            -> AdditiveDict b
+                            -> Writer (PyonTuple2 a b);
+
 AdditiveDict_Complex_add :
     (a : bare)
  -> Repr a
@@ -1079,15 +1116,48 @@ VectorDict_Complex_dot :
  -> Complex a
  -> float;
 
-CartesianDict_dim0_loBound : dim0 -> Writer (Maybe (index dim0));
-CartesianDict_dim0_hiBound : dim0 -> Writer (Maybe (index dim0));
-CartesianDict_dim0_arrayRange : index dim0 -> index dim0 -> dim0;
-CartesianDict_dim1_loBound : dim1 -> Writer (Maybe (index dim1));
-CartesianDict_dim1_hiBound : dim1 -> Writer (Maybe (index dim1));
-CartesianDict_dim1_arrayRange : index dim1 -> index dim1 -> dim1;
-CartesianDict_dim2_loBound : dim2 -> Writer (Maybe (index dim2));
-CartesianDict_dim2_hiBound : dim2 -> Writer (Maybe (index dim2));
-CartesianDict_dim2_arrayRange : index dim2 -> index dim2 -> dim2;
+CartesianDict_dim0_loBound :
+    dim0 -> Writer (Maybe (index dim0));
+CartesianDict_dim0_hiBound :
+    dim0 -> Writer (Maybe (index dim0));
+CartesianDict_dim0_arrayRange :
+    index dim0 -> index dim0 -> dim0;
+CartesianDict_dim0_displaceDomain :
+    dim0 -> index dim0 -> dim0;
+CartesianDict_dim0_multiplyDomain :
+    dim0 -> int -> dim0;
+CartesianDict_dim0_divideDomain :
+    dim0 -> int -> dim0;
+CartesianDict_dim0_unbounded :
+    dim0;
+CartesianDict_dim1_loBound :
+    dim1 -> Writer (Maybe (index dim1));
+CartesianDict_dim1_hiBound :
+    dim1 -> Writer (Maybe (index dim1));
+CartesianDict_dim1_arrayRange :
+    index dim1 -> index dim1 -> dim1;
+CartesianDict_dim1_displaceDomain :
+    dim1 -> index dim1 -> dim1;
+CartesianDict_dim1_multiplyDomain :
+    dim1 -> int -> dim1;
+CartesianDict_dim1_divideDomain :
+    dim1 -> int -> dim1;
+CartesianDict_dim1_unbounded :
+    dim1;
+CartesianDict_dim2_loBound :
+    dim2 -> Writer (Maybe (index dim2));
+CartesianDict_dim2_hiBound :
+    dim2 -> Writer (Maybe (index dim2));
+CartesianDict_dim2_arrayRange :
+    index dim2 -> index dim2 -> dim2;
+CartesianDict_dim2_displaceDomain :
+    dim2 -> index dim2 -> dim2;
+CartesianDict_dim2_multiplyDomain :
+    dim2 -> int -> dim2;
+CartesianDict_dim2_divideDomain :
+    dim2 -> int -> dim2;
+CartesianDict_dim2_unbounded :
+    dim2;
 
 -------------------------------------------------------------------------------
 -- other arithmetic
@@ -1203,6 +1273,14 @@ eqZ_refl : (n : intindex) -> Pf (eqZ n n);
 -- construct proofs that are never used.  Since the value is not used, it is
 -- safe to construct such a value.
 deadProof : (p : prop) -> Pf p;
+
+-- Construct an identity coercion.  This function is safe.
+idCoercion : (a : box) -> coerce @box a a;
+
+-- The type functions 'index' and 'cartesianDomain' are inverses where
+-- they are defined.
+cartesianIndexCoercion : (sh : box)
+                      -> coerce @box (cartesianDomain (index sh)) sh;
 
 -- Construct a coercion.  This function is unsafe.
 unsafeMakeCoercion : (a b : box) -> coerce @box a b;
@@ -1543,14 +1621,8 @@ fun_isNothing : (a : bare) -> Repr a -> Maybe a -> bool;
 fun_isJust : (a : bare) -> Repr a -> Maybe a -> bool;
 fun_fromJust : (a : bare) -> Repr a -> Maybe a -> Writer a;
 
--- arr1D_traverse : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
--- 	      -> arr N a -> darr1 N a;
-
 arr1D_build : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
 	   -> (int -> Writer a) -> Writer (arr N a);
-
--- arr2D_traverse : (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
--- 	      -> arr M (arr N a) -> darr2 M N a;
 
 arr2D_build : (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
 	   -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
@@ -1559,6 +1631,17 @@ empty_list_dim_view : (a : bare) -> Repr a -> view list_dim a;
 
 viewToSequence : (a : bare) -> Repr a -> view list_dim a -> Sequence a;
 sequenceToView : (a : bare) -> Repr a -> Sequence a -> view list_dim a;
+view_transform : (sh : box) -> (a : bare)
+              -> Repr a
+              -> (sh -> sh)
+              -> (index sh -> Writer (index sh))
+              -> view sh a
+              -> view sh a;
+
+shift : (sh : box) -> (a : bare)
+     -> Repr a -> CartesianDict sh -> AdditiveDict (index sh)
+     -> index sh -> view sh a -> view sh a;
+
 
 -- Fold over a stream using an update-in-place operation
 accumulate_Stream_int : (s i b : bare)
@@ -1706,14 +1789,6 @@ stencil2D : (t : bare -> bare) -> (a b : bare)
 	 -> (view dim2 a -> Writer b)
 	 -> t a
 	 -> Writer (array2 b);
-
-shift2D : (t : bare -> bare) -> (a : bare)
-       -> IndexableDict t
-       -> coerce @box (shape t) dim2
-       -> Repr a
-       -> index (shape t)
-       -> t a
-       -> view dim2 a;
 
 range2D : index dim2 -> Stream dim2 (index dim2);
 

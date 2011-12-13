@@ -208,13 +208,6 @@ instantiateVariable pos v = Inf $ \env ->
        -- printContext ("instantiate " ++ maybe "" showLabel (varName v)) (cst : constraint)
        return (cst:constraint, vars, placeholders, (val, ty))
 
-lookupTyScheme :: Variable -> Inf TyScheme
-lookupTyScheme v = withEnvironment $ \env ->
-  case Map.lookup v env
-  of Nothing  -> internalError $
-                 "No type for variable " ++ maybe "" showLabel (varName v)
-     Just ass -> return $ assignedTyScheme ass
-
 -------------------------------------------------------------------------------
 
 -- | Generalize a set of types to type schemes in a common type environment.

@@ -57,7 +57,7 @@ mkMethodType :: Class -> TyScheme -> TyScheme
 mkMethodType cls (TyScheme qvars cst fot) =
   let cls_var = clsParam $ clsSignature cls
       qvars' = cls_var : qvars
-      cst' = (ConTy cls_var `IsInst` cls) : cst
+      cst' = ConTy cls_var `IsInst` cls : cst
   in TyScheme qvars' cst' fot
 
 -- | Create a class method.
@@ -65,9 +65,7 @@ mkMethodType cls (TyScheme qvars cst fot) =
 -- The returned method is added to the fields of the class, so the 'cls' 
 -- parameter must be used lazily.
 mkClassMethod cls index name sig = do
-  -- Add the class parameter and class constraint to the method's signature 
-  let method_sig = mkMethodType cls sig
-      ass = methodAssignment cls index method_sig
+  let ass = methodAssignment cls index sig
   var <- predefinedVariable (Just $ builtinLabel name) ass
   return $ ClassMethod name sig var
 
@@ -77,10 +75,10 @@ getClassMethod cls ix
   | otherwise = clsMethods cls !! ix
 
 -- | Look up a method of the given class and return its type scheme
-classMethodType :: (TIBuiltins -> Class) -> Int -> TyScheme
+{-classMethodType :: (TIBuiltins -> Class) -> Int -> TyScheme
 classMethodType cls_field index =
   let cls = tiBuiltin cls_field
-  in mkMethodType cls (clmSignature $ getClassMethod cls index)
+  in mkMethodType cls (clmSignature $ getClassMethod cls index)-}
 
 monomorphicInstance cls ty methods =
   mkInstance [] [] (clsSignature cls) ty Nothing methods
@@ -198,36 +196,26 @@ mkSliceTyFun = do
    slice_type = ConTy $ tiBuiltin the_con_SliceObject
    int_type = ConTy $ tiBuiltin the_con_int
 
-{-
-mkViewTyFun = do
-  rec { (con, fam) <- mkTyFunction "view" (Star :-> Star :-> Star) []
-                      (pyonBuiltin SystemF.The_view)
-                      [list_instance, matrix_instance]
-      ; let list_instance =
+mkCartesianDomainTyFun = do
+  rec { (con, fam) <- mkTyFunction "cartesianDomain" (Star :-> Star) []
+                      (pyonBuiltin SystemF.The_cartesianDomain)
+                      [dim0_instance, dim1_instance, dim2_instance]
+      ; let dim0_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_NoneType)
+              (ConTy $ tiBuiltin the_con_dim0)
+      ; let dim1_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              int_type
               (ConTy $ tiBuiltin the_con_dim1)
-              (ConTy $ tiBuiltin the_con_view1)
-      ; let matrix_instance =
+      ; let dim2_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
+              (TupleTy 2 @@ int_type @@ int_type)
               (ConTy $ tiBuiltin the_con_dim2)
-              (ConTy $ tiBuiltin the_con_view2)
       }
-  return con-}
-
-{- mkShapeElimTyFun = do
-  rec { (con, fam) <- mkTyFunction "shape_eliminator" (Star :-> Star :-> Star) []
-                      (pyonBuiltin SystemF.The_shape_eliminator)
-                      [list_instance, matrix_instance]
-      ; let list_instance =
-              mkTyFamilyInstance [] [] (tfSignature fam)
-              (ConTy $ tiBuiltin the_con_dim1)
-              (ConTy $ tiBuiltin the_con_ListShapeEliminator)
-      ; let matrix_instance =
-              mkTyFamilyInstance [] [] (tfSignature fam)
-              (ConTy $ tiBuiltin the_con_dim2)
-              (ConTy $ tiBuiltin the_con_MatrixShapeEliminator)
-      }
-  return con -}
+  return con
+  where
+int_type = ConTy $ tiBuiltin the_con_int
 
 mkEqClass = do
   rec { a <- newTyVar Star Nothing
@@ -638,7 +626,7 @@ mkAdditiveClass = do
               (pyonBuiltin SystemF.The_AdditiveDict)
               (pyonBuiltin SystemF.The_additiveDict)
               [add, sub, negate, zero]
-              [int_instance, float_instance, complex_instance]
+              [int_instance, float_instance, complex_instance, tuple2_instance]
 
   ; add <- mkClassMethod cls 0 "__add__" binScheme
   ; sub <- mkClassMethod cls 1 "__sub__" binScheme
@@ -668,6 +656,15 @@ mkAdditiveClass = do
           , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_Complex_sub)
           , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_Complex_negate)
           , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_Complex_zero)]
+  ; c <- newTyVar Star Nothing
+  ; let tuple2_instance =
+          polyInstance [b, c] [passable (ConTy b), passable (ConTy c),
+                               ConTy b `IsInst` cls, ConTy c `IsInst` cls] cls
+          (TupleTy 2 @@ ConTy b @@ ConTy c)
+          [ InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_add)
+          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_sub)
+          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_negate)
+          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_zero)]
   }
   return cls
 
@@ -834,22 +831,32 @@ mkVectorClass = do
   return cls
 
 mkCartesianClass = do
-  a <- newTyVar Star Nothing
-  let index_type = TFunAppTy (tiBuiltin the_con_index) [ConTy a]
-      maybe_index_type = ConTy (tiBuiltin the_con_Maybe) @@ index_type
+  sh <- newTyVar Star Nothing
+  let dom_ty = ConTy sh
+      ix_ty = TFunAppTy (tiBuiltin the_con_index) [dom_ty]
+      maybe_index_type = ConTy (tiBuiltin the_con_Maybe) @@ ix_ty
   let bound_scheme =
-        monomorphic $ functionType [ConTy a] maybe_index_type
+        monomorphic $ functionType [dom_ty] maybe_index_type
       range_scheme =
-        monomorphic $ functionType [index_type, index_type] (ConTy a)
+        monomorphic $ functionType [ix_ty, ix_ty] dom_ty
+      displace_scheme =
+        monomorphic $ functionType [dom_ty, ix_ty] dom_ty
+      scale_scheme =
+        monomorphic $ functionType [dom_ty, ConTy (tiBuiltin the_con_int)] dom_ty
   rec let cls =
-            mkClass "Cartesian" a []
+            mkClass "Cartesian" sh
+            [TFunAppTy (tiBuiltin the_con_cartesianDomain) [ix_ty] `IsEqual` dom_ty]
             (pyonBuiltin SystemF.The_CartesianDict)
             (pyonBuiltin SystemF.The_cartesianDict)
-            [loBound, hiBound, arrayRange]
+            [loBound, hiBound, arrayRange, displace, multiply, divide, unbounded]
             [dim0_instance, dim1_instance, dim2_instance]
       loBound <- mkClassMethod cls 0 "loBound" bound_scheme
       hiBound <- mkClassMethod cls 1 "hiBound" bound_scheme
       arrayRange <- mkClassMethod cls 2 "arrayRange" range_scheme
+      displace <- mkClassMethod cls 3 "displaceDomain" displace_scheme
+      multiply <- mkClassMethod cls 4 "multiplyDomain" scale_scheme
+      divide <- mkClassMethod cls 5 "divideDomain" scale_scheme
+      unbounded <- mkClassMethod cls 6 "unbounded" (monomorphic dom_ty)
       let dim0_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim0))
             [ InstanceMethod $
@@ -857,7 +864,16 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_hiBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_arrayRange]
+              pyonBuiltin SystemF.The_CartesianDict_dim0_arrayRange
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_displaceDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_multiplyDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_divideDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_unbounded]
+      let int_type = ConTy (tiBuiltin the_con_int)
       let dim1_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim1))
             [ InstanceMethod $
@@ -865,7 +881,15 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_hiBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_arrayRange]
+              pyonBuiltin SystemF.The_CartesianDict_dim1_arrayRange
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_displaceDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_multiplyDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_divideDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_unbounded]
       let dim2_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim2))
             [ InstanceMethod $
@@ -873,7 +897,15 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_hiBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_arrayRange]
+              pyonBuiltin SystemF.The_CartesianDict_dim2_arrayRange
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_displaceDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_multiplyDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_divideDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_unbounded]
   return cls
 
 mkRemainderClass = do
@@ -1194,6 +1226,17 @@ mkLenType =
        tT `IsInst` tiBuiltin the_c_Indexable],
       functionType [tT @@ aT] int_type)
 
+mkShiftType =
+  forallType [Star, Star] $ \[sh, a] ->
+  let shT = ConTy sh
+      aT = ConTy a
+      indexT = TFunAppTy (tiBuiltin the_con_index) [shT]
+      view_type = ConTy (tiBuiltin the_con_view) @@ shT @@ aT
+  in ([passable aT,
+       shT `IsInst` tiBuiltin the_c_Cartesian,
+       indexT `IsInst` tiBuiltin the_c_Additive],
+      functionType [indexT, view_type] view_type)
+
 mkWidthHeightType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
@@ -1246,18 +1289,6 @@ mkRange2DType =
   let int_type = ConTy $ tiBuiltin the_con_int
       int2_type = TupleTy 2 @@ int_type @@ int_type
   in functionType [int2_type] (ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_dim2) @@ int2_type)
-
-mkShift2DType =
-  forallType [Star :-> Star, Star] $ \[t, a] ->
-  let tT = ConTy t
-      aT = ConTy a
-      int_type = ConTy $ tiBuiltin the_con_int
-      int2_type = TupleTy 2 @@ int_type @@ int_type
-  in ([tT `IsInst` tiBuiltin the_c_Indexable,
-       shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
-       passable aT],
-      functionType [int2_type, tT @@ aT]
-      (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim2) @@ aT))
 
 mkExtend2DType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
@@ -1477,6 +1508,8 @@ initializeTIBuiltins = do
           type_functions =
             [ ("shape", [| pyonBuiltin SystemF.The_shape |], [| mkShapeTyFun |])
             , ("index", [| pyonBuiltin SystemF.The_index |], [| mkIndexTyFun |])
+            , ("cartesianDomain", [| pyonBuiltin SystemF.The_cartesianDomain |],
+               [| mkCartesianDomainTyFun |])
             , ("slice", [| pyonBuiltin SystemF.The_slice |], [| mkSliceTyFun |])
             , ("array", [| pyonBuiltin SystemF.The_array |], [| mkArrayTyFun |])
             ]
@@ -1548,6 +1581,9 @@ initializeTIBuiltins = do
               ("outerproduct", [| mkOuterProductType |]
               , [| pyonBuiltin SystemF.The_outerproduct |]
               ),
+              ("shift", [| mkShiftType |]
+              , [| pyonBuiltin SystemF.The_shift |]
+              ),
               ("view2", [| mkView2Type |]
               , [| pyonBuiltin SystemF.The_create_view2 |]
               ),
@@ -1556,9 +1592,6 @@ initializeTIBuiltins = do
               ),              
               ("extend2D", [| mkExtend2DType |]
               , [| pyonBuiltin SystemF.The_extend2D |]
-              ),              
-              ("shift2D", [| mkShift2DType |]
-              , [| pyonBuiltin SystemF.The_shift2D |]
               ),              
               ("range2D", [| mkRange2DType |]
               , [| pyonBuiltin SystemF.The_range2D |]
@@ -1646,7 +1679,9 @@ initializeTIBuiltins = do
                                     "exp", "log", "sqrt",
                                     "sin", "cos", "tan", "pi"])
             , ([| the_c_Vector |], ["scale", "magnitude", "dot"])
-            , ([| the_c_Cartesian |], ["loBound", "hiBound", "arrayRange"])
+            , ([| the_c_Cartesian |], ["loBound", "hiBound", "arrayRange",
+                                       "displaceDomain", "multiplyDomain",
+                                       "divideDomain", "unbounded"])
             ]
 
           -- Construct initializers

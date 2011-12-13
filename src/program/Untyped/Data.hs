@@ -305,8 +305,9 @@ data TypeAssignment =
   TypeAssignment
   { -- | Get a type assignment's free type variables
     _typeAssignmentFreeVariables :: !(IO TyVarSet)
-    -- | Get a type assignment's scheme, if it can be ascribed one
-    -- This will evaluate to an error for recursive variable type assignments
+    -- | Get a type assignment's scheme, if it can be ascribed one.
+    --   This will evaluate to an error for recursive variable type assignments.
+    --   It's only used for debugging.
   , _typeAssignmentScheme :: TyScheme
     -- | Instantiate a type assignment
   , _instantiateTypeAssignment :: !(SourcePos -> IO (Placeholders, TyVarSet, Constraint, HMType, TIExp))

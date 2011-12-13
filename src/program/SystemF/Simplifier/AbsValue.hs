@@ -761,6 +761,9 @@ interpretInitializer code = do
     of HeapAV (AbsHeap (HeapMap m)) ->
          case lookup out_var m
          of Just value -> return $ ReturnAC value
+
+            -- Can this happen normally?
+            Nothing -> return $ ReturnAC topCode
        TopAV -> return $ ReturnAC topCode
        _ -> internalError "interpretInitializer: Type error detected"
 

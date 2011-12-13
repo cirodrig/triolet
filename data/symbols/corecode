@@ -1,5 +1,117 @@
 
 -------------------------------------------------------------------------------
+-- Additive dictionaries
+
+AdditiveDict_PyonTuple2_add @(a b : bare)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (additive_a : AdditiveDict a)
+  (additive_b : AdditiveDict b)
+  (x : PyonTuple2 a b)
+  (y : PyonTuple2 a b)
+  (ret : OutPtr (PyonTuple2 a b))
+  -> IEffect (PyonTuple2 a b) =
+
+  case additive_a of
+    additiveDict @a
+    (add_a : a -> a -> Writer a)
+    (sub_a : a -> a -> Writer a)
+    (negate_a : a -> Writer a)
+    (zero_a : a).
+  case additive_b of
+    additiveDict @b
+    (add_b : b -> b -> Writer b)
+    (sub_b : b -> b -> Writer b)
+    (negate_b : b -> Writer b)
+    (zero_b : b).
+
+  case x of pyonTuple2 @a @b (x_a : a) (x_b : b).
+  case y of pyonTuple2 @a @b (y_a : a) (y_b : b).
+  pyonTuple2 @a @b (add_a x_a y_a) (add_b x_b y_b) ret;
+
+
+AdditiveDict_PyonTuple2_sub @(a b : bare)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (additive_a : AdditiveDict a)
+  (additive_b : AdditiveDict b)
+  (x : PyonTuple2 a b)
+  (y : PyonTuple2 a b)
+  (ret : OutPtr (PyonTuple2 a b))
+  -> IEffect (PyonTuple2 a b) =
+
+  case additive_a of
+    additiveDict @a
+    (add_a : a -> a -> Writer a)
+    (sub_a : a -> a -> Writer a)
+    (negate_a : a -> Writer a)
+    (zero_a : a).
+  case additive_b of
+    additiveDict @b
+    (add_b : b -> b -> Writer b)
+    (sub_b : b -> b -> Writer b)
+    (negate_b : b -> Writer b)
+    (zero_b : b).
+
+  case x of pyonTuple2 @a @b (x_a : a) (x_b : b).
+  case y of pyonTuple2 @a @b (y_a : a) (y_b : b).
+  pyonTuple2 @a @b (sub_a x_a y_a) (sub_b x_b y_b) ret;
+
+
+AdditiveDict_PyonTuple2_negate @(a b : bare)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (additive_a : AdditiveDict a)
+  (additive_b : AdditiveDict b)
+  (x : PyonTuple2 a b)
+  (ret : OutPtr (PyonTuple2 a b))
+  -> IEffect (PyonTuple2 a b) =
+
+  case additive_a of
+    additiveDict @a
+    (add_a : a -> a -> Writer a)
+    (sub_a : a -> a -> Writer a)
+    (negate_a : a -> Writer a)
+    (zero_a : a).
+  case additive_b of
+    additiveDict @b
+    (add_b : b -> b -> Writer b)
+    (sub_b : b -> b -> Writer b)
+    (negate_b : b -> Writer b)
+    (zero_b : b).
+  case x of pyonTuple2 @a @b (x_a : a) (x_b : b).
+  pyonTuple2 @a @b (negate_a x_a) (negate_b x_b) ret;
+
+
+AdditiveDict_PyonTuple2_zero @(a b : bare)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (additive_a : AdditiveDict a)
+  (additive_b : AdditiveDict b)
+  (ret : OutPtr (PyonTuple2 a b))
+  -> IEffect (PyonTuple2 a b) =
+
+  case additive_a of
+    additiveDict @a
+    (add_a : a -> a -> Writer a)
+    (sub_a : a -> a -> Writer a)
+    (negate_a : a -> Writer a)
+    (zero_a : a).
+  case additive_b of
+    additiveDict @b
+    (add_b : b -> b -> Writer b)
+    (sub_b : b -> b -> Writer b)
+    (negate_b : b -> Writer b)
+    (zero_b : b).
+  pyonTuple2 @a @b (copy @a repr_a zero_a) (copy @b repr_b zero_b) ret;
+
+-------------------------------------------------------------------------------
+-- Multiplicative dictionaries
+
+-- This is the identity transformation
+MultiplicativeDict_int_fromInt (x : int) -> int attribute(inline) = x;
+
+-------------------------------------------------------------------------------
 -- Integer index arithmetic
 
 plus_ii @(m n : intindex) (a : IInt m) (b : IInt n)
@@ -462,22 +574,55 @@ internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
 -------------------------------------------------------------------------------
 -- Cartesian methods
 
-CartesianDict_dim0_loBound (dom : dim0) -> Writer (Maybe (index dim0))
+CartesianDict_dim0_loBound
+  (dom : dim0)
+  -> Writer (Maybe (index dim0))
   attribute(inline) =
   just @(Stored NoneType) (stored @NoneType None);
 
 
-CartesianDict_dim0_hiBound (dom : dim0) -> Writer (Maybe (index dim0))
+CartesianDict_dim0_hiBound
+  (dom : dim0)
+  -> Writer (Maybe (index dim0))
   attribute(inline) =
   just @(Stored NoneType) (stored @NoneType None);
 
 
-CartesianDict_dim0_arrayRange (lo : index dim0) (hi : index dim0) -> dim0
+CartesianDict_dim0_arrayRange
+  (lo : index dim0)
+  (hi : index dim0)
+  -> dim0
   attribute(inline) =
   mk_dim0;
 
 
-CartesianDict_dim1_loBound (dom : dim1) (ret : OutPtr (Maybe (index dim1)))
+CartesianDict_dim0_displaceDomain
+  (dom : dim0)
+  (ix : index dim0)
+  -> dim0
+  attribute(inline) =
+  mk_dim0;
+
+
+CartesianDict_dim0_multiplyDomain
+  (dom : dim0)
+  (n : int)
+  -> dim0
+  attribute(inline) =
+  mk_dim0;
+
+
+CartesianDict_dim0_divideDomain
+  (dom : dim0)
+  (n : int)
+  -> dim0
+  attribute(inline) =
+  mk_dim0;
+
+
+CartesianDict_dim1_loBound
+  (dom : dim1)
+  (ret : OutPtr (Maybe (index dim1)))
   -> IEffect (Maybe (index dim1))
   attribute(inline) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
@@ -488,7 +633,9 @@ CartesianDict_dim1_loBound (dom : dim1) (ret : OutPtr (Maybe (index dim1)))
   };
 
 
-CartesianDict_dim1_hiBound (dom : dim1) (ret : OutPtr (Maybe (index dim1)))
+CartesianDict_dim1_hiBound
+  (dom : dim1)
+  (ret : OutPtr (Maybe (index dim1)))
   -> IEffect (Maybe (index dim1))
   attribute(inline) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
@@ -499,7 +646,10 @@ CartesianDict_dim1_hiBound (dom : dim1) (ret : OutPtr (Maybe (index dim1)))
   };
 
 
-CartesianDict_dim1_arrayRange (lo : index dim1) (hi : index dim1) -> dim1
+CartesianDict_dim1_arrayRange
+  (lo : index dim1)
+  (hi : index dim1)
+  -> dim1
   attribute(inline) =
   case lo of stored @int (lo_i : int).
   case hi of stored @int (hi_i : int).
@@ -507,7 +657,85 @@ CartesianDict_dim1_arrayRange (lo : index dim1) (hi : index dim1) -> dim1
           (linearMap 1 0);
 
 
-CartesianDict_dim2_loBound (dom : dim2) (ret : OutPtr (Maybe (index dim2)))
+CartesianDict_dim1_displaceDomain
+  (dom : dim1)
+  (ix : index dim1)
+  -> dim1
+  attribute(inline) =
+  case dom of mk_dim1 (iv : Interval) (m : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case m of linearMap (stride : int) (alignment : int).
+  case ix of stored @int (offset_i : int).
+
+  let lb2 : MaybeVal int =
+        case lb of {
+          justVal @int (lb_i : int). justVal @int (lb_i +# offset_i)
+        ; nothingVal @int. nothingVal @int
+        } in
+  let ub2 : MaybeVal int =
+        case ub of {
+          justVal @int (ub_i : int). justVal @int (ub_i +# offset_i)
+        ; nothingVal @int. nothingVal @int
+        } in
+  mk_dim1 (interval lb2 ub2)
+          (linearMap stride ((alignment +# offset_i) %# stride));
+
+
+CartesianDict_dim1_multiplyDomain
+  (dom : dim1)
+  (n : int)
+  -> dim1
+  attribute(inline) =
+  case dom of mk_dim1 (iv : Interval) (m : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case m of linearMap (stride : int) (alignment : int).
+  
+  let lb2 : MaybeVal int =
+        case lb of {
+          justVal @int (lb_i : int). justVal @int (lb_i *# n)
+        ; nothingVal @int. nothingVal @int
+        } in
+
+  let ub2 : MaybeVal int =
+        case ub of {
+          justVal @int (ub_i : int). justVal @int (ub_i *# n)
+        ; nothingVal @int. nothingVal @int
+        } in
+  mk_dim1 (interval lb2 ub2)
+          (linearMap (stride *# n) (alignment *# n));
+
+
+CartesianDict_dim1_divideDomain
+  (dom : dim1)
+  (n : int)
+  -> dim1
+  attribute(inline) =
+  case dom of mk_dim1 (iv : Interval) (m : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case m of linearMap (stride : int) (alignment : int).
+
+  -- Ensure that it divides exactly
+  if or (stride %# n /=# 0) (alignment %# n /=# 0)
+  then except @(dim1) else
+  
+  let lb2 : MaybeVal int =
+        case lb of {
+          justVal @int (lb_i : int). justVal @int (lb_i //# n)
+        ; nothingVal @int. nothingVal @int
+        } in
+
+  let ub2 : MaybeVal int =
+        case ub of {
+          justVal @int (ub_i : int). justVal @int (ub_i //# n)
+        ; nothingVal @int. nothingVal @int
+        } in
+  mk_dim1 (interval lb2 ub2)
+          (linearMap (stride //# n) (alignment //# n));
+
+
+CartesianDict_dim2_loBound
+  (dom : dim2)
+  (ret : OutPtr (Maybe (index dim2)))
   -> IEffect (Maybe (index dim2))
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
@@ -530,7 +758,9 @@ CartesianDict_dim2_loBound (dom : dim2) (ret : OutPtr (Maybe (index dim2)))
   };
   
 
-CartesianDict_dim2_hiBound (dom : dim2) (ret : OutPtr (Maybe (index dim2)))
+CartesianDict_dim2_hiBound
+  (dom : dim2)
+  (ret : OutPtr (Maybe (index dim2)))
   -> IEffect (Maybe (index dim2))
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
@@ -553,7 +783,10 @@ CartesianDict_dim2_hiBound (dom : dim2) (ret : OutPtr (Maybe (index dim2)))
   };
 
 
-CartesianDict_dim2_arrayRange (lo : index dim2) (hi : index dim2) -> dim2
+CartesianDict_dim2_arrayRange
+  (lo : index dim2)
+  (hi : index dim2)
+  -> dim2
   attribute(inline) =
   case lo of
     pyonTuple2 @(Stored int) @(Stored int)
@@ -569,6 +802,38 @@ CartesianDict_dim2_arrayRange (lo : index dim2) (hi : index dim2) -> dim2
                    (linearMap 1 0))
           (mk_dim1 (interval (justVal @int lo_x_i) (justVal @int hi_x_i))
                    (linearMap 1 0));
+
+
+CartesianDict_dim2_displaceDomain
+  (dom : dim2)
+  (ix : index dim2)
+  -> dim2
+  attribute(inline) =
+  case ix of pyonTuple2 @(Stored int) @(Stored int)
+             (ix_y : Stored int) (ix_x : Stored int).
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  mk_dim2 (CartesianDict_dim1_displaceDomain dom_y ix_y)
+          (CartesianDict_dim1_displaceDomain dom_x ix_x);
+
+
+CartesianDict_dim2_multiplyDomain
+  (dom : dim2)
+  (n : int)
+  -> dim2
+  attribute(inline) =
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  mk_dim2 (CartesianDict_dim1_multiplyDomain dom_y n)
+          (CartesianDict_dim1_multiplyDomain dom_x n);
+  
+  
+CartesianDict_dim2_divideDomain
+  (dom : dim2)
+  (n : int)
+  -> dim2
+  attribute(inline) =
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  mk_dim2 (CartesianDict_dim1_divideDomain dom_y n)
+          (CartesianDict_dim1_divideDomain dom_x n);
 
 -------------------------------------------------------------------------------
 -- Imperative computation
@@ -2202,7 +2467,7 @@ safeSlice @(t : bare -> bare) @(a : bare)
     		   coerce @box (shape t) sh ->
 		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
 
-  shape_slice @t @a (unsafeMakeCoercion @sh @sh) indexable repr container sl;
+  shape_slice @t @a (idCoercion @sh) indexable repr container sl;
 
 
 len @(t : bare -> bare) @(a : bare)
@@ -2221,6 +2486,56 @@ len @(t : bare -> bare) @(a : bare)
   case list_size of {
     justVal @int (n : int). n
   ; nothingVal @int. except @int
+  };
+
+
+width @(t : bare -> bare) @(a : bare)
+  (is_2d : coerce @box (shape t) dim2)
+  (indexable : IndexableDict t)
+  (container : t a)
+  -> int
+  attribute(inline) =
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  let sh : dim2 = coerce @(shape t) @dim2 (get_shape @a container) in
+  case sh of mk_dim2 (dim_y : dim1) (dim_x : dim1).
+  case dim_x of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case lb of {
+    justVal @int (lb_i : int).
+      case ub of {
+        justVal @int (ub_i : int). ub_i -# lb_i
+      ; nothingVal @int. except @int
+      }
+    ; nothingVal @int. except @int
+  };
+
+
+height @(t : bare -> bare) @(a : bare)
+  (is_2d : coerce @box (shape t) dim2)
+  (indexable : IndexableDict t)
+  (container : t a)
+  -> int
+  attribute(inline) =
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  let sh : dim2 = coerce @(shape t) @dim2 (get_shape @a container) in
+  case sh of mk_dim2 (dim_y : dim1) (dim_x : dim1).
+  case dim_y of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case lb of {
+    justVal @int (lb_i : int).
+      case ub of {
+        justVal @int (ub_i : int). ub_i -# lb_i
+      ; nothingVal @int. except @int
+      }
+    ; nothingVal @int. except @int
   };
 
 
@@ -2303,6 +2618,57 @@ sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
      case si of stored @int (i : int).
      copy @a repr (subscript @N @a repr ay i) ret);
 
+
+-- Given a mapping from old to new domains and from new to old indices,
+-- transform a view.
+view_transform @(sh : box) @(a : bare)
+  (repr : Repr a)
+  (transform_domain : sh -> sh)
+  (transform_index : index sh -> Writer (index sh))
+  (vw : view sh a)
+  -> view sh a
+  attribute(inline, inline_dimensionality) =
+  case vw of mk_view @sh @a (dom : sh) (f : index sh -> Writer a).
+  mk_view @sh @a (transform_domain dom)
+  (\ (i : index sh) (ret : OutPtr a) -> IEffect a.
+     case boxed @(index sh) (transform_index i) of
+       boxed @(index sh) (i2 : index sh).
+     f i2 ret);
+
+
+shift @(sh : box) @(a : bare)
+  (repr : Repr a) (cartesian : CartesianDict sh)
+  (additive : AdditiveDict (index sh))
+  (disp : index sh)
+  (vw : view sh a)
+  -> view sh a
+  attribute(inline) =
+
+  let type ix = index sh in
+  case cartesian of
+    cartesianDict @sh
+    (has_shape : coerce @box (cartesianDomain (index sh)) sh)
+    (loBound : sh -> Writer (Maybe ix))
+    (hiBound : sh -> Writer (Maybe ix))
+    (arrayRange : ix -> ix -> sh)
+    (displaceDomain : sh -> ix -> sh)
+    (multiplyDomain : sh -> int -> sh)
+    (divideDomain : sh -> int -> sh)
+    (unbounded : sh).
+
+  case additive of
+    additiveDict @ix
+    (add : ix -> ix -> Writer ix)
+    (sub : ix -> ix -> Writer ix)
+    (negate : ix -> Writer ix)
+    (zero : ix).
+
+  -- Note that we transform from new index to old index by subtracting the
+  -- displacement 
+  view_transform @sh @a repr
+  (\ (s : sh) -> sh. displaceDomain s disp)
+  (\ (i : ix) -> Writer ix. sub i disp)
+  vw;
 
 -------------------------------------------------------------------------------
 -- ShapeDict-like internal functions
@@ -3610,47 +3976,8 @@ safeSlice @(t : bare -> bare) @(a : bare)
 		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
 
   shape_slice @t @a
-  (unsafeMakeCoercion @sh @sh)
+  (idCoercion @sh)
   indexable repr container sl;
-
--------------------------------------------------------------------------------
--- Conversions
-
-view1ToDarr1 @(a b : bare)
-  (vw : view1 a)
-  (elim : (N : intindex) -> FIInt N -> darr1 N a -> Writer b)
-  (elim_empty : Writer b)
-  (ret : OutPtr b)
-  -> IEffect b attribute(inline, inline_dimensionality) =
-  case vw of {
-    mk_view1 @a @(lo hi : intindex)
-             (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-      let flo : FIInt lo = fromIndInt @lo ilo in
-      let fhi : FIInt hi = fromIndInt @hi ihi in
-
-      let type N = minus_i hi lo in
-      let delta : FIInt N = minus_fii @hi @lo fhi flo in
-      case flo of fiInt @lo (lo_i : int).
-
-      -- The darr is zero-indexed; subtract the offset
-      letfun
-        f2 (i : int) -> Writer a = f (AdditiveDict_int_sub i lo_i)
-      in
-
-      elim @N delta (mk_darr1 @N @a f2) ret;
-
-    empty_view1 @a.
-      elim_empty ret
-  };
-
-
-darr1ToView1 @(N : intindex) @(a : bare)
-  (size : FIInt N)
-  (darr : darr1 N a)
-  -> view1 a attribute(inline, inline_dimensionality) =
-  case darr of mk_darr1 @N @a (f : int -> Writer a).
-  mk_view1 @a @0 @N zero_ii (iInt @N size) f;
-
 
 -------------------------------------------------------------------------------
 -- Traversable methods

@@ -512,12 +512,16 @@ reduceContext csts = do
   when debugContextReduction $ do
     old_context <- runPpr (pprContext csts)
     print $ text "Start context reduction:" <+> old_context
-  
-  let (equalities, others) = partition isEqualityPredicate csts
+
+  -- Add superclass equality predicates to the constraint before solving
+  superclass_csts <- mapM andSuperclassEqualityPredicates csts
+  let expanded_csts = concat superclass_csts
+
+  let (equalities, others) = partition isEqualityPredicate expanded_csts
   csts' <- fixed_point_reduce equalities others
 
   when debugContextReduction $ do
-    old_context <- runPpr (pprContext csts)
+    old_context <- runPpr (pprContext expanded_csts)
     new_context <- runPpr (pprContext csts')
     print $ hang (text "End context reduction:" <+> old_context) 4 new_context
 

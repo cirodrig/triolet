@@ -82,11 +82,35 @@ instantiate (TyScheme qvars cst ty) = do
   ty' <- rename substitution ty
   cst' <- mapM (rename substitution) cst
 
-  -- Include superclass equality coercions in the constraint, since
-  -- they can help in type refinement
-  superclass_cst <- liftM concat $ mapM andSuperclassEqualityPredicates cst'
+  return (new_qvars, cst', ty')
 
-  return $ (new_qvars, superclass_cst, ty')
+-- | Instantiate a class method's type scheme. 
+--   Class methods have a class parameter and class constraint in addition
+--   to instance's type scheme.
+--
+--   The returned tuple contains the instantiated class variable, the
+--   instantiated class constraint, the class predicate,
+--   the instantiated method type parameters,
+--   the instantiated method constraint, and the instantiated method type.
+instantiateClassMethod :: Class
+                       -> TyScheme
+                       -> IO (TyCon, Constraint, Predicate, TyVars, Constraint, HMType)
+instantiateClassMethod cls (TyScheme qvars cst ty) = do
+  -- Create a substitution from each qvar to a new variable
+  let cls_sig = clsSignature cls
+  new_c_qvar <- duplicateTyVar $ clsParam cls_sig
+  new_m_qvars <- mapM duplicateTyVar qvars
+  let substitution =
+        substitutionFromList $
+        (clsParam cls_sig, ConTy new_c_qvar) : zip qvars (map ConTy new_m_qvars)
+
+  -- Apply the substitution to the type
+  ty' <- rename substitution ty
+  c_cst' <- mapM (rename substitution) $ clsConstraint cls_sig
+  m_cst' <- mapM (rename substitution) cst
+
+  return (new_c_qvar, c_cst', ConTy new_c_qvar `IsInst` cls,
+          new_m_qvars, m_cst', ty')
 
 -- | Instantiate a type scheme and match it to some other type.
 -- Throw an error if types do not match.

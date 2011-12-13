@@ -75,6 +75,16 @@ errorIfOutPtr msg ty x
 newtype RI a = RI {unRI :: ReaderT RIEnv IO a}
              deriving(Functor, Monad)
 
+-- | A first-order type rewrite rule.  When the type on the left is matched,
+--   rewrite it to the type on the right.
+data TypeRewrite = TR {trKind :: !Kind, trLHS :: Type, trRHS :: Type}
+
+pprTypeRewrite :: TypeRewrite -> Doc
+pprTypeRewrite (TR _ lhs rhs) =
+  pprType lhs <+> text "=>" <+> pprType rhs
+
+pprTypeRewrites xs = vcat $ map pprTypeRewrite xs
+
 data RIEnv =
   RIEnv
   { riVarSupply :: {-#UNPACK#-}!(IdentSupply Var)
@@ -82,6 +92,11 @@ data RIEnv =
     -- | The specification type environment
   , riTypeEnv :: TypeEnv
   , riDictEnv :: SingletonValueEnv
+
+    -- | Rewrite rules on the specification type environment.
+    --   Each time a coercion is inserted into the type environment, the 
+    --   corresponding rewrite rule is inserted here.
+  , riRewrites :: [TypeRewrite]
 
     -- | The system F type environment
   , riSystemFTypeEnv :: TypeEnv
@@ -133,12 +148,38 @@ riLookupDataCon v = askTypeEnv lookup_type
       of Just rt -> rt
          _ -> internalError $ "riLookupDataCon: not found: " ++ show v
 
--- | Add a type to the System F type environment
+getRewrites :: RI [TypeRewrite]
+getRewrites = RI $ asks riRewrites
+
+-- | Add a type to the System F type environment.
+--
+--   If it's a coercion type, add it to the set of rewrite rules too.
 assumeSFType :: Var -> Type -> RI a -> RI a
 assumeSFType v t m = RI $ local insert_type (unRI m)
   where
     insert_type env =
       env {riSystemFTypeEnv = insertType v t $ riSystemFTypeEnv env}
+
+-- | For each coercion parameter inserted by type inference, add
+--   a rewrite rule to the environment.  Each time a function parameter is
+--   encountered, this function is called with the parameter's specification
+--   type.  Types are ignored if they're not coercion types.
+--   One rewrite rule is added for boxed types, another for bare types.
+assumeCoercionType :: Type -> RI a -> RI a    
+assumeCoercionType ty m = 
+  case fromTypeApp ty
+  of (CoT k, [s, t]) -> insert_rewrites k s t
+     _ -> m
+  where
+    insert_rewrites k s t = do
+      (rw_box, rw_bare) <- liftTypeEvalM $ create_rewrites k s t
+      RI $ local (\env -> env {riRewrites = rw_box : rw_bare : riRewrites env}) (unRI m)
+
+    create_rewrites (VarT k) s t
+      | k == boxV =
+          return (TR boxT s t, TR bareT (bareType s) (bareType t))
+      | otherwise =
+          internalError "assumeCoercionType: Not implemented for this kind"
 
 -- | Add a System F type and a specification type to the environment.
 --
@@ -163,6 +204,86 @@ assumeValueTypes v sf_type spec_type m =
 assumeTypeKinds :: Var -> Kind -> Kind -> RI a -> RI a
 assumeTypeKinds a sf_kind spec_kind m =
   assume a spec_kind $ assumeSFType a sf_kind m
+
+-------------------------------------------------------------------------------
+-- Applying type rewrites
+
+-- | Normalize a specification type by applying type coercions exhaustively.
+--   Return the normalized type, and 'True' if any type coercions were applied.
+normalizeSpecificationType :: Type -> RI (Bool, Type)
+normalizeSpecificationType ty = RI $ ReaderT $ \env ->
+  let apply_coercions = applyTypeCoercionsExhaustively (riRewrites env) ty
+  in runTypeEvalM apply_coercions (riVarSupply env) (riTypeEnv env)
+
+-- | Apply a type coercion to a type, if its LHS exactly matches.
+applyTypeCoercion :: TypeRewrite -> Kind -> Type -> TypeEvalM (Bool, Type)
+applyTypeCoercion (TR rewrite_kind lhs rhs) ty_kind ty = do
+  -- We can only compare the types if they have the same kind
+  same_kind <- compareTypes rewrite_kind ty_kind
+  if same_kind then try_apply else return (False, ty)
+  where
+    try_apply = do
+      eq <- compareTypes lhs ty
+      return $! if eq then (True, rhs) else (False, ty)
+
+-- | Apply any matching type coercion to a type.
+applyTypeCoercions :: [TypeRewrite] -> Type -> TypeEvalM (Bool, Type)
+applyTypeCoercions rws ty = do
+  tenv <- getTypeEnv
+  let kind = typeKind tenv ty
+
+  let loop (rw:rws) = applyTypeCoercion rw kind ty >>= continue
+        where
+          continue new@(True, _) = return new
+          continue (False, _)    = loop rws
+      loop [] = return (False, ty)
+
+  loop rws
+
+-- | Apply any matching type coercion to a type or any subexpression.
+applyTypeCoercionsRec :: [TypeRewrite] -> Type -> TypeEvalM (Bool, Type)
+applyTypeCoercionsRec rws ty = do
+  -- Rewrite this expression
+  (progress, ty') <- applyTypeCoercions rws ty
+  let no_change = return (progress, ty')
+
+  -- Rewrite subexpressions
+  ty'' <- Substitute.freshen ty'
+  case ty'' of
+    VarT _      -> no_change
+    AppT t1 t2  -> recurse progress AppT t1 t2
+    FunT t1 t2  -> recurse progress FunT t1 t2
+    LamT b body -> bind progress LamT b body
+    AllT b body -> bind progress AllT b body
+    IntT _      -> no_change
+    CoT _       -> no_change
+    UTupleT _   -> no_change
+  where
+    recurse progress con t1 t2 = do 
+      (progress1, t1') <- applyTypeCoercionsRec rws t1
+      (progress2, t2') <- applyTypeCoercionsRec rws t2
+      let p = progress || progress1 || progress2
+      p `seq` return (p, con t1' t2')
+
+    bind progress con binder body = do
+      (progress1, body') <-
+        assumeBinder binder $ applyTypeCoercionsRec rws body
+      let p = progress || progress1
+      p `seq` return (p, con binder body')
+
+-- | Apply type coercions until no further rewriting is possible.
+applyTypeCoercionsExhaustively :: [TypeRewrite] -> Type
+                               -> TypeEvalM (Bool, Type)
+applyTypeCoercionsExhaustively rws ty = do
+  -- liftIO $ print $
+  --   hang (text "Type coercions" <+> pprType ty) 4 (pprTypeRewrites rws)
+  loop False ty
+  where
+    loop change ty = do 
+      (change', ty') <- applyTypeCoercionsRec rws ty
+      if change'
+        then loop True ty'
+        else return (change, ty')
 
 -------------------------------------------------------------------------------
 
@@ -610,16 +731,24 @@ coerceExps [] [] k = k []
 
 coerceExps _ _ _ = internalError "coerceExps: List length mismatch"
 
--- | Create a coercion that coerces a value from the given type to the
---   expected type.
-coercion :: EvalMonad m =>
-            Type                -- ^ Given type
+-- | Create a coercion that coerces a value from the given specification
+--   type to the expected specification type.
+coercion :: [TypeRewrite]
+         -> Type                -- ^ Given type
          -> Type                -- ^ Expected type
-         -> m Coercion          -- ^ Computes the coercion
-coercion g_type e_type = do
+         -> TypeEvalM Coercion  -- ^ Computes the coercion
+coercion rewrites g_type e_type = do
   tenv <- getTypeEnv
-  whnf_g_type <- reduceToWhnf g_type
-  whnf_e_type <- reduceToWhnf e_type
+
+  -- Apply type coercions so that the types are normalized
+  (coerce_g_type, normalized_g_type) <-
+    applyTypeCoercionsExhaustively rewrites g_type
+  (coerce_e_type, normalized_e_type) <-
+    applyTypeCoercionsExhaustively rewrites e_type
+
+  -- Get the kinds 
+  whnf_g_type <- reduceToWhnf normalized_g_type
+  whnf_e_type <- reduceToWhnf normalized_e_type
   let g_kind = toBaseKind $ typeKind tenv whnf_g_type
       e_kind = toBaseKind $ typeKind tenv whnf_e_type
   
@@ -627,7 +756,7 @@ coercion g_type e_type = do
     if g_kind == e_kind
     then compareTypes whnf_e_type whnf_g_type
     else return False
-  
+
   -- If types are equal, then coercion is unnecessary
   if types_equal then return IdCoercion else do
 
@@ -640,17 +769,26 @@ coercion g_type e_type = do
     coerce_kind <- mostSpecificNaturalHeadKind natural_g_type natural_e_type
 
     liftIO $ print $ text "Coerce " <+>
-      (pprType whnf_g_type $$
-       text "to" <+> pprType whnf_e_type $$
+      (pprType g_type $$
+       text "to" <+> pprType e_type $$
        text "via" <+> text (show coerce_kind) $$
        text (show g_kind) <+> text (show e_kind))
   
     -- Create a coercion.  Coerce to the natural representation,
     -- then coerce the value, then coerce to the output representation.
+    let co0 = if coerce_g_type 
+              then typeCoercion g_type normalized_g_type g_kind
+              else IdCoercion
     co1 <- representationCoercion natural_g_type coerce_kind g_kind coerce_kind
     co2 <- valueCoercion coerce_kind natural_g_type natural_e_type
     co3 <- representationCoercion natural_e_type coerce_kind coerce_kind e_kind
-    return (co3 `mappend` co2 `mappend` co1)
+    let co4 = if coerce_e_type
+              then typeCoercion normalized_e_type e_type e_kind
+              else IdCoercion
+    return (co4 `mappend` co3 `mappend` co2 `mappend` co1 `mappend` co0)
+
+typeCoercion from_type to_type kind = Coercion $ \k e ->
+  k (ExpM $ CoerceE defaultExpInfo from_type to_type e)
 
 -- | Compute the appropriate coercion to coerce an object from the
 --   given representation to the expected representation.
@@ -684,7 +822,7 @@ representationCoercion natural_ty natural_kind g_kind e_kind =
       case natural_kind
       of ValK  -> varApp (pyonBuiltin The_Stored) [natural_ty]
          BareK -> natural_ty
-         BoxK  -> varApp (pyonBuiltin The_BareType) [natural_ty]
+         BoxK  -> bareType natural_ty
 
     -- Coerce to another kind, then coerce to final kind
     coerce_via k = do
@@ -706,12 +844,14 @@ valueCoercion kind g_type e_type = do
         (e_tydom, e_dom, e_rng) = fromForallFunType e_type
     in if not (null g_tydom) || not (null g_dom)
        then return $ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
-       else traceShow (pprType g_type $$ pprType e_type) $ internalError "valueCoercion: Not implemented for this type"
+       else traceShow (text "valueCoercion" <+> (pprType g_type $$ pprType e_type)) $
+            internalError "valueCoercion: Not implemented for this type"
 
 coerceExpAtType :: Type -> Type -> ExpM -> (ExpM -> RI (ExpM, a))
                 -> RI (ExpM, a)
 coerceExpAtType g_type e_type e k = do
-  co <- coercion g_type e_type
+  rewrites <- getRewrites
+  co <- liftTypeEvalM $ coercion rewrites g_type e_type
   coerceExp co e k
   where
     debug = traceShow $ text "coerceExpAtType" <+> PrintMemoryIR.pprExp e
@@ -945,7 +1085,11 @@ reprApply op op_type ty_args args = do
   applyResultToValues app_result (map fst args)
   where
     debug x =
-      traceShow (text "reprApply" <+> vcat (PrintMemoryIR.pprExp op : map (pprType . fst) ty_args)) x
+      traceShow (text "reprApply" <+>
+                 vcat (parens (pprType op_type) :
+                       PrintMemoryIR.pprExp op :
+                       map (pprType . fst) ty_args ++
+                       map (PrintMemoryIR.pprExp . fst) args)) x
 
 reprApplyCon :: Var                -- ^ Constructor
              -> [TypeArgument]     -- ^ Type arguments
@@ -995,7 +1139,8 @@ applyToArg :: AppResult -> Type -> RI AppResult
 applyToArg operator arg_type =
   case appliedReturnType operator
   of FunT expected_type rng -> do
-       arg_coercion <- coercion arg_type expected_type
+       rewrites <- getRewrites
+       arg_coercion <- liftTypeEvalM $ coercion rewrites arg_type expected_type
        return $! resultOfApp rng arg_coercion operator
      _ -> do
        -- Can we coerce the operator to the proper representation?
@@ -1026,12 +1171,15 @@ reprParam :: PatSF -> (PatM -> RI a) -> RI a
 reprParam (VarP v t) k = do
   (t', _) <- cvtNormalizeParamType t
   let pattern = patM (v ::: t')
-  saveReprDictPattern pattern $ assumeValueTypes v t t' $ k pattern
+  saveReprDictPattern pattern $
+    assumeCoercionType t' $
+    assumeValueTypes v t t' $
+    k pattern
 
 reprRet :: Type -> RI Type
 reprRet t = fmap fst $ cvtNormalizeReturnType t
 
--- | Convert an expression's representation
+-- | Convert an expression's representation.  Return its specification type.
 reprExp :: ExpSF -> RI (ExpM, Type)
 reprExp expression =
   case fromExpSF expression
@@ -1227,7 +1375,7 @@ representationInference mod = do
     sf_type_env <- readInitGlobalVarIO the_systemFTypes
     type_env <- readInitGlobalVarIO the_specTypes
     dict_env <- runFreshVarM supply createDictEnv
-    let context = RIEnv supply (specToTypeEnv type_env) dict_env sf_type_env
+    let context = RIEnv supply (specToTypeEnv type_env) dict_env [] sf_type_env
     runReaderT (unRI (reprModule mod)) context
   
   -- Convert from specification types to mem types

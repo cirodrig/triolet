@@ -21,7 +21,7 @@ pyonSourceTypes =
    "array", "array0", "array1", "array2",
    "Maybe", "Any",
    "shape", "list_dim", "dim0", "dim1", "dim2",
-   "index", "slice",
+   "index", "slice", "cartesianDomain",
    "view"]
 
 -- | Predefined data types not visible to the Pyon parser
@@ -53,10 +53,10 @@ pyonSourceGlobals =
   , "rows"
   , "cols"
   , "outerproduct"
+  , "shift"
   , "view2"
   , "stencil2D"
   , "extend2D"
-  , "shift2D"
   , "histogram"
   , "listiter"
   , "matrixiter"
@@ -92,6 +92,7 @@ pyonSourceGlobals =
   , "loBound"
   , "hiBound"
   , "arrayRange"
+  , "unbounded"
   , "__fromfloat__"
   , "__power__"
   , "exp"
@@ -113,6 +114,7 @@ pyonOtherGlobals =
     "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
     "getSlice",
     "at_point",
+    "displaceDomain", "multiplyDomain", "divideDomain",
     "sliceObject", "justVal", "nothingVal"
   ]
 

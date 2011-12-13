@@ -2,7 +2,6 @@
 module Untyped.TypeAssignment
        (TypeAssignment,
         assignedFreeVariables,
-        assignedTyScheme,
         instantiateTypeAssignment,
         firstOrderAssignment,
         polymorphicAssignment,
@@ -12,6 +11,8 @@ module Untyped.TypeAssignment
 where
 
 import Control.Monad
+import qualified Data.Set as Set
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.SourcePos
@@ -20,13 +21,11 @@ import Untyped.HMType
 import Untyped.Kind
 import Untyped.Syntax
 import Untyped.Data
+import Untyped.Unification
 import Type.Var
 
 assignedFreeVariables :: TypeAssignment -> IO TyVarSet
 assignedFreeVariables = _typeAssignmentFreeVariables
-
-assignedTyScheme :: TypeAssignment -> TyScheme
-assignedTyScheme = _typeAssignmentScheme
 
 instantiateTypeAssignment :: SourcePos
                           -> TypeAssignment
@@ -91,33 +90,67 @@ recursiveAssignment var = do
   return ( TypeAssignment (freeTypeVariables ty) scheme instantiate_function
          , tyvar)
 
--- | Create a class method assignment
+-- | Create a class method assignment.  A class method is really a piece of
+--   code that retrieves and calls a function from the class dictionary.
+--
+--   The class method's type scheme is made from the method's type signature.
+--   It has one extra type parameter, which is the class's type parameter, 
+--   and one extra predicate, which is the class instance.  The parameter and
+--   predicate always come before other parameters and predicates.
 methodAssignment :: Class -> Int -> TyScheme -> TypeAssignment
 methodAssignment cls index scm =
-  TypeAssignment (freeTypeVariables scm) scm instantiate_function
+  let get_free_variables = do
+        ftvs <- freeTypeVariables scm
+        return $ Set.insert cls_param ftvs
+  in TypeAssignment get_free_variables visible_method_scheme instantiate_function
   where
+    cls_param = clsParam $ clsSignature cls
+
+    -- Add the class parameter and the class constraint to the method's scheme.
+    -- This is equivalent to the method's type, but doesn't let us keep
+    -- track of which parts come from the class versus the method.
+    visible_method_scheme =
+      case scm
+      of TyScheme scm_params scm_cst scm_fot ->
+           let params = cls_param : scm_params
+               cst = ConTy cls_param `IsInst` cls : scm_cst
+           in TyScheme params cst scm_fot
+
     instantiate_function pos = do
-      (ty_vars, constraint, fot) <- instantiate scm
+      -- Instantiate the method's type
+      (inst_var, cls_cst, cls_prd, inst_vars, inst_cst, fot) <-
+        instantiateClassMethod cls scm
       free_vars <- unifiableTypeVariables fot
 
-      -- The head of the constraint list is always the class constraint
-      case constraint of
-        cls_predicate@(IsInst cls_type cls2) : constraint'
-          | cls == cls2 -> do
-              -- The first type variable is the class variable
-              let (cls_var : ty_vars') = ty_vars
-          
-              -- Create a placeholder for the class dictionary
-              placeholder <- mkDictPlaceholder pos cls_predicate
-      
-              -- Create a method selector expression
-              (placeholders, expr) <-
-                mkMethodInstanceE pos cls cls_type index (map ConTy ty_vars') constraint' placeholder
-              
-              return ( placeholder : placeholders 
-                     , free_vars
-                     , constraint
-                     , fot
-                     , expr
-                     )
-        _ -> internalError "Unexpected constraint on class method"
+      -- Remove the class parameter from the type
+      let cls_type = case cls_prd of ty `IsInst` _ -> ty
+
+      -- Create a placeholder for the class dictionary
+      cls_placeholder <- mkDictPlaceholder pos cls_prd
+
+      -- Create a method selector expression and instantiate the method
+      (inst_placeholders, expr) <-
+        mkMethodInstanceE pos cls cls_type index (map ConTy inst_vars) inst_cst cls_placeholder
+
+      let placeholders = cls_placeholder : inst_placeholders
+          constraint = cls_prd : cls_cst ++ inst_cst
+
+      -- DEBUG: print out the results of instantiating the class method
+      -- printMethodAssignmentResult placeholders free_vars constraint fot
+      return (placeholders, free_vars, constraint, fot, expr)
+
+printMethodAssignmentResult placeholders free_vars constraint fot = do
+  (ph_doc, fv_doc, cst_doc, fot_doc) <- runPpr $ do
+    ph_docs <- forM placeholders $ \(DictPH {phExpPredicate = pred}) -> do
+      uShow pred
+
+    fv_doc <- mapM pprTyCon $ Set.toList free_vars
+    cst_doc <- mapM uShow constraint
+    fot_doc <- uShow fot
+    return (vcat ph_docs, fv_doc, fsep $ punctuate (text ",") cst_doc, fot_doc)
+
+  print "Instantiated method assignment"
+  print ph_doc
+  print fv_doc
+  print cst_doc
+  print fot_doc
