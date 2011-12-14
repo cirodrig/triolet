@@ -449,7 +449,7 @@ mkShapeClass = do
     in ([shapeType tT `IsEqual` ConTy sh,
          tT `IsInst` tiBuiltin the_c_Indexable,
          passable aT],
-        functionType [slice_type]
+        functionType [tT @@ aT, slice_type]
         (ConTy (tiBuiltin the_con_view) @@ ConTy sh @@ aT))
 
   rec let cls = mkClass "Shape" sh [passable index_type, passable slice_type]
@@ -525,8 +525,10 @@ mkShapeClass = do
     -- forall (a ... z). (Repr a, ..., Repr z) =>
     -- (a -> ... -> z) -> iter sh a -> ... -> iter sh z
     zipWithN_scheme sh n =
-      forallType (replicate (n+1) Star) $ \(range : domain) ->
-      let constraint = [passable (ConTy tv) | tv <- range : domain]
+      forallType (replicate (n+1) Star) $ \typarams ->
+      let range = last typarams
+          domain = init typarams
+          constraint = [passable (ConTy tv) | tv <- typarams]
           transform = functionType (map ConTy domain) (ConTy range)
           iter t = ConTy (tiBuiltin the_con_iter) @@ sh @@ t
           fun_type = functionType
@@ -1299,7 +1301,7 @@ mkExtend2DType =
   in ([tT `IsInst` tiBuiltin the_c_Indexable,
        shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
        passable aT],
-      functionType [int2_type, int2_type, tT @@ aT]
+      functionType [tT @@ aT]
       (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim2) @@ aT))
 
 mkRowsColsType =
