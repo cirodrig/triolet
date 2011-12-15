@@ -594,6 +594,14 @@ inlckConlike tenv dmd (ExpM (AppE _ (ExpM (VarE _ op)) _ args)) =
 
 inlckConlike tenv dmd _ = False
 
+-- | Create a substitution that pre-inlines the given list of variables
+preinlineSubst :: [(Var, ExpM)] -> Subst
+preinlineSubst xs = Subst Substitute.empty $ fromListV [(v, SubstitutedVar e) | (v, e) <- xs]
+
+-- | Create a substitution that pre-inlines the given variable
+preinlineSubst1 :: Var -> ExpM -> Subst
+preinlineSubst1 v e = Subst Substitute.empty $ singletonV v (SubstitutedVar e)
+
 -- | Given a function and its arguments, create an expression equivalent to
 --   the function applied to those arguments.  Then, simplify the new
 --   expression.
@@ -602,17 +610,20 @@ inlckConlike tenv dmd _ = False
 --   followed by the function body.  The expression is not actually created;
 --   instead, the appropriate rewrite methods are called to simplify the
 --   expression that would have been created.
-betaReduce :: Bool -> ExpInfo -> FunM -> [Type] -> [ExpSM] -> LR (ExpM, AbsCode)
-betaReduce is_stream_arg inf fun ty_args args = do
+betaReduce :: Bool              -- ^ True if the function call is an argument to a stream expression
+           -> ExpInfo           -- ^ Function call info
+           -> ExpM              -- ^ The function expression; only used for debugging
+           -> FunM              -- ^ The function value
+           -> [Type]            -- ^ Type arguments
+           -> [ExpSM]           -- ^ Value arguments
+           -> LR (ExpM, AbsCode)
+betaReduce is_stream_arg inf fun_exp fun ty_args args = do
   -- This wrapper is here to make it easier to print debugging information
   -- before beta reduction
-  betaReduce' is_stream_arg inf fun ty_args args
-  {-
-  traceShow (hang (text "betaReduce") 2 $
-             pprFun fun $$
-             vcat (map ((text "@" <+>) . pprType . fromTypM) ty_args ++
-                   map ((text ">" <+>) . pprExp) args) $$
-             pprExp e) $ return e -}
+  e <- betaReduce' is_stream_arg inf fun ty_args args
+  
+  {- liftIO $ print (hang (text "betaReduce") 2 $ pprExp fun_exp) -}
+  return e
 
 betaReduce' is_stream_arg inf (FunM fun) ty_args args
   | n_ty_args < n_ty_params && null args = do
@@ -1376,11 +1387,11 @@ rwAppWithOperator' is_stream_arg inf op op_val ty_args args =
   ifElseFuel unknown_app $
   case op
   of ExpM (LamE _ f) ->
-       consumeFuel >> inline_function_call f
+       consumeFuel >> inline_function_call op f
      _ ->
        case codeExp op_val
        of Just (ExpM (LamE _ f)) ->
-            consumeFuel >> inline_function_call f
+            consumeFuel >> inline_function_call op f
 
           -- Use special rewrite semantics for built-in functions
           Just (ExpM (VarE _ op_var))
@@ -1441,7 +1452,7 @@ rwAppWithOperator' is_stream_arg inf op op_val ty_args args =
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
-    inline_function_call funm = betaReduce is_stream_arg inf funm ty_args args
+    inline_function_call op_exp funm = betaReduce is_stream_arg inf op_exp funm ty_args args
 
 -- | Attempt to statically evaluate a copy.
 
@@ -1563,8 +1574,7 @@ rwLet inf (PatSM bind@(PatM (bind_var ::: _) _)) val simplify_body =
           -- Since substitution will eliminate the variable before the
           -- simplifier observes it, the variable isn't added to the environment.
           consumeFuel
-          let subst = Subst Substitute.empty (singletonV bind_var (SubstitutedVar subst_val))
-          simplify_body subst
+          simplify_body (preinlineSubst1 bind_var subst_val)
         else rw_recursive_let
 
     rw_recursive_let = rwLetNormal inf bind val (simplify_body emptySubst)
@@ -1601,31 +1611,49 @@ rwLetrec is_stream_arg inf defs body = do
   phase <- getPhase
   have_fuel <- checkFuel
 
-  -- If the function is nonrecursive and used exactly once, the function is
-  -- unconditionally pre-inlined
   case defs of
+    -- If the function is nonrecursive and used exactly once, the function is
+    -- unconditionally pre-inlined.
+    -- Wrapper functions are always pre-inlined.
     NonRec def | have_fuel &&
-                 usesSuggestInlining def &&
-                 phasePermitsInlining phase def -> do
+                 (defIsWrapper def ||
+                  usesSuggestInlining def && phasePermitsInlining phase def) -> do
       consumeFuel
 
       -- Substitute a lambda expression for this variable
       function <- applySubstitutionFun (definiens def)
       let lambda_fun = ExpM $ LamE inf function
-          value_subst =
-            singletonV (definiendum def) (SubstitutedVar lambda_fun)
-          subst = Subst Substitute.empty value_subst
+          subst = preinlineSubst1 (definiendum def) lambda_fun
 
       -- Rewrite the body
       rwExp is_stream_arg =<< substitute subst body
 
-  -- Otherwise, the letrec expression itself is not eliminated.
-  -- Local functions are simplified,
-  -- then may be considered for inlining at each callsite.
-    _ -> withDefs defs $ \defs' -> do
-      (body', _) <- rwExp is_stream_arg body
-      let local_vars = Set.fromList $ map definiendum $ defGroupMembers defs'
-      rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
+    NonRec {} -> do
+      -- Do not inline this function
+      withDefs defs $ \defs' -> do
+        (body', _) <- rwExp is_stream_arg body
+        rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
+
+    -- Otherwise, the letrec expression itself is not eliminated.
+    -- Wrapper functions are pre-inlined.
+    -- (A wrapper function cannot contain a reference to another wrapper function).
+    -- Local functions are simplified,
+    -- then may be considered for inlining at each callsite.
+    Rec rec_defs -> do
+
+      -- Pre-inline wrappers
+      let (wrappers, others) = partition defIsWrapper rec_defs
+      wrapper_bindings <- forM wrappers $ \wrapper_def -> do
+        function <- applySubstitutionFun (definiens wrapper_def)
+        return (definiendum wrapper_def, ExpM $ LamE (funInfo $ fromFunM function) function)
+      let subst = preinlineSubst wrapper_bindings
+      substituted_defs <- mapM (mapMDefiniens $ substitute subst) others
+      substituted_body <- substitute subst body
+
+      -- Rewrite other functions
+      withDefs (Rec substituted_defs) $ \defs' -> do
+        (body', _) <- rwExp is_stream_arg substituted_body
+        rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
 
 rwCase :: Bool -> ExpInfo -> ExpSM -> [AltSM] -> LR (ExpM, AbsCode)
 rwCase is_stream_arg inf scrut alts = do

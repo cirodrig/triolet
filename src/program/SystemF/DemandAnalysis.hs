@@ -392,7 +392,13 @@ dmdFun is_initializer (FunM f) = do
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 
 dmdDef :: DmdAnl (Def Mem)
-dmdDef def = mapMDefiniens (dmdFun False) def
+dmdDef def
+  -- Wrapper functions may be inlined many times.
+  -- Conservatively treat any use of a variable inside a wrapper as if it were many uses.
+  | defIsWrapper def = censor replicatedCode analyze_def
+  | otherwise        = analyze_def
+  where
+    analyze_def = mapMDefiniens (dmdFun False) def
 
 -- | Act like each exported function definition is used in an unknown way.
 --   Doing so prevents the function from being inlined/deleted.

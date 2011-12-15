@@ -163,6 +163,21 @@ lambdaAbstracted = IntMap.map lambda_abstract
     weaken OnceUnsafe = OnceUnsafe
     weaken ManyUnsafe = ManyUnsafe
 
+-- | Transform the demand information of values that appear in code that will be
+--   replicated.
+--
+--   Since many copies of the code will be created, one use becomes many.
+replicatedCode :: Dmds -> Dmds
+replicatedCode = IntMap.map replicated
+  where
+    replicated dmd = dmd {multiplicity = weaken $ multiplicity dmd}
+    
+    weaken Dead = Dead
+    weaken OnceSafe = ManySafe
+    weaken ManySafe = ManySafe
+    weaken OnceUnsafe = ManyUnsafe
+    weaken ManyUnsafe = ManyUnsafe
+
 useVariable :: Var -> Dmd -> Dmds
 useVariable v dmd = IntMap.singleton (fromIdent $ varID v) dmd
 
