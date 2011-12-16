@@ -374,6 +374,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin The_ShapeDict_list_dim, shape_dict_list_dim)
             , (pyonBuiltin The_ShapeDict_dim0, shape_dict_dim0)
             , (pyonBuiltin The_ShapeDict_dim1, shape_dict_dim1)
+            , (pyonBuiltin The_ShapeDict_dim2, shape_dict_dim2)
             ]
     
     -- The following expression represents the "count" stream:
@@ -460,6 +461,19 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
       The_ShapeDict_dim1_zipWith3
       The_ShapeDict_dim1_zipWith4
       The_ShapeDict_dim1_slice
+
+    shape_dict_dim2 =
+      shape_dict (VarT $ pyonBuiltin The_dim2)
+      The_repr_index2 The_repr_slice2
+      The_ShapeDict_dim2_member
+      The_ShapeDict_dim2_intersect
+      The_ShapeDict_dim2_flatten
+      The_ShapeDict_dim2_generate
+      The_ShapeDict_dim2_map
+      The_ShapeDict_dim2_zipWith
+      The_ShapeDict_dim2_zipWith3
+      The_ShapeDict_dim2_zipWith4
+      The_ShapeDict_dim2_slice
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
