@@ -1080,25 +1080,29 @@ eliminateUselessCopying expression = do
       case body' of
         ConE inf con fields ->
           compare_pattern_to_expression decon alt_fields con fields
-         
+
         -- TODO: Also detect case where body is applied to a return parameter
 
         _ -> return Nothing
 
     -- Compare fields of a pattern to fields of a data constructor expression
-    -- to determine whether they match.  The constructor part has already been
-    -- observed to match.
+    -- to determine whether they match.
     compare_pattern_to_expression decon alt_fields con exp_fields =
       case (decon, con)
       of (VarDeCon alt_op alt_ty_args alt_ex_types,
           VarCon exp_op exp_ty_args exp_ex_types) -> do
+           let bound_ex_types = map (VarT . binderVar) alt_ex_types
            types_match <-
              -- Compare constructors
              return (alt_op == exp_op) >&&>
 
              -- Compare type parameters
              andM (zipWith compareTypes alt_ty_args exp_ty_args) >&&>
-             andM (zipWith compareTypes [t | _ ::: t <- alt_ex_types] exp_ex_types) >&&>
+
+             -- Compare existential types.  If the existentially bound
+             -- variable is passed back to the data constructor, then the
+             -- new existential type matches the old one.
+             andM (zipWith compareTypes bound_ex_types exp_ex_types) >&&>
 
              -- Compare fields
              andM (zipWith match_field alt_fields exp_fields)
@@ -1126,7 +1130,7 @@ eliminateUselessCopying expression = do
         match_field pattern expr = do
           let pattern_var = patMVar (fromPatSM pattern)
           subst_expr <- freshenHead expr
-          checkForVariableExpr' pattern_var subst_expr >&&>
+          checkForVariableExpr' pattern_var subst_expr >||>
             checkForCopyExpr' pattern_var subst_expr
 
 -- | Test whether the expression is a variable expression referencing
