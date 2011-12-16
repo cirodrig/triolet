@@ -1328,10 +1328,19 @@ rwApp :: Bool -> BaseExp SM -> ExpInfo -> ExpSM -> [Type] -> [ExpSM]
       -> LR (ExpM, AbsCode)
 rwApp is_stream_arg original_expression inf op ty_args args = do
   (op', ty_args', args') <- preUncurryApp inf op ty_args args
-  rwAppOperator is_stream_arg inf op' ty_args' args'
+  case op' of
+    Left op_exp ->
+      rwAppOperator is_stream_arg inf op_exp ty_args' args'
+    Right (case_inf, scr, alts) ->
+      rwAppOfCase is_stream_arg inf case_inf scr alts ty_args' args'
 
 -- Try to uncurry this application.  The operator and arguments have not been
 -- rewritten.
+--
+-- If the operator is a case expression, then deconstruct the case expression;
+-- there is a special code path to handle case statements.
+preUncurryApp :: ExpInfo -> ExpSM -> [Type] -> [ExpSM]
+              -> LR (Either ExpSM (ExpInfo, ExpSM, [AltSM]), [Type], [ExpSM])
 preUncurryApp inf op ty_args args = do
   op' <- freshenHead op
   case op' of
@@ -1340,10 +1349,49 @@ preUncurryApp inf op ty_args args = do
           continue inner_op inner_ty_args (inner_args ++ args)
       | null inner_args ->
           continue inner_op (inner_ty_args ++ ty_args) args
-    _ -> return (op, ty_args, args)
+    CaseE case_inf scr alts ->
+      return (Right (case_inf, scr, alts), ty_args, args)
+    _ -> return (Left op, ty_args, args)
   where
     continue op ty_args args =
       preUncurryApp inf op ty_args args
+
+-- | Convert an app-of-case expression to a case-of-app expression.
+--   To avoid duplicating code across all case branches,
+--   the arguments are bound to new variables.
+--
+-- > (case x of {C. e1}) e2
+--
+-- becomes
+--
+-- > let z = e2 in case x of C. e1 z
+rwAppOfCase :: Bool -> ExpInfo -> ExpInfo -> ExpSM -> [AltSM] -> [Type]
+            -> [ExpSM]
+            -> LR (ExpM, AbsCode)
+rwAppOfCase is_stream_arg inf case_inf scr alts ty_args args = do
+  scr' <- applySubstitution scr
+  restructured_exp <- withMany bind_argument args $ \args' -> do
+    alts' <- mapM (insert_app inf ty_args args') alts
+    return $ ExpM $ CaseE case_inf scr' alts'
+
+  -- Rewrite the new expression
+  rwExp is_stream_arg $ deferEmptySubstitution restructured_exp
+  where
+    bind_argument arg k = do
+      -- Bind the argument to a variable.
+      -- The variable will be used once in each case alternative, so
+      -- annotate the argument with 'ManySafe' multiplicity.
+      let_var <- newAnonymousVar ObjectLevel
+      arg' <- applySubstitution arg
+      arg_type <- inferExpType arg'
+      let pat = setPatMDmd (Dmd ManySafe Used) $ patM (let_var ::: arg_type)
+      new_expr <- k arg'
+      return $ ExpM $ LetE inf pat arg' new_expr
+
+    -- Put a function application term inside a case alternative
+    insert_app inf ty_args args altm = do
+      AltM (Alt decon params body) <- applySubstitutionAlt altm
+      return $ AltM $ Alt decon params (appE inf body ty_args args)
 
 rwAppOperator is_stream_arg inf op ty_args args =
   clearCurrentReturnParameter $ do
