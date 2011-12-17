@@ -139,6 +139,7 @@ data Domain ix = Domain (Identifier ix) (LType ix)
 data Exp a =
     VarE (Identifier a)
   | IntE !Integer
+  | FloatE !Double
   | TupleE [LExp a]
   | TAppE (LExp a) (LType a)
   | AppE (LExp a) (LExp a)

@@ -27,6 +27,8 @@ $notml          = [^\-\{]               -- not the start of a meaningful token
 $oper		= [\-\+\*\/\<\>=\~\!\?\#:\@\$\%\^\&\|]
 
 @signed		= \-? $digit+
+@fractional     = \. $digit+            -- fractional part of a float
+@exponent       = [eE] @signed          -- exponent of a float
 @word		= $alpha $alnum *
 @eow		= ~$alnum | $eol	-- end of word
 @operator	= $oper +
@@ -61,6 +63,7 @@ rules :- ----------------------------------------------------------------------
 
 -- Numbers
 
+<0,att>	@signed @fractional @exponent?	{ posn mkFloat }
 <0,att>	@signed			{ posn mkInt }
 
 -- Identifiers

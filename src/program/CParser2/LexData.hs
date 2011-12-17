@@ -15,6 +15,7 @@ data Token = Token !SourcePos !Tok
 -- | A token produced by lexical analysis
 data Tok =
     IntTok {-# UNPACK #-} !Integer
+  | FloatTok {-# UNPACK #-} !Double
   | IdentTok String
   | OperTok String
   | LBraceTok
@@ -52,6 +53,7 @@ showTok :: Tok -> String
 showTok t =
     case t
     of IntTok n     -> show n
+       FloatTok n   -> show n
        IdentTok s   -> "'" ++ s ++ "'"
        OperTok s    -> "operator '" ++ s ++ "'"
        LBraceTok    -> "left brace"
@@ -120,8 +122,13 @@ posnTok t = Lex $ \posn _ _ -> TokenResult $ Token posn t
 -- Functions to create tokens.
 -- The lexical analyzer rules should accept only valid strings, so that
 -- calls to 'read' never fail.
-mkInt, mkIdent, mkOper :: String -> Int -> Tok
-mkInt s _   = IntTok (fst $ head $ reads s)
+mkInt, mkFloat, mkIdent, mkOper :: String -> Int -> Tok
+mkInt s n = case reads (take n s)
+            of (n, []) : _ -> IntTok n
+               _ -> throw $ LexerError noSourcePos "Cannot parse integer"
+mkFloat s n = case reads (take n s)
+              of (n, []) : _ -> FloatTok n
+                 _ -> throw $ LexerError noSourcePos "Cannot parse float"
 mkIdent s n = IdentTok (take n s)
 mkOper s n  = OperTok (take n s)
 

@@ -267,6 +267,8 @@ translateExp (L pos expression) =
            return $ SystemF.ExpM $ SystemF.VarE inf (toVar v)
      IntE n ->
        return $ SystemF.ExpM $ SystemF.LitE inf (SystemF.IntL n int_type)
+     FloatE n ->
+       return $ SystemF.ExpM $ SystemF.LitE inf (SystemF.FloatL n float_type)
      TupleE es -> do
        es' <- mapM translateExp es
        types <- lift $ mapM SystemF.TypecheckMem.inferExpType es'
@@ -311,6 +313,7 @@ translateExp (L pos expression) =
        return $ SystemF.ExpM $ SystemF.CoerceE inf ft tt body'
   where
     int_type = Type.VarT $ pyonBuiltin The_int
+    float_type = Type.VarT $ pyonBuiltin The_float
     inf = SystemF.mkExpInfo pos
 
 translateApp inf op ty_args args = do

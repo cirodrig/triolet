@@ -267,6 +267,7 @@ resolveExp pos expression =
   case expression
   of VarE v -> VarE <$> use v pos
      IntE n -> pure $ IntE n
+     FloatE n -> pure $ FloatE n
      TupleE ts -> TupleE <$> mapM (resolveL resolveExp) ts
      TAppE e t -> do
        e' <- resolveL resolveExp e 

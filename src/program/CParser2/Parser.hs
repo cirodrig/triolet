@@ -90,6 +90,12 @@ int = PS.tokenPrim showToken nextPosition matchAndReturn
       matchAndReturn (Token _ (IntTok n)) = Just n
       matchAndReturn _                    = Nothing
 
+float :: P Double
+float = PS.tokenPrim showToken nextPosition matchAndReturn
+    where
+      matchAndReturn (Token _ (FloatTok n)) = Just n
+      matchAndReturn _                      = Nothing
+
 eof :: P ()
 eof = PS.getInput >>= acceptEOF
     where
@@ -395,7 +401,7 @@ appExp = do
           operand <- atomicExp  -- Non-atomic expressions must be parenthesized
           apply loc (L loc $ AppE f operand)
 
-atomicExp = varE <|> intE <|> parenExp
+atomicExp = varE <|> intE <|> floatE <|> parenExp
 
 -- An expression in parentheses
 parenExp = do
@@ -407,6 +413,9 @@ varE = located (VarE <$> identifier) <?> "variable"
 
 intE :: P PLExp
 intE = located (IntE <$> int) <?> "integer"
+
+floatE :: P PLExp
+floatE = located (FloatE <$> float) <?> "floating-point number"
 
 -- | Parse a case alternative.  The alternative is either a constructor
 --   application or a tuple application.
