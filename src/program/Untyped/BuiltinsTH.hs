@@ -37,6 +37,8 @@ pyonSourceGlobals =
   , "isJust"
   , "isNothing"
   , "fromJust"
+  , "list_dim"
+  , "dim1"
   , "map"
   , "reduce"
   , "reduce1"

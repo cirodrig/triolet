@@ -373,7 +373,8 @@ invEvalLM (i : int) (m : LinearMap) -> int =
 
 -- Compute the intersection of two linear maps.
 -- If the intersection is empty, 'Nothing' is returned.
-intersectLM (m1 : LinearMap) (m2 : LinearMap) -> MaybeVal LinearMap =
+intersectLM (m1 : LinearMap) (m2 : LinearMap) -> MaybeVal LinearMap
+  attribute(inline, inline_final) =
   case m1 of linearMap (s1 : int) (a1 : int).
   case m2 of linearMap (s2 : int) (a2 : int).
 
@@ -397,7 +398,8 @@ intersectLM (m1 : LinearMap) (m2 : LinearMap) -> MaybeVal LinearMap =
   justVal @LinearMap (linearMap s3 a3);
 
 
-trimInterval (iv : Interval) (m : LinearMap) -> Interval =
+trimInterval (iv : Interval) (m : LinearMap) -> Interval
+  attribute(inline, inline_final) =
   case iv of interval (l : MaybeVal int) (u : MaybeVal int).
   case m of linearMap (s : int) (a : int).
 
@@ -624,7 +626,7 @@ CartesianDict_dim1_loBound
   (dom : dim1)
   (ret : OutPtr (Maybe (index dim1)))
   -> IEffect (Maybe (index dim1))
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case lb of {
@@ -637,7 +639,7 @@ CartesianDict_dim1_hiBound
   (dom : dim1)
   (ret : OutPtr (Maybe (index dim1)))
   -> IEffect (Maybe (index dim1))
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case ub of {
@@ -661,7 +663,7 @@ CartesianDict_dim1_displaceDomain
   (dom : dim1)
   (ix : index dim1)
   -> dim1
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
@@ -685,7 +687,7 @@ CartesianDict_dim1_multiplyDomain
   (dom : dim1)
   (n : int)
   -> dim1
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
@@ -709,7 +711,7 @@ CartesianDict_dim1_divideDomain
   (dom : dim1)
   (n : int)
   -> dim1
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
@@ -841,36 +843,44 @@ CartesianDict_dim2_divideDomain
 intUpdateInPlace (dummy : NoneType)
               -> UpdateInPlace (Stored int) (Stored NoneType) int
               attribute(inline, inline_final) =
-  updateInPlace @(Stored int) @(Stored NoneType) @int
+  let type Sint = Stored int in
+  updateInPlace @Sint @(Stored NoneType) @int @Sint
+  repr_int
   intUpdateInPlace_initializer
-  (\ (modify : int -> int) (ret : OutPtr (Stored int)) (ix : Stored NoneType)
-     (tok_in : EffTok) -> EffTok.
-     intUpdateInPlace_updater modify ret tok_in);
+  (\ (modify : int -> int) (ix : Stored NoneType)
+     (tok_in : EffTok) (ret : OutPtr Sint) -> EffTok.
+     intUpdateInPlace_updater modify ix tok_in ret)
+  (mutateInPlace @Sint @Sint (idBareCoercion @Sint));
 
 
 floatUpdateInPlace (dummy : NoneType)
               -> UpdateInPlace (Stored float) (Stored NoneType) float
               attribute(inline, inline_final) =
-  updateInPlace @(Stored float) @(Stored NoneType) @float
+  let type Sfloat = Stored float in
+  updateInPlace @Sfloat @(Stored NoneType) @float @Sfloat
+  repr_float
   floatUpdateInPlace_initializer
-  (\ (modify : float -> float) (ret : OutPtr (Stored float))
-     (ix : Stored NoneType) (tok_in : EffTok) -> EffTok.
-     floatUpdateInPlace_updater modify ret tok_in);
+  (\ (modify : float -> float)
+     (ix : Stored NoneType) (tok_in : EffTok) (ret : OutPtr Sfloat) -> EffTok.
+     floatUpdateInPlace_updater modify ix tok_in ret)
+  (mutateInPlace @Sfloat @Sfloat (idBareCoercion @Sfloat));
 
 
-arrUpdateInPlace @(N : intindex) @(s i : bare) @(a : val)
+arrUpdateInPlace @(N : intindex) @(r i : bare) @(a : val)
   (size : FIInt N)
-  (repr : Repr s)
-  (elem_updater : UpdateInPlace s i a)
-  -> UpdateInPlace (arr N s) (PyonTuple2 (Stored int) i) a
+  (repr : Repr r)
+  (elem_updater : UpdateInPlace r i a)
+  -> UpdateInPlace (arr N r) (PyonTuple2 (Stored int) i) a
   attribute(inline, inline_final) =
 
   case size of fiInt @N (u_size : int).
 
   case elem_updater of
-    updateInPlace @s @i @a
+    updateInPlace @r @i @a @(s : bare)
+    (state_repr : Repr s)
     (elem_init : (NoneType -> a) -> OutPtr s -> EffTok)
-    (elem_modify : (a -> a) -> OutPtr s -> i -> EffTok -> EffTok).
+    (elem_modify : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
+    (elem_finalizer : UpdateInPlaceFinalizer s r).
 
   -- Initialize the array by running the initializer on every array element
   letfun
@@ -880,7 +890,7 @@ arrUpdateInPlace @(N : intindex) @(s i : bare) @(a : val)
       (doall @N @(arr N s) @s size
        (\ (i : int) -> IEffect s.
           let array_element : OutPtr s =
-            subscript_out @N @s repr ret i in
+            subscript_out @N @s state_repr ret i in
           fromEffTok @s (elem_init get_init array_element)))
   in
 
@@ -889,9 +899,9 @@ arrUpdateInPlace @(N : intindex) @(s i : bare) @(a : val)
   letfun
     modify_array
       (modify_value : a -> a)
-      (ret : OutPtr (arr N s))
       (ix : PyonTuple2 (Stored int) i)
       (token_in : EffTok)
+      (ret : OutPtr (arr N s))
       -> EffTok =
 
       -- Choose the array index
@@ -902,12 +912,175 @@ arrUpdateInPlace @(N : intindex) @(s i : bare) @(a : val)
       if or (u_ix <# 0) (u_ix >=# u_size)
       then token_in
       else let array_element : OutPtr s =
-             subscript_out @N @s repr ret u_ix in
-           elem_modify modify_value array_element ix2 token_in
+             subscript_out @N @s state_repr ret u_ix in
+           elem_modify modify_value ix2 token_in array_element
   in
-      
-  updateInPlace @(arr N s) @(PyonTuple2 (Stored int) i) @a
-  initialize_array modify_array;
+
+  let finalizer : UpdateInPlaceFinalizer (arr N s) (arr N r) =
+        case elem_finalizer of {
+          mutateInPlace @s @r (co : coerce @bare s r).
+            mutateInPlace @(arr N s) @(arr N r)
+            (unsafeMakeBareCoercion @(arr N s) @(arr N r))
+
+        ; mutateAndCopy @s @r (f : s -> Writer r).
+            letfun
+              f2 (ay : arr N s) (ret : OutPtr (arr N r)) -> IEffect (arr N r) =
+
+                -- Convert an array of 's' to an array of 'r'
+                doall @N @(arr N r) @r size
+                (\ (i : int) -> IEffect r.
+                   f (subscript @N @s state_repr ay i)
+                     (subscript_out @N @r repr ret i)) in
+
+            mutateAndCopy @(arr N s) @(arr N r) f2
+        } in
+
+  updateInPlace @(arr N r) @(PyonTuple2 (Stored int) i) @a @(arr N s)
+  (repr_arr @N @s size state_repr)
+  initialize_array modify_array finalizer;
+
+
+intSumScatterReduction (dummy : NoneType)
+ -> ScatterReduction (Stored int) (Stored int) =
+
+  let type Sint = Stored int in
+  case intUpdateInPlace None of
+    updateInPlace @Sint @(Stored NoneType) @int @(s : bare)
+    (state_repr : Repr s)
+    (initializer : (NoneType -> int) -> OutPtr s -> EffTok)
+    (updater : (int -> int) -> Stored NoneType -> EffTok -> OutPtr s -> EffTok)
+    (finalizer : UpdateInPlaceFinalizer s Sint).
+
+  -- Change the index type to 'Stored int'
+  let uip : UpdateInPlace Sint Sint int =
+        updateInPlace @Sint @Sint @int @s
+        state_repr
+        initializer
+        (\ (f : int -> int) (i : Sint) (t : EffTok) (p : OutPtr s) -> EffTok.
+           case boxed @(Stored NoneType) (stored @NoneType None) of
+             boxed @(Stored NoneType) (i2 : Stored NoneType).
+           updater f i2 t p)
+        finalizer
+        in
+
+  scatterReduction @Sint @Sint @int
+  uip
+  (\ (i : Sint) -> int -> int.
+     case i of stored @int (ui : int).
+     (\ (n : int) -> int. ui +# n))
+  (\ (dummy : NoneType) -> int. 0)
+  (\ (x : Sint) (y : Sint) (ret : OutPtr Sint) -> IEffect Sint.
+     case x of stored @int (ux : int).
+     case y of stored @int (uy : int).
+     stored @int (ux +# uy) ret);
+
+
+floatSumScatterReduction (dummy : NoneType)
+  -> ScatterReduction (Stored float) (Stored float) =
+
+  let type Sfloat = Stored float in
+  case floatUpdateInPlace None of
+    updateInPlace @Sfloat @(Stored NoneType) @float @(s : bare)
+    (state_repr : Repr s)
+    (initializer : (NoneType -> float) -> OutPtr s -> EffTok)
+    (updater : (float -> float) -> Stored NoneType -> EffTok -> OutPtr s -> EffTok)
+    (finalizer : UpdateInPlaceFinalizer s Sfloat).
+
+  -- Change the index type to 'Stored float'
+  let uip : UpdateInPlace Sfloat Sfloat float =
+        updateInPlace @Sfloat @Sfloat @float @s
+        state_repr
+        initializer
+        (\ (f : float -> float) (i : Sfloat) (t : EffTok) (p : OutPtr s) -> EffTok.
+           case boxed @(Stored NoneType) (stored @NoneType None) of
+             boxed @(Stored NoneType) (i2 : Stored NoneType).
+           updater f i2 t p)
+        finalizer in
+
+  scatterReduction @Sfloat @Sfloat @float
+  uip
+  (\ (i : Stored float) -> float -> float.
+     case i of stored @float (ui : float).
+     (\ (n : float) -> float. AdditiveDict_float_add ui n))
+  (\ (dummy : NoneType) -> float. 0.0)
+  (\ (x : Stored float) (y : Stored float) (ret : OutPtr (Stored float))
+     -> IEffect (Stored float).
+     case x of stored @float (ux : float).
+     case y of stored @float (uy : float).
+     stored @float (AdditiveDict_float_add ux uy) ret);
+
+
+countingScatterReduction (dummy : NoneType)
+  -> ScatterReduction (Stored int) (Stored NoneType) =
+
+  scatterReduction @(Stored int) @(Stored NoneType) @int
+  (intUpdateInPlace None)
+  (\ (dummy : Stored NoneType) -> int -> int. (\ (x : int) -> int. x +# 1))
+  (\ (dummy : NoneType) -> int. 0)
+  (\ (x : Stored int) (y : Stored int) (ret : OutPtr (Stored int))
+     -> IEffect (Stored int).
+     case x of stored @int (ux : int).
+     case y of stored @int (uy : int).
+     stored @int (ux +# uy) ret);
+
+
+arrScatterReduction @(N : intindex) @(e i : bare)
+  (repr_i : Repr i)
+  (repr_e : Repr e)
+  (count : FIInt N)
+  (reduction_op : ScatterReduction e i)
+  -> ScatterReduction (arr N e) (PyonTuple2 (Stored int) i)
+  attribute(inline, inline_final) =
+
+  case reduction_op of
+    scatterReduction @e @i @(a : val)
+    (uip : UpdateInPlace e i a)
+    (updater : i -> a -> a)
+    (initializer : NoneType -> a)
+    (combiner : e -> e -> Writer e).
+
+  let arr_uip : UpdateInPlace (arr N e) (PyonTuple2 (Stored int) i) a =
+        arrUpdateInPlace @N @e @i @a count repr_e uip in
+
+  scatterReduction @(arr N e) @i @a arr_uip updater initializer
+  (\ (x : arr N e) (y : arr N e) -> Writer (arr N e).
+    arr1D_build @N @e repr_e count
+    (\ (i : int) (ret : OutPtr e) -> IEffect e.
+       combiner (subscript @N @e repr_e x i) (subscript @N @e repr_e y i) ret));
+
+
+array1ScatterReduction @(e i : bare)
+  (repr_i : Repr i)
+  (repr_e : Repr e)
+  (dom : dim1)
+  (reduction_op : ScatterReduction e i)
+  -> ScatterReduction (array1 e) (PyonTuple2 (Stored int) i) =
+
+  let type i2 = (PyonTuple2 (Stored int) i) in
+  let type ret_type = ScatterReduction (array1 e) i2 in
+
+  -- Compute array size
+  case boxed @(StoredBox ret_type)
+       (dim1ToArrayDesc @(StoredBox ret_type) dom
+        (\ @(N : intindex) (lb : int) (stride : int) (count : FIInt N)
+           (ret : OutPtr (StoredBox ret_type))
+           -> IEffect (StoredBox ret_type).
+
+           -- Create a plain array scatter reducer
+           case arrScatterReduction @N @e @i repr_i repr_e count reduction_op of
+             scatterReduction @(arr N e) @i2 @(a : val)
+             (uip : UpdateInPlace (arr N e) i2)
+             (updater : i2 -> a -> a)
+             (initializer : NoneType -> a)
+             (combiner : arr N e -> arr N e -> Writer (arr N e)).
+
+           -- TODO: finish this code
+           except @(IEffect (StoredBox ret_type))
+        )) of
+    boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
+  case s_retval of storedBox @ret_type (retval : ret_type).
+  retval;
+
 
 -------------------------------------------------------------------------------
 -- Traversable methods
@@ -1493,7 +1666,7 @@ ShapeDict_dim1_member (dom : dim1) (ix : Stored int)
   else False;
 
 
-ShapeDict_dim1_intersect (d : dim1) (e : dim1) -> dim1 =
+ShapeDict_dim1_intersect (d : dim1) (e : dim1) -> dim1 attribute(inline, inline_sequential) =
   case d of mk_dim1 (iv1 : Interval) (m1 : LinearMap).
   case e of mk_dim1 (iv2 : Interval) (m2 : LinearMap).
   case intersectLM m1 m2 of {
@@ -1637,17 +1810,16 @@ ShapeDict_dim2_generate @(a : bare)
   view_generate @dim2 ShapeDict_dim2 @a repr dom f;
 
 
-ShapeDict_dim2_flatten @(a : bare)
-  (repr : Repr a) (s : Stream dim2 a) -> Stream list_dim a
-  attribute(inline, inline_dimensionality) =
-  case s of mk_view @dim2 @a (dom : dim2) (f : index dim2 -> Writer a).
-  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  case dom_x of mk_dim1 (iv_x : Interval) (lm_x : LinearMap).
-  case dom_y of mk_dim1 (iv_y : Interval) (lm_y : LinearMap).
+ShapeDict_dim2_flatten_helper
+  (iv_y : Interval)
+  (iv_x : Interval)
+  (stride_y : int)
+  (stride_x : int)
+  -> (list_dim, MaybeVal int, int, int)
+  attribute(inline, inline_sequential) =
+
   case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
   case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
-  case lm_x of linearMap (stride_x : int) (alignment_x : int).
-  case lm_y of linearMap (stride_y : int) (alignment_y : int).
 
   -- Lower bound must be finite
   case lb_x of {
@@ -1669,55 +1841,68 @@ ShapeDict_dim2_flatten @(a : bare)
                         justVal @int (count_x *# count_y)
                     ; nothingVal @int.
 
-                        -- Domain is unbounded in the y-dimensino
+                        -- Domain is unbounded in the y-dimension
                         nothingVal @int
                     } in
 
-              viewStream @a
-              (mk_view @list_dim @a (mk_list_dim list_size)
-               (\ (si : Stored int) -> Writer a.
-                  -- Linearize the index
-                  case si of stored @int (i : int).
-                  let i_y : int = i //# count_x in
-                  let i_x : int = i %# count_x in
-
-                  -- Apply the stride to get an index in the domain
-                  let dim2_i_y : int = lb_y_i +# i_y *# stride_y in 
-                  let dim2_i_x : int = lb_x_i +# i_x *# stride_x in 
-                  case boxed @(PyonTuple2 (Stored int) (Stored int))
-                       (pyonTuple2 @(Stored int) @(Stored int)
-                        (stored @int dim2_i_y) (stored @int dim2_i_x))
-                  of boxed @(PyonTuple2 (Stored int) (Stored int))
-                     (index_2d : PyonTuple2 (Stored int) (Stored int)).
-                  f index_2d))
-
-          ; nothingVal @int.
-              except @(Stream list_dim a)
-          }
+              (mk_list_dim list_size, justVal @int count_x, lb_y_i, lb_x_i)
+            ; nothingVal @int.
+                except @(list_dim, MaybeVal int, int, int)
+            }
 
       ; nothingVal @int.
           -- Domain has infinite x extent
           case lb_y of {
             justVal @int (lb_y_i : int).
-              viewStream @a
-              (mk_view @list_dim @a (mk_list_dim (nothingVal @int))
-               (\ (si : Stored int) -> Writer a.
-                  case si of stored @int (i : int).
-                  let dim2_i_x : int = lb_x_i +# i *# stride_x in
-                  case boxed @(PyonTuple2 (Stored int) (Stored int))
-                       (pyonTuple2 @(Stored int) @(Stored int)
-                        (stored @int lb_y_i) (stored @int dim2_i_x))
-                  of boxed @(PyonTuple2 (Stored int) (Stored int))
-                     (index_2d : PyonTuple2 (Stored int) (Stored int)).
-                  f index_2d))
+              (mk_list_dim (nothingVal @int), nothingVal @int, lb_y_i, lb_x_i)
+
           ; nothingVal @int.
-              except @(Stream list_dim a)
+              except @(list_dim, MaybeVal int, int, int)
           }
       }
 
   ; nothingVal @int.
-      except @(Stream list_dim a)
+      except @(list_dim, MaybeVal int, int, int)
   };
+
+
+ShapeDict_dim2_flatten @(a : bare)
+  (repr : Repr a) (s : Stream dim2 a) -> Stream list_dim a
+  attribute(inline, inline_dimensionality) =
+  case s of mk_view @dim2 @a (dom : dim2) (f : index dim2 -> Writer a).
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  case dom_x of mk_dim1 (iv_x : Interval) (lm_x : LinearMap).
+  case dom_y of mk_dim1 (iv_y : Interval) (lm_y : LinearMap).
+  case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+  case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case lm_x of linearMap (stride_x : int) (alignment_x : int).
+  case lm_y of linearMap (stride_y : int) (alignment_y : int).
+
+  -- Compute stream dimensions and indices
+  case ShapeDict_dim2_flatten_helper iv_y iv_x stride_y stride_x
+  of (flattened_size : list_dim, divisor : MaybeVal int, lb_y_i : int, lb_x_i : int).
+
+  viewStream @a
+  (mk_view @list_dim @a flattened_size
+   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+      -- Linearize the index
+      case si of stored @int (i : int).
+      case case divisor of {
+             justVal @int (count_x : int). (i //# count_x, i %# count_x)
+           ; nothingVal @int. (0, i)
+           }
+      of (i_y : int, i_x : int).
+
+      -- Apply the stride to get an index in the domain
+      let dim2_i_y : int = lb_y_i +# i_y *# stride_y in 
+      let dim2_i_x : int = lb_x_i +# i_x *# stride_x in 
+
+      let type index2d = PyonTuple2 (Stored int) (Stored int) in
+      case boxed @index2d
+           (pyonTuple2 @(Stored int) @(Stored int)
+            (stored @int dim2_i_y) (stored @int dim2_i_x))
+      of boxed @index2d (index_2d : index2d).
+      f index_2d ret));
 
 
 ShapeDict_dim2_map @(a b : bare)
@@ -1727,6 +1912,40 @@ ShapeDict_dim2_map @(a b : bare)
   -> Stream dim2 b attribute(inline) =
   view_map @dim2
   ShapeDict_dim2 @a @b repr_a repr_b transformer s;
+
+
+ShapeDict_dim2_zipWith @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (transformer : a -> b -> Writer c)
+  (sa : Stream dim2 a)
+  (sb : Stream dim2 b)
+  -> Stream dim2 c attribute(inline) =
+  view_zipWith @dim2 ShapeDict_dim2 @a @b @c
+  repr_a repr_b repr_c transformer sa sb;
+
+
+ShapeDict_dim2_zipWith3 @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (transformer : a -> b -> c -> Writer d)
+  (sa : Stream dim2 a)
+  (sb : Stream dim2 b)
+  (sc : Stream dim2 c)
+  -> Stream dim2 d attribute(inline) =
+  view_zipWith3 @dim2 ShapeDict_dim2 @a @b @c @d
+  repr_a repr_b repr_c repr_d transformer sa sb sc;
+
+
+ShapeDict_dim2_zipWith4 @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (repr_e : Repr e)
+  (transformer : a -> b -> c -> d -> Writer e)
+  (sa : Stream dim2 a)
+  (sb : Stream dim2 b)
+  (sc : Stream dim2 c)
+  (sd : Stream dim2 d)
+  -> Stream dim2 e attribute(inline) =
+  view_zipWith4 @dim2 ShapeDict_dim2 @a @b @c @d @e
+  repr_a repr_b repr_c repr_d repr_e transformer sa sb sc sd;
 
 
 ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
@@ -1880,7 +2099,7 @@ fun_reduce @(t : bare -> bare) @(a : bare)
   (input : t a)
   (ret : OutPtr a)
   -> IEffect a
-  attribute(inline) =
+  attribute(inline, inline_dimensionality) =
   let type sh = shape t in
 
   case traversable
@@ -1931,7 +2150,7 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
   (input : t a)
   (ret : OutPtr a)
   -> IEffect a
-  attribute(inline) =
+  attribute(inline, inline_dimensionality) =
   let type sh = shape t in
 
   case traversable
@@ -1972,6 +2191,117 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
   ; sequenceStream @a (sq : Sequence a).
       Sequence_reduce1 @a repr reducer sq ret
   };
+
+
+fun_scatterReduce @(t : bare -> bare) @(i r : bare)
+  (shape_dict : ShapeDict (shape t))
+  (traversable : TraversableDict t)
+  (repr_s : Repr (t i))
+  (repr_i : Repr i)
+  (repr_r : Repr r)
+  (op : ScatterReduction r i)
+  (src : t i)
+  (ret : OutPtr r)
+  -> IEffect r
+  attribute(inline) =
+
+  let type sh = shape t in
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+       (build : (a : bare) -> Repr a -> Stream sh a -> Writer (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  -- Do a sequential in-place update
+  case shape_flatten @i repr_i (traverse @i repr_i src) of {
+    viewStream @i (vw : view list_dim i).
+      scatter_list_dim @i @r repr_i repr_r op vw ret
+
+  ; sequenceStream @i (sq : Sequence i).
+      Sequence_scatter @i @r repr_i repr_r op sq ret
+  };
+
+
+histogram @(sh : box)
+  (shape_dict : ShapeDict sh)
+  (lo_bound : int)
+  (hi_bound : int)
+  (input : Stream sh (Stored int))
+  (ret : OutPtr (array1 (Stored int)))
+  -> IEffect (array1 (Stored int))
+  attribute(inline) =
+
+  let type Sint = Stored int in
+  let type SNone = Stored NoneType in
+  let sr : ScatterReduction (array1 Sint) (PyonTuple2 Sint SNone) =
+        array1ScatterReduction @Sint @SNone
+        repr_int
+        (mk_dim1 (interval (justVal @int lo_bound) (justVal @int hi_bound))
+                 (linearMap 1 0))
+        (countingScatterReduction None) in
+
+  let traversable : TraversableDict (\ (a : bare). StoredBox (Stream sh a)) =
+        traversableDict @(\ (a : bare). StoredBox (Stream sh a))
+        (\ @(a : bare) (repr : Repr a) (x : StoredBox (Stream sh a))
+           -> Stream sh a.
+           case x of storedBox @(Stream sh a) (ux : Stream sh a). ux)
+        (\ @(a : bare) (repr : Repr a) (x : Stream sh a)
+           -> Writer (StoredBox (Stream sh a)).
+           storedBox @(Stream sh a) x) in
+
+  case boxed @(BareType (Stream sh Sint)) (storedBox @(Stream sh Sint) input) of
+    boxed @(BareType (Stream sh Sint)) (b_input : StoredBox (Stream sh Sint)).
+
+  -- For each input value x, create a tuple (x, None)
+  case boxed @(BareType (Stream sh (PyonTuple2 Sint SNone)))
+       (fun_map @(\ (a : bare). BareType (Stream sh a))
+                @Sint @(PyonTuple2 Sint SNone)
+                traversable
+                shape_dict
+                repr_int
+                (repr_PyonTuple2 @Sint @SNone repr_int repr_NoneType)
+                (\ (x : Sint) -> Writer (PyonTuple2 Sint SNone).
+                  pyonTuple2 @Sint @SNone
+                  (copy @Sint repr_int x) (stored @NoneType None))
+                b_input)
+  of boxed @(BareType (Stream sh (PyonTuple2 Sint SNone)))
+     (b_input2 : BareType (Stream sh (PyonTuple2 Sint SNone))).
+
+  fun_scatterReduce @(\ (a : bare). BareType (Stream sh a))
+  @(PyonTuple2 Sint SNone) @(array1 Sint)
+  shape_dict
+  traversable
+  (repr_Box @(Stream sh (PyonTuple2 Sint SNone)))
+  (repr_PyonTuple2 @Sint @SNone repr_int repr_NoneType)
+  (repr_array1 @(Stored int) repr_int)
+  sr
+  b_input2
+  ret;
 
 
 fun_indices @(sh : box) (shape_dict : ShapeDict sh) (shp : sh)
@@ -2547,6 +2877,91 @@ range (length : int) -> Stream list_dim (Stored int)
    (\ (i : Stored int) -> Writer (Stored int).
       copy @(Stored int) repr_int i));
 
+
+extend2D @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (is_2d : coerce @box (shape t) dim2)
+  (repr : Repr a)
+  (container : t a)
+  -> view dim2 a
+  attribute(inline, inline_dimensionality) =
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  case coerce @(shape t) @dim2 (get_shape @a container) of
+    mk_dim2 (dim_y : dim1) (dim_x : dim1).
+  case dim_y of mk_dim1 (y_interval : Interval) (y_linear_map : LinearMap).
+  case y_interval of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case y_linear_map of linearMap (stride_y : int) (alignment_y : int).
+  case dim_x of mk_dim1 (x_interval : Interval) (x_linear_map : LinearMap).
+  case x_interval of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+  case x_linear_map of linearMap (stride_x : int) (alignment_x : int).
+
+  -- Input must be nonempty
+  if or (case lb_y of {
+           justVal @int (lb_y_i : int).
+             case ub_y of {
+               justVal @int (ub_y_i : int). lb_y_i ==# ub_y_i
+             ; nothingVal @int. False
+             }
+         ; nothingVal @int. False
+         })
+         (case lb_x of {
+           justVal @int (lb_x_i : int).
+             case ub_x of {
+               justVal @int (ub_x_i : int). lb_x_i ==# ub_x_i
+             ; nothingVal @int. False
+             }
+         ; nothingVal @int. False
+         })
+  then except @(view dim2 a) else
+
+  -- Create a view with no bounds
+  let unbounded_interval : Interval =
+        interval (nothingVal @int) (nothingVal @int) in
+  let dom : dim2 =
+        mk_dim2 (mk_dim1 unbounded_interval y_linear_map)
+                (mk_dim1 unbounded_interval x_linear_map) in
+
+  mk_view @dim2 @a dom
+  (\ (ix : PyonTuple2 (Stored int) (Stored int)) (ret : OutPtr a)
+     -> IEffect a.
+     case ix of pyonTuple2 @(Stored int) @(Stored int)
+                (sy : Stored int) (sx : Stored int).
+     case sy of stored @int (y : int).
+     case sx of stored @int (x : int).
+
+     -- Coerce the x and y indices to be in bounds
+     letfun
+       coerce_to_bounds
+         (i : int) (lb : MaybeVal int) (ub : MaybeVal int) (stride : int)
+         -> int =
+         letfun
+           coerce_upper (dummy : NoneType) -> int =
+             case ub of {
+               justVal @int (ub_i : int).
+                 if i >=# ub_i then ub_i -# stride else i
+             ; nothingVal @int. i
+             } in
+         case lb of {
+           justVal @int (lb_i : int).
+             if i <# lb_i then lb_i else coerce_upper None
+         ; nothingVal @int. coerce_upper None
+         } in
+     let real_y : int = coerce_to_bounds y lb_y ub_y stride_y in
+     let real_x : int = coerce_to_bounds x lb_x ub_x stride_x in
+
+     -- Create new index
+     case boxed @(PyonTuple2 (Stored int) (Stored int))
+          (pyonTuple2 @(Stored int) @(Stored int)
+           (stored @int real_y) (stored @int real_x)) of
+       boxed @(PyonTuple2 (Stored int) (Stored int))
+             (inbounds_ix : PyonTuple2 (Stored int) (Stored int)).
+     at_index @a repr container
+     (coerce @(index dim2) @(index (shape t)) inbounds_ix)
+     ret);
 
 -------------------------------------------------------------------------------
 -- High-level list comprehension functions
@@ -3170,6 +3585,65 @@ reduce1_list_dim @(a : bare)
   primitive_list_dim_reduce1 @a repr dom gen f;
 
 
+scatter_list_dim @(i r : bare)
+  (repr_i : Repr i)
+  (repr_r : Repr r)
+  (op : ScatterReduction r i)
+  (src : view list_dim i)
+  (ret : OutPtr r)
+  -> IEffect r
+  attribute(inline, inline_sequential) =
+
+  case op of
+    scatterReduction @r @i @(a : val)
+    (uip : UpdateInPlace r i a)
+    (make_updater : i -> a -> a)
+    (make_init : NoneType -> a)
+    (combiner : r -> r -> Writer r).
+
+  case uip of
+    updateInPlace @r @i @a @(s : bare)
+    (state_repr : Repr s)
+    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
+    (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
+    (finalizer : UpdateInPlaceFinalizer s r).
+
+  letfun
+    use_finalizer (w : Writer s) (ret : OutPtr r) -> IEffect r =
+      case finalizer of {
+        mutateInPlace @s @r (co : coerce @bare s r).
+          (coerce @(Writer s) @(Writer r) w) ret
+
+      ; mutateAndCopy @s @r (f : s -> Writer r).
+          case boxed @s w of boxed @s (tmp : s).
+          f tmp ret
+      } in
+
+  -- Perform the computation; copy to output if required
+  use_finalizer
+  (\ (local_ret : OutPtr s) -> IEffect s.
+   -- Initialize the output
+   case boxed @(Stored EffTok)
+        (stored @EffTok (initializer make_init local_ret)) of
+     boxed @(Stored EffTok) (init_eff_tok : Stored EffTok).
+
+   -- Sequential in-place update
+   case boxed @(Stored EffTok)
+        (fold_list_dim @i @(Stored EffTok)
+         repr_i repr_EffTok
+         (\ (x : Stored EffTok) (y : i) (loop_ret : OutPtr (Stored EffTok))
+            -> IEffect (Stored EffTok).
+            case x of stored @EffTok (x_u : EffTok).
+            stored @EffTok (updater (make_updater y) y x_u local_ret) loop_ret)
+         init_eff_tok
+         src) of
+     boxed @(Stored EffTok) (s_final_eff_tok : Stored EffTok).
+
+   -- Translate to a return value
+   case s_final_eff_tok of stored @EffTok (final_eff_tok : EffTok).
+     fromEffTok @s final_eff_tok)
+  ret;
+
 -------------------------------------------------------------------------------
 -- Sequence layer
 
@@ -3237,6 +3711,64 @@ Sequence_reduce1 @(a : bare)
     streamEmpty @st @a.
       except @(IEffect a)
   };
+
+
+Sequence_scatter @(i r : bare)
+  (repr_i : Repr i)
+  (repr_r : Repr r)
+  (op : ScatterReduction r i)
+  (src : Sequence i)
+  (ret : OutPtr r)
+  -> IEffect r
+  attribute(inline, inline_final) =
+
+  case op of
+    scatterReduction @r @i @(a : val)
+    (uip : UpdateInPlace r i a)
+    (make_updater : i -> a -> a)
+    (make_init : NoneType -> a)
+    (combiner : r -> r -> Writer r).
+
+  case uip of
+    updateInPlace @r @i @a @(s : bare)
+    (state_repr : Repr s)
+    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
+    (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
+    (finalizer : UpdateInPlaceFinalizer s r).
+
+  letfun
+    use_finalizer (w : Writer s) (ret : OutPtr r) -> IEffect r =
+      case finalizer of {
+        mutateInPlace @s @r (co : coerce @bare s r).
+          (coerce @(Writer s) @(Writer r) w) ret
+
+      ; mutateAndCopy @s @r (f : s -> Writer r).
+          case boxed @s w of boxed @s (tmp : s).
+          f tmp ret
+      } in
+
+  use_finalizer
+  (\ (local_ret : OutPtr s) -> IEffect s.
+   -- Initialize the output
+   case boxed @(Stored EffTok)
+        (stored @EffTok (initializer make_init local_ret)) of
+     boxed @(Stored EffTok) (init_eff_tok : Stored EffTok).
+
+       case boxed @(Stored EffTok)
+            (Sequence_fold @i @(Stored EffTok)
+             repr_i repr_EffTok
+             (\ (x : Stored EffTok) (y : i) (loop_ret : OutPtr (Stored EffTok))
+                -> IEffect (Stored EffTok).
+                case x of stored @EffTok (x_u : EffTok).
+                stored @EffTok (updater (make_updater y) y x_u local_ret) loop_ret)
+             init_eff_tok
+             src) of
+         boxed @(Stored EffTok) (s_final_eff_tok : Stored EffTok).
+
+   -- Translate to a return value
+   case s_final_eff_tok of stored @EffTok (final_eff_tok : EffTok).
+     fromEffTok @s final_eff_tok)
+  ret;
 
 
 Sequence_fold @(a acc : bare)
@@ -3862,6 +4394,61 @@ parallel_doall @(N : intindex) @(a b : bare)
 
 -------------------------------------------------------------------------------
 -- Data structure functions
+
+fun_list_dim (size : Maybe (Stored int)) -> list_dim
+  attribute(inline) =
+  mk_list_dim (case size of {
+                 just @(Stored int) (si : Stored int).
+                   case si of stored @int (i : int).
+                   justVal @int i
+               ; nothing @(Stored int).
+                   nothingVal @int
+               });
+
+
+fun_dim1 (lo_bound : Maybe (Stored int)) (hi_bound : Maybe (Stored int))
+         (stride : int) (alignment : int) -> dim1
+  attribute(inline) =
+
+  letfun
+    cvt_Maybe (x : Maybe (Stored int)) -> MaybeVal int =
+      case x of {
+        just @(Stored int) (si : Stored int).
+          case si of stored @int (i : int).
+          justVal @int i
+      ; nothing @(Stored int).
+          nothingVal @int
+      } in
+
+  if stride <=# 0 then except @dim1 else
+
+  -- Create an interval from the given bounds.  If the low bound is
+  -- greater than the high bound, use an empty interval.
+  let iv : Interval =
+        case lo_bound of {
+          just @(Stored int) (lb : Stored int).
+            case lb of stored @int (lb_i : int).
+            case hi_bound of {
+              just @(Stored int) (ub : Stored int).
+                case ub of stored @int (ub_i : int).
+                if lb_i ># ub_i
+                then interval (justVal @int 0) (justVal @int 0)
+                else interval (justVal @int lb_i) (justVal @int ub_i)
+            ; nothing @(Stored int).
+                interval (justVal @int lb_i) (nothingVal @int)
+            }
+        ; nothing @(Stored int).
+          case hi_bound of {
+            just @(Stored int) (ub : Stored int).
+              case ub of stored @int (ub_i : int).
+              interval (nothingVal @int) (justVal @int ub_i)
+          ; nothing @(Stored int).
+              interval (nothingVal @int) (nothingVal @int)
+          }
+        } in
+  let m : LinearMap = linearMap stride (alignment %# stride) in
+  mk_dim1 (trimInterval iv m) m;
+
 
 fun_isNothing @(a : bare) (repr : Repr a) (x : Maybe a)
   -> bool attribute(inline) =

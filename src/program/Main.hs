@@ -265,13 +265,13 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   when debugMode $ void $ do
     putStrLn ""
     putStrLn "Before Argument Flattening"
-    print $ SystemF.PrintMemoryIR.pprModule repr_mod
+    print $ pprMemModule repr_mod
   repr_mod <- SystemF.performGlobalDemandAnalysis repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
   
   when debugMode $ void $ do
     putStrLn "After argument flattening"
-    print $ SystemF.PrintMemoryIR.pprModule repr_mod
+    print $ pprMemModule repr_mod
     evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
   tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
 

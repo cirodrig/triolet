@@ -36,7 +36,9 @@ pyonBuiltinTypeNames =
   , "arr"
   , "EffTok"
   , "Pf"
+  , "UpdateInPlaceFinalizer"
   , "UpdateInPlace"
+  , "ScatterReduction"
 
     -- Representation coercions
   , "Stored"
@@ -138,7 +140,10 @@ pyonBuiltinVariableNames =
   , "mk_dim1"
   , "mk_dim2"
   , "mk_arr_shape"
+  , "mutateInPlace"
+  , "mutateAndCopy"
   , "updateInPlace"
+  , "scatterReduction"
 
     -- Class constructors
   , "repr"
@@ -164,6 +169,8 @@ pyonBuiltinVariableNames =
   , "repr_dim0"
   , "repr_dim1"
   , "repr_dim2"
+  , "repr_index2"
+  , "repr_slice2"
   , "repr_Complex"
   , "repr_list"
   , "repr_array0"
@@ -239,6 +246,7 @@ pyonBuiltinVariableNames =
   , "ShapeDict_dim2_intersect"
   , "ShapeDict_dim2_generate"
   , "ShapeDict_dim2_flatten"
+  , "ShapeDict_dim2_flatten_helper"
   , "ShapeDict_dim2_map"
   , "ShapeDict_dim2_zipWith"
   , "ShapeDict_dim2_zipWith3"
@@ -361,6 +369,8 @@ pyonBuiltinVariableNames =
 
     -- Constructor-like functions
   , "create_view2"
+  , "fun_list_dim"
+  , "fun_dim1"
 
     -- Pseudo-dictionary methods inserted by optimizations
   , "arr1D_build"
@@ -424,6 +434,7 @@ pyonBuiltinVariableNames =
   , "fun_map"
   , "fun_reduce"
   , "fun_reduce1"
+  , "fun_scatterReduce"
   , "fun_indices"
   , "fun_zip"
   , "fun_zip3"
@@ -450,8 +461,10 @@ pyonBuiltinVariableNames =
   , "internalApplyArraySlice"
   , "sliceToDomain"
   , "idCoercion"
+  , "idBareCoercion"
   , "cartesianIndexCoercion"
   , "unsafeMakeCoercion"
+  , "unsafeMakeBareCoercion"
   , "unsafeMakeViewCoercion"
 
     -- In-place update
@@ -462,6 +475,12 @@ pyonBuiltinVariableNames =
   , "floatUpdateInPlace_initializer"
   , "floatUpdateInPlace_updater"
   , "arrUpdateInPlace"
+    
+  , "intSumScatterReduction"
+  , "floatSumScatterReduction"
+  , "countingScatterReduction"
+  , "arrScatterReduction"
+  , "array1ScatterReduction"
 
     -- Inserted by rewrites or inlining
   , "sequenceToView"
@@ -486,6 +505,7 @@ pyonBuiltinVariableNames =
   , "Sequence_generate_bind"
   , "Sequence_reduce"
   , "Sequence_reduce1"
+  , "Sequence_scatter"
   , "Sequence_fold"
   , "Sequence_parallel_reduce"
 
@@ -499,6 +519,12 @@ pyonBuiltinVariableNames =
   , "reduce1_list_dim"
   , "reduce1_dim1"
   , "reduce1_dim2"
+  , "scatter_list_dim"
+  , "scatter_dim1"
+  , "scatter_dim2"
+  , "fold_list_dim"
+  , "fold_dim1"
+  , "fold_dim2"
 
     -- Primitive functions
   , "primitive_list_dim_reduce"
@@ -530,6 +556,7 @@ pyonBuiltinVariableNames =
   --, "primitive_darr1_generate"
   , "view1_reduce"
   , "view1_reduce1"
+  , "view1_scatter"
   , "view1_fold"
   , "fun_from_MatrixView_Stream"
   , "fun_asArray2_Stream"

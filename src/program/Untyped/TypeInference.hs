@@ -576,7 +576,8 @@ superclassDictionaries pos (IsEqual t1 t2) dict = return []
 
 inferDefGroup :: Bool -> [FunctionDef] -> ([TIDef] -> Inf a) -> Inf a
 inferDefGroup is_top_level defs k =
-  let source_pos = getSourcePos $ head defs
+  let (first_def:_) = defs
+      source_pos = getSourcePos first_def
       defgroup_vars = [v | FunctionDef v _ <- defs]
   in generalizeDefGroup is_top_level source_pos defgroup_vars
      infer_defgroup infer_body

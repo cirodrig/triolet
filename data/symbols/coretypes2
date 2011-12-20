@@ -368,35 +368,68 @@ seqEffTok : EffTok -> EffTok -> EffTok;
 
 fromEffTok : (a : bare) -> EffTok -> IEffect a;
 
--- An in-place update operation.
+-- The finalizer of an in-place update operation.
+-- A finalizer performs a one-time computation to convert the updatable
+-- data structure to a read-only data structure.  In some cases, a finalizer
+-- is not required, in which case the update is really performed in-place.
+data UpdateInPlaceFinalizer : bare -> bare -> box
+{
+  -- The data can be mutated in place if the mutable and immutable data formats
+  -- are the same
+  mutateInPlace (mutable immutable : bare) () (coerce @bare mutable immutable);
+
+  -- Data should be mutated out-of-place, then written to the output
+  mutateAndCopy (mutable immutable : bare) () (mutable -> Writer immutable);
+};
+
+-- An associative in-place update operation.
 --
 -- In-place updating is a computation strategy wherein a value is initialized,
--- then repeatedly modified to produce some result.
+-- then repeatedly modified to produce some result.  In-place updating can be
+-- parallelized by privatizing the accumulator.
 --
--- The fields of the operator are an initializer, an indexer (to select an
--- array element to update), and an updater.
+-- The type parameters are:
+-- * a return type 'r', which accumulates state in memory
+-- * an index type 'i', which is used to index into an array
+-- * a scalar type 'a', which is the value that's modified by in-place update
+--
+-- The existential state 's' is the state maintained by an update computation.
+--
+-- The fields of the operator are an initializer, an updater, and a finalizer.
 --
 -- The initializer and updater may be implemented in the low-level API.  The
 -- function types were chosen so that the low-level API does not need to
 -- perform memory allocation.  Token passing is used to represent dependences.
 data UpdateInPlace : bare -> bare -> val -> box
 {
-  updateInPlace (s i : bare, a : val) ()
-    ((NoneType -> a) -> OutPtr s -> EffTok,
-     (a -> a) -> OutPtr s -> i -> EffTok -> EffTok);
+  updateInPlace (r i : bare, a : val) (s : bare)
+    (Repr s,
+     (NoneType -> a) -> OutPtr s -> EffTok,
+     (a -> a) -> i -> EffTok -> OutPtr s -> EffTok,
+     UpdateInPlaceFinalizer s r);
 };
 
 -- Update an int in-place.
-intUpdateInPlace : NoneType -> UpdateInPlace (Stored int) (Stored NoneType) int;
+intUpdateInPlace : NoneType
+                -> UpdateInPlace (Stored int) (Stored NoneType) int;
 
 -- Update a float in-place.
-floatUpdateInPlace : NoneType -> UpdateInPlace (Stored float) (Stored NoneType) float;
+floatUpdateInPlace : NoneType
+                  -> UpdateInPlace (Stored float) (Stored NoneType) float;
 
 -- These functions are implemented in low-level code.
-intUpdateInPlace_initializer : (NoneType -> int) -> OutPtr (Stored int) -> EffTok;
-intUpdateInPlace_updater : (int -> int) -> OutPtr (Stored int) -> EffTok -> EffTok;
-floatUpdateInPlace_initializer : (NoneType -> float) -> OutPtr (Stored float) -> EffTok;
-floatUpdateInPlace_updater : (float -> float) -> OutPtr (Stored float) -> EffTok -> EffTok;
+intUpdateInPlace_initializer : (NoneType -> int)
+                            -> OutPtr (Stored int)
+                            -> EffTok;
+intUpdateInPlace_updater : (int -> int) -> Stored NoneType -> EffTok
+                        -> OutPtr (Stored int)
+                        -> EffTok;
+floatUpdateInPlace_initializer : (NoneType -> float)
+                              -> OutPtr (Stored float)
+                              -> EffTok;
+floatUpdateInPlace_updater : (float -> float) -> Stored NoneType -> EffTok
+                          -> OutPtr (Stored float)
+                          -> EffTok;
 
 -- Update an array of values in-place by selecting and updating one array
 -- element in-place.
@@ -407,6 +440,43 @@ arrUpdateInPlace : (N : intindex) -> (s i : bare) -> (a : val)
                 -> Repr s
                 -> UpdateInPlace s i a
                 -> UpdateInPlace (arr N s) (PyonTuple2 (Stored int) i) a;
+
+-- A scatter-based reduction.
+--
+-- Scatter-based reductions consist of an in-place update mechanism
+-- and a reduction operator.
+-- 
+data ScatterReduction : bare -> bare -> box
+{
+  scatterReduction (r i : bare) (a : val)
+  (UpdateInPlace r i a,
+   i -> (a -> a),               -- Update function
+   NoneType -> a,            -- Sequential initializer
+   r -> r -> Writer r           -- Parallel combiner
+  );
+};
+
+intSumScatterReduction : NoneType
+                      -> ScatterReduction (Stored int) (Stored int);
+floatSumScatterReduction : NoneType
+                        -> ScatterReduction (Stored float) (Stored float);
+countingScatterReduction : NoneType
+                        -> ScatterReduction (Stored int) (Stored NoneType);
+
+arrScatterReduction : (N : intindex)
+                   -> (s i : bare)
+                   -> Repr i
+                   -> Repr s
+                   -> FIInt N
+                   -> ScatterReduction s i
+                   -> ScatterReduction (arr N s) (PyonTuple2 (Stored int) i);
+
+array1ScatterReduction : (s i : bare)
+                      -> Repr i
+                      -> Repr s
+                      -> dim1
+                      -> ScatterReduction s i
+                      -> ScatterReduction (array1 s) (PyonTuple2 (Stored int) i);
 
 -------------------------------------------------------------------------------
 -- Streams
@@ -574,6 +644,9 @@ repr_list_dim : Repr (StoredBox list_dim);
 repr_dim0 : Repr (StoredBox dim0);
 repr_dim1 : Repr (StoredBox dim1);
 repr_dim2 : Repr (StoredBox dim2);
+
+repr_index2 : Repr (PyonTuple2 (Stored int) (Stored int));
+repr_slice2 : Repr (PyonTuple2 SliceObject SliceObject);
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
@@ -806,6 +879,9 @@ ShapeDict_dim2_intersect :
 
 ShapeDict_dim2_generate :
   (a : bare) -> Repr a -> dim2 -> (index dim2 -> Writer a) -> Stream dim2 a;
+
+ShapeDict_dim2_flatten_helper : Interval -> Interval -> int -> int
+  -> (list_dim, MaybeVal int, int, int);
 
 ShapeDict_dim2_flatten :
   (a : bare) -> Repr a -> Stream dim2 a -> Stream list_dim a;
@@ -1276,6 +1352,7 @@ deadProof : (p : prop) -> Pf p;
 
 -- Construct an identity coercion.  This function is safe.
 idCoercion : (a : box) -> coerce @box a a;
+idBareCoercion : (a : bare) -> coerce @bare a a;
 
 -- The type functions 'index' and 'cartesianDomain' are inverses where
 -- they are defined.
@@ -1286,8 +1363,18 @@ cartesianIndexCoercion : (sh : box)
 unsafeMakeCoercion : (a b : box) -> coerce @box a b;
 
 -- Construct a coercion.  This function is unsafe.
+unsafeMakeBareCoercion : (a b : bare) -> coerce @bare a b;
+
+-- Construct a coercion.  This function is unsafe.
 unsafeMakeViewCoercion : (d : box)
                       -> coerce @(bare -> box) (Stream d) (view d);
+
+-------------------------------------------------------------------------------
+-- Domain functions
+
+fun_list_dim : Maybe (Stored int) -> list_dim;
+
+fun_dim1 : Maybe (Stored int) -> Maybe (Stored int) -> int -> int -> dim1;
 
 -------------------------------------------------------------------------------
 -- Stream consumers
@@ -1327,6 +1414,20 @@ reduce1_dim1 : (a : bare)
   -> (a -> a -> Writer a)
   -> view dim1 a
   -> Writer a;
+
+scatter_list_dim : (i r : bare)
+  -> Repr i -> Repr r
+  -> ScatterReduction r i
+  -> view list_dim i
+  -> Writer r;
+
+fold_list_dim : (a acc : bare)
+  -> Repr a
+  -> Repr acc
+  -> (acc -> a -> Writer acc)
+  -> acc
+  -> view list_dim a
+  -> Writer acc;
 
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionary-like internal methods
@@ -1417,6 +1518,11 @@ Sequence_reduce1 : (a : bare)
 		 -> (a -> a -> Writer a)
 		 -> Sequence a
 		 -> Writer a;
+
+Sequence_scatter : (i r : bare) -> Repr i -> Repr r
+                -> ScatterReduction r i
+                -> Sequence i
+                -> Writer r;
 
 Sequence_fold : (a acc : bare)
 	      -> Repr a
@@ -1796,8 +1902,6 @@ extend2D : (t : bare -> bare) -> (a : bare)
         -> IndexableDict t
         -> coerce @box (shape t) dim2
         -> Repr a
-        -> index (shape t)
-        -> index (shape t)
         -> t a
         -> view dim2 a;
 
@@ -1808,6 +1912,17 @@ create_view2 : (a : bare) -> Repr a
 rangeIndexed : (n : intindex)
             -> IInt n
             -> Stream (arr_shape n dim0) (Stored int);
+
+fun_scatterReduce : (t : bare -> bare)
+                 -> (i r : bare)
+                 -> ShapeDict (shape t)
+                 -> TraversableDict t
+                 -> Repr (t i)
+                 -> Repr i
+                 -> Repr r
+                 -> ScatterReduction r i
+                 -> t i
+                 -> Writer r;
 
 histogram : (sh : box)
          -> ShapeDict sh

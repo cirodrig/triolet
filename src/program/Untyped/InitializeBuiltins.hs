@@ -1101,6 +1101,18 @@ mkFromJustType = forallType [Star] $ \[a] ->
   ([passable (ConTy a)],
    functionType [ConTy (tiBuiltin the_con_Maybe) @@ ConTy a] (ConTy a))
 
+mkListDimType =
+  return $ monomorphic $
+  functionType [ConTy (tiBuiltin the_con_Maybe) @@
+                ConTy (tiBuiltin the_con_int)]
+  (ConTy (tiBuiltin the_con_list_dim))
+
+mkDim1Type =
+  let int = ConTy (tiBuiltin the_con_int)
+      mint = ConTy (tiBuiltin the_con_Maybe) @@ int
+  in return $ monomorphic $
+     functionType [mint, mint, int, int] (ConTy (tiBuiltin the_con_dim1))
+
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
       aT = ConTy a
@@ -1543,6 +1555,12 @@ initializeTIBuiltins = do
               ),
               ("fromJust", [| mkFromJustType |]
               , [| pyonBuiltin SystemF.The_fun_fromJust |]
+              ),
+              ("list_dim", [| mkListDimType |]
+              , [| pyonBuiltin SystemF.The_fun_list_dim |]
+              ),
+              ("dim1", [| mkDim1Type |]
+              , [| pyonBuiltin SystemF.The_fun_dim1 |]
               ),
               ("map", [| mkMapType |]
               , [| pyonBuiltin SystemF.The_fun_map |]

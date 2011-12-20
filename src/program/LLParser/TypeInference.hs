@@ -297,7 +297,7 @@ throwErrorMaybe err = NR $ \_ env errs ->
 enterRec :: NR a -> NR a
 enterRec m = NR $ \ctx env errs -> do
   rec { let init_local_scope =
-             RecScope { completeDict = partialDict (head $ currentScope env')
+             RecScope { completeDict = partialDict (get_head $ currentScope env')
                       , partialDict = emptyDict
                       }
             init_env = env {currentScope = init_local_scope : currentScope env}
@@ -305,6 +305,9 @@ enterRec m = NR $ \ctx env errs -> do
         ; let env'' = Env { nextTypeParameter = nextTypeParameter env
                           , currentScope = tail $ currentScope env'} }
   return (x, env'', errs')
+  where
+    get_head (x:_) = x
+    get_head _ = internalError "enterRec: No scope"
 
 -- | Enter a nonrecursvie scope.
 enterNonRec :: NR a -> NR a
