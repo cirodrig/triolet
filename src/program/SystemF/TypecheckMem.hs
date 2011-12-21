@@ -106,9 +106,9 @@ typeInferConE orig_exp inf con args = do
   (field_types, result_type) <- typeInferCon con
 
   -- Verify that argument types match
-  forM_ (zip args field_types) $ \(arg, field_type) -> do
+  forM_ (zip3 [1..] args field_types) $ \(index, arg, field_type) -> do
     arg_type <- typeInferExp arg
-    let message = text "Constructor field has wrong type"
+    let message = text "Constructor field" <+> int index <+> text "has wrong type"
     checkType message (getSourcePos inf) field_type arg_type
 
   return result_type
