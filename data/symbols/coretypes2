@@ -382,79 +382,51 @@ data UpdateInPlaceFinalizer : bare -> bare -> box
   mutateAndCopy (mutable immutable : bare) () (mutable -> Writer immutable);
 };
 
--- An associative in-place update operation.
+-- A scatter-reduce operation.  Reductions are performed with a combination of
+-- sequential in-place updates and parallel reduction.
 --
--- In-place updating is a computation strategy wherein a value is initialized,
--- then repeatedly modified to produce some result.  In-place updating can be
--- parallelized by privatizing the accumulator.
+-- The type parameters and existential types are:
+-- * a return type 'r', which is the result type of a scatter reduction
+-- * an index type 'i', which is the type of inputs to a scatter reduction
+-- * a state type 's', which is the memory representation that's modified by
+--   in-place upate
+-- * a scalar type 'a', which is the data type that's loaded and stored
+--   (or atomically updated) during an in-place update
 --
--- The type parameters are:
--- * a return type 'r', which accumulates state in memory
--- * an index type 'i', which is used to index into an array
--- * a scalar type 'a', which is the value that's modified by in-place update
+-- The code is organized such that only function types are parameterized on
+-- 'a'.  There are no values of type 'a', because values can only have ground
+-- types.  By organizing functions this way, we can generally ensure that the
+-- low-level API does not need to perform memory allocation.
 --
--- The existential state 's' is the state maintained by an update computation.
---
--- The fields of the operator are an initializer, an updater, and a finalizer.
---
--- The initializer and updater may be implemented in the low-level API.  The
--- function types were chosen so that the low-level API does not need to
--- perform memory allocation.  Token passing is used to represent dependences.
-data UpdateInPlace : bare -> bare -> val -> box
+-- Token passing is used to represent dependences during the in-place part of
+-- the reduction.
+data ScatterReduction : bare -> bare -> box
 {
-  updateInPlace (r i : bare, a : val) (s : bare)
-    (Repr s,
-     (NoneType -> a) -> OutPtr s -> EffTok,
-     (a -> a) -> i -> EffTok -> OutPtr s -> EffTok,
-     UpdateInPlaceFinalizer s r);
+  scatterReduction (r i : bare) (s : bare, a : val)
+  (Repr s,
+   (NoneType -> a) -> OutPtr s -> EffTok,       -- Initializer
+   (a -> a) -> i -> EffTok -> OutPtr s -> EffTok, -- Updater
+   s -> s -> Writer s,                          -- Combining function
+   UpdateInPlaceFinalizer s r,                  -- Final value constructor
+   i -> (a -> a),                               -- Update function
+   NoneType -> a                                -- Initial value
+  );
 };
 
--- Update an int in-place.
-intUpdateInPlace : NoneType
-                -> UpdateInPlace (Stored int) (Stored NoneType) int;
-
--- Update a float in-place.
-floatUpdateInPlace : NoneType
-                  -> UpdateInPlace (Stored float) (Stored NoneType) float;
 
 -- These functions are implemented in low-level code.
 intUpdateInPlace_initializer : (NoneType -> int)
                             -> OutPtr (Stored int)
                             -> EffTok;
-intUpdateInPlace_updater : (int -> int) -> Stored NoneType -> EffTok
+intUpdateInPlace_updater : (int -> int) -> EffTok
                         -> OutPtr (Stored int)
                         -> EffTok;
 floatUpdateInPlace_initializer : (NoneType -> float)
                               -> OutPtr (Stored float)
                               -> EffTok;
-floatUpdateInPlace_updater : (float -> float) -> Stored NoneType -> EffTok
+floatUpdateInPlace_updater : (float -> float) -> EffTok
                           -> OutPtr (Stored float)
                           -> EffTok;
-
--- Update an array of values in-place by selecting and updating one array
--- element in-place.
---
--- Out-of-bounds indices have no effect.
-arrUpdateInPlace : (N : intindex) -> (s i : bare) -> (a : val)
-                -> FIInt N
-                -> Repr s
-                -> UpdateInPlace s i a
-                -> UpdateInPlace (arr N s) (PyonTuple2 (Stored int) i) a;
-
--- A scatter-based reduction.
---
--- Scatter-based reductions consist of an in-place update mechanism
--- and a reduction operator.
--- 
-data ScatterReduction : bare -> bare -> box
-{
-  scatterReduction (r i : bare) (a : val)
-  (UpdateInPlace r i a,
-   i -> (a -> a),               -- Update function
-   NoneType -> a,            -- Sequential initializer
-   r -> r -> Writer r           -- Parallel combiner
-  );
-};
 
 intSumScatterReduction : NoneType
                       -> ScatterReduction (Stored int) (Stored int);
@@ -1748,16 +1720,6 @@ shift : (sh : box) -> (a : bare)
      -> Repr a -> CartesianDict sh -> AdditiveDict (index sh)
      -> index sh -> view sh a -> view sh a;
 
-
--- Fold over a stream using an update-in-place operation
-accumulate_Stream_int : (s i b : bare)
-                 -> Repr i
-                 -> Repr b
-                 -> UpdateInPlace s i int
-                 -> int
-                 -> (b -> i -> (int -> int))
-                 -> Stream dim1 (PyonTuple2 i b)
-                 -> Writer s;
 
 -- Reinterpret a stream as having list shape
 fun_asList_Stream : (sh a : bare)

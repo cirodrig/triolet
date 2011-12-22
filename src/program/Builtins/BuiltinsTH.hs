@@ -37,7 +37,6 @@ pyonBuiltinTypeNames =
   , "EffTok"
   , "Pf"
   , "UpdateInPlaceFinalizer"
-  , "UpdateInPlace"
   , "ScatterReduction"
 
     -- Representation coercions
@@ -142,7 +141,6 @@ pyonBuiltinVariableNames =
   , "mk_arr_shape"
   , "mutateInPlace"
   , "mutateAndCopy"
-  , "updateInPlace"
   , "scatterReduction"
 
     -- Class constructors
@@ -468,13 +466,10 @@ pyonBuiltinVariableNames =
   , "unsafeMakeViewCoercion"
 
     -- In-place update
-  , "intUpdateInPlace"
-  , "floatUpdateInPlace"
   , "intUpdateInPlace_initializer"
   , "intUpdateInPlace_updater"
   , "floatUpdateInPlace_initializer"
   , "floatUpdateInPlace_updater"
-  , "arrUpdateInPlace"
     
   , "intSumScatterReduction"
   , "floatSumScatterReduction"
@@ -510,7 +505,6 @@ pyonBuiltinVariableNames =
   , "Sequence_parallel_reduce"
 
     -- Fold-like functions
-  , "accumulate_Stream_int"
   , "build_dim1_array"
   , "build_list_dim_list"
   , "reduce_list_dim"

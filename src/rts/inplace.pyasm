@@ -17,7 +17,7 @@ function inline intUpdateInPlace_initializer (owned f, pointer ret) -> unit
   nil;
 };
 
-function inline intUpdateInPlace_updater (owned f, pointer unused, unit _, pointer ret) -> unit
+function inline intUpdateInPlace_updater (owned f, unit _, pointer ret) -> unit
 {
   !ret = int call f (int load ret);
   nil;
@@ -29,7 +29,7 @@ function inline floatUpdateInPlace_initializer (owned f, pointer ret) -> unit
   nil;
 };
 
-function inline floatUpdateInPlace_updater (owned f, pointer unused, unit _, pointer ret) -> unit
+function inline floatUpdateInPlace_updater (owned f, unit _, pointer ret) -> unit
 {
   !ret = float call f (float load ret);
   nil;

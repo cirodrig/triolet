@@ -840,188 +840,65 @@ CartesianDict_dim2_divideDomain
 -------------------------------------------------------------------------------
 -- Imperative computation
 
-intUpdateInPlace (dummy : NoneType)
-              -> UpdateInPlace (Stored int) (Stored NoneType) int
-              attribute(inline, inline_final) =
-  let type Sint = Stored int in
-  updateInPlace @Sint @(Stored NoneType) @int @Sint
-  repr_int
-  intUpdateInPlace_initializer
-  (\ (modify : int -> int) (ix : Stored NoneType)
-     (tok_in : EffTok) (ret : OutPtr Sint) -> EffTok.
-     intUpdateInPlace_updater modify ix tok_in ret)
-  (mutateInPlace @Sint @Sint (idBareCoercion @Sint));
-
-
-floatUpdateInPlace (dummy : NoneType)
-              -> UpdateInPlace (Stored float) (Stored NoneType) float
-              attribute(inline, inline_final) =
-  let type Sfloat = Stored float in
-  updateInPlace @Sfloat @(Stored NoneType) @float @Sfloat
-  repr_float
-  floatUpdateInPlace_initializer
-  (\ (modify : float -> float)
-     (ix : Stored NoneType) (tok_in : EffTok) (ret : OutPtr Sfloat) -> EffTok.
-     floatUpdateInPlace_updater modify ix tok_in ret)
-  (mutateInPlace @Sfloat @Sfloat (idBareCoercion @Sfloat));
-
-
-arrUpdateInPlace @(N : intindex) @(r i : bare) @(a : val)
-  (size : FIInt N)
-  (repr : Repr r)
-  (elem_updater : UpdateInPlace r i a)
-  -> UpdateInPlace (arr N r) (PyonTuple2 (Stored int) i) a
-  attribute(inline, inline_final) =
-
-  case size of fiInt @N (u_size : int).
-
-  case elem_updater of
-    updateInPlace @r @i @a @(s : bare)
-    (state_repr : Repr s)
-    (elem_init : (NoneType -> a) -> OutPtr s -> EffTok)
-    (elem_modify : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
-    (elem_finalizer : UpdateInPlaceFinalizer s r).
-
-  -- Initialize the array by running the initializer on every array element
-  letfun
-    initialize_array
-      (get_init : NoneType -> a) (ret : OutPtr (arr N s)) -> EffTok =
-      toEffTok @(arr N s)
-      (doall @N @(arr N s) @s size
-       (\ (i : int) -> IEffect s.
-          let array_element : OutPtr s =
-            subscript_out @N @s state_repr ret i in
-          fromEffTok @s (elem_init get_init array_element)))
-  in
-
-  -- Update the array by updating one array element.  If out of bounds,
-  -- then do nothing.
-  letfun
-    modify_array
-      (modify_value : a -> a)
-      (ix : PyonTuple2 (Stored int) i)
-      (token_in : EffTok)
-      (ret : OutPtr (arr N s))
-      -> EffTok =
-
-      -- Choose the array index
-      case ix of pyonTuple2 @(Stored int) @i (s_ix : Stored int) (ix2 : i).
-      case s_ix of stored @int (u_ix : int).
-
-      -- If out of bounds, do nothing.  Otherwise, modify an array element.
-      if or (u_ix <# 0) (u_ix >=# u_size)
-      then token_in
-      else let array_element : OutPtr s =
-             subscript_out @N @s state_repr ret u_ix in
-           elem_modify modify_value ix2 token_in array_element
-  in
-
-  let finalizer : UpdateInPlaceFinalizer (arr N s) (arr N r) =
-        case elem_finalizer of {
-          mutateInPlace @s @r (co : coerce @bare s r).
-            mutateInPlace @(arr N s) @(arr N r)
-            (unsafeMakeBareCoercion @(arr N s) @(arr N r))
-
-        ; mutateAndCopy @s @r (f : s -> Writer r).
-            letfun
-              f2 (ay : arr N s) (ret : OutPtr (arr N r)) -> IEffect (arr N r) =
-
-                -- Convert an array of 's' to an array of 'r'
-                doall @N @(arr N r) @r size
-                (\ (i : int) -> IEffect r.
-                   f (subscript @N @s state_repr ay i)
-                     (subscript_out @N @r repr ret i)) in
-
-            mutateAndCopy @(arr N s) @(arr N r) f2
-        } in
-
-  updateInPlace @(arr N r) @(PyonTuple2 (Stored int) i) @a @(arr N s)
-  (repr_arr @N @s size state_repr)
-  initialize_array modify_array finalizer;
-
-
 intSumScatterReduction (dummy : NoneType)
  -> ScatterReduction (Stored int) (Stored int) =
 
   let type Sint = Stored int in
-  case intUpdateInPlace None of
-    updateInPlace @Sint @(Stored NoneType) @int @(s : bare)
-    (state_repr : Repr s)
-    (initializer : (NoneType -> int) -> OutPtr s -> EffTok)
-    (updater : (int -> int) -> Stored NoneType -> EffTok -> OutPtr s -> EffTok)
-    (finalizer : UpdateInPlaceFinalizer s Sint).
-
-  -- Change the index type to 'Stored int'
-  let uip : UpdateInPlace Sint Sint int =
-        updateInPlace @Sint @Sint @int @s
-        state_repr
-        initializer
-        (\ (f : int -> int) (i : Sint) (t : EffTok) (p : OutPtr s) -> EffTok.
-           case boxed @(Stored NoneType) (stored @NoneType None) of
-             boxed @(Stored NoneType) (i2 : Stored NoneType).
-           updater f i2 t p)
-        finalizer
-        in
-
-  scatterReduction @Sint @Sint @int
-  uip
-  (\ (i : Sint) -> int -> int.
-     case i of stored @int (ui : int).
-     (\ (n : int) -> int. ui +# n))
-  (\ (dummy : NoneType) -> int. 0)
+  scatterReduction @Sint @Sint @Sint @int
+  repr_int
+  intUpdateInPlace_initializer
+  (\ (modify : int -> int) (ix : Stored int)
+     (tok_in : EffTok) (ret : OutPtr Sint) -> EffTok.
+     intUpdateInPlace_updater modify tok_in ret)
   (\ (x : Sint) (y : Sint) (ret : OutPtr Sint) -> IEffect Sint.
      case x of stored @int (ux : int).
      case y of stored @int (uy : int).
-     stored @int (ux +# uy) ret);
+     stored @int (ux +# uy) ret)
+  (mutateInPlace @Sint @Sint (idBareCoercion @Sint))
+  (\ (i : Sint) -> int -> int.
+     case i of stored @int (ui : int).
+     (\ (n : int) -> int. ui +# n))
+  (\ (dummy : NoneType) -> int. 0);
 
 
 floatSumScatterReduction (dummy : NoneType)
   -> ScatterReduction (Stored float) (Stored float) =
 
   let type Sfloat = Stored float in
-  case floatUpdateInPlace None of
-    updateInPlace @Sfloat @(Stored NoneType) @float @(s : bare)
-    (state_repr : Repr s)
-    (initializer : (NoneType -> float) -> OutPtr s -> EffTok)
-    (updater : (float -> float) -> Stored NoneType -> EffTok -> OutPtr s -> EffTok)
-    (finalizer : UpdateInPlaceFinalizer s Sfloat).
-
-  -- Change the index type to 'Stored float'
-  let uip : UpdateInPlace Sfloat Sfloat float =
-        updateInPlace @Sfloat @Sfloat @float @s
-        state_repr
-        initializer
-        (\ (f : float -> float) (i : Sfloat) (t : EffTok) (p : OutPtr s) -> EffTok.
-           case boxed @(Stored NoneType) (stored @NoneType None) of
-             boxed @(Stored NoneType) (i2 : Stored NoneType).
-           updater f i2 t p)
-        finalizer in
-
-  scatterReduction @Sfloat @Sfloat @float
-  uip
-  (\ (i : Stored float) -> float -> float.
-     case i of stored @float (ui : float).
-     (\ (n : float) -> float. AdditiveDict_float_add ui n))
-  (\ (dummy : NoneType) -> float. 0.0)
-  (\ (x : Stored float) (y : Stored float) (ret : OutPtr (Stored float))
-     -> IEffect (Stored float).
+  scatterReduction @Sfloat @Sfloat @Sfloat @float
+  repr_float
+  floatUpdateInPlace_initializer
+  (\ (f : float -> float) (ix : Stored float) (tok_in : EffTok)
+     (ret : OutPtr (Stored float)) -> EffTok.
+     floatUpdateInPlace_updater f tok_in ret)
+  (\ (x : Sfloat) (y : Sfloat) (ret : OutPtr Sfloat) -> IEffect Sfloat.
      case x of stored @float (ux : float).
      case y of stored @float (uy : float).
-     stored @float (AdditiveDict_float_add ux uy) ret);
+     stored @float (AdditiveDict_float_add ux uy) ret)
+  (mutateInPlace @Sfloat @Sfloat (idBareCoercion @Sfloat))
+  (\ (i : Sfloat) -> float -> float.
+     case i of stored @float (ui : float).
+     (\ (n : float) -> float. AdditiveDict_float_add ui n))
+  (\ (dummy : NoneType) -> float. 0.0);
 
 
 countingScatterReduction (dummy : NoneType)
   -> ScatterReduction (Stored int) (Stored NoneType) =
 
-  scatterReduction @(Stored int) @(Stored NoneType) @int
-  (intUpdateInPlace None)
-  (\ (dummy : Stored NoneType) -> int -> int. (\ (x : int) -> int. x +# 1))
-  (\ (dummy : NoneType) -> int. 0)
+  scatterReduction @(Stored int) @(Stored NoneType) @(Stored int) @int
+  repr_int
+  intUpdateInPlace_initializer
+  (\ (f : int -> int) (ix : Stored NoneType) (tok_in : EffTok)
+     (ret : OutPtr (Stored int)) -> EffTok.
+     intUpdateInPlace_updater f tok_in ret)
   (\ (x : Stored int) (y : Stored int) (ret : OutPtr (Stored int))
      -> IEffect (Stored int).
      case x of stored @int (ux : int).
      case y of stored @int (uy : int).
-     stored @int (ux +# uy) ret);
+     stored @int (ux +# uy) ret)
+  (mutateInPlace @(Stored int) @(Stored int) (idBareCoercion @(Stored int)))
+  (\ (dummy : Stored NoneType) -> int -> int. (\ (x : int) -> int. x +# 1))
+  (\ (dummy : NoneType) -> int. 0);
 
 
 arrScatterReduction @(N : intindex) @(e i : bare)
@@ -1033,20 +910,68 @@ arrScatterReduction @(N : intindex) @(e i : bare)
   attribute(inline, inline_final) =
 
   case reduction_op of
-    scatterReduction @e @i @(a : val)
-    (uip : UpdateInPlace e i a)
-    (updater : i -> a -> a)
-    (initializer : NoneType -> a)
-    (combiner : e -> e -> Writer e).
+    scatterReduction @e @i @(s : bare) @(a : val)
+    (repr_s : Repr s)
+    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
+    (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Writer s)
+    (finalizer : UpdateInPlaceFinalizer s e)
+    (update_f : i -> a -> a)
+    (init_f : NoneType -> a).
 
-  let arr_uip : UpdateInPlace (arr N e) (PyonTuple2 (Stored int) i) a =
-        arrUpdateInPlace @N @e @i @a count repr_e uip in
+  let type arr_t = arr N e in
+  let type i2 = PyonTuple2 (Stored int) i in
 
-  scatterReduction @(arr N e) @i @a arr_uip updater initializer
-  (\ (x : arr N e) (y : arr N e) -> Writer (arr N e).
-    arr1D_build @N @e repr_e count
-    (\ (i : int) (ret : OutPtr e) -> IEffect e.
-       combiner (subscript @N @e repr_e x i) (subscript @N @e repr_e y i) ret));
+  case count of fiInt @N (u_count : int).
+
+  scatterReduction @arr_t @i2 @(arr N s) @a
+  (repr_arr @N @s count repr_s)
+  (\ (f : NoneType -> a) (p : OutPtr (arr N s)) -> EffTok.
+     -- Initialize all array elements
+     toEffTok @(arr N s)
+     (arr1D_build @N @s repr_s count
+      (\ (i : int) (ret : OutPtr s) -> IEffect s.
+         fromEffTok @s (initializer f ret)) p))
+  (\ (f : a -> a) (index : i2) (in_tok : EffTok) (p : OutPtr (arr N s))
+     -> EffTok.
+     case index of
+       pyonTuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
+     case arr_index of stored @int (u_arr_index : int).
+
+     -- If index is out of bounds, do nothing
+     if or (u_arr_index <# 0) (u_arr_index >=# u_count)
+     then except @EffTok
+     else updater f elt_index in_tok
+          (subscript_out @N @s repr_s p u_arr_index))
+
+  -- Combine arrays elementwise
+  (\ (x : arr N s) (y : arr N s) (ret : OutPtr (arr N s)) -> IEffect (arr N s).
+     arr1D_build @N @s repr_s count
+     (\ (i : int) (local_ret : OutPtr s) -> IEffect s.
+        combiner (subscript @N @s repr_s x i) (subscript @N @s repr_s y i)
+        local_ret)
+     ret)
+
+  -- Update in place if array elements can be updated in place
+  -- Otherwise, make a copy
+  (case finalizer of {
+     mutateInPlace @s @e (co : coerce @bare s e).
+       mutateInPlace @(arr N s) @(arr N e)
+       (unsafeMakeBareCoercion @(arr N s) @(arr N e))
+   ; mutateAndCopy @s @e (f : s -> Writer e).
+       mutateAndCopy @(arr N s) @(arr N e)
+       (\ (accumulator : arr N s) (ret : OutPtr (arr N e))
+          -> IEffect (arr N e).
+          arr1D_build @N @e repr_e count
+          (\ (i : int) (ret : OutPtr e) -> IEffect e.
+             f (subscript @N @s repr_s accumulator i) ret)
+          ret)
+   })
+   (\ (index : i2) -> a -> a.
+      case index of
+        pyonTuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
+      update_f elt_index)
+   init_f;
 
 
 array1ScatterReduction @(e i : bare)
@@ -1068,15 +993,41 @@ array1ScatterReduction @(e i : bare)
 
            -- Create a plain array scatter reducer
            case arrScatterReduction @N @e @i repr_i repr_e count reduction_op of
-             scatterReduction @(arr N e) @i2 @(a : val)
-             (uip : UpdateInPlace (arr N e) i2)
-             (updater : i2 -> a -> a)
-             (initializer : NoneType -> a)
-             (combiner : arr N e -> arr N e -> Writer (arr N e)).
+             scatterReduction @(arr N e) @i2 @(s : bare) @(a : val)
+             (repr_s : Repr s)
+             (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
+             (updater : (a -> a) -> i2 -> EffTok -> OutPtr s -> EffTok)
+             (combiner : s -> s -> Writer s)
+             (finalizer : UpdateInPlaceFinalizer s (arr N e))
+             (make_updater : i2 -> a -> a)
+             (make_init : NoneType -> a).
 
-           -- TODO: finish this code
-           except @(IEffect (StoredBox ret_type))
-        )) of
+           -- Create a scatter reducer that wraps it in an array
+           let array_finalizer : UpdateInPlaceFinalizer s (array1 e) =
+                 mutateAndCopy @s @(array1 e)
+                 (\ (accumulator : s) (ret : OutPtr (array1 e))
+                    -> IEffect (array1 e).
+                    mk_array1 @e @N lb stride count
+                    (referenced @(arr N e)
+                     (case finalizer of {
+                        mutateInPlace @s @(arr N e) (co : coerce @bare s (arr N e)).
+                          copy @(arr N e) (repr_arr @N @e count repr_e)
+                          (coerce @s @(arr N e) accumulator)
+                      ; mutateAndCopy @s @(arr N e) (f : s -> Writer (arr N e)).
+                          f accumulator
+                      }))
+                    ret) in
+
+           storedBox @ret_type
+           (scatterReduction @(array1 e) @i2 @s @a
+            repr_s
+            initializer
+            updater
+            combiner
+            array_finalizer
+            make_updater
+            make_init)
+           ret)) of
     boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
   case s_retval of storedBox @ret_type (retval : ret_type).
   retval;
@@ -2260,6 +2211,7 @@ histogram @(sh : box)
   let type SNone = Stored NoneType in
   let sr : ScatterReduction (array1 Sint) (PyonTuple2 Sint SNone) =
         array1ScatterReduction @Sint @SNone
+        repr_NoneType
         repr_int
         (mk_dim1 (interval (justVal @int lo_bound) (justVal @int hi_bound))
                  (linearMap 1 0))
@@ -3595,18 +3547,14 @@ scatter_list_dim @(i r : bare)
   attribute(inline, inline_sequential) =
 
   case op of
-    scatterReduction @r @i @(a : val)
-    (uip : UpdateInPlace r i a)
-    (make_updater : i -> a -> a)
-    (make_init : NoneType -> a)
-    (combiner : r -> r -> Writer r).
-
-  case uip of
-    updateInPlace @r @i @a @(s : bare)
-    (state_repr : Repr s)
+    scatterReduction @r @i @(s : bare) @(a : val)
+    (repr_s : Repr s)
     (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
     (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
-    (finalizer : UpdateInPlaceFinalizer s r).
+    (combiner : s -> s -> Writer s)
+    (finalizer : UpdateInPlaceFinalizer s r)
+    (make_updater : i -> a -> a)
+    (make_init : NoneType -> a).
 
   letfun
     use_finalizer (w : Writer s) (ret : OutPtr r) -> IEffect r =
@@ -3642,6 +3590,27 @@ scatter_list_dim @(i r : bare)
    -- Translate to a return value
    case s_final_eff_tok of stored @EffTok (final_eff_tok : EffTok).
      fromEffTok @s final_eff_tok)
+  ret;
+
+
+fold_list_dim @(a acc : bare)
+  (repr_a : Repr a)
+  (repr_acc : Repr acc)
+  (f : acc -> a -> Writer acc)
+  (init : acc)
+  (vw : view list_dim a)
+  (ret : OutPtr acc)
+  -> IEffect acc
+  attribute(inline, inline_dimensionality) =
+
+  case vw of
+    mk_view @list_dim @a (dom : list_dim) (g : index list_dim -> Writer a).
+
+  primitive_list_dim_fold @acc repr_acc dom
+  (\ (ix : index list_dim) (x : acc) (ret : OutPtr acc) -> IEffect acc.
+     case boxed @a (g ix) of boxed @a (y : a).
+     f x y ret)
+  init
   ret;
 
 -------------------------------------------------------------------------------
@@ -3723,18 +3692,14 @@ Sequence_scatter @(i r : bare)
   attribute(inline, inline_final) =
 
   case op of
-    scatterReduction @r @i @(a : val)
-    (uip : UpdateInPlace r i a)
-    (make_updater : i -> a -> a)
-    (make_init : NoneType -> a)
-    (combiner : r -> r -> Writer r).
-
-  case uip of
-    updateInPlace @r @i @a @(s : bare)
-    (state_repr : Repr s)
+    scatterReduction @r @i @(s : bare) @(a : val)
+    (repr_s : Repr s)
     (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
     (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
-    (finalizer : UpdateInPlaceFinalizer s r).
+    (combiner : s -> s -> Writer s)
+    (finalizer : UpdateInPlaceFinalizer s r)
+    (make_updater : i -> a -> a)
+    (make_init : NoneType -> a).
 
   letfun
     use_finalizer (w : Writer s) (ret : OutPtr r) -> IEffect r =
