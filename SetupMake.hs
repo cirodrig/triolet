@@ -201,7 +201,7 @@ compileCRtsFile :: MakeRuleTemplate
 compileCRtsFile build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
       i_file = source_path </> src `replaceExtension` ".c"
-  in MakeRule [o_file] [i_file, "bootstrap_data"] $
+  in MakeRule [o_file] [i_file, "$(BOOT_DATA_FILES)"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(CC) $(RTS_C_C_OPTS) -c $< -o $@"
 
@@ -210,13 +210,13 @@ compileCxxRtsFile :: MakeRuleTemplate
 compileCxxRtsFile build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
       i_file = source_path </> src `replaceExtension` ".cc"
-  in MakeRule [o_file] [i_file, "bootstrap_data"] $
+  in MakeRule [o_file] [i_file, "$(BOOT_DATA_FILES)"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(CXX) $(RTS_CXX_C_OPTS) -c $< -o $@"
 
 -- | Generate a rule to compile a low-level pyon file for the RTS
 --
--- > build_path/A.o : src_path/A.pyasm bootstrap_data
+-- > build_path/A.o : src_path/A.pyasm $(BOOT_DATA_FILES)
 -- > 	mkdir -p build_path
 -- > 	pyon_program -B build_path/data $< -o $@
 compilePyAsmRtsFile :: ExtraConfigFlags -> FilePath -> FilePath -> MakeRuleTemplate
@@ -224,7 +224,7 @@ compilePyAsmRtsFile econfig pyon_program data_path build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
       iface_file = build_path </> src `replaceExtension` ".pi"
       i_file = source_path </> src `replaceExtension` ".pyasm"
-  in MakeRule [o_file, iface_file] [i_file, "bootstrap_data"] $
+  in MakeRule [o_file, iface_file] [i_file, "$(PYON_TARGET)", "$(BOOT_DATA_FILES)"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n" ++
      pyon_program ++ " -B " ++ data_path ++
      " $(RTS_PYASM_C_OPTS) --keep-c-files $< -o " ++ o_file
@@ -513,10 +513,12 @@ generateVariables econfig exe lbi pyon_rules rts_rules data_rules
          , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts econfig exe lbi)
 
            -- files: RTS
+         , ("RTS_TARGET", buildDir lbi </> "rts" </> "libpyonrts.so")
          , ("RTS_SOURCE_FILES", makefileList rts_source_files)
          , ("RTS_OBJECT_FILES", makefileList rts_object_files)
          , ("RTS_INTERFACE_FILES", makefileList rts_interface_files)
            -- files: pyon program
+         , ("PYON_TARGET", buildDir lbi </> "pyon" </> "pyon")
          , ("PYON_SOURCE_FILES", makefileList pyon_source_files)
          , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
            -- files: pyon data files
