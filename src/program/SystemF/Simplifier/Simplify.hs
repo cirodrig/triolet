@@ -240,7 +240,7 @@ withKnownValue v val m = LR $ \env ->
 --
 --   The function may or may not be added, depending on its attributes and
 --   whether the function is part of a recursive group.
-withDefValue :: Bool -> Def Mem -> LR a -> LR a
+withDefValue :: Bool -> FDef Mem -> LR a -> LR a
 withDefValue is_rec def@(Def v _ f) m = do
   phase <- getPhase
   let fun_info = funInfo $ fromFunM f
@@ -253,10 +253,10 @@ withDefValue is_rec def@(Def v _ f) m = do
   if can_inline then withKnownValue v fun_val m else m
 
 -- | Add a function definition to the environment, but don't inline it
-withUninlinedDefValue :: Def Mem -> LR a -> LR a
+withUninlinedDefValue :: FDef Mem -> LR a -> LR a
 withUninlinedDefValue (Def v _ f) m = m
 
-withDefValues :: Bool -> DefGroup (Def Mem) -> LR a -> LR a
+withDefValues :: Bool -> DefGroup (FDef Mem) -> LR a -> LR a
 withDefValues False  (NonRec def) m = withDefValue False def m
 
 -- Nonrecursive groups are not recursive
@@ -269,7 +269,7 @@ withDefValues is_rec (Rec defs)   m = foldr (withDefValue is_rec) m defs
 --
 --   We do not take into account here whether it's /beneficial/ to inline the
 --   function.
-isRecInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
+isRecInliningCandidate :: SimplifierPhase -> FDef Mem -> Bool
 isRecInliningCandidate _ def =
   -- It's inlinable only if it's a wrapper function
   defIsWrapper def
@@ -280,7 +280,7 @@ isRecInliningCandidate _ def =
 --   The inlining annotation must allow inlinng.  Furthermore, the function
 --   must either be used only once (to avoid code size explosion)
 --   or be marked for aggressive inlining.
-isInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
+isInliningCandidate :: SimplifierPhase -> FDef Mem -> Bool
 isInliningCandidate phase def = phase_ok && code_growth_ok
   where
     ann = defAnnotation def
@@ -314,12 +314,12 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
 -- | Decide whether the function is good for inlining, based on 
 --   its use annotation.  Functions that are used exactly once should be
 --   inlined because inlining won't produce growth.
-usesSuggestInlining :: Def a -> Bool
+usesSuggestInlining :: FDef a -> Bool
 usesSuggestInlining def = singleMultiplicity $ defAnnUses $ defAnnotation def
 
 -- | Decide whether inlining is permitted for the function in the current 
 --   simplifier phase, based on its phase annotation.
-phasePermitsInlining :: SimplifierPhase -> Def a -> Bool
+phasePermitsInlining :: SimplifierPhase -> FDef a -> Bool
 phasePermitsInlining phase def =
   let def_phase = defAnnInlinePhase $ defAnnotation def
   in def_phase `seq`
@@ -360,10 +360,10 @@ assumePatterns :: [PatM] -> LR a -> LR a
 assumePatterns pats m = foldr assumePattern m pats
 
 -- | Add the function definition types to the environment
-assumeDefs :: DefGroup (Def SM) -> LR a -> LR a
+assumeDefs :: DefGroup (FDef SM) -> LR a -> LR a
 assumeDefs defs m = foldr assumeDefSM m (defGroupMembers defs)
 
-assumeDefSM :: Def SM -> LR a -> LR a
+assumeDefSM :: FDef SM -> LR a -> LR a
 assumeDefSM (Def v ann f) m =
   let conlike = defAnnConlike ann
   in assumeWithProperties v (functionTypeSM f) conlike m
@@ -465,8 +465,8 @@ interpretStreamInSimplifier inf op ty_args args = LR $ \env -> do
 
     simplify_stream s = do
       s' <- simplifyStreamExp s
-      return $ Just $ embedStreamExp s'
-      -- traceShow (text "INTERPRETED" <+> pprExpS s')
+      let e' = traceShow (text "INTERPRETED" <+> pprExpS s) $ embedStreamExp s'
+      return $ Just e'
 
     serialize_stream s = do
       sequentializeStreamExp s
@@ -838,7 +838,7 @@ flattenLetExp inf (PatSM pat) rhs body = do
        _ ->
          return $ letContext True inf pat rhs' $ unitContext subst_body
 
-flattenLetfunExp :: ExpInfo -> DefGroup (Def SM) -> ExpSM -> Restructure ExpM
+flattenLetfunExp :: ExpInfo -> DefGroup (FDef SM) -> ExpSM -> Restructure ExpM
 flattenLetfunExp inf defs body = do
   subst_body <- assumeBinders locals $ applySubstitution body
   subst_defs <-
@@ -1658,7 +1658,7 @@ rwLetNormal inf bind val simplify_body = do
 
 -- | Rewrite a letrec expression, by rewriting the functions and the
 --   expression body.  
-rwLetrec :: Bool -> ExpInfo -> DefGroup (Def SM) -> ExpSM -> LR (ExpM, AbsCode)
+rwLetrec :: Bool -> ExpInfo -> DefGroup (FDef SM) -> ExpSM -> LR (ExpM, AbsCode)
 rwLetrec is_stream_arg inf defs body = do
   phase <- getPhase
   have_fuel <- checkFuel
@@ -2288,7 +2288,7 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
 --   If there would be no function parameters, a dummy parameter
 --   of type 'NoneType' is created.
 makeBranchContinuation :: ExpInfo -> Maybe PatSM -> AltSM
-                       -> LR (Def Mem, AltM)
+                       -> LR (FDef Mem, AltM)
 makeBranchContinuation inf m_return_param alt = do
   -- Rename the return parameter (if present) to avoid name collisions
   (m_return_param', alt') <-
@@ -2453,7 +2453,7 @@ rwFun' (FunSM f) =
           of Dead -> p
              _ -> setPatMDmd unknownDmd p
 
-rwDef :: Def SM -> LR (Def Mem)
+rwDef :: FDef SM -> LR (FDef Mem)
 rwDef def = mapMDefiniens (liftM fst . rwFun) def
 
 rwExport :: Subst -> Export Mem -> LR (Export Mem)
@@ -2464,7 +2464,7 @@ rwExport initial_subst (Export pos spec f) = do
 
 -- | Rewrite a definition group.  Then, add the defined functions to the
 --   environment and rewrite something else.
-withDefs :: DefGroup (Def SM) -> (DefGroup (Def Mem) -> LR a) -> LR a
+withDefs :: DefGroup (FDef SM) -> (DefGroup (FDef Mem) -> LR a) -> LR a
 withDefs (NonRec def) k = do
   def' <- rwDef def
   assumeDefSM def $ withDefValue False def' $ k (NonRec def')

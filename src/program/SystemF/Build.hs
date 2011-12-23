@@ -116,7 +116,7 @@ letViaBoxed binder rhs body =
                        , altBody = body}
   in expr
 
-letfunE :: DefGroup (Def Mem) -> ExpM -> ExpM
+letfunE :: DefGroup (FDef Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
 
 caseE :: (Supplies m VarID) => m ExpM -> [m AltM] -> m ExpM

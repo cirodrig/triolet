@@ -132,8 +132,8 @@ partialEvaluateModule (Module module_name [] defss exports) =
   let (defss', exports') = runPE (pevalDefGroups defss exports)
   in Module module_name [] defss' exports'
 
-pevalDefGroups :: [DefGroup (Def SF)] -> [Export SF]
-               -> PE ([DefGroup (Def SF)], [Export SF])
+pevalDefGroups :: [DefGroup (FDef SF)] -> [Export SF]
+               -> PE ([DefGroup (FDef SF)], [Export SF])
 pevalDefGroups (defs:defss) exports = do
   (defs', (defss', exports')) <-
     pevalDefGroup defs $ pevalDefGroups defss exports
@@ -148,13 +148,13 @@ pevalExport export = do
   fun <- pevalFun (exportFunction export)
   return $ export {exportFunction = fun}
 
-pevalDefGroup :: DefGroup (Def SF) -> PE a -> PE (DefGroup (Def SF), a)
+pevalDefGroup :: DefGroup (FDef SF) -> PE a -> PE (DefGroup (FDef SF), a)
 pevalDefGroup dg m = do
   dg' <- mapM pevalDef dg
   x <- m
   return (dg', x)
 
-pevalDef :: Def SF -> PE (Def SF)
+pevalDef :: FDef SF -> PE (FDef SF)
 pevalDef def = mapMDefiniens pevalFun def
 
 pevalFun :: FunSF -> PE FunSF

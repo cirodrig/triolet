@@ -309,7 +309,7 @@ altToDecisionBranch tenv (AltM (Alt decon params body)) =
 --   deciding how to specialize a function call.
 decisionTreeFun :: EvalMonad m =>
                    Maybe Label -> DefAnn -> WantedSpecializations
-                -> m (FunM, CreatedSpecializations, [Def Mem])
+                -> m (FunM, CreatedSpecializations, [FDef Mem])
 decisionTreeFun mlabel annotation dfun = do
   let DecisionFun inf ty_params in_params out_params ret body = dfun 
       properties = (mlabel, annotation, inf, ret)
@@ -606,7 +606,7 @@ specializeLetfun inf defs body = do
       return $ ExpM $ LetfunE inf defs' body'
     Just spcl_map -> liftTypeEvalM $ do
       (defs'', body'') <-
-        assumeDefGroup defs'
+        assumeFDefGroup defs'
         (case defs'
          of NonRec {} -> return defs'
             Rec ds -> Rec <$> mapM (specializeCallsDef spcl_map) ds)
@@ -655,11 +655,11 @@ specializeFun (FunM f) =
 --   functions.
 --
 --   Function calls are not specialized--that must be done in a separate pass.
-specializeDefGroup :: DefGroup (Def Mem)
+specializeDefGroup :: DefGroup (FDef Mem)
                    -> Specialize a
                    -> Specialize (a,
                                   Maybe CreatedSpecializationsMap,
-                                  DefGroup (Def Mem))
+                                  DefGroup (FDef Mem))
 specializeDefGroup group m =
   case group
   of NonRec def -> do
@@ -693,8 +693,8 @@ specializeDefGroup group m =
           (new_defs, created) <- specialize_functions specializations defs
           return (return_value, Just created, Rec new_defs)
 
-    specialize_function :: IntMap.IntMap WantedSpecializations -> Def Mem
-                        -> Specialize ([Def Mem], Maybe (Var, CreatedSpecializations))
+    specialize_function :: IntMap.IntMap WantedSpecializations -> FDef Mem
+                        -> Specialize ([FDef Mem], Maybe (Var, CreatedSpecializations))
     specialize_function wanted_map def
       | Just wanted <-
         IntMap.lookup (fromIdent $ varID $ definiendum def) wanted_map = do
@@ -711,8 +711,8 @@ specializeDefGroup group m =
                 hang (text "Constructor specialized function") 2 $
                 old $$ text "----" $$ new
                 where
-                  old = pprDef def
-                  new = vcat (map pprDef specialized_functions)
+                  old = pprFDef def
+                  new = vcat (map pprFDef specialized_functions)
           debug debug_message $
             return (specialized_functions, Just (name, specializations))
       | otherwise =
@@ -720,8 +720,8 @@ specializeDefGroup group m =
           return ([def], Nothing)
 
     specialize_functions :: IntMap.IntMap WantedSpecializations
-                         -> [Def Mem]
-                         -> Specialize ([Def Mem], IntMap.IntMap CreatedSpecializations)
+                         -> [FDef Mem]
+                         -> Specialize ([FDef Mem], IntMap.IntMap CreatedSpecializations)
     specialize_functions wanted_map xs = do
       (defss, assocs) <- mapAndUnzipM (specialize_function wanted_map) xs
       let m = IntMap.fromList [(fromIdent $ varID v, c)
@@ -732,7 +732,7 @@ specializeDefGroup group m =
 --   computation.  Run the computation to compute wanted specializations.
 --   Return the wanted specializations, and the list of functions that 
 --   shouldn't be specialized.
-withWantedSpecializations :: [Def Mem]
+withWantedSpecializations :: [FDef Mem]
                           -> Specialize a
                           -> Specialize (a, IntMap.IntMap WantedSpecializations)
 withWantedSpecializations defs m = Specialize $ ReaderT $ \env -> do
@@ -768,14 +768,14 @@ withWantedSpecializations defs m = Specialize $ ReaderT $ \env -> do
 
   return (return_value, wanted)
   where
-    assume_defs defs m = foldr assumeDef m defs
+    assume_defs defs m = foldr assumeFDef m defs
 
 specializeExport export = do
   f <- specializeFun (exportFunction export)
   return $ export {exportFunction = f}
   
-specializeTopLevel :: [DefGroup (Def Mem)] -> [Export Mem]
-                   -> Specialize ([DefGroup (Def Mem)], [Export Mem])
+specializeTopLevel :: [DefGroup (FDef Mem)] -> [Export Mem]
+                   -> Specialize ([DefGroup (FDef Mem)], [Export Mem])
 specializeTopLevel (defs:defss) exports = do
   ((defss', exports'), specializations, defs') <-
     specializeDefGroup defs $ specializeTopLevel defss exports
@@ -783,7 +783,7 @@ specializeTopLevel (defs:defss) exports = do
     Nothing -> return (defs' : defss', exports')
     Just spcl_map -> liftTypeEvalM $ do
       (defs'', (defss'', exports'')) <-
-        assumeDefGroup defs'
+        assumeFDefGroup defs'
         (case defs'
          of NonRec {} -> return defs'
             Rec ds -> Rec <$> mapM (specializeCallsDef spcl_map) ds)
@@ -799,7 +799,7 @@ specializeModule (Module module_name imports defs exports) =
     (defs', exports') <- specializeTopLevel defs exports
     return $ Module module_name imports defs' exports' 
   where
-    assume_imports m = foldr assumeDef m imports
+    assume_imports m = foldr assumeFDef m imports
 
 -------------------------------------------------------------------------------
 
@@ -836,7 +836,7 @@ specializeCallsExp spcl_map expression =
        return $ ExpM $ LetE inf pat rhs' body'
      LetfunE inf defs body -> do
        (defs', body') <-
-         assumeDefGroup defs
+         assumeFDefGroup defs
          (mapM (specializeCallsDef spcl_map) defs)
          (specializeCallsExp spcl_map body)
        return $ ExpM $ LetfunE inf defs' body'
@@ -875,12 +875,12 @@ specializeCallsExport spcl_map export = do
   return $ export {exportFunction = f}
 
 specializeCallsTopLevel :: CreatedSpecializationsMap
-                        -> [DefGroup (Def Mem)]
+                        -> [DefGroup (FDef Mem)]
                         -> [Export Mem]
-                        -> TypeEvalM ([DefGroup (Def Mem)], [Export Mem])
+                        -> TypeEvalM ([DefGroup (FDef Mem)], [Export Mem])
 specializeCallsTopLevel spcl_map (defs : defss) exports = do
   (defs', (defss', exports')) <-
-    assumeDefGroup defs
+    assumeFDefGroup defs
     (mapM (specializeCallsDef spcl_map) defs)
     (specializeCallsTopLevel spcl_map defss exports)
   return (defs' : defss', exports')

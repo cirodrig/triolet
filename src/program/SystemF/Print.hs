@@ -1,8 +1,8 @@
 
 module SystemF.Print
        (PrintFlags(..), defaultPrintFlags,
-        pprLit, pprVar, pprPat, pprExp, pprFun, pprDef, pprModule,
-        pprVarFlags, pprPatFlags, pprExpFlags, pprFunFlags, pprDefFlags
+        pprLit, pprVar, pprPat, pprExp, pprFun, pprFDef, pprModule,
+        pprVarFlags, pprPatFlags, pprExpFlags, pprFunFlags, pprFDefFlags
         )
 where
 
@@ -25,8 +25,8 @@ pprExp = pprExpFlags defaultPrintFlags
 pprFun :: FunSF -> Doc
 pprFun = pprFunFlags defaultPrintFlags
 
-pprDef :: Def SF -> Doc
-pprDef = pprDefFlags defaultPrintFlags
+pprFDef :: FDef SF -> Doc
+pprFDef = pprFDefFlags defaultPrintFlags
 
 pprExport :: Export SF -> Doc
 pprExport (Export pos spec f) =
@@ -35,7 +35,7 @@ pprExport (Export pos spec f) =
 pprModule :: Module SF -> Doc
 pprModule (Module module_name [] defs exports) =
   text "module" <+> text (showModuleName module_name) $$
-  vcat (map (braces . vcat . map pprDef . defGroupMembers) defs) $$
+  vcat (map (braces . vcat . map pprFDef . defGroupMembers) defs) $$
   vcat (map pprExport exports)
 
 data PrintFlags =
@@ -115,7 +115,7 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
              e2 = pprExpFlags flags body
          in text "let" <+> e1 $$ e2
      LetfunE {expDefs = ds, expBody = body} ->
-         let defsText = vcat $ map (pprDefFlags flags) $ defGroupMembers ds
+         let defsText = vcat $ map (pprFDefFlags flags) $ defGroupMembers ds
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
      CaseE {expScrutinee = e, expAlternatives = [AltSF alt1, AltSF alt2]} 
@@ -188,7 +188,7 @@ pprFunFlags flags fun =
       body = pprExpFlags flags $ funBody (fromFunSF fun)
   in hang (lambda <+> params <> text ".") 4 body
 
-pprDefFlags flags (Def v _ fun) =
+pprFDefFlags flags (Def v _ fun) =
   let params = pprFunParameters False flags fun
       body = pprExpFlags flags $ funBody (fromFunSF fun)
   in hang (pprVarFlags flags v <+> params <+> equals) 4 body

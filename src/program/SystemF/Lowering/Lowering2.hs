@@ -351,13 +351,13 @@ lowerFun (FunM fun) =
       ret_val <- lowerExp body
       return (LL.ReturnE $ LL.ValA $ retValToList ret_val)
 
-lowerDefGroupG :: DefGroup (Def Mem)
+lowerDefGroupG :: DefGroup (FDef Mem)
                -> (LL.Group LL.FunDef -> GenLower a)
                -> GenLower a
 lowerDefGroupG defs = liftT1 (lowerDefGroup defs)
 
 -- | Lower a local definition group.
-lowerDefGroup :: DefGroup (Def Mem)
+lowerDefGroup :: DefGroup (FDef Mem)
               -> (LL.Group LL.FunDef -> Lower a)
               -> Lower a
 lowerDefGroup defgroup k = 
@@ -383,7 +383,7 @@ lowerDefGroup defgroup k =
 
 -- | Lower a global definition group.
 --   The definitions and a list of exported functions are returned.
-lowerGlobalDefGroup :: DefGroup (Def Mem)
+lowerGlobalDefGroup :: DefGroup (FDef Mem)
                     -> (LL.Group LL.FunDef -> [(LL.Var, ExportSig)] -> Lower a)
                     -> Lower a
 lowerGlobalDefGroup defgroup k = 
@@ -456,7 +456,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       return (LL.Def v wrapped_fun, CXXExportSig cxx_export_sig)
 
 lowerModuleCode :: ModuleName 
-                -> [DefGroup (Def Mem)]
+                -> [DefGroup (FDef Mem)]
                 -> [Export Mem]
                 -> Lower ([LL.Group LL.FunDef], [(LL.Var, ExportSig)])
 lowerModuleCode module_name defss exports = lower_definitions defss

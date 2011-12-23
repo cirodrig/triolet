@@ -130,7 +130,7 @@ evFun (U.TIFun inf ty_params params rt body) = do
   body' <- evExp body
   return $ FunSF $ Fun inf ty_params' params' rt' (body_context body')
 
-evDef :: TIDef -> IO (Def SF)
+evDef :: TIDef -> IO (FDef SF)
 evDef (U.TIDef v ann f) = Def v ann <$> evFun f
 
 evExport :: TIExport -> IO (Export SF)

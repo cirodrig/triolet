@@ -68,7 +68,7 @@ assumeTyPat (TyPat (v ::: t)) k = do
   assume v t k
 
 -- Assume a function definition.  Do not check the function definition's body.
-assumeDef :: Def SF -> TCM a -> TCM a
+assumeDef :: FDef SF -> TCM a -> TCM a
 assumeDef (Def v _ fun) = assume v (functionType fun)
 
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
@@ -212,7 +212,7 @@ typeInferLetE inf pat expression body = do
   -- Assume the pattern while inferring the body; result is the body's type
   assumePat pat $ typeInferExp body
 
-typeInferLetfunE :: ExpInfo -> DefGroup (Def SF) -> ExpSF -> TCM Type
+typeInferLetfunE :: ExpInfo -> DefGroup (FDef SF) -> ExpSF -> TCM Type
 typeInferLetfunE inf defs body =
   typeCheckDefGroup defs $ typeInferExp body
 
@@ -300,7 +300,7 @@ typeInferCoerceE inf from_ty to_ty body = do
 
   return to_ty
 
-typeCheckDefGroup :: DefGroup (Def SF) -> TCM b -> TCM b
+typeCheckDefGroup :: DefGroup (FDef SF) -> TCM b -> TCM b
 typeCheckDefGroup defgroup k = 
   case defgroup
   of NonRec def -> do

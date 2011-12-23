@@ -81,12 +81,12 @@ edcMaskTyPats (pat:pats) m = do
 edcMaskTyPats [] m = do x <- m
                         return ([], x)
 
-edcDef :: EDC (Def SF)
+edcDef :: EDC (FDef SF)
 edcDef def = mapMDefiniens edcFun def
 
-edcDefGroup :: DefGroup (Def SF)
+edcDefGroup :: DefGroup (FDef SF)
             -> GetMentionsSet a
-            -> GetMentionsSet (DefGroup (Def SF), a)
+            -> GetMentionsSet (DefGroup (FDef SF), a)
 edcDefGroup defgroup m =
   case defgroup
   of NonRec def -> do

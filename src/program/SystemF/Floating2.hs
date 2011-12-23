@@ -391,8 +391,8 @@ floatTopLevelFun (FunM f@(Fun inf ty_params params return_type body)) =
     return $ FunM (f {funBody = body})
 
 -- | Perform floating in a top-level definition group
-floatTopLevelGroup :: DefGroup (Def Mem)
-                   -> (DefGroup (Def Mem) -> Flt a)
+floatTopLevelGroup :: DefGroup (FDef Mem)
+                   -> (DefGroup (FDef Mem) -> Flt a)
                    -> Flt a
 floatTopLevelGroup (NonRec def) k = do
   f <- floatTopLevelFun $ definiens def

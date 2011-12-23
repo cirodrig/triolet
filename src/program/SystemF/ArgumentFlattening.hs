@@ -139,7 +139,7 @@ assumePats :: (EvalMonad m, ReprDictMonad m) =>
               [PatM] -> m a -> m a
 assumePats pats m = foldr assumePat m pats
 
-assumeDef :: TypeEnvMonad m => Def Mem -> m a -> m a
+assumeDef :: TypeEnvMonad m => FDef Mem -> m a -> m a
 assumeDef d m = assume (definiendum d) (functionType $ definiens d) m
 
 -- | Apply the transformation to each expression in tail position.
@@ -152,7 +152,7 @@ mapOverTailExps f expression =
        body' <- assumePat binder $ mapOverTailExps f body
        return $ ExpM $ LetE inf binder rhs body'
      LetfunE inf defs body -> do
-       ((), body') <- assumeDefGroup defs (return ()) $ mapOverTailExps f body
+       ((), body') <- assumeFDefGroup defs (return ()) $ mapOverTailExps f body
        return $ ExpM $ LetfunE inf defs body'
      CaseE inf scr alts -> do
        alts' <- mapM map_alt alts
@@ -1334,7 +1334,7 @@ mkWrapperFunction :: FunctionPlan
                   -> DefAnn
                   -> Var        -- ^ Wrapper function name
                   -> Var        -- ^ Worker function name
-                  -> AF (Def Mem)
+                  -> AF (FDef Mem)
 mkWrapperFunction plan annotation wrapper_name worker_name = do
   wrapper_body <- make_wrapper_body
   let (wrapper_ty_params, wrapper_params, wrapper_ret) = 
@@ -1392,7 +1392,7 @@ mkWorkerFunction :: FunctionPlan
                  -> DefAnn
                  -> Var         -- ^ Worker function name
                  -> ExpM        -- ^ Original function body
-                 -> AF (Def Mem)
+                 -> AF (FDef Mem)
 mkWorkerFunction plan annotation worker_name original_body = do
   worker_body <- create_worker_body
   tenv <- getTypeEnv
@@ -1460,7 +1460,7 @@ mkWorkerFunction plan annotation worker_name original_body = do
 --   If flattening would not change the function arguments, then the function
 --   body is transformed and a single definition is returned.  Otherwise,
 --   the worker is returned, followed by the wrapper.
-flattenFunctionArguments :: Def Mem -> AF (Maybe (Def Mem), Def Mem)
+flattenFunctionArguments :: FDef Mem -> AF (Maybe (FDef Mem), FDef Mem)
 flattenFunctionArguments def = do
   let fun_name = definiendum def
       fun_annotation = defAnnotation def
@@ -1492,7 +1492,7 @@ flattenInFun (FunM f) =
     fun_body <- flattenInExp $ funBody f
     return $ FunM $ f {funBody = fun_body}
 
-flattenInGroup :: DefGroup (Def Mem) -> AF [DefGroup (Def Mem)]
+flattenInGroup :: DefGroup (FDef Mem) -> AF [DefGroup (FDef Mem)]
 flattenInGroup (NonRec def) = do
   (m_worker, wrapper) <- flattenFunctionArguments def
   -- Wrapper can reference worker, but not vice versa; produce two groups

@@ -231,7 +231,7 @@ newDmdVar s = liftIO $ newIORef s
 
 -- | Generate code to process a definition group.
 --   Add the group to the environment.
-setupDefGroup :: DefGroup (Def Mem) -> Setup a -> Setup a
+setupDefGroup :: DefGroup (FDef Mem) -> Setup a -> Setup a
 setupDefGroup group m = do
   case group of
     NonRec fdef -> do

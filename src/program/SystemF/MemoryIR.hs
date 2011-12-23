@@ -27,8 +27,8 @@ module SystemF.MemoryIR
         unpackVarAppM, unpackDataConAppM, isDataConAppM,
         assumePatM, assumePatMs,
         assumeTyPat, assumeTyPats,
-        assumeDef,
-        assumeDefGroup,
+        assumeFDef,
+        assumeFDefGroup,
         functionType,
         partitionParameters
        )
@@ -186,24 +186,24 @@ assumeTyPat (TyPat b) m = assumeBinder b m
 assumeTyPats :: TypeEnvMonad m => [TyPat] -> m a -> m a
 assumeTyPats pats m = foldr assumeTyPat m pats
 
-assumeDef :: forall m a. TypeEnvMonad m => Def Mem -> m a -> m a
-{-# INLINE assumeDef #-}
-assumeDef def m = assume (definiendum def) (functionType $ definiens def) m
+assumeFDef :: forall m a. TypeEnvMonad m => FDef Mem -> m a -> m a
+{-# INLINE assumeFDef #-}
+assumeFDef def m = assume (definiendum def) (functionType $ definiens def) m
 
-assumeDefGroup :: forall m a b. TypeEnvMonad m =>
-                  DefGroup (Def Mem) -> m a -> m b -> m (a, b)
-{-# INLINE assumeDefGroup #-}
-assumeDefGroup g group_m body_m =
+assumeFDefGroup :: forall m a b. TypeEnvMonad m =>
+                  DefGroup (FDef Mem) -> m a -> m b -> m (a, b)
+{-# INLINE assumeFDefGroup #-}
+assumeFDefGroup g group_m body_m =
   case g
   of NonRec def -> do x <- group_m 
-                      y <- assumeDef def body_m
+                      y <- assumeFDef def body_m
                       return (x, y)
      Rec defs -> assume_defs defs $ do x <- group_m
                                        y <- body_m
                                        return (x, y)
   where
-    assume_defs :: forall a. [Def Mem] -> m a -> m a
-    assume_defs defs m = foldr assumeDef m defs
+    assume_defs :: forall a. [FDef Mem] -> m a -> m a
+    assume_defs defs m = foldr assumeFDef m defs
 
 -- | Get the type of a function using its parameter and return types.
 functionType :: FunM -> Type 

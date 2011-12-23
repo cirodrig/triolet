@@ -13,8 +13,8 @@ module SystemF.PrintMemoryIR
         pprAlt,
         pprFun,
         pprFunPrec,
-        pprDef,
-        pprDefGroup,
+        pprFDef,
+        pprFDefGroup,
         pprExport,
         pprModule,
         pprModuleFlags,
@@ -138,7 +138,7 @@ pprExpPrecFlags flags (ExpM expression) =
        in hang (pat_doc <+> text "=") letIndent rhs_doc $$ body_doc
           `hasPrec` stmtPrec
      LetfunE _ defs body ->
-       let defs_doc = pprDefGroupFlags flags defs
+       let defs_doc = pprFDefGroupFlags flags defs
            body_doc = continue body ? stmtPrec
        in text "letfun" <+> defs_doc $$ body_doc
           `hasPrec` stmtPrec
@@ -224,9 +224,9 @@ pprFunPrecFlags is_lambda flags (FunM fun) =
   in hang (text "lambda" <+> sig_doc <> text ".") defIndent body_doc
      `hasPrec` stmtPrec
 
-pprDef def = pprDefFlags defaultPprFlags def
+pprFDef def = pprFDefFlags defaultPprFlags def
 
-pprDefFlags flags (Def v ann f) =
+pprFDefFlags flags (Def v ann f) =
   hang (pprVar v <+> ann_doc <+> text "=") defIndent $
   pprFunPrecFlags False flags f ? outerPrec
   where
@@ -252,15 +252,15 @@ pprDefFlags flags (Def v ann f) =
          punctuate (text ",") $
          filter (not . isEmpty) [inl_doc, join_doc, phase_doc, uses_doc]
 
-pprDefGroup :: DefGroup (Def Mem) -> Doc
-pprDefGroup dg = pprDefGroupFlags defaultPprFlags dg
+pprFDefGroup :: DefGroup (FDef Mem) -> Doc
+pprFDefGroup dg = pprFDefGroupFlags defaultPprFlags dg
 
-pprDefGroupFlags flags dg =
+pprFDefGroupFlags flags dg =
   case dg
   of NonRec _ -> text "nonrec {" $$ nest 2 members $$ text "}"
      Rec _ -> text "rec {" $$ nest 2 members $$ text "}"
   where
-    members = vcat $ map (pprDefFlags flags) $ defGroupMembers dg
+    members = vcat $ map (pprFDefFlags flags) $ defGroupMembers dg
 
 pprExport e = pprExportFlags defaultPprFlags e
 
@@ -274,5 +274,5 @@ pprModuleFlags flags (Module modname imports defs exports) =
   {-text "imports {" $$
   nest 2 (vcat (map pprDef imports)) $$
   text "}" $$-}
-  vcat (map (pprDefGroupFlags flags) defs) $$
+  vcat (map (pprFDefGroupFlags flags) defs) $$
   vcat (map (pprExportFlags flags) exports)

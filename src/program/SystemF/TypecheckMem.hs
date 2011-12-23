@@ -53,7 +53,7 @@ assumeAndAnnotateTyPat (TyPat (v ::: t)) k = do
   typeCheckType t               -- Verify that kind is well-formed
   assume v t k
 
-assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
+assumeDefs defs m = foldr assumeFDef m (defGroupMembers defs)
 
 typeInferType :: Type -> TCM Kind
 typeInferType = typeCheckType
@@ -231,7 +231,7 @@ typeInferLetE inf pat expression body = do
   -- Assume the pattern while inferring the body; result is the body's type
   assumeAndAnnotatePat pat $ typeInferExp body
 
-typeInferLetfunE :: ExpInfo -> DefGroup (Def Mem) -> ExpM -> TCM Type
+typeInferLetfunE :: ExpInfo -> DefGroup (FDef Mem) -> ExpM -> TCM Type
 typeInferLetfunE inf defs body =
   typeCheckDefGroup defs $ typeInferExp body
 
@@ -355,15 +355,13 @@ typeInferCoerceE inf from_t to_t body = do
   
   return to_t
   
-typeCheckDefGroup :: DefGroup (Def Mem) -> TCM b -> TCM b
-typeCheckDefGroup defgroup do_body = 
-  case defgroup
-  of NonRec def -> do
-       typeCheckDef def
-       assumeDefs defgroup do_body
-     Rec defs -> assumeDefs defgroup $ do 
-       mapM_ typeCheckDef defs
-       do_body
+typeCheckDefGroup :: DefGroup (FDef Mem) -> TCM b -> TCM b
+typeCheckDefGroup defgroup do_body = do
+  (_, body_type) <-
+    assumeFDefGroup defgroup
+    (mapM_ typeCheckDef $ defGroupMembers defgroup)
+    do_body
+  return body_type
   where
     -- To typecheck a definition, check the function it contains
     typeCheckDef def = typeInferFun $ definiens def

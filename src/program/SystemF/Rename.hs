@@ -201,8 +201,8 @@ renamePatMs :: Renaming -> [PatM] -> (Renaming -> [PatM] -> a) -> a
 renamePatMs = renameMany renamePatM
 
 renameDefGroup :: Renaming
-               -> DefGroup (Def Mem)
-               -> (Renaming -> DefGroup (Def Mem) -> a)
+               -> DefGroup (FDef Mem)
+               -> (Renaming -> DefGroup (FDef Mem) -> a)
                -> a
 renameDefGroup rn group k =
   -- Rename the function definitions and exclude bound variables from the
@@ -220,7 +220,7 @@ renameDefGroup rn group k =
   rename_def rn def =
     def {definiens = rename rn $ definiens def}
 
-defGroupFreeVariables :: DefGroup (Def Mem) -> Set.Set Var -> Set.Set Var
+defGroupFreeVariables :: DefGroup (FDef Mem) -> Set.Set Var -> Set.Set Var
 defGroupFreeVariables (NonRec def) fv =
   freeVariables (definiens def) `Set.union` Set.delete (definiendum def) fv
   
@@ -329,8 +329,8 @@ substituteDefGroup :: forall m a s. EvalMonad m =>
                       (Subst -> Fun Mem -> m (Fun s))
                       -- ^ How to perform substitution on a function
                    -> Subst     -- ^ Substitution to apply
-                   -> DefGroup (Def Mem) -- ^ Definition group
-                   -> (Subst -> DefGroup (Def s) -> m a)
+                   -> DefGroup (FDef Mem) -- ^ Definition group
+                   -> (Subst -> DefGroup (FDef s) -> m a)
                       -- ^ Code over which the definitions are in scope
                    -> m a
 substituteDefGroup subst_fun s g k =
@@ -667,7 +667,7 @@ checkForShadowingExpSet in_scope e =
     insert v scope = IntSet.insert (fromIdent $ varID v) scope
 
 checkForShadowingGroupSet :: CheckForShadowing a -> a
-                          -> CheckForShadowing (DefGroup (Def Mem))
+                          -> CheckForShadowing (DefGroup (FDef Mem))
 checkForShadowingGroupSet check body in_scope defs =
   let definienda = map definiendum $ defGroupMembers defs
       definientia = map definiens $ defGroupMembers defs

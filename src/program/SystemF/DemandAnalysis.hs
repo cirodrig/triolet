@@ -391,7 +391,7 @@ dmdFun is_initializer (FunM f) = do
       dmdExp Used (funBody f)
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 
-dmdDef :: DmdAnl (Def Mem)
+dmdDef :: DmdAnl (FDef Mem)
 dmdDef def
   -- Wrapper functions may be inlined many times.
   -- Conservatively treat any use of a variable inside a wrapper as if it were many uses.
@@ -402,14 +402,14 @@ dmdDef def
 
 -- | Act like each exported function definition is used in an unknown way.
 --   Doing so prevents the function from being inlined/deleted.
-useExportedDefs :: [Def Mem] -> Df ()
+useExportedDefs :: [FDef Mem] -> Df ()
 useExportedDefs defs = mapM_ demand_if_exported defs
   where
     demand_if_exported def =
       when (defAnnExported $ defAnnotation def) $
       mentionExtern (definiendum def)
   
-dmdGroup :: DefGroup (Def Mem) -> Df b -> Df ([DefGroup (Def Mem)], b)
+dmdGroup :: DefGroup (FDef Mem) -> Df b -> Df ([DefGroup (FDef Mem)], b)
 dmdGroup defgroup do_body =
   case defgroup
   of NonRec def -> do
@@ -443,7 +443,7 @@ dmdGroup defgroup do_body =
                       uses)
                     | (new_def, uses) <- defs_and_uses]
 
-          new_defs_and_uses :: [DefGroup (Def Mem, Dmds)]
+          new_defs_and_uses :: [DefGroup (FDef Mem, Dmds)]
           new_defs_and_uses = partitionDefGroup members body_uses
 
           new_uses =

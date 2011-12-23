@@ -1323,7 +1323,7 @@ reprFun (FunSF f) =
                        , funReturn = ret
                        , funBody = co_body})
 
-withDefs :: DefGroup (Def SF) -> (DefGroup (Def Mem) -> RI a) -> RI a
+withDefs :: DefGroup (FDef SF) -> (DefGroup (FDef Mem) -> RI a) -> RI a
 withDefs (NonRec def) k = do
   def' <- mapMDefiniens reprFun def
   let sf_def_type = TypecheckSF.functionType $ definiens def
@@ -1351,9 +1351,9 @@ reprExport e = do
                   , exportSpec = exportSpec e
                   , exportFunction = f}
 
-reprTopLevelDefs :: [DefGroup (Def SF)]
+reprTopLevelDefs :: [DefGroup (FDef SF)]
                  -> [Export SF]
-                 -> RI ([DefGroup (Def Mem)], [Export Mem])
+                 -> RI ([DefGroup (FDef Mem)], [Export Mem])
 reprTopLevelDefs defgroups exports = go id defgroups
   where
     go hd (g:gs) = withDefs g $ \g' -> go (hd . (g':)) gs

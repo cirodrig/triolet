@@ -122,7 +122,7 @@ data CtxItem =
   | CaseCtx ExpInfo ExpM !AltBinders [AltBinders]
 
     -- | A group of function definitions
-  | LetfunCtx ExpInfo !(DefGroup (Def Mem))
+  | LetfunCtx ExpInfo !(DefGroup (FDef Mem))
 
 -- | The binders from a case alternative
 data AltBinders = AltBinders !DeConInst [PatM]
@@ -357,7 +357,7 @@ caseContext keep_demands inf scr decon params ex_alts body =
   in addContextItem (CaseCtx inf scr normal_binder ex_binders) body
 
 -- | Add a @letfun@ term to the outside of the given context
-letfunContext :: ExpInfo -> DefGroup (Def Mem) -> Contexted a -> Contexted a
+letfunContext :: ExpInfo -> DefGroup (FDef Mem) -> Contexted a -> Contexted a
 letfunContext inf defs body =
   addContextItem (LetfunCtx inf defs) body
 
@@ -451,7 +451,7 @@ pprContext show_body (ApplyContext {_ctxContext = c, _ctxBody = b}) =
           text "except if" <+> pprPatternMatch decon pats
 
     show_context (LetfunCtx _ defs) =
-      text "letrec" <+> pprDefGroup defs
+      text "letrec" <+> pprFDefGroup defs
   
 -- | Split a context into a part that is dependent on a set of variables and
 --   a part that is independent.  In the result, the outer part is independent

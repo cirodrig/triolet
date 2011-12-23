@@ -49,7 +49,8 @@ module SystemF.Syntax
      BaseFun(..),
      
      -- ** Function definitions
-     Def(..), mkDef, mkWrapperDef, mkWorkerDef,
+     Def(..), FDef,
+     mkDef, mkWrapperDef, mkWorkerDef,
      mapDefiniens,
      mapMDefiniens,
      modifyDefAnnotation,
@@ -296,7 +297,7 @@ data BaseExp s =
     -- | Recursive definition group
   | LetfunE
     { expInfo :: ExpInfo
-    , expDefs :: DefGroup (Def s)
+    , expDefs :: DefGroup (FDef s)
     , expBody :: Exp s
     }
     -- | Case analysis 
@@ -415,15 +416,16 @@ data BaseFun s =
       }
 
 -- | A function definition
-data Def s =
+data Def t s =
   Def
   { definiendum :: Var
   , defAnnotation :: {-#UNPACK#-}!DefAnn
-  , definiens :: Fun s
+  , definiens :: t s
   }
-  deriving(Typeable)
 
-mkDef :: Var -> Fun s -> Def s
+type FDef s = Def Fun s
+
+mkDef :: Var -> t s -> Def t s
 mkDef v f = Def v defaultDefAnn f
 
 -- | Create a wrapper function as part of a worker-wrapper transformation.
@@ -431,7 +433,7 @@ mkDef v f = Def v defaultDefAnn f
 --   The wrapper function inherits some properties of the original 
 --   function.  The wrapper function, not the worker,
 --   is the one that code outside the module sees.
-mkWrapperDef :: DefAnn -> Var -> Fun s -> Def s
+mkWrapperDef :: DefAnn -> Var -> t s -> Def t s
 mkWrapperDef original_ann v f = let
   annotation =
     defaultDefAnn { defAnnInlinePhase = InlWrapper
@@ -445,7 +447,7 @@ mkWrapperDef original_ann v f = let
 --
 --   The worker function inherits the inlining-related properties of the 
 --   original function.
-mkWorkerDef :: DefAnn -> Var -> Fun s -> Def s
+mkWorkerDef :: DefAnn -> Var -> t s -> Def t s
 mkWorkerDef original_ann v f = let
   annotation =
     defaultDefAnn { -- Inherit inlining-related properties
@@ -455,19 +457,19 @@ mkWorkerDef original_ann v f = let
                   }
   in Def v annotation f
 
-mapDefiniens :: (Fun s -> Fun s') -> Def s -> Def s'
+mapDefiniens :: (t s -> t s') -> Def t s -> Def t s'
 {-# INLINE mapDefiniens #-}
 mapDefiniens f def = def {definiens = f $ definiens def}
 
-mapMDefiniens :: Monad m => (Fun s -> m (Fun s')) -> Def s -> m (Def s')
+mapMDefiniens :: Monad m => (t s -> m (t s')) -> Def t s -> m (Def t s')
 {-# INLINE mapMDefiniens #-}
 mapMDefiniens f def = do fun <- f (definiens def)
                          return $ def {definiens = fun}
 
-modifyDefAnnotation :: (DefAnn -> DefAnn) -> Def s -> Def s
+modifyDefAnnotation :: (DefAnn -> DefAnn) -> Def t s -> Def t s
 modifyDefAnnotation f d = d {defAnnotation = f (defAnnotation d)}
 
-defIsWrapper :: Def s -> Bool
+defIsWrapper :: Def t s -> Bool
 defIsWrapper def = defAnnInlinePhase (defAnnotation def) == InlWrapper
 
 -- | Annotations on a function definition
@@ -566,8 +568,8 @@ data Module s =
     -- | Definitions of functions that were imported from other modules.
     --   The optimizer may inline these definitions.
     --   Before representation inference, the imports should be empty.
-  , modImports :: [Def s]
-  , modDefs :: [DefGroup (Def s)]
+  , modImports :: [FDef s]
+  , modDefs :: [DefGroup (FDef s)]
   , modExports :: [Export s]
   }
   deriving(Typeable)

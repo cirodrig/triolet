@@ -92,8 +92,8 @@ defAttributes attrs ann =
 --   If functions are is labeled as exported.
 applyDefAttributes :: Bool
                    -> [Attribute]
-                   -> SystemF.Def SystemF.Mem
-                   -> SystemF.Def SystemF.Mem
+                   -> SystemF.FDef SystemF.Mem
+                   -> SystemF.FDef SystemF.Mem
 applyDefAttributes is_global attrs def = SystemF.modifyDefAnnotation f def 
   where
     -- Global functions are exported.  Local functions are not.

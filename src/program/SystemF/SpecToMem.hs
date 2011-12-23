@@ -96,7 +96,7 @@ convertFun (FunM f) =
            , funReturn = convertType $ funReturn f
            , funBody = convertExp $ funBody f}
 
-convertDef :: Def Mem -> Def Mem
+convertDef :: FDef Mem -> FDef Mem
 convertDef def = mapDefiniens convertFun def
 
 convertExport :: Export Mem -> Export Mem

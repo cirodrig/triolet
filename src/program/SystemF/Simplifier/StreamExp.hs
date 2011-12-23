@@ -85,7 +85,7 @@ data instance Exp Stream =
     -- | Recursive definition group
   | LetfunSE
     { sexpInfo :: ExpInfo
-    , sexpDefs :: DefGroup (Def Mem)
+    , sexpDefs :: DefGroup (FDef Mem)
     , sexpBody :: ExpS
     }
     -- | Case analysis 
@@ -1013,7 +1013,7 @@ restructureIfNeeded locals expression cont =
      LetfunSE inf defs body -> do
        let locals' = foldr Set.insert locals $
                      map definiendum (defGroupMembers defs)
-       (_, e) <- assumeDefGroup defs (return ()) $
+       (_, e) <- assumeFDefGroup defs (return ()) $
                  restructureIfNeeded locals' body $ \body' ->
                  cont (LetfunSE inf defs body')
        return e
@@ -1213,7 +1213,7 @@ fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
            progress $ LetSE inf pat rhs body'
 
          LetfunSE inf defs body -> do
-           (_, (_, body')) <- assumeDefGroup defs (return ()) $
+           (_, (_, body')) <- assumeFDefGroup defs (return ()) $
                               fuse_with_producer shape body
            progress $ LetfunSE inf defs body'
          
