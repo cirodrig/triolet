@@ -37,7 +37,7 @@ module SystemF.Lowering.Datatypes2
         algebraicElim)
 where
 
-import Prelude hiding(foldr, elem, any, all, sum)
+import Prelude hiding(foldr, elem, any, all, or, sum)
 
 import Control.Monad hiding(forM_)
 import Control.Monad.Trans
@@ -62,6 +62,7 @@ import SystemF.Lowering.LowerMonad
 import Type.Environment
 import Type.Eval
 import Type.Type
+import qualified Type.Substitute as Substitute 
 
 -- | Generate code to compute the maximum of a nonempty list of values.
 -- The values are unsigned native ints (this is not checked).
@@ -73,21 +74,69 @@ fieldTypeToRecord :: LL.DynamicFieldType -> LL.DynamicRecord
 fieldTypeToRecord (LL.RecordField r) = r
 fieldTypeToRecord ftype = singletonDynamicRecord LL.Mutable ftype
 
+-- | A Code generator of a computation that produces a value
+type Producer = GenLower LL.Val
+
+-- | A code generator of a computation that writes a value into memory
+type Writer = LL.Val -> GenLower ()
+
+-- | A code generator of an initializer.
+--
+--   An initializer either puts a value into a field or
+--   writes an object into memory, depending on the data kind that the
+--   initializer was created from.
+data Initializer = ValInit Producer | WriteInit Writer
+
+fromProducer (ValInit m) = m
+fromProducer _ = internalError "Expected a value, got a writer"
+
+fromWriter (WriteInit m) = m
+fromWriter _ = internalError "Expected a writer, got a value"
+
+-- | Convert an initializer to a writer.
+--
+--   If a value producer was provided, its value is written to memory.
+asWriter :: Initializer -> Writer
+asWriter (WriteInit m) = m
+asWriter (ValInit m) = \dst -> do
+  val <- m
+  primStoreMutable (LL.valType val) dst val
+
+-------------------------------------------------------------------------------
 {-
 
 * Layout objects
 
-Layout objects describe how to introduce data
-(corresponding to constructor application),
-eliminate data (corresponding to case statements), and access data that is
-stored inside other data.
+Data types are described in two levels of detail.  A 'Layout' describes how
+to store a value as a field of another value, including how to read and write
+that field.  An 'AlgLayout' describes, in addition to what 'Layout' describes,
+how to introduce values (the low-level translation of constructor application)
+and how to eliminate values (the low-level translation of a case statement).
 
-TODO: Describe semantics of values in Mem and LowLevel.  Describe the idea of
-wrappers/adapters.  Describe algebraic data types.
+Types are lowered to /value/ or /memory/ data, depending  
+on their kind.  A lowered value variable /contains/ its data, while a lowered
+memory variable /points to/ its data.  A lowered field of an object
+contains its data in both cases.  Because of this distinction, field access
+works differently depending on the types involved.
+In addition, some data types have pointer indirection or extra fields.  Those
+details are inserted by the code in this file.
+
+Data of kind \'val\' become values.  The exact data type used to represent a
+\'val\' value is selected by inspecting its data type.  The compiler ensures
+that a \'val\' value will always have a constant type (not a type variable).
+Data of kind \'box\' also become values--more precisely, owned pointer values.
+Data of kinds \'bare\' and \'out\' become memory data.
+
+Algebraic layouts describe sum-of-product data types.  The sum component
+of the type is described by an 'AlgSum'.  The 'AlgSum' describes how to
+identify which component of a SOP data type a given instance belongs to.
+The product component is described by a 'ValProd' or 'MemProd'.  It includes
+a constructor, layout, field layouts, and methods for constructing or reading
+that product type.
 -}
 
--- | A data constructor used for selecting the correct layout for a member of 
---   a sum type.  Tuple types have only one constructor, so no further
+-- | A data constructor used for selecting a member of a sum type.
+--   Tuple types have only one constructor, so no further
 --   information is required.  Other algebraic data types are annotated with
 --   a constructor name.
 data LayoutCon = VarTag !Var | TupleTag
@@ -132,11 +181,13 @@ instance Foldable AlgSum where
 --   Even though a boxed object is stored in memory, the /pointer/ to the
 --   object is passed by value.
 --
---   An erased value behaves like a unit value, except when it appears as a
---   field of another object.
+--   An erased value behaves like a unit value when it's in a variable.
+--   Erased values are not stored in an object.
 data AlgValLayout = AVLayout !(AlgSum ValProd) | AVErased
 
--- | An algebraic product type
+-- | An algebraic product type.  A product type consists of a constructor
+--   and fields.  The field values are stored in the object according to
+--   the writer and reader methods.
 data ValProd =
     ValProd
     { valConstructor :: !LayoutCon
@@ -170,28 +221,27 @@ valIsPointerless :: ValLayout -> Bool
 valIsPointerless (VLayout t)   = LL.pointerlessness t
 valIsPointerless VErased = True
 
-type Producer = GenLower LL.Val
-type Writer = LL.Val -> GenLower ()
+fromValLayout (ValLayout vl) = vl
+fromValLayout _ = internalError "fromValLayout"
 
--- | An initializer.  Either put a value in a field or write into memory.
-data Initializer = ValInit Producer | WriteInit Writer
+-- | Get the value type corresponding to a 'ValLayout'
+valLayoutValueType :: ValLayout -> LL.ValueType
+valLayoutValueType (VLayout t) = t
+valLayoutValueType VErased     = LL.PrimType LL.UnitType
 
-fromProducer (ValInit m) = m
-fromProducer _ = internalError "Expected a value, got a writer"
-
-fromWriter (WriteInit m) = m
-fromWriter _ = internalError "Expected a writer, got a value"
-
-asWriter :: Initializer -> Writer
-asWriter (WriteInit m) = m
-asWriter (ValInit m) = \dst -> do
-  val <- m
-  primStoreMutable (LL.valType val) dst val
+-- | Get the data type corresponding to a 'ValLayout' that's stored as a field
+--   of another object.
+--   Erased values have no data type.
+valLayoutFieldType :: ValLayout -> Maybe LL.StaticFieldType
+valLayoutFieldType (VLayout t) = Just $ LL.valueToFieldType t
+valLayoutFieldType VErased     = Nothing
 
 -- | The layout of an algebraic data type that is passed by reference.
 type AlgMemLayout = AlgSum MemProd
 
--- | An algebraic product type
+-- | An algebraic product type.
+--
+--   A product type is or contains a record containing its fields.
 data MemProd =
     MemProd
     { memConstructor :: !LayoutCon
@@ -202,30 +252,29 @@ data MemProd =
       -- | Fields of the product type
     , memFields       :: ![Layout]
 
-      -- | Write the fields of the product type, when constructing a value
-      --   with this layout
-    , memWriter       :: !(LL.DynamicRecord -> [Initializer] -> Writer)
+      -- | Initialize the product type, given the initializers for all its
+      --   fields
+    , memWriter       :: !([Initializer] -> Writer)
 
       -- | Read the fields of the product type, when using a @case@ statement
       --   to inspect data with this layout
-    , memReader       :: !(LL.DynamicRecord -> LL.Val -> GenLower [LL.Val])
+    , memReader       :: !(LL.Val -> GenLower [LL.Val])
     }
 
+-- | The layout of a memory object.
 data MemLayout =
-  MLayout
-  { -- | The data type when used as a field of a record,
-    --   and its pointerlessness.
-    memFieldType :: GenLower (LL.DynamicFieldType, LL.Val)
-    
-    -- | The data type as a record, and its pointerlessness.
-  , memType :: GenLower (LL.DynamicRecord, LL.Val)
-
-    -- | Whether an object with this layout is stored via an indirection.
-    --   If 'True', then the layout consists of a single pointer in memory
-    --   that points to the real data; 'memFieldType' and 'memType' describe
-    --   a pointer.  If 'False', then the layout consists of the real data.
-  , memIsIndirect :: {-#UNPACK#-}!Bool
-  }
+    -- | An object with statically known layout
+    StaticMemLayout !LL.ValueType
+    -- | A pointer to a pass-by-reference object
+  | IndirectMemLayout
+    -- | A pass-by-reference object with dynamically determined layout
+    --   * size (unsigned word) 
+    --   * alignment (unsigned word)
+    --   * pointerless (bool)
+  | DynamicMemLayout (GenLower (LL.Val, LL.Val, LL.Val))
+    -- | An erased object; only occurs as a field of another object.
+    --   The erased object is read and written as a unit value.
+  | ErasedMemLayout
 
 data AlgLayout = AlgMemLayout !AlgMemLayout | AlgValLayout !AlgValLayout
 
@@ -235,59 +284,132 @@ isErasedLayout :: Layout -> Bool
 isErasedLayout (ValLayout VErased) = True
 isErasedLayout _ = False
 
-fromValLayout (ValLayout vl) = vl
-fromValLayout _ = internalError "fromValLayout"
-
--- | Get the value type corresponding to a 'ValLayout'
-valLayoutValueType :: ValLayout -> LL.ValueType
-valLayoutValueType (VLayout t) = t
-valLayoutValueType VErased     = LL.PrimType LL.UnitType
-
--- | Get the low-level type used to pass this data type as a
---   constructor parameter
-algParamType :: Layout -> LL.ValueType
-algParamType (ValLayout vl) = valLayoutValueType vl
-algParamType (MemLayout _) = LL.PrimType LL.OwnedType
-
--- | Get the low-level type used to return this data from a case statement
-algReturnType :: Layout -> LL.ValueType
-algReturnType (ValLayout vl) = valLayoutValueType vl
-algReturnType (MemLayout _) = LL.PrimType LL.PointerType
-
 discardStructure :: AlgLayout -> Layout
 discardStructure (AlgMemLayout ml) = MemLayout (discardMemStructure ml)
 discardStructure (AlgValLayout vl) = ValLayout (discardValStructure vl)
 
 -- | Read the contents of a structure field
-readField :: Layout -> LL.DynamicField -> LL.Val -> GenLower LL.Val
-readField (MemLayout mem_member) _ ptr =
-  if memIsIndirect mem_member
-  then primLoadMutable (LL.PrimType LL.PointerType) ptr
-  else return ptr
--- memAccessor mem_member (LL.fieldType field) ptr
-readField (ValLayout val_member) _ ptr =
+readField :: Layout -> LL.Val -> GenLower LL.Val
+readField (MemLayout mem_member) ptr = return ptr
+
+readField (ValLayout val_member) ptr =
   primLoadMutable (valLayoutValueType val_member) ptr
 
-layoutFieldType :: Layout -> GenLower (LL.DynamicFieldType, LL.Val)
-layoutFieldType (MemLayout ml) = memFieldType ml
-layoutFieldType (ValLayout vl) =
-  let field_type =
-        case valLayoutValueType vl
-        of LL.PrimType pt -> LL.PrimField pt
-           LL.RecordType rt -> LL.RecordField (toDynamicRecord rt)
-  in return (field_type, boolV $ LL.pointerlessness vl)
+-- | Get the storage properties of an object having the given layout
+memDynamicObjectType :: MemLayout -> GenLower (LL.Val, LL.Val, LL.Val)
+memDynamicObjectType (StaticMemLayout vt) =
+  return (nativeWordV $ LL.sizeOf vt,
+          nativeWordV $ LL.alignOf vt,
+          boolV $ LL.pointerlessness vt)
 
-buildMemFieldType :: GenLower (LL.DynamicRecord, LL.Val)
-                  -> GenLower (LL.DynamicFieldType, LL.Val)
-buildMemFieldType m = do
-  (recd, is_pointerless) <- m
-  return (LL.RecordField recd, is_pointerless)
+memDynamicObjectType IndirectMemLayout =
+  return (nativeWordV $ LL.sizeOf LL.PointerType,
+          nativeWordV $ LL.alignOf LL.PointerType,
+          boolV False)
 
-buildMemRecord :: GenLower (LL.DynamicFieldType, LL.Val)
-               -> GenLower (LL.DynamicRecord, LL.Val)
-buildMemRecord m = do
-  (recd, is_pointerless) <- m
-  return (singletonDynamicRecord LL.Mutable recd, is_pointerless)
+memDynamicObjectType (DynamicMemLayout l) = l
+
+memDynamicObjectType ErasedMemLayout =
+  internalError "memDynamicObjectType: Not an object"
+
+memStaticFieldType :: MemLayout -> Maybe (LL.StaticFieldType, Bool)
+memStaticFieldType (StaticMemLayout vt) =
+  Just (LL.valueToFieldType vt, LL.pointerlessness vt)
+memStaticFieldType IndirectMemLayout =
+  Just (LL.PrimField LL.PointerType, False)
+memStaticFieldType ErasedMemLayout = Nothing
+memStaticFieldType _ = internalError "memStaticFieldType: Invalid type"
+
+memDynamicFieldType :: MemLayout
+                    -> Maybe (GenLower (LL.DynamicFieldType, LL.Val))
+memDynamicFieldType (StaticMemLayout vt) = Just $ do
+  return (toDynamicFieldType $ LL.valueToFieldType vt,
+          boolV $ LL.pointerlessness vt)
+
+memDynamicFieldType IndirectMemLayout = Just $ do
+  return (LL.PrimField LL.PointerType, boolV False)
+
+memDynamicFieldType (DynamicMemLayout l) = Just $ do
+  (size, alignment, pointerless) <- l
+  return (LL.BytesField size alignment, pointerless)
+
+memDynamicFieldType ErasedMemLayout = Nothing
+
+dynamicFieldType :: Layout -> Maybe (GenLower (LL.DynamicFieldType, LL.Val))
+dynamicFieldType (MemLayout ml) = memDynamicFieldType ml
+dynamicFieldType (ValLayout VErased) = Nothing
+dynamicFieldType (ValLayout (VLayout t)) =
+  Just $ return (toDynamicFieldType $ LL.valueToFieldType t,
+                 boolV $ LL.pointerlessness t)
+
+staticFieldType :: Layout -> Maybe (LL.StaticFieldType, Bool)
+staticFieldType (MemLayout ml) = memStaticFieldType ml
+staticFieldType (ValLayout VErased) = Nothing
+staticFieldType (ValLayout (VLayout t)) =
+  Just (LL.valueToFieldType t, LL.pointerlessness t)
+
+-- | Compute the layout of a record type consisting of the specified fields 
+dynamicRecordLayout :: [Layout] -> GenLower (LL.DynamicRecord, LL.Val)
+dynamicRecordLayout layouts
+  | any is_dynamic layouts = do
+      -- Cannot create a static record layout.  Compute dynamic layout
+      -- for each field.
+      field_info <- sequence $ mapMaybe dynamicFieldType layouts
+      let (fields, pointerlesss) = unzip field_info
+      recd <- createMutableDynamicRecord fields
+      pointerless <- foldM primAnd (boolV True) pointerlesss
+      return (recd, pointerless)
+  | otherwise =
+      -- Create a static record layout
+      let (field_types, pointerlesss) =
+            unzip $ mapMaybe staticFieldType layouts
+      in return (toDynamicRecord $ LL.mutableStaticRecord field_types,
+                 boolV $ or pointerlesss)
+  where
+    is_dynamic (MemLayout (DynamicMemLayout _)) = True
+    is_dynamic _ = False
+
+-------------------------------------------------------------------------------
+-- Printing
+
+pprAlgSum ppr_member (Sum xs _) = braces $ vcat (map member xs)
+  where
+    member (l, x) = LL.pprLit l <+> text "=>" <+> ppr_member x
+
+pprAlgSum ppr_member (One x) = ppr_member x
+
+pprLayoutCon (VarTag v) = pprVar v
+pprLayoutCon TupleTag   = text "tuple"
+
+pprValProd p = parens $ sep (intro : ty : fields)
+  where
+    intro = pprLayoutCon (valConstructor p) <> colon
+    ty = pprValLayout (valType p)
+    fields = map pprLayout $ valFields p
+
+pprMemProd p = parens $ sep (intro : ty : fields)
+  where
+    intro = pprLayoutCon (memConstructor p) <> colon
+    ty = pprMemLayout (memLayout p)
+    fields = map pprLayout $ memFields p
+
+pprLayout (MemLayout ml) = parens $ text "M" <+> pprMemLayout ml
+pprLayout (ValLayout vl) = parens $ text "V" <+> pprValLayout vl
+
+pprValLayout (VLayout t) = LL.pprValueType t
+pprValLayout VErased = text "()"
+
+pprMemLayout (StaticMemLayout t)  = LL.pprValueType t
+pprMemLayout IndirectMemLayout    = text "indirect"
+pprMemLayout (DynamicMemLayout _) = text "dynamic"
+pprMemLayout ErasedMemLayout      = text "()"
+
+pprAlgLayout (AlgMemLayout ml) = pprAlgMemLayout ml
+pprAlgLayout (AlgValLayout vl) = pprAlgValLayout vl
+
+pprAlgMemLayout = pprAlgSum pprMemProd
+pprAlgValLayout (AVLayout x) = pprAlgSum pprValProd x
+pprAlgValLayout AVErased = text "()"
 
 -------------------------------------------------------------------------------
 -- Operations on value layouts
@@ -473,25 +595,25 @@ boxedLayout' (MemProd con layout fields writer reader) =
         , valWriter = new_writer
         , valReader = new_reader}
   where
-    new_writer fld_inits = do
-      (record_type, _) <- memType layout
+    new_writer initializers = do
+      (obj_size, _, _) <- memDynamicObjectType layout
 
       -- Allocate storage and initialize the contents.  Boxed objects
       -- always contain pointers in their header.
-      ptr <- allocateHeapMemComposite (LL.recordSize record_type)
-      writer record_type fld_inits ptr
+      ptr <- allocateHeapMemComposite obj_size
+      writer initializers ptr
 
       -- Return an owned pointer
       emitAtom1 (LL.PrimType LL.OwnedType) $ LL.PrimA LL.PrimCastToOwned [ptr]
 
     new_reader owned_ptr = do
-      (record_type, _) <- memType layout
-
       -- Cast to a non-owned pointer before reading
       ptr <- emitAtom1 (LL.PrimType LL.PointerType) $
              LL.PrimA LL.PrimCastFromOwned [owned_ptr]
-      reader record_type ptr
+      reader ptr
 
+-- | Given the layout of a boxed object's data payload
+--   (basically a bare object), construct the boxed layout.
 boxedObjectLayout :: AlgMemLayout -> AlgValLayout
 boxedObjectLayout l = boxedLayout (objectLayout l)
 
@@ -512,46 +634,25 @@ discardMemStructure (One member) = memLayout member
 unionLayout :: [MemLayout] -> MemLayout
 unionLayout layouts =
   memBytesLayout $ do
-    -- Compute the maximum size and alignment over all fields 
-    (field_records, pointerlessnesses) <- mapAndUnzipM memType layouts
-    max_size <- computeMaximum $ map LL.recordSize field_records
-    max_align <- computeMaximum $ map LL.recordAlignment field_records
+    -- Compute the maximum size and alignment over all fields
+    (unzip3 -> (sizes, alignments, pointerlessnesses)) <-
+      mapM memDynamicObjectType layouts
+    max_size <- computeMaximum sizes
+    max_align <- computeMaximum alignments
     is_pointerless <- foldM primAnd (boolV True) pointerlessnesses
     return (max_size, max_align, is_pointerless)
-
--- | Layout of an object that occupies a single field  
-memValueLayout :: ValLayout -> MemLayout
-memValueLayout value_type =
-  MLayout
-  (return (field_type, is_pointerless))
-  (buildMemRecord $ return (field_type, is_pointerless))
-  False
-  where
-    is_pointerless = boolV $ LL.pointerlessness value_type
-    field_type = 
-      case valLayoutValueType value_type
-      of LL.PrimType pt -> LL.PrimField pt
-         LL.RecordType rt -> LL.RecordField (toDynamicRecord rt)
 
 -- | Layout of an object that consists of undifferentiated bytes
 memBytesLayout :: GenLower (LL.Val, LL.Val, LL.Val)
                   -- ^ Computes size, alignment, and pointerlessness
                -> MemLayout     -- ^ Memory layout
-memBytesLayout mk_size =
-  MLayout mk_field_type (buildMemRecord mk_field_type) False
-  where
-    mk_field_type = do
-      (size, alignment, is_pointerless) <- mk_size
-      return (LL.BytesField size alignment, is_pointerless)
+memBytesLayout mk_size = DynamicMemLayout mk_size
 
 -- | Layout of an object that consists of a record
 memRecordLayout :: GenLower (LL.DynamicRecord, LL.Val) -> MemLayout
-memRecordLayout mk_record =
-  MLayout
-  { memFieldType = buildMemFieldType mk_record 
-  , memType = mk_record 
-  , memIsIndirect = False
-  }
+memRecordLayout mk_record = DynamicMemLayout $ do
+  (recd, is_pointerless) <- mk_record
+  return (LL.recordSize recd, LL.recordAlignment recd, is_pointerless)
 
 -- | The layout of an indirect reference.  The reference occupies one pointer
 --   worth of memory.  It points to a dynamically allocated data structure
@@ -559,35 +660,26 @@ memRecordLayout mk_record =
 --   any possible value of the referent type.
 referenceLayout :: MemLayout -> MemProd
 referenceLayout layout =
-  MemProd (VarTag $ pyonBuiltin The_referenced) reference_layout [MemLayout layout]
-  writer reader
+  MemProd (VarTag $ pyonBuiltin The_referenced) IndirectMemLayout
+  [MemLayout layout] writer reader
   where
-    writer _ [init] dst = do
+    writer [init] dst = do
       -- Allocate memory
-      (referent_record, is_pointerless) <- memType layout
-      let referent_size = LL.recordSize referent_record
-      referent <- allocateHeapMem referent_size is_pointerless
-      
+      (size, align, is_pointerless) <- memDynamicObjectType layout
+      referent <- allocateHeapMem size is_pointerless
+
       -- Initialize the allocated memory
       asWriter init referent
-      
+
       -- Save the pointer
       primStoreMutable (LL.PrimType LL.PointerType) dst referent
     
-    reader _ src = do
+    reader src = do
       -- Read the pointer to the referent
       referent <- primLoadMutable (LL.PrimType LL.PointerType) src
 
       -- Get the referent
       return [referent]
-
-    reference_layout =
-      -- Create the layout of a reference.  It's a pointer.
-      MLayout (return (field_type, boolV False))
-      (return (singletonDynamicRecord LL.Mutable field_type, boolV False))
-      True
-      where
-        field_type = LL.PrimField LL.PointerType
 
 -- | The layout of a polymorphic reference.  Its size and alignment are
 --   computed at run time.
@@ -603,44 +695,39 @@ arrayLayout :: GenLower LL.Val -> MemLayout -> MemLayout
 arrayLayout get_count element =
   memBytesLayout $ do
     count <- get_count
-    (element_record, is_pointerless) <- memType element
+    (elt_size, elt_align, elt_pointerless) <- memDynamicObjectType element
 
     -- Array size = count * (pad (alignment element) (size element)
-    let elt_size = LL.recordSize element_record
-    let elt_align = LL.recordAlignment element_record
     int_size <- primCastZ (LL.PrimType LL.nativeIntType) elt_size
     padded_elt_size <- addRecordPadding int_size elt_align
     array_size <- nativeMulZ count padded_elt_size
     array_uint_size <- primCastZ (LL.PrimType LL.nativeWordType) array_size
     
-    return (array_uint_size, elt_align, is_pointerless)
+    return (array_uint_size, elt_align, elt_pointerless)
 
 -- | The layout of a product type.
 productMemLayout :: LayoutCon -> [Layout] -> MemProd
 productMemLayout con fields =
   MemProd con layout fields writer reader
   where
-    layout = memRecordLayout $ do
-      (field_types, pointerlesss) <- mapAndUnzipM layoutFieldType fields
-      pointerless <- foldM primAnd (boolV True) pointerlesss
-      recd <- createMutableDynamicRecord field_types
-      return (recd, pointerless)
+    layout = memRecordLayout $ dynamicRecordLayout fields
 
-    writer record_type initializers dst 
+    writer initializers dst 
       | length initializers /= length fields = 
           internalError "productMemLayout: Wrong number of field initializers"
       | otherwise = do
-          let record_fields = LL.recordFields record_type
+          (recd, _) <- dynamicRecordLayout fields
+          let record_fields = LL.recordFields recd
           forM_ (zip record_fields initializers) $ \(fld, initializer) -> do
             field_ptr <- referenceField fld dst
             let layout = fieldTypeToRecord $ LL.fieldType fld
             asWriter initializer field_ptr
 
-    reader record_type src = do
+    reader src = do
+      (record_type, _) <- dynamicRecordLayout fields
       let record_fields = LL.recordFields record_type
       forM (zip record_fields fields) $ \(fld, member) -> do
-        field_ptr <- referenceField fld src
-        readField member fld field_ptr
+        readField member =<< referenceField fld src
 
 -- | The layout of a type that's not a sum type.
 nonSumMemLayout :: MemProd -> AlgMemLayout
@@ -659,8 +746,8 @@ taggedSumMemLayout members = Sum tagged_members get_tag
     
     payload_alignment :: GenLower LL.Val
     payload_alignment = do
-      (recd, _) <- memType payload_layout
-      return (LL.recordAlignment recd)
+      (_, alignment, _) <- memDynamicObjectType payload_layout
+      return alignment
     
     tag_type = LL.litType $ fst $ head members
     
@@ -668,7 +755,8 @@ taggedSumMemLayout members = Sum tagged_members get_tag
     -- given the same alignment in all cases
     tagged_type layout = do
       alignment <- payload_alignment
-      (field_type, is_pointerless) <- memFieldType layout
+      (field_type, is_pointerless) <-
+        case memDynamicFieldType layout of Just m -> m
       recd <- createMutableDynamicRecord
               [LL.AlignField alignment, LL.PrimField tag_type, field_type]
       return (recd, is_pointerless)
@@ -679,24 +767,22 @@ taggedSumMemLayout members = Sum tagged_members get_tag
         tagged_member tag (MemProd cons layout fs writer reader) =
           MemProd cons (tagged_layout tag layout) fs tagged_writer tagged_reader
           where
-            tagged_writer record_type initializers dst = do
+            tagged_writer initializers dst = do
+              (record_type, _) <- tagged_type layout
               let [tag_field, payload_field] = LL.recordFields record_type
-                  LL.RecordField payload_record = LL.fieldType payload_field
 
               -- Write the tag
               storeField tag_field dst (LL.LitV tag)
 
               -- Write the payload
-              payload_ptr <- referenceField payload_field dst
-              writer payload_record initializers payload_ptr
+              writer initializers =<< referenceField payload_field dst
             
-            tagged_reader record_type ptr = do
+            tagged_reader ptr = do
+              (record_type, _) <- tagged_type layout
               let payload_field = record_type !!: 1
-                  LL.RecordField payload_record = LL.fieldType payload_field
 
               -- Read the payload
-              payload_ptr <- referenceField payload_field ptr
-              reader payload_record payload_ptr              
+              reader =<< referenceField payload_field ptr
 
         tagged_layout tag layout = memRecordLayout (tagged_type layout)
 
@@ -707,10 +793,11 @@ objectLayout mem_layout =
   case mem_layout
   of Sum members get_tag ->
        let get_tag' ptr = do
-             (payload, _) <- memFieldType $ discardMemStructure mem_layout
-             object_record <- mk_object_record payload
-             payload_ptr <- referenceField (object_record !!: 1) ptr
-             get_tag payload_ptr
+             -- Compute offset of payload
+             object_record <- mk_object_record (discardMemStructure mem_layout)
+
+             -- Get the tag from the payload
+             get_tag =<< referenceField (object_record !!: 1) ptr
            members' = [(tag, member_layout l) | (tag, l) <- members]
        in Sum members' get_tag'
      One member -> One $ member_layout member
@@ -718,29 +805,26 @@ objectLayout mem_layout =
     member_layout (MemProd cons layout fields writer reader) =
       MemProd cons (object_layout layout) fields obj_writer obj_reader
       where
-        obj_writer recd initializers dst = do
+        obj_writer initializers dst = do
           -- TODO: Write object header
           -- Write payload
+          recd <- mk_object_record (discardMemStructure mem_layout)
           let payload_field = recd !!: 1
-              LL.RecordField payload_record = LL.fieldType payload_field
-          payload_ptr <- referenceField payload_field dst
-          writer payload_record initializers payload_ptr
+          writer initializers =<< referenceField payload_field dst
         
-        obj_reader recd src = do
+        obj_reader src = do
+          recd <- mk_object_record (discardMemStructure mem_layout)
           let payload_field = recd !!: 1
-              LL.RecordField payload_record = LL.fieldType payload_field
-          payload_ptr <- referenceField payload_field src
-          reader payload_record payload_ptr
+          reader =<< referenceField payload_field src
 
     object_layout layout = memRecordLayout $ do
-      (field_type, _) <- memFieldType layout
-
+      recd <- mk_object_record layout
       -- The header has pointers that must be tracked,
       -- so pointerlessness is False
-      recd <- mk_object_record field_type
       return (recd, boolV False)
 
-    mk_object_record payload =
+    mk_object_record layout = do
+      (payload, _) <- case memDynamicFieldType layout of Just m -> m
       createMutableDynamicRecord [LL.RecordField objectHeaderRecord', payload]
     
 -------------------------------------------------------------------------------
@@ -806,11 +890,8 @@ algMemIntro' (MemProd { memLayout = layout
   ret_param <- lift $ LL.newAnonymousVar (LL.PrimType LL.PointerType)
 
   genLambda [LL.PrimType LL.PointerType] [] $ \[ret_param] -> do
-    -- Create record type
-    (record_type, _) <- memType layout
-
     -- Write fields
-    writer record_type (algInitializers fields fs) ret_param
+    writer (algInitializers fields fs) ret_param
     return []
 
 algValIntro vl con =
@@ -856,6 +937,12 @@ algebraicElim (AlgValLayout AVErased) _ _ =
 algebraicElim (AlgMemLayout layout) scr branches =
   eliminateSum memConstructor algMemElim layout scr branches
 
+eliminateSum :: (a -> LayoutCon)
+             -> (a -> LL.Val -> ([LL.Val] -> GenLower LL.Stm) -> GenLower LL.Stm)
+             -> AlgSum a
+             -> LL.Val
+             -> Branches
+             -> GenLower LL.Stm
 eliminateSum get_ctors elim (Sum members get_tag) scr branches = do
   ret_types <- getReturnTypes
   alts <- lift $ forM branches $ \ (con, branch) -> do
@@ -879,11 +966,13 @@ eliminateSum get_ctors elim (One member) scr [(con, branch)]
 eliminateSum _ _ _ _ _ =
   internalError "algebraicElim: Wrong number of case alternatives"
 
+algValElim :: ValProd -> LL.Val -> ([LL.Val] -> GenLower LL.Stm)
+           -> GenLower LL.Stm
 algValElim layout scr branch = valReader layout scr >>= branch
 
-algMemElim layout scr branch = do
-  (record_type, _) <- memType $ memLayout layout
-  memReader layout record_type scr >>= branch
+algMemElim :: MemProd -> LL.Val -> ([LL.Val] -> GenLower LL.Stm)
+           -> GenLower LL.Stm
+algMemElim layout scr branch = memReader layout scr >>= branch
 
 -------------------------------------------------------------------------------
 -- Computing the layout of a data type
@@ -1097,23 +1186,24 @@ getLayout ty = do
 getValLayout :: Type -> Lower ValLayout
 getValLayout ty
   | getLevel ty /= TypeLevel = internalError "getValLayout"
-  | otherwise =
-      case fromTypeApp ty
-      of (VarT op, args)
+  | otherwise = do
+      ty' <- Substitute.freshen ty
+      case fromTypeApp ty' of
+         (VarT op, args)
            | op `isPyonBuiltin` The_bool  -> prim_layout LL.BoolType
            | op `isPyonBuiltin` The_int   -> prim_layout LL.pyonIntType
            | op `isPyonBuiltin` The_float -> prim_layout LL.pyonFloatType
            | op `isPyonBuiltin` The_Pf    -> return VErased
            | otherwise -> do
                tenv <- getTypeEnv
-               case toBaseKind $ typeKind tenv ty of
+               case toBaseKind $ typeKind tenv ty' of
                  BoxK ->
                    -- All boxed types have the same layout
                    prim_layout LL.OwnedType
                  ValK ->
                    -- Layout of a value type depends on the data constructor, 
                    -- which must be known (i.e. not a variable or function)
-                   case lookupDataTypeForLayout tenv ty
+                   case lookupDataTypeForLayout tenv ty'
                    of Just inst_type@(tycon, _, _) -> do
                         -- Use the algebraic data type layout
                         alg_layout <- getValDataTypeLayout inst_type
@@ -1127,43 +1217,43 @@ getValLayout ty
            -- have a value layout.
            arg_layouts <- mapM getLayout args
            return $ VLayout $ LL.RecordType $ LL.constStaticRecord $
-             map (LL.valueToFieldType . valLayoutValueType . fromValLayout)
-             arg_layouts
+             mapMaybe (valLayoutFieldType . fromValLayout) arg_layouts
          (FunT {}, []) ->
            prim_layout LL.OwnedType
-         (AllT (v ::: k) ty', []) ->
+         (AllT (v ::: k) ty'', []) ->
            -- Look through the 'forall' type
-           assume v k $ getValLayout ty'
+           assume v k $ getValLayout ty''
          (CoT {}, [_, _]) ->
            -- Coercions are erased
            return VErased
 
-         _ -> traceShow (pprType ty) $ internalError "getLayout: Head is not a type application"
+         _ -> internalError "getLayout: Head is not a type application"
   where
     prim_layout t = return $ VLayout $ LL.PrimType t
 
 -- | Get the layout of a bare type.  The type should be in WHNF.
 getRefLayout :: Type -> Lower MemLayout
-getRefLayout ty =
-  case fromTypeApp ty
-  of (VarT op, [arg])
-       | op `isPyonBuiltin` The_Referenced ->
-           return $ memValueLayout $ VLayout (LL.PrimType LL.PointerType)
+getRefLayout ty = do
+  ty' <- Substitute.freshen ty
+  case fromTypeApp ty' of
+     (VarT op, [arg])
+       | op `isPyonBuiltin` The_Referenced -> do
+           return IndirectMemLayout
      (VarT op, [arg1, arg2])
        | op `isPyonBuiltin` The_arr -> do
            field_layout <- getRefLayout =<< reduceToWhnf arg2
            return $ arrayLayout (lookupIndexedInt arg1) field_layout
-     (AllT (v ::: k) ty', []) ->      
+     (AllT (v ::: k) rng, []) ->
        -- Look through the 'forall' type
-       assume v k $ getRefLayout ty'
+       assume v k $ getRefLayout rng
      _ -> do
        tenv <- getTypeEnv
-       case lookupDataTypeForLayout tenv ty of
+       case lookupDataTypeForLayout tenv ty' of
          Nothing ->
-           case ty
+           case ty'
            of AnyT {} -> internalError "getLayout: Not implemented for Any"
               _ -> -- Type variable or type variable application
-                return $ polymorphicLayout ty
+                return $ polymorphicLayout ty'
               _ -> internalError "getRefLayout: Unexpected type"
          Just inst_type@(data_type, _, _) ->
            case dataTypeKind data_type
