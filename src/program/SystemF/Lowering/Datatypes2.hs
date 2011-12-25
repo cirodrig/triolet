@@ -33,6 +33,7 @@ module SystemF.Lowering.Datatypes2
         getAlgLayout,
 
         -- * Code generation
+        staticObject,
         algebraicIntro,
         algebraicElim)
 where
@@ -57,6 +58,7 @@ import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
 import LowLevel.CodeTypes((!!:))
 import qualified LowLevel.Print as LL
+import LowLevel.Records
 import SystemF.Syntax
 import SystemF.Lowering.LowerMonad
 import Type.Environment
@@ -198,6 +200,9 @@ data ValProd =
       -- | Fields of the product type
     , valFields      :: ![Layout]
 
+      -- | Create a static value
+    , valBuilder      :: !([LL.Val] -> Lower (LL.Val, [LL.GlobalDef]))
+
       -- | Create a value, given the fields of the product type.
       --   All fields including erased fields are passed.
     , valWriter      :: !([Initializer] -> Producer)
@@ -252,6 +257,9 @@ data MemProd =
       -- | Fields of the product type
     , memFields       :: ![Layout]
 
+      -- | Create a static value
+    , memBuilder      :: !([LL.Val] -> Lower (LL.Val, [LL.GlobalDef]))
+
       -- | Initialize the product type, given the initializers for all its
       --   fields
     , memWriter       :: !([Initializer] -> Writer)
@@ -294,6 +302,17 @@ readField (MemLayout mem_member) ptr = return ptr
 
 readField (ValLayout val_member) ptr =
   primLoadMutable (valLayoutValueType val_member) ptr
+
+memStaticObjectType :: MemLayout -> LL.ValueType
+memStaticObjectType (StaticMemLayout vt) = vt
+
+memStaticObjectType IndirectMemLayout = LL.PrimType LL.PointerType
+
+memStaticObjectType (DynamicMemLayout _) =
+  internalError "memStaticObjectType: Not a valid static type"
+
+memStaticObjectType ErasedMemLayout =
+  internalError "memStaticObjectType: Not a valid static type"
 
 -- | Get the storage properties of an object having the given layout
 memDynamicObjectType :: MemLayout -> GenLower (LL.Val, LL.Val, LL.Val)
@@ -426,9 +445,9 @@ enumValLayout members = AVLayout $ Sum (map make_layout members) return
     tag_type = case members of (_, lit, _) : _ -> LL.litType lit
 
     make_layout (con, tag, fields) =
-      (tag, ValProd (VarTag con) ty fields writer reader)
+      (tag, ValProd (VarTag con) ty fields builder writer reader)
       where
-        (writer, reader) = nullaryValueConCode (LL.LitV tag) fields
+        (builder, writer, reader) = nullaryValueConCode (LL.LitV tag) fields
         ty = VLayout $ LL.PrimType tag_type
 
 -- | The layout of an (enumerative + product) type.
@@ -459,15 +478,19 @@ enumProdLayout e_members (p_con, p_tag, p_prod) =
 
     -- Construct the layout for an enum member
     make_layout (con, tag, fields) =
-      (tag, ValProd (VarTag con) ty fields writer reader)
+      (tag, ValProd (VarTag con) ty fields builder writer reader)
       where
         value = LL.RecV record_type [LL.LitV tag, dummy_payload_value]
-        (writer, reader) = nullaryValueConCode value fields
+        (builder, writer, reader) = nullaryValueConCode value fields
     
     -- The layout for the product member
     p_layout =
-      (p_tag, ValProd (VarTag p_con) ty (valFields p_prod) writer reader)
+      (p_tag, ValProd (VarTag p_con) ty (valFields p_prod) builder writer reader)
       where
+        builder inits = do
+          (val, defs) <- valBuilder p_prod inits
+          return (LL.RecV record_type [LL.LitV p_tag, val], defs)
+
         writer inits = do
           -- Construct the product value
           val <- valWriter p_prod inits
@@ -501,12 +524,20 @@ dummyRecordValue record_type = LL.RecV record_type field_types
 -- | The layout of a product value type
 productValLayout :: LayoutCon -> [ValLayout] -> ValProd
 productValLayout con fields =
-  ValProd con ltype (map ValLayout fields) writer reader
+  ValProd con ltype (map ValLayout fields) builder writer reader
   where
     num_fields = length fields
     record_type =
       -- Create a record containing only non-erased fields
       LL.constStaticRecord [LL.valueToFieldType f | VLayout f <- fields]
+
+    builder args
+      | length args == num_fields = do
+          -- Ignore the erased arguments
+          let kept_args = [a | (a, VLayout _) <- zip args fields]
+          return (LL.RecV record_type kept_args, [])
+      | otherwise = internalError "productValLayout: Wrong number of fields"
+
     writer args
       | length args == num_fields = do
           -- Ignore the erased arguments
@@ -540,9 +571,9 @@ nonSumValLayout = AVLayout . One
 --   The data type may have fields; the fields must all be erased.
 unitValLayout :: LayoutCon -> [Layout] -> AlgValLayout
 unitValLayout con fields =
-  nonSumValLayout $ ValProd con unit_type fields writer reader
+  nonSumValLayout $ ValProd con unit_type fields builder writer reader
   where
-    (writer, reader) = nullaryValueConCode (LL.LitV LL.UnitL) fields
+    (builder, writer, reader) = nullaryValueConCode (LL.LitV LL.UnitL) fields
     unit_type = VLayout (LL.PrimType LL.UnitType)
 
 -- | Generate the code to construct or deconstruct a nullary value.
@@ -551,13 +582,18 @@ unitValLayout con fields =
 --   field values as arguments and ignores them.  The destructor 
 --   returns field values.
 nullaryValueConCode :: LL.Val -> [Layout]
-                    -> (([Initializer] -> Producer),
+                    -> (([LL.Val] -> Lower (LL.Val, [LL.GlobalDef])),
+                        ([Initializer] -> Producer),
                         (LL.Val -> GenLower [LL.Val]))
 nullaryValueConCode value fields
-  | all isErasedLayout fields = num_fields `seq` (writer, reader)
+  | all isErasedLayout fields = num_fields `seq` (builder, writer, reader)
   | otherwise = internalError "unitValueLayout: Data type has fields"
   where
     num_fields = length fields
+
+    builder fs
+      | length fs == num_fields = return (value, [])
+      | otherwise = internalError "unitValLayout: Wrong number of fields"
 
     writer fs 
       | length fs == num_fields = return value
@@ -588,13 +624,23 @@ boxedLayout (One m) = AVLayout $ One (boxedLayout' m)
 -- | Helper function for 'boxedLayout'.  Construct the layout of a boxed
 --   sum type.
 boxedLayout' :: MemProd -> ValProd
-boxedLayout' (MemProd con layout fields writer reader) =
+boxedLayout' (MemProd con layout fields builder writer reader) =
   ValProd { valConstructor = con
-        , valType = VLayout (LL.PrimType LL.OwnedType)
-        , valFields = fields
-        , valWriter = new_writer
-        , valReader = new_reader}
+          , valType = VLayout (LL.PrimType LL.OwnedType)
+          , valFields = fields
+          , valBuilder = new_builder
+          , valWriter = new_writer
+          , valReader = new_reader}
   where
+    new_builder fields = do
+      -- Construct the object
+      (val, defs) <- builder fields
+
+      -- Bind it to a global definition
+      tmp_var <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
+      let object_def = LL.GlobalDataDef (LL.Def tmp_var (LL.StaticData val))
+      return (LL.VarV tmp_var, object_def : defs)
+
     new_writer initializers = do
       (obj_size, _, _) <- memDynamicObjectType layout
 
@@ -661,8 +707,14 @@ memRecordLayout mk_record = DynamicMemLayout $ do
 referenceLayout :: MemLayout -> MemProd
 referenceLayout layout =
   MemProd (VarTag $ pyonBuiltin The_referenced) IndirectMemLayout
-  [MemLayout layout] writer reader
+  [MemLayout layout] builder writer reader
   where
+    builder [obj_value] = do
+      -- Create a global data definition with this value 
+      tmp_var <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
+      let obj_def = LL.GlobalDataDef $ LL.Def tmp_var (LL.StaticData obj_value)
+      return (LL.VarV tmp_var, [obj_def])
+          
     writer [init] dst = do
       -- Allocate memory
       (size, align, is_pointerless) <- memDynamicObjectType layout
@@ -708,9 +760,17 @@ arrayLayout get_count element =
 -- | The layout of a product type.
 productMemLayout :: LayoutCon -> [Layout] -> MemProd
 productMemLayout con fields =
-  MemProd con layout fields writer reader
+  MemProd con layout fields builder writer reader
   where
     layout = memRecordLayout $ dynamicRecordLayout fields
+
+    builder args
+      | length args /= length fields = 
+          internalError "productMemLayout: Wrong number of field initializers"
+      | otherwise = do
+          let record_type =
+                LL.mutableStaticRecord $ map (LL.valueToFieldType . LL.valType) args
+          return (LL.RecV record_type args, [])
 
     writer initializers dst 
       | length initializers /= length fields = 
@@ -748,9 +808,19 @@ taggedSumMemLayout members = Sum tagged_members get_tag
     payload_alignment = do
       (_, alignment, _) <- memDynamicObjectType payload_layout
       return alignment
-    
+
+    -- If static records of this data type can be built, this is the
+    -- size and alignment of the payload
+    static_payload_alignment :: (Int, Int)
+    static_payload_alignment =
+      foldl' (\(a, b) (c, d) -> (max a c, max b d)) (0, 1)
+      [(LL.sizeOf field, LL.alignOf field)
+      | (_, p) <- members,
+        let Just (field, _) = memStaticFieldType $ memLayout p]
+
+    -- Data type used for the tag
     tag_type = LL.litType $ fst $ head members
-    
+
     -- Create a record type containing tag and payload.  The record type is
     -- given the same alignment in all cases
     tagged_type layout = do
@@ -761,12 +831,26 @@ taggedSumMemLayout members = Sum tagged_members get_tag
               [LL.AlignField alignment, LL.PrimField tag_type, field_type]
       return (recd, is_pointerless)
 
+    static_tagged_type layout =
+      let Just (field_type, is_pointerless) = memStaticFieldType layout
+          (_, alignment) = static_payload_alignment
+          recd = LL.mutableStaticRecord
+                 [LL.AlignField alignment, LL.PrimField tag_type, field_type]
+      in (recd, is_pointerless)
+
     tagged_members :: [(LL.Lit, MemProd)]
     tagged_members = [(tag, tagged_member tag l) | (tag, l) <- members]
       where
-        tagged_member tag (MemProd cons layout fs writer reader) =
-          MemProd cons (tagged_layout tag layout) fs tagged_writer tagged_reader
+        tagged_member tag (MemProd cons layout fs builder writer reader) =
+          MemProd cons (tagged_layout tag layout) fs
+          tagged_builder tagged_writer tagged_reader
           where
+            tagged_builder values = do
+              let (record_type, _) = static_tagged_type layout
+              (payload, defs) <- builder values
+              let val = LL.RecV record_type [LL.LitV tag, payload]
+              return (val, defs)
+
             tagged_writer initializers dst = do
               (record_type, _) <- tagged_type layout
               let [tag_field, payload_field] = LL.recordFields record_type
@@ -802,9 +886,21 @@ objectLayout mem_layout =
        in Sum members' get_tag'
      One member -> One $ member_layout member
   where
-    member_layout (MemProd cons layout fields writer reader) =
-      MemProd cons (object_layout layout) fields obj_writer obj_reader
+    member_layout (MemProd cons layout fields builder writer reader) =
+      MemProd cons (object_layout layout) fields obj_builder obj_writer obj_reader
       where
+        obj_builder values = do
+          let Just (field_type, is_pointerless) = memStaticFieldType layout
+          (payload, defs) <- builder values
+          let record_type =
+                LL.mutableStaticRecord [LL.RecordField objectHeaderRecord,
+                                     LL.valueToFieldType $ LL.valType payload]
+
+              -- TODO: Initialize object header
+              recd = LL.RecV record_type [dummyRecordValue objectHeaderRecord,
+                                          payload]
+          return (recd, defs)
+
         obj_writer initializers dst = do
           -- TODO: Write object header
           -- Write payload
@@ -862,6 +958,23 @@ lowerFunctionType env ty = runLowering env $ do
   ret_type <- fmap maybeToList $ lowerType local_tenv ret
   let ll_type = LL.closureFunctionType param_types ret_type
   return ll_type
+
+-- | Generate a static data definition from a data constructor application.
+staticObject :: AlgLayout -> Var -> [LL.Val] -> Lower (LL.Val, [LL.GlobalDef])
+staticObject (AlgMemLayout ml) con fields =
+  staticMemObject ml (VarTag con) fields
+staticObject (AlgValLayout (AVLayout vl)) con fields =
+  staticValObject vl (VarTag con) fields
+
+staticMemObject ml con fields =
+  case findMember ((con ==) . memConstructor) ml
+  of Just mb -> memBuilder mb fields
+     Nothing -> internalError "staticObject: Constructor not found"
+
+staticValObject vl con fields =
+  case findMember ((con ==) . valConstructor) vl
+  of Just mb -> valBuilder mb fields
+     Nothing -> internalError "staticObject: Constructor not found"
 
 -- | Generate the low-level translation of a data constructor.  If the
 --   data constructor takes a return pointer, then a lambda function
