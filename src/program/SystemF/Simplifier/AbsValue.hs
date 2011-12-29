@@ -32,6 +32,7 @@ module SystemF.Simplifier.AbsValue
         applyCode,
         interpretCon,
         interpretInitializer,
+        interpretConstant,
 
         -- * Concretization
         concretize,
@@ -766,6 +767,20 @@ interpretInitializer code = do
             Nothing -> return $ ReturnAC topCode
        TopAV -> return $ ReturnAC topCode
        _ -> internalError "interpretInitializer: Type error detected"
+
+-- | Compute the value of a constant value
+interpretConstant :: Constant Mem -> AbsCode
+interpretConstant c = interpret_exp $ constExp c
+  where
+    interpret_exp expression =
+      case fromExpM expression
+      of VarE _ v -> valueCode $ VarAV v
+         LitE _ l -> valueCode $ LitAV l
+         ConE _ con args ->
+           let args_values = map interpret_exp args
+           in valueCode $ DataAV $ AbsData con args_values
+         _ ->
+           internalError "interpretConstant: Unexpected expression"
 
 -- | Compute the value of a case scrutinee, given that it matched a pattern
 --   in a case alternative.

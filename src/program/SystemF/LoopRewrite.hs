@@ -260,6 +260,14 @@ rwAlt (AltM alt) = do
 
 rwDef d = mapMDefiniens rwFun d
 
+rwGlobalDef (Def v ann (FunEnt f)) = do 
+  f' <- rwFun f
+  return $ Def v ann (FunEnt f')
+
+rwGlobalDef def@(Def _ _ (DataEnt _)) =
+  -- There's no code to rewrite here
+  return def
+
 rwFun (FunM f) = do
   body <- rwExp $ funBody f
   return $ FunM $ f {funBody = body}
@@ -268,8 +276,10 @@ rwExport (Export pos spec f) = do
   f' <- rwFun f
   return (Export pos spec f')
 
+rwTopLevel :: [DefGroup (GDef Mem)] -> [Export Mem]
+           -> LRW ([DefGroup (GDef Mem)], [Export Mem])
 rwTopLevel defss exports = do
-  defss' <- mapM (mapM rwDef) defss
+  defss' <- mapM (mapM rwGlobalDef) defss
   exports' <- mapM rwExport exports
   return (defss', exports')
 

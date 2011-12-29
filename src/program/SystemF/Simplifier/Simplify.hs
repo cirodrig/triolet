@@ -236,33 +236,62 @@ withKnownValue v val m = LR $ \env ->
     trace_assignment =
       traceShow (text "Simpl" <+> pprVar v <+> text "=" <+> pprAbsCode val)
 
+class Definiens t where
+  definiensInfo :: t Mem -> ExpInfo
+  definiensIsInliningCandidate :: SimplifierPhase -> Def t Mem -> Bool
+  definiensValue :: Def t Mem -> AbsCode
+  definiensTypeSM :: t SM -> Type
+
+instance Definiens Fun where
+  definiensInfo = funInfo . fromFunM
+  definiensIsInliningCandidate = isInliningCandidate
+  definiensValue (Def v _ f) =
+    let fun_info = funInfo $ fromFunM f
+    in labelCodeVar v $ labelCode (ExpM $ LamE fun_info f) $ topCode
+  definiensTypeSM = functionTypeSM
+
+instance Definiens Ent where
+  definiensInfo (FunEnt f) = definiensInfo f
+  definiensInfo (DataEnt d) = definiensInfo d
+
+  definiensIsInliningCandidate phase (Def v ann (FunEnt f)) =
+    definiensIsInliningCandidate phase (Def v ann f)
+  definiensIsInliningCandidate phase (Def v ann (DataEnt d)) =
+    True
+
+  definiensValue (Def v ann (FunEnt f)) =
+    definiensValue (Def v ann f)
+  definiensValue (Def v ann (DataEnt d)) =
+    definiensValue (Def v ann d)
+
+  definiensTypeSM (FunEnt f) = definiensTypeSM f
+  definiensTypeSM (DataEnt d) = definiensTypeSM d
+
+instance Definiens Constant where
+  definiensInfo = constInfo
+  definiensIsInliningCandidate phase _ = True
+  definiensValue (Def v ann d) =
+    labelCodeVar v $ interpretConstant d
+
+  definiensTypeSM = constType
+  
+
 -- | Add a function definition's value to the environment.
 --
 --   The function may or may not be added, depending on its attributes and
 --   whether the function is part of a recursive group.
-withDefValue :: Bool -> FDef Mem -> LR a -> LR a
-withDefValue is_rec def@(Def v _ f) m = do
+withDefValue :: Definiens t => Def t Mem -> LR a -> LR a
+withDefValue def@(Def v _ f) m = do
   phase <- getPhase
-  let fun_info = funInfo $ fromFunM f
-      fun_val = labelCodeVar v $
-                labelCode (ExpM $ LamE defaultExpInfo f) $
-                topCode
-      can_inline = if is_rec
-                   then isRecInliningCandidate phase def 
-                   else isInliningCandidate phase def
-  if can_inline then withKnownValue v fun_val m else m
+  if definiensIsInliningCandidate phase def
+    then withKnownValue v (definiensValue def) m
+    else m
 
 -- | Add a function definition to the environment, but don't inline it
 withUninlinedDefValue :: FDef Mem -> LR a -> LR a
 withUninlinedDefValue (Def v _ f) m = m
 
-withDefValues :: Bool -> DefGroup (FDef Mem) -> LR a -> LR a
-withDefValues False  (NonRec def) m = withDefValue False def m
-
--- Nonrecursive groups are not recursive
-withDefValues True   (NonRec _)   m = internalError "withDefValues"
-
-withDefValues is_rec (Rec defs)   m = foldr (withDefValue is_rec) m defs
+withDefValues defs m = foldr withDefValue m defs
 
 -- | Decide whether a function may be inlined within its own recursive
 --   definition group.  The function's attributes are used for the decision.
@@ -360,13 +389,13 @@ assumePatterns :: [PatM] -> LR a -> LR a
 assumePatterns pats m = foldr assumePattern m pats
 
 -- | Add the function definition types to the environment
-assumeDefs :: DefGroup (FDef SM) -> LR a -> LR a
+assumeDefs :: Definiens t => DefGroup (Def t SM) -> LR a -> LR a
 assumeDefs defs m = foldr assumeDefSM m (defGroupMembers defs)
 
-assumeDefSM :: FDef SM -> LR a -> LR a
-assumeDefSM (Def v ann f) m =
+assumeDefSM :: Definiens t => Def t SM -> LR a -> LR a
+assumeDefSM (Def v ann ent) m =
   let conlike = defAnnConlike ann
-  in assumeWithProperties v (functionTypeSM f) conlike m
+  in assumeWithProperties v (definiensTypeSM ent) conlike m
 
 -- | Print the known values on entry to the computation.
 --
@@ -1682,7 +1711,7 @@ rwLetrec is_stream_arg inf defs body = do
 
     NonRec {} -> do
       -- Do not inline this function
-      withDefs defs $ \defs' -> do
+      withFDefs defs $ \defs' -> do
         (body', _) <- rwExp is_stream_arg body
         rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
 
@@ -1703,7 +1732,7 @@ rwLetrec is_stream_arg inf defs body = do
       substituted_body <- substitute subst body
 
       -- Rewrite other functions
-      withDefs (Rec substituted_defs) $ \defs' -> do
+      withFDefs (Rec substituted_defs) $ \defs' -> do
         (body', _) <- rwExp is_stream_arg substituted_body
         rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
 
@@ -2456,6 +2485,15 @@ rwFun' (FunSM f) =
 rwDef :: FDef SM -> LR (FDef Mem)
 rwDef def = mapMDefiniens (liftM fst . rwFun) def
 
+rwGlobalDef :: GDef SM -> LR (GDef Mem)
+rwGlobalDef (Def v ann (FunEnt f)) = do
+  (f', _) <- rwFun f
+  return $ Def v ann (FunEnt f')
+
+rwGlobalDef (Def v ann (DataEnt (Constant inf ty e))) = do
+  e' <- applySubstitution e
+  return $ Def v ann (DataEnt (Constant inf ty e'))
+
 rwExport :: Subst -> Export Mem -> LR (Export Mem)
 rwExport initial_subst (Export pos spec f) = do
   subst_f <- freshenFun initial_subst f
@@ -2464,38 +2502,42 @@ rwExport initial_subst (Export pos spec f) = do
 
 -- | Rewrite a definition group.  Then, add the defined functions to the
 --   environment and rewrite something else.
-withDefs :: DefGroup (FDef SM) -> (DefGroup (FDef Mem) -> LR a) -> LR a
-withDefs (NonRec def) k = do
-  def' <- rwDef def
-  assumeDefSM def $ withDefValue False def' $ k (NonRec def')
+withDefs :: Definiens t =>
+            (Def t SM -> LR (Def t Mem))
+         -> DefGroup (Def t SM)
+         -> (DefGroup (Def t Mem) -> LR a)
+         -> LR a
+withDefs do_def (NonRec def) k = do
+  def' <- do_def def
+  assumeDefSM def $ withDefValue def' $ k (NonRec def')
 
-withDefs defgroup@(Rec defs) k = assumeDefs defgroup $ do
+withDefs do_def defgroup@(Rec defs) k = assumeDefs defgroup $ do
   -- Don't inline recursive functions in general.  However, we _do_ want to
   -- inline wrapper functions into non-wrapper functions, even in recursive
   -- definition groups.  So process the wrapper functions first, followed by
   -- the other functions.
   let (wrappers, others) = partition defIsWrapper defs
-  wrappers' <- mapM rwDef wrappers
-  with_wrappers wrappers' $ do
-    others' <- mapM rwDef others
-    let defgroup' = Rec (wrappers' ++ others')
-    withDefValues True defgroup' $ k defgroup'
-  where
-    with_wrappers wrs m = foldr (withDefValue True) m wrs
+  wrappers' <- mapM do_def wrappers
+  withDefValues wrappers' $ do
+    others' <- mapM do_def others
+    k $ Rec (wrappers' ++ others')
+
+withFDefs = withDefs rwDef
+withGDefs = withDefs rwGlobalDef
 
 rwModule :: Subst -> Module Mem -> LR (Module Mem)
 rwModule initial_subst (Module mod_name imports defss exports) =
   -- Add imported functions to the environment.
   -- Note that all imported functions are added--recursive functions should
   -- not be in the import list, or they will be expanded repeatedly
-  foldr (withDefValue False) (rw_top_level id defss) imports
+  withDefValues imports $ rw_top_level id defss
   where
     -- First, rewrite the top-level definitions.
     -- Add defintion groups to the environment as we go along.
     rw_top_level defss' (defs:defss) = do
       -- Insert an empty substition into each function body
-      subst_defs <- mapM (mapMDefiniens (freshenFun initial_subst)) defs
-      withDefs subst_defs $ \defs' -> rw_top_level (defss' . (defs' :)) defss
+      subst_defs <- mapM (mapMDefiniens (freshenEnt initial_subst)) defs
+      withGDefs subst_defs $ \defs' -> rw_top_level (defss' . (defs' :)) defss
     
     -- Then rewrite the exported functions
     rw_top_level defss' [] = do

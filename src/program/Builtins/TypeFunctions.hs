@@ -4,6 +4,7 @@ module Builtins.TypeFunctions(builtinTypeFunctions) where
 
 import Control.Monad
 import qualified Data.Map as Map
+import Text.PrettyPrint.HughesPJ
 
 import Builtins.Builtins
 import Common.MonadLogic

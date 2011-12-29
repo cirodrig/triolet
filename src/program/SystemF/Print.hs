@@ -28,6 +28,9 @@ pprFun = pprFunFlags defaultPrintFlags
 pprFDef :: FDef SF -> Doc
 pprFDef = pprFDefFlags defaultPrintFlags
 
+pprGDef :: GDef SF -> Doc
+pprGDef = pprGDefFlags defaultPrintFlags
+
 pprExport :: Export SF -> Doc
 pprExport (Export pos spec f) =
   text "export" <+> pprExportSpec spec $$ nest 2 (pprFun f)
@@ -35,7 +38,7 @@ pprExport (Export pos spec f) =
 pprModule :: Module SF -> Doc
 pprModule (Module module_name [] defs exports) =
   text "module" <+> text (showModuleName module_name) $$
-  vcat (map (braces . vcat . map pprFDef . defGroupMembers) defs) $$
+  vcat (map (braces . vcat . map pprGDef . defGroupMembers) defs) $$
   vcat (map pprExport exports)
 
 data PrintFlags =
@@ -192,3 +195,11 @@ pprFDefFlags flags (Def v _ fun) =
   let params = pprFunParameters False flags fun
       body = pprExpFlags flags $ funBody (fromFunSF fun)
   in hang (pprVarFlags flags v <+> params <+> equals) 4 body
+
+pprGDefFlags flags (Def v a (FunEnt fun)) =
+  pprFDefFlags flags (Def v a fun)
+
+pprGDefFlags flags (Def v _ (DataEnt const)) =
+  let type_doc = pprType (constType const)
+      value = pprExpFlags flags $ constExp const
+  in hang (pprVarFlags flags v <+> colon <+> type_doc <+> equals) 4 value

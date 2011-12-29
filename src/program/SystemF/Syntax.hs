@@ -35,7 +35,7 @@ module SystemF.Syntax
      literalType,
      
      -- ** Data types
-     ConInst(..),
+     ConInst(..), ConInstSummary,
      summarizeConstructor,
      conTyArgs, conExTypes, conTypes, conFieldKinds, conType, isVarCon,
      DeConInst(..),
@@ -50,6 +50,8 @@ module SystemF.Syntax
      
      -- ** Function definitions
      Def(..), FDef,
+     Ent(..), GDef,
+     Constant(..),
      mkDef, mkWrapperDef, mkWorkerDef,
      mapDefiniens,
      mapMDefiniens,
@@ -268,12 +270,6 @@ data BaseExp s =
     , expCon       :: !ConInst
     , expArgs      :: [Exp s]
     }
-    {- Subsumed by ConE
-    -- | An unboxed tuple expression
-  | UTupleE
-    { expInfo :: ExpInfo
-    , expArgs :: [Exp s]
-    } -}
     -- | Function application.
     --   Data constructor applications are represented by 'ConE' instead.
   | AppE
@@ -415,6 +411,20 @@ data BaseFun s =
       , funBody       :: Exp s
       }
 
+-- | A constant value.
+--
+--   A global constant value may be defined; it will be created before 
+--   execution begins.  A constant value may contain only variable, literal,
+--   and constructor terms.
+data Constant s =
+  Constant { constInfo :: ExpInfo
+           , constType :: Type
+           , constExp  :: Exp s
+           }
+
+-- | An entity that can be defined in a global definition group.
+data Ent s = FunEnt !(Fun s) | DataEnt !(Constant s)
+
 -- | A function definition
 data Def t s =
   Def
@@ -423,7 +433,11 @@ data Def t s =
   , definiens :: t s
   }
 
+-- | A function definition
 type FDef s = Def Fun s
+
+-- | A global definition
+type GDef s = Def Ent s
 
 mkDef :: Var -> t s -> Def t s
 mkDef v f = Def v defaultDefAnn f
@@ -568,8 +582,8 @@ data Module s =
     -- | Definitions of functions that were imported from other modules.
     --   The optimizer may inline these definitions.
     --   Before representation inference, the imports should be empty.
-  , modImports :: [FDef s]
-  , modDefs :: [DefGroup (FDef s)]
+  , modImports :: [GDef s]
+  , modDefs :: [DefGroup (GDef s)]
   , modExports :: [Export s]
   }
   deriving(Typeable)

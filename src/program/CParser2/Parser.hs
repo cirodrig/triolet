@@ -489,18 +489,26 @@ pTypeDecl = located $ do
   kind <- pType
   return $ Decl tycon $ TypeEnt kind Nothing
 
-pVarDecl :: P PLDecl
-pVarDecl = located $ do
-  -- If there is a colon after the variable and attributes,
+-- | Parse a global variable or constant definition.
+--   Both definitions start the same way.  Constant definitions end with
+--   an expression.
+pVarOrConstDecl :: P PLDecl
+pVarOrConstDecl = located $ do
+  -- If there is a colon after the variable,
   -- then this is a variable declaration 
   -- Otherwise it might be some other kind of declaration
-  (v, attrs) <- PS.try $ do
+  v <- PS.try $ do
     v <- identifier 
-    attrs <- attributeList
     match ColonTok
-    return (v, attrs)
+    return v
   kind <- pType
-  return $ Decl v $ VarEnt kind attrs
+  attrs <- attributeList
+  value <- optionMaybe $ do
+    match EqualTok
+    pExp
+  return $ Decl v $ case value
+                    of Nothing -> VarEnt kind attrs
+                       Just e  -> ConstEnt kind e attrs
 
 pFunDecl :: P PLDecl
 pFunDecl = do
@@ -512,7 +520,7 @@ pFunDecl = do
   body <- pExp
   return $ L pos $ Decl v $ FunEnt (L pos (Fun ty_params params range body)) attrs
 
-pDecl = pDataDecl <|> pTypeDecl <|> pVarDecl <|> pFunDecl <?>
+pDecl = pDataDecl <|> pTypeDecl <|> pVarOrConstDecl <|> pFunDecl <?>
         "type, data, variable, or function declaration"
 
 pModule :: P PModule

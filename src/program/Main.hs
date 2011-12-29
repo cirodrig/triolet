@@ -26,7 +26,6 @@ import qualified SystemF.ConSpecialization as SystemF
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
-import qualified SystemF.GlobalDemand as SystemF
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import qualified SystemF.TypecheckSF
@@ -158,11 +157,6 @@ highLevelOptimizations :: Bool
 highLevelOptimizations global_demand_analysis simplifier_phase mod = do
   -- Run the rewriter (most optimizations are in here)
   mod <- SystemF.rewriteAtPhase simplifier_phase mod
-  when debugMode $ void $ do
-    putStrLn "After rewrite"
-    print $ pprMemModule mod
-    evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
-    SystemF.TypecheckMem.typeCheckModule mod
 
   -- Specialize on constructors
   mod <- SystemF.specializeOnConstructors mod
@@ -173,6 +167,12 @@ highLevelOptimizations global_demand_analysis simplifier_phase mod = do
          then SystemF.demandAnalysis mod
          else SystemF.localDemandAnalysis mod
   
+  when debugMode $ void $ do
+    putStrLn "After rewrite"
+    print $ pprMemModule mod
+    evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
+    SystemF.TypecheckMem.typeCheckModule mod
+
   return mod
 
 -- | Compile a pyon file from source code to high-level, unoptimized code.
@@ -258,22 +258,19 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
 
   -- Restructure the code resulting from inlining, which may create new
   -- local functions
-  repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
-  repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
+  repr_mod <- iterateM (highLevelOptimizations True SystemF.FinalSimplifierPhase) 3 repr_mod
 
   -- Argument flattening
   when debugMode $ void $ do
     putStrLn ""
     putStrLn "Before Argument Flattening"
     print $ pprMemModule repr_mod
-  repr_mod <- SystemF.performGlobalDemandAnalysis repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
   
   when debugMode $ void $ do
     putStrLn "After argument flattening"
     print $ pprMemModule repr_mod
     evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
-  tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
 
   -- Reconstruct demand information after flattening variables,
   -- so that the next optimization pass can do more work

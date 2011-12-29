@@ -133,6 +133,9 @@ evFun (U.TIFun inf ty_params params rt body) = do
 evDef :: TIDef -> IO (FDef SF)
 evDef (U.TIDef v ann f) = Def v ann <$> evFun f
 
+evGlobalDef :: TIDef -> IO (GDef SF)
+evGlobalDef (U.TIDef v ann f) = Def v ann <$> (FunEnt <$> evFun f)
+
 evExport :: TIExport -> IO (Export SF)
 evExport (U.TIExport pos spec f) =
   Export pos spec `liftM` evFun f
@@ -140,6 +143,6 @@ evExport (U.TIExport pos spec f) =
 evalTypeInferenceResult :: (ModuleName, [DefGroup TIDef], [TIExport])
                         -> IO (Module SF)
 evalTypeInferenceResult (module_name, defs, exports) = do
-  defs' <- mapM (mapM evDef) defs
+  defs' <- mapM (mapM evGlobalDef) defs
   exports' <- mapM evExport exports
   return $ Module module_name [] defs' exports'

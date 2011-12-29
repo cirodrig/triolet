@@ -390,22 +390,25 @@ floatTopLevelFun (FunM f@(Fun inf ty_params params return_type body)) =
     body <- contextExpression ctx_body return_type
     return $ FunM (f {funBody = body})
 
+floatTopLevelEnt (FunEnt f) = FunEnt `liftM` floatTopLevelFun f
+floatTopLevelEnt (DataEnt d) = return (DataEnt d)
+
 -- | Perform floating in a top-level definition group
-floatTopLevelGroup :: DefGroup (FDef Mem)
-                   -> (DefGroup (FDef Mem) -> Flt a)
+floatTopLevelGroup :: DefGroup (GDef Mem)
+                   -> (DefGroup (GDef Mem) -> Flt a)
                    -> Flt a
 floatTopLevelGroup (NonRec def) k = do
-  f <- floatTopLevelFun $ definiens def
+  f <- floatTopLevelEnt $ definiens def
   let def' = def {definiens = f}
-  assume (definiendum def) (functionType f) $ k (NonRec def')
+  assume (definiendum def) (entityType f) $ k (NonRec def')
 
 floatTopLevelGroup (Rec defs) k = assume_defs $ do
-  fs <- mapM (floatTopLevelFun . definiens) defs
+  fs <- mapM (floatTopLevelEnt . definiens) defs
   let defs' = [def {definiens = f} | (def, f) <- zip defs fs]
   k (Rec defs')
   where
     assume_defs m = foldr assume_def m defs
-    assume_def def = assume (definiendum def) (functionType $ definiens def)
+    assume_def def = assume (definiendum def) (entityType $ definiens def)
 
 floatExport :: Export Mem -> Flt (Export Mem)
 floatExport export = do
@@ -427,7 +430,7 @@ floatModule (Module module_name imports defs exports) = do
       return ([], exports')
 
     assume_imports m = foldr assume_import m imports
-    assume_import def = assume (definiendum def) (functionType $ definiens def)
+    assume_import def = assume (definiendum def) (entityType $ definiens def)
 
 longRangeFloating :: Module Mem -> IO (Module Mem)
 longRangeFloating mod =

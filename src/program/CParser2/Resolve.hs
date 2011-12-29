@@ -395,6 +395,13 @@ resolveEntity _ (DataEnt ty cons attrs) = do
   cons' <- mapM (resolveL resolveDataConDecl) cons
   return $ DataEnt ty' cons' attrs
 
+resolveEntity _ (ConstEnt ty e attrs) = do
+  (ty', lv) <- resolveLType ty
+  logErrorIf (lv /= TypeLevel) $
+    "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
+  e' <- resolveL resolveExp e
+  return $ ConstEnt ty' e' attrs
+
 resolveEntity _ (FunEnt f attrs) = do
   f' <- resolveL resolveFun f
   return $ FunEnt f' attrs
@@ -411,6 +418,7 @@ resolveDecl (L pos (Decl name ent)) = do
                      of VarEnt {} -> ObjectLevel
                         TypeEnt {} -> TypeLevel
                         DataEnt {} -> TypeLevel
+                        ConstEnt {} -> ObjectLevel
                         FunEnt {} -> ObjectLevel
 
 -- | Resolve top-level declarations, with limited error recovery

@@ -29,7 +29,10 @@ module SystemF.MemoryIR
         assumeTyPat, assumeTyPats,
         assumeFDef,
         assumeFDefGroup,
+        assumeGDef,
+        assumeGDefGroup,
         functionType,
+        entityType,
         partitionParameters
        )
 where
@@ -190,6 +193,15 @@ assumeFDef :: forall m a. TypeEnvMonad m => FDef Mem -> m a -> m a
 {-# INLINE assumeFDef #-}
 assumeFDef def m = assume (definiendum def) (functionType $ definiens def) m
 
+assumeGDef :: forall m a. TypeEnvMonad m => GDef Mem -> m a -> m a
+{-# INLINE assumeGDef #-}
+assumeGDef def m =
+  let ty =
+        case definiens def
+        of FunEnt f  -> functionType f
+           DataEnt d -> constType d
+  in assume (definiendum def) ty m
+
 assumeFDefGroup :: forall m a b. TypeEnvMonad m =>
                   DefGroup (FDef Mem) -> m a -> m b -> m (a, b)
 {-# INLINE assumeFDefGroup #-}
@@ -205,6 +217,21 @@ assumeFDefGroup g group_m body_m =
     assume_defs :: forall a. [FDef Mem] -> m a -> m a
     assume_defs defs m = foldr assumeFDef m defs
 
+assumeGDefGroup :: forall m a b. TypeEnvMonad m =>
+                  DefGroup (GDef Mem) -> m a -> m b -> m (a, b)
+{-# INLINE assumeGDefGroup #-}
+assumeGDefGroup g group_m body_m =
+  case g
+  of NonRec def -> do x <- group_m 
+                      y <- assumeGDef def body_m
+                      return (x, y)
+     Rec defs -> assume_defs defs $ do x <- group_m
+                                       y <- body_m
+                                       return (x, y)
+  where
+    assume_defs :: forall a. [GDef Mem] -> m a -> m a
+    assume_defs defs m = foldr assumeGDef m defs
+
 -- | Get the type of a function using its parameter and return types.
 functionType :: FunM -> Type 
 functionType (FunM (Fun { funTyParams = ty_params
@@ -213,6 +240,10 @@ functionType (FunM (Fun { funTyParams = ty_params
                         })) =
   forallType [b | TyPat b <- ty_params] $
   funType (map patMType params) ret
+
+entityType :: Ent Mem -> Type
+entityType (FunEnt f) = functionType f
+entityType (DataEnt d) = constType d
 
 -- | Partition a list of parameters into input and output parameters.
 --   Output parameters must follow input parameters.

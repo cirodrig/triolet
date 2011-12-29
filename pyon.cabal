@@ -116,7 +116,6 @@ Executable pyon
     SystemF.DictEnv
     SystemF.EtaReduce
     SystemF.Floating2
-    SystemF.GlobalDemand
     SystemF.IncrementalSubstitution
     SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2

@@ -235,7 +235,7 @@ dmdExpWorker is_initializer spc expressionM@(ExpM expression) =
        return $ ExpM $ LamE inf f'
      LetE inf pat rhs body -> dmdLetE spc inf pat rhs body
      LetfunE inf dg body -> do
-       (dg', body') <- dmdGroup dg (dmdExp spc body)
+       (dg', body') <- dmdGroup dmdDef dg (dmdExp spc body)
        let mk_let defgroup e = ExpM (LetfunE inf defgroup e)
        return $ foldr mk_let body' dg'
      CaseE inf scr alts -> dmdCaseE spc inf scr alts
@@ -391,26 +391,44 @@ dmdFun is_initializer (FunM f) = do
       dmdExp Used (funBody f)
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 
-dmdDef :: DmdAnl (FDef Mem)
-dmdDef def
+dmdData (Constant inf ty e) = do
+  e' <- dmdExp Used e
+  dfType ty
+  return $ Constant inf ty e'
+
+dmdDef' :: DmdAnl (t Mem) -> DmdAnl (Def t Mem)
+dmdDef' analyze_t def
   -- Wrapper functions may be inlined many times.
   -- Conservatively treat any use of a variable inside a wrapper as if it were many uses.
   | defIsWrapper def = censor replicatedCode analyze_def
   | otherwise        = analyze_def
   where
-    analyze_def = mapMDefiniens (dmdFun False) def
+    analyze_def = mapMDefiniens analyze_t def
+
+dmdDef :: DmdAnl (FDef Mem)
+dmdDef = dmdDef' (dmdFun False)
+
+dmdGlobalDef :: DmdAnl (GDef Mem)
+dmdGlobalDef = dmdDef' dmdEnt
+
+dmdEnt (FunEnt f) = FunEnt `liftM` dmdFun False f
+dmdEnt (DataEnt d) = DataEnt `liftM` dmdData d
 
 -- | Act like each exported function definition is used in an unknown way.
 --   Doing so prevents the function from being inlined/deleted.
-useExportedDefs :: [FDef Mem] -> Df ()
+useExportedDefs :: [Def t Mem] -> Df ()
 useExportedDefs defs = mapM_ demand_if_exported defs
   where
     demand_if_exported def =
       when (defAnnExported $ defAnnotation def) $
       mentionExtern (definiendum def)
   
-dmdGroup :: DefGroup (FDef Mem) -> Df b -> Df ([DefGroup (FDef Mem)], b)
-dmdGroup defgroup do_body =
+dmdGroup :: forall a t.
+            DmdAnl (Def t Mem)
+         -> DefGroup (Def t Mem)
+         -> Df a
+         -> Df ([DefGroup (Def t Mem)], a)
+dmdGroup do_def defgroup do_body =
   case defgroup
   of NonRec def -> do
        -- Eliminate dead code.  Decide whether the definition is dead.
@@ -419,7 +437,7 @@ dmdGroup defgroup do_body =
          Dead ->
            return ([], body)
          _ -> do
-           def' <- dmdDef def
+           def' <- do_def def
            let def'' = set_def_uses dmd def'
            return ([NonRec def''], body)
 
@@ -434,7 +452,7 @@ dmdGroup defgroup do_body =
 
     rec_dmd defs = Df $ \tenv ->
       let -- Scan each definition and the body code
-          defs_and_uses = [runDf (dmdDef def) tenv | def <- defs]
+          defs_and_uses = [runDf (do_def def) tenv | def <- defs]
           (body, body_uses) = runDf do_body_and_exports tenv
 
           -- Partition into strongly connected components
@@ -443,7 +461,7 @@ dmdGroup defgroup do_body =
                       uses)
                     | (new_def, uses) <- defs_and_uses]
 
-          new_defs_and_uses :: [DefGroup (FDef Mem, Dmds)]
+          new_defs_and_uses :: forall. [DefGroup (Def t Mem, Dmds)]
           new_defs_and_uses = partitionDefGroup members body_uses
 
           new_uses =
@@ -519,7 +537,8 @@ dmdExport export = do
   return $ export {exportFunction = fun}
 
 dmdTopLevelGroup (dg:dgs) exports = do
-  (dg', (dgs', exports')) <-  dmdGroup dg $ dmdTopLevelGroup dgs exports
+  (dg', (dgs', exports')) <-
+    dmdGroup dmdGlobalDef dg $ dmdTopLevelGroup dgs exports
   return (dg' ++ dgs', exports')
 
 dmdTopLevelGroup [] exports = do
@@ -531,7 +550,7 @@ dmdTopLevelGroup [] exports = do
 localDemandAnalysis :: Module Mem -> IO (Module Mem)
 localDemandAnalysis (Module modname imports defss exports) = do
   tenv <- readInitGlobalVarIO the_memTypes
-  let defss' = map (fmap (\d -> evalDf (dmdDef d) tenv)) defss
+  let defss' = map (fmap (\d -> evalDf (dmdGlobalDef d) tenv)) defss
       exports' = map (\e -> evalDf (dmdExport e) tenv) exports
   return $ Module modname imports defss' exports'
 

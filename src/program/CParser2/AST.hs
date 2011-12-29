@@ -227,9 +227,15 @@ type LDataConDecl ix = Located (DataConDecl ix)
 data Decl ix = Decl (Identifier ix) !(Entity ix)
 
 data Entity ix = 
+    -- | A variable declaration
     VarEnt (LType ix) [Attribute]
+    -- | A type declaration
   | TypeEnt (LType ix) (Maybe BuiltinTypeFunction)
+    -- | A data type definition
   | DataEnt (LType ix) [LDataConDecl ix] [Attribute]
+    -- | A global constant definition
+  | ConstEnt (LType ix) (LExp ix) [Attribute]
+    -- | A global function
   | FunEnt (Located (Fun ix)) [Attribute]
 
 type LDecl ix = Located (Decl ix)

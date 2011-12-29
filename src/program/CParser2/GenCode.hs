@@ -24,14 +24,15 @@ import qualified Type.Type as Type
 -- | Extract function declarations from a module
 checkModule :: Module Resolved -> Module Resolved
 checkModule mod@(Module decls) 
-  | any (not . is_fun_decl) decls =
+  | any (not . is_value_decl) decls =
       internalError "Expecting function declarations only"
   | otherwise = mod
   where
-    is_fun_decl ldecl =
+    is_value_decl ldecl =
       case unLoc ldecl
-      of Decl _ (FunEnt _ _) -> True
-         _                   -> False
+      of Decl _ (FunEnt {})   -> True
+         Decl _ (ConstEnt {}) -> True
+         _                    -> False
 
 -- | During translation, keep a mapping from "let type"-bound identifiers
 --   to types.  If a type is found in the mapping, it's replaced by its
@@ -92,8 +93,8 @@ defAttributes attrs ann =
 --   If functions are is labeled as exported.
 applyDefAttributes :: Bool
                    -> [Attribute]
-                   -> SystemF.FDef SystemF.Mem
-                   -> SystemF.FDef SystemF.Mem
+                   -> SystemF.Def t SystemF.Mem
+                   -> SystemF.Def t SystemF.Mem
 applyDefAttributes is_global attrs def = SystemF.modifyDefAnnotation f def 
   where
     -- Global functions are exported.  Local functions are not.
@@ -237,6 +238,10 @@ translateType' lty =
        dom' <- translateType' dom
        rng' <- translateType' rng
        return $ Type.typeApp (Type.CoT kind') [dom', rng']
+
+translateGlobalFun pos f = do
+  f' <- translateFun pos f
+  return $ SystemF.FunEnt f'
 
 translateFun pos f = do
   ty_binders <- mapM translateDomain $ fTyParams f
@@ -401,17 +406,27 @@ translateAlt (Alt (TuplePattern fields) body) = do
 translateDecl (L pos (Decl name (FunEnt (L fun_pos f) attrs))) =
   let ResolvedVar v _ = name
   in liftM (applyDefAttributes True attrs . SystemF.mkDef v) $
-     translateFun fun_pos f
+     translateGlobalFun fun_pos f
+
+translateDecl (L pos (Decl name (ConstEnt ty d attrs))) = do
+  let ResolvedVar v _ = name
+  core_ty <- translateType ty
+  core_expr <- translateExp d
+  let value = SystemF.Constant (SystemF.mkExpInfo pos) core_ty core_expr
+      def = SystemF.mkDef v (SystemF.DataEnt value)
+  return $ applyDefAttributes True attrs def
 
 translateDecl _ =
   internalError "translateDecl"
+
+translateDecls decls = mapM translateDecl decls
 
 -------------------------------------------------------------------------------
 
 createCoreFunctions var_supply tenv mod =
   case checkModule mod
   of Module decls -> do
-       defs <- runTypeEvalM (runReaderT (mapM translateDecl decls) Map.empty) var_supply tenv
+       defs <- runTypeEvalM (runReaderT (translateDecls decls) Map.empty) var_supply tenv
        mapM_ check_def_type defs
        return $ SystemF.Module builtinModuleName [] [SystemF.Rec defs] []
   where
@@ -425,7 +440,7 @@ createCoreFunctions var_supply tenv mod =
                Nothing -> internalError $ "No type declared for function: " ++
                           show (SystemF.definiendum def)
           defined_type =
-            SystemF.TypecheckMem.functionType $ SystemF.definiens def
+            SystemF.entityType $ SystemF.definiens def
       ok <- runTypeEvalM
             (Type.Compare.compareTypes declared_type defined_type)
             var_supply tenv

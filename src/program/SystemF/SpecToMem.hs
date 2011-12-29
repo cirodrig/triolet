@@ -99,9 +99,17 @@ convertFun (FunM f) =
 convertDef :: FDef Mem -> FDef Mem
 convertDef def = mapDefiniens convertFun def
 
+convertData (Constant inf ty e) =
+  Constant inf (convertType ty) (convertExp e)
+
+convertGlobalDef def = mapDefiniens convertEntity def
+
+convertEntity (FunEnt f) = FunEnt $ convertFun f
+convertEntity (DataEnt d) = DataEnt $ convertData d
+
 convertExport :: Export Mem -> Export Mem
 convertExport e = e {exportFunction = convertFun $ exportFunction e}
 
 convertSpecToMemTypes :: Module Mem -> Module Mem
 convertSpecToMemTypes (Module mod_name [] defss exports) =
-  Module mod_name [] (map (fmap convertDef) defss) (map convertExport exports)
+  Module mod_name [] (map (fmap convertGlobalDef) defss) (map convertExport exports)

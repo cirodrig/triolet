@@ -73,6 +73,15 @@ assumeDef (Def v _ fun) = assume v (functionType fun)
 
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
+assumeGDef :: GDef SF -> TCM a -> TCM a
+assumeGDef (Def v _ ent) =
+  let ty = case ent
+           of FunEnt f -> functionType f
+              DataEnt d -> constType d
+  in assume v ty
+
+assumeGDefs defs m = foldr assumeGDef m (defGroupMembers defs)
+
 typeInferType :: Type -> TCM Kind
 typeInferType = typeCheckType
 
@@ -300,6 +309,14 @@ typeInferCoerceE inf from_ty to_ty body = do
 
   return to_ty
 
+typeCheckEntity (FunEnt f) = void $ typeInferFun f
+
+typeCheckEntity (DataEnt (Constant inf ty e)) = do
+  typeCheckType ty 
+  expression_type <- typeInferExp e
+  let msg = text "Type mismatch in global data definition"
+  checkType msg (getSourcePos inf) ty expression_type
+
 typeCheckDefGroup :: DefGroup (FDef SF) -> TCM b -> TCM b
 typeCheckDefGroup defgroup k = 
   case defgroup
@@ -313,6 +330,19 @@ typeCheckDefGroup defgroup k =
     -- To typecheck a definition, check the function it contains
     typeCheckDef def = typeInferFun $ definiens def
 
+typeCheckGlobalDefGroup :: DefGroup (GDef SF) -> TCM b -> TCM b
+typeCheckGlobalDefGroup defgroup k =
+  case defgroup
+  of NonRec def -> do
+       typeCheckGlobalDef def
+       assumeGDefs defgroup k
+     Rec defs -> assumeGDefs defgroup $ do
+       mapM_ typeCheckGlobalDef defs
+       k
+  where
+    -- To typecheck a definition, check the function it contains
+    typeCheckGlobalDef def = typeCheckEntity $ definiens def
+
 typeCheckExport :: Export SF -> TCM ()
 typeCheckExport (Export pos spec f) = do
   typeInferFun f
@@ -325,7 +355,7 @@ typeCheckModule (Module module_name [] defs exports) = do
     runTypeEvalM typecheck varIDs global_type_env
   where
     typeCheckDefGroups (defs:defss) exports = 
-      typeCheckDefGroup defs $ typeCheckDefGroups defss exports
+      typeCheckGlobalDefGroup defs $ typeCheckDefGroups defss exports
       
     typeCheckDefGroups [] exports = do 
       mapM_ typeCheckExport exports

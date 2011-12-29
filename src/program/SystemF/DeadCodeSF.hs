@@ -25,7 +25,7 @@ eliminateDeadCode (Module module_name [] defss exports) = do
   return $ Module module_name [] defss' exports'
   where
     edcTopLevelGroup (ds:dss) = do
-      (ds', (dss', exports')) <- edcDefGroup ds $ edcTopLevelGroup dss
+      (ds', (dss', exports')) <- edcDefGroup edcGDef ds $ edcTopLevelGroup dss
       return (ds' : dss', exports')
     
     edcTopLevelGroup [] = do
@@ -84,17 +84,24 @@ edcMaskTyPats [] m = do x <- m
 edcDef :: EDC (FDef SF)
 edcDef def = mapMDefiniens edcFun def
 
-edcDefGroup :: DefGroup (FDef SF)
+edcGDef :: EDC (GDef SF)
+edcGDef def = mapMDefiniens do_entity def
+  where
+    do_entity (FunEnt f) = FunEnt `liftM` edcFun f
+    do_entity (DataEnt d) = return $ DataEnt d
+
+edcDefGroup :: EDC (Def t SF)
+            -> DefGroup (Def t SF)
             -> GetMentionsSet a
-            -> GetMentionsSet (DefGroup (FDef SF), a)
-edcDefGroup defgroup m =
+            -> GetMentionsSet (DefGroup (Def t SF), a)
+edcDefGroup do_def defgroup m =
   case defgroup
   of NonRec def -> do
-       def' <- edcDef def
+       def' <- do_def def
        x <- mask (definiendum def) m
        return (NonRec def', x)
      Rec defs -> masks (mentionsSet $ map definiendum defs) $ do
-       defs' <- mapM edcDef defs
+       defs' <- mapM do_def defs
        x <- m
        return (Rec defs', x)
 
@@ -132,7 +139,7 @@ edcExp expression@(ExpSF base_expression) =
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
        edcLetE info p e1 e2
      LetfunE {expDefs = ds, expBody = e} -> do
-       (ds', e') <- edcDefGroup ds $ edcExp e
+       (ds', e') <- edcDefGroup edcDef ds $ edcExp e
        return $ ExpSF $ base_expression {expDefs = ds', expBody = e'}
      CaseE {expScrutinee = scr, expAlternatives = alts} -> do
        scr' <- edcExp scr

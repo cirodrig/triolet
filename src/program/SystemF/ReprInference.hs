@@ -1206,7 +1206,7 @@ reprExp expression =
            (body', body_type) <- reprExp body
            return (ExpM $ LetE inf pat' rhs'' body', body_type)
      LetfunE inf defs body ->
-       withDefs defs $ \defs' -> do
+       withFDefs defs $ \defs' -> do
          (body', body_type) <- reprExp body
          return (ExpM $ LetfunE inf defs' body', body_type)
      CaseE inf scr alts -> reprCase expression inf scr alts
@@ -1323,21 +1323,32 @@ reprFun (FunSF f) =
                        , funReturn = ret
                        , funBody = co_body})
 
-withDefs :: DefGroup (FDef SF) -> (DefGroup (FDef Mem) -> RI a) -> RI a
-withDefs (NonRec def) k = do
-  def' <- mapMDefiniens reprFun def
-  let sf_def_type = TypecheckSF.functionType $ definiens def
-      def_type = TypecheckMem.functionType $ definiens def'
+reprEnt :: Ent SF -> RI (Ent Mem)
+reprEnt (FunEnt f) = FunEnt `liftM` reprFun f
+reprEnt (DataEnt (Constant inf ty e)) = do
+  (ty', _) <- cvtNormalizeLocalType ty
+  (e', _) <- reprExp e
+  return $ DataEnt $ Constant inf ty' e'
+
+withDefs :: (t SF -> RI (t Mem))
+         -> (t SF -> Type)
+         -> (t Mem -> Type)
+         -> DefGroup (Def t SF) -> (DefGroup (Def t Mem) -> RI a) -> RI a
+withDefs convert_def get_sf_type get_mem_type (NonRec def) k = do
+  def' <- mapMDefiniens convert_def def
+  let sf_def_type = get_sf_type $ definiens def
+      def_type = get_mem_type $ definiens def'
   assumeValueTypes (definiendum def') sf_def_type def_type $ k (NonRec def')
 
-withDefs (Rec defs) k = assume_functions defs $ do
-    defs' <- mapM (mapMDefiniens reprFun) defs
+withDefs convert_def get_sf_type get_mem_type (Rec defs) k =
+  assume_functions defs $ do
+    defs' <- mapM (mapMDefiniens convert_def) defs
     k (Rec defs')
   where
     assume_functions (def : defs) m = do
       -- Compute the System F and specification types
       let fun_name = definiendum def
-          sf_type = TypecheckSF.functionType $ definiens def
+          sf_type = get_sf_type $ definiens def
       (spec_type, _) <- cvtNormalizeNaturalType sf_type
 
       -- Add to type environment
@@ -1345,18 +1356,25 @@ withDefs (Rec defs) k = assume_functions defs $ do
 
     assume_functions [] m = m
 
+withFDefs = withDefs reprFun TypecheckSF.functionType TypecheckMem.functionType
+
+withGDefs = withDefs reprEnt entity_type entityType
+  where
+    entity_type (FunEnt f) = TypecheckSF.functionType f
+    entity_type (DataEnt d) = constType d
+
 reprExport e = do
   f <- reprFun $ exportFunction e
   return $ Export { exportSourcePos = exportSourcePos e 
                   , exportSpec = exportSpec e
                   , exportFunction = f}
 
-reprTopLevelDefs :: [DefGroup (FDef SF)]
+reprTopLevelDefs :: [DefGroup (GDef SF)]
                  -> [Export SF]
-                 -> RI ([DefGroup (FDef Mem)], [Export Mem])
+                 -> RI ([DefGroup (GDef Mem)], [Export Mem])
 reprTopLevelDefs defgroups exports = go id defgroups
   where
-    go hd (g:gs) = withDefs g $ \g' -> go (hd . (g':)) gs
+    go hd (g:gs) = withGDefs g $ \g' -> go (hd . (g':)) gs
     go hd [] = do es <- mapM reprExport exports
                   return (hd [], es)
 

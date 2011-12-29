@@ -651,7 +651,7 @@ checkForShadowingExpSet in_scope e =
        checkForShadowingSet in_scope (patMType pat) `seq`
        checkForShadowingExpSet (insert (patMVar pat) in_scope) body
      LetfunE _ defs body ->
-       checkForShadowingGroupSet checkForShadowingExpSet body in_scope defs
+       checkForShadowingGroupSet checkForShadowingFunSet checkForShadowingExpSet body in_scope defs
      CaseE _ scr alts ->
        continue scr `seq`
        (foldr seq () $ map (checkForShadowingAltSet in_scope) alts)
@@ -666,9 +666,11 @@ checkForShadowingExpSet in_scope e =
     continues es = foldr seq () $ map continue es
     insert v scope = IntSet.insert (fromIdent $ varID v) scope
 
-checkForShadowingGroupSet :: CheckForShadowing a -> a
-                          -> CheckForShadowing (DefGroup (FDef Mem))
-checkForShadowingGroupSet check body in_scope defs =
+checkForShadowingGroupSet :: CheckForShadowing (t Mem)
+                          -> CheckForShadowing a
+                          -> a
+                          -> CheckForShadowing (DefGroup (Def t Mem))
+checkForShadowingGroupSet check_def check body in_scope defs =
   let definienda = map definiendum $ defGroupMembers defs
       definientia = map definiens $ defGroupMembers defs
       augmented_scope = inserts definienda in_scope
@@ -681,11 +683,10 @@ checkForShadowingGroupSet check body in_scope defs =
            Rec _    -> augmented_scope
   in assertVarsAreUndefined in_scope definienda `seq`
      (foldr seq (check augmented_scope body) $
-      map (checkForShadowingFunSet local_scope) definientia)
+      map (check_def local_scope) definientia)
   where
     insert v scope = IntSet.insert (fromIdent $ varID v) scope
     inserts vs scope = foldr insert scope vs
-
 
 checkForShadowingConSet :: CheckForShadowing ConInst
 checkForShadowingConSet in_scope con =
@@ -716,6 +717,17 @@ checkForShadowingFunSet in_scope (FunM (Fun _ typarams params return body)) =
     insert v scope = IntSet.insert (fromIdent $ varID v) scope
     inserts vs scope = foldr insert scope vs
 
+checkForShadowingDataSet in_scope (Constant inf ty e) =
+  checkForShadowingSet in_scope ty `seq`
+  checkForShadowingExpSet in_scope e
+
+checkForShadowingGlobalDefSet :: CheckForShadowing (Ent Mem)
+checkForShadowingGlobalDefSet in_scope (FunEnt f) =
+  checkForShadowingFunSet in_scope f
+
+checkForShadowingGlobalDefSet in_scope (DataEnt d) =
+  checkForShadowingDataSet in_scope d
+
 checkForShadowingAltSet :: CheckForShadowing AltM
 checkForShadowingAltSet in_scope (AltM (Alt decon params body)) =
   let ex_vars = map binderVar $ deConExTypes decon
@@ -741,10 +753,11 @@ checkForShadowingExpHere e =
 
 checkForShadowingModule :: Module Mem -> ()
 checkForShadowingModule (Module _ imports defss exports) =
-  checkForShadowingGroupSet check_globals defss IntSet.empty (Rec imports)
+  checkForShadowingGroupSet
+  checkForShadowingGlobalDefSet check_globals defss IntSet.empty (Rec imports)
   where
     check_globals env (defs : defss) =
-      checkForShadowingGroupSet check_globals defss env defs
+      checkForShadowingGroupSet checkForShadowingGlobalDefSet check_globals defss env defs
     
     check_globals env [] =
       foldr seq () $ map (checkForShadowingFunSet env . exportFunction) exports

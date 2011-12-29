@@ -1492,18 +1492,28 @@ flattenInFun (FunM f) =
     fun_body <- flattenInExp $ funBody f
     return $ FunM $ f {funBody = fun_body}
 
-flattenInGroup :: DefGroup (FDef Mem) -> AF [DefGroup (FDef Mem)]
-flattenInGroup (NonRec def) = do
-  (m_worker, wrapper) <- flattenFunctionArguments def
+flattenInGroup :: (Def t Mem -> AF (Maybe (Def t Mem), Def t Mem))
+               -> DefGroup (Def t Mem) -> AF [DefGroup (Def t Mem)]
+flattenInGroup flatten_def (NonRec def) = do
+  (m_worker, wrapper) <- flatten_def def
   -- Wrapper can reference worker, but not vice versa; produce two groups
   return $ case m_worker
            of Nothing -> [NonRec wrapper]
               Just w  -> [NonRec w, NonRec wrapper]
 
-flattenInGroup (Rec defs) = do
-  flattened <- mapM flattenFunctionArguments defs
+flattenInGroup flatten_def (Rec defs) = do
+  flattened <- mapM flatten_def defs
   return [Rec $ catMaybes $ concat [[m_worker, Just wrapper]
                                    | (m_worker, wrapper) <- flattened]]
+
+flattenGlobalDef (Def v ann (FunEnt f)) = do
+  (m_worker, wrapper) <- flattenFunctionArguments (Def v ann f)
+  return (fmap inject_def m_worker, inject_def wrapper)
+  where
+    inject_def (Def v ann f) = Def v ann (FunEnt f)
+
+flattenGlobalDef def@(Def _ _ (DataEnt _)) =
+  return (Nothing, def)
 
 flattenInExp :: ExpM -> AF ExpM
 flattenInExp expression =
@@ -1525,7 +1535,7 @@ flattenInExp expression =
        body' <- flattenInExp body
        return $ ExpM $ LetE inf pat rhs' body'
      LetfunE inf defs body -> do
-       new_defs <- flattenInGroup defs
+       new_defs <- flattenInGroup flattenFunctionArguments defs
        body' <- flattenInExp body
        let mk_letfun d e = ExpM (LetfunE inf d e)
        return $ foldr mk_letfun body' new_defs
@@ -1552,7 +1562,7 @@ flattenInExport export = do
 
 flattenModuleContents :: (Module Mem) -> AF (Module Mem)
 flattenModuleContents (Module mod_name imports defss exports) = do
-  defss' <- mapM flattenInGroup defss
+  defss' <- mapM (flattenInGroup flattenGlobalDef) defss
   exports' <- mapM flattenInExport exports
   return $ Module mod_name imports (concat defss') exports'
 

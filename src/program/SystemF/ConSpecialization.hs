@@ -58,8 +58,7 @@ and changed to 'True' when that node is selected for specialization.
 A function call is encoded as a 'CallPattern'.
 -}
 
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
-{-# OPTIONS_GHC -auto-all #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, Rank2Types #-}
 module SystemF.ConSpecialization(specializeOnConstructors)
 where
 
@@ -665,128 +664,193 @@ specializeDefGroup group m =
   of NonRec def -> do
        -- Run the computation
        (return_value, specializations) <-
-         withWantedSpecializations [def] m
+         withWantedSpecializationsF [def] m
 
        -- Perform specialization inside the function
        def' <- mapMDefiniens specializeFun def
 
-       specialize_group (NonRec def') [def']
-         return_value specializations
+       specializeGroupWithSpecializations specialize_function
+         (NonRec def') [def'] return_value specializations
 
      Rec defs -> do
        -- Scan the recursive functions and run the computation
        ((return_value, defs'), specializations) <-
-         withWantedSpecializations defs $ do
+         withWantedSpecializationsF defs $ do
            return_value <- m
            defs' <- mapM (mapMDefiniens specializeFun) defs
            return (return_value, defs')
 
-       specialize_group (Rec defs') defs'
-         return_value specializations
+       specializeGroupWithSpecializations specialize_function
+         (Rec defs') defs' return_value specializations
+
+-- | Like 'specializeDefGroup', but for global definition groups.
+--   Functions are specialized in the same way; data definitions are unchanged.
+specializeDefGroupG :: DefGroup (GDef Mem)
+                   -> Specialize a
+                   -> Specialize (a,
+                                  Maybe CreatedSpecializationsMap,
+                                  DefGroup (GDef Mem))
+specializeDefGroupG group m =
+  case group
+  of NonRec def -> do
+       -- Run the computation
+       (return_value, specializations) <-
+         withWantedSpecializationsG [def] m
+
+       -- Perform specialization inside the function
+       def' <- mapMDefiniens specialize_entity def
+
+       specializeGroupWithSpecializations specializeGlobalEntity
+         (NonRec def') [def'] return_value specializations
+
+     Rec defs -> do
+       -- Scan the recursive functions and run the computation
+       ((return_value, defs'), specializations) <-
+         withWantedSpecializationsG defs $ do
+           return_value <- m
+           defs' <- mapM (mapMDefiniens specialize_entity) defs
+           return (return_value, defs')
+
+       specializeGroupWithSpecializations specializeGlobalEntity
+         (Rec defs') defs' return_value specializations
   where
-    specialize_group grp defs return_value specializations
-      | IntMap.null specializations =
-          debug (text "Unspecialized functions" <+>
-                 sep (map (pprVar . definiendum) $ defGroupMembers grp)) $
-          return (return_value, Nothing, grp)
-      | otherwise = do
-          (new_defs, created) <- specialize_functions specializations defs
-          return (return_value, Just created, Rec new_defs)
+    specialize_entity (FunEnt f) = FunEnt `liftM` specializeFun f
+    specialize_entity (DataEnt d) = return $ DataEnt d
 
-    specialize_function :: IntMap.IntMap WantedSpecializations -> FDef Mem
-                        -> Specialize ([FDef Mem], Maybe (Var, CreatedSpecializations))
-    specialize_function wanted_map def
-      | Just wanted <-
-        IntMap.lookup (fromIdent $ varID $ definiendum def) wanted_map = do
-          let name = definiendum def
-              fun_label = varName $ definiendum def
-              annotation = defAnnotation def
-          (f, specializations, new_defs) <-
-            decisionTreeFun fun_label annotation wanted
-          let specialized_functions = Def name annotation f : new_defs
+specializeGroupWithSpecializations specialize_entity grp defs return_value specializations
+  | IntMap.null specializations =
+      debug (text "Unspecialized functions" <+>
+             sep (map (pprVar . definiendum) $ defGroupMembers grp)) $
+      return (return_value, Nothing, grp)
+  | otherwise = do
+      (new_defs, created) <- specialize_functions specialize_entity specializations defs
+      return (return_value, Just created, Rec new_defs)
+
+-- | Specialize a collection of mutually recursive definitions
+--   using the @specialize@ parameter.  Collect the 'CreatedSpecializations'
+--   for later use.
+specialize_functions :: (IntMap.IntMap WantedSpecializations -> Def t Mem
+                         -> Specialize ([Def t Mem], Maybe (Var, CreatedSpecializations)))
+                     -> IntMap.IntMap WantedSpecializations
+                     -> [Def t Mem]
+                     -> Specialize ([Def t Mem], IntMap.IntMap CreatedSpecializations)
+specialize_functions specialize wanted_map xs = do
+  (defss, assocs) <- mapAndUnzipM (specialize wanted_map) xs
+  let m = IntMap.fromList [(fromIdent $ varID v, c)
+                          | (v, c) <- catMaybes assocs]
+  return (concat defss, m)
+
+-- | Specialize a global definition.  Function definitions are considered for
+--   specialization; data definitions are not changed.
+specializeGlobalEntity :: IntMap.IntMap WantedSpecializations -> GDef Mem
+                       -> Specialize ([GDef Mem], Maybe (Var, CreatedSpecializations))
+specializeGlobalEntity _ def@(Def _ _ (DataEnt _)) =
+  -- Cannot specialize data
+  return ([def], Nothing)
+
+specializeGlobalEntity wanted_map (Def v ann (FunEnt f)) = do
+  (defs, specialization) <- specialize_function wanted_map (Def v ann f)
+  return ([Def v ann (FunEnt f) | Def v ann f <- defs], specialization)
+
+-- | Specialize a function definition, if it meets the criteria for
+--   specialization.
+specialize_function :: IntMap.IntMap WantedSpecializations -> FDef Mem
+                    -> Specialize ([FDef Mem], Maybe (Var, CreatedSpecializations))
+specialize_function wanted_map def
+  | Just wanted <-
+      IntMap.lookup (fromIdent $ varID $ definiendum def) wanted_map = do
+      let name = definiendum def
+          fun_label = varName $ definiendum def
+          annotation = defAnnotation def
+      (f, specializations, new_defs) <-
+        decisionTreeFun fun_label annotation wanted
+      let specialized_functions = Def name annotation f : new_defs
           
-          -- If debugging this module,
-          -- notify user that a function was specialized
-          let debug_message =
-                hang (text "Constructor specialized function") 2 $
-                old $$ text "----" $$ new
-                where
-                  old = pprFDef def
-                  new = vcat (map pprFDef specialized_functions)
-          debug debug_message $
-            return (specialized_functions, Just (name, specializations))
-      | otherwise =
-          debug (text "Unspecialized function" <+> pprVar (definiendum def)) $
-          return ([def], Nothing)
+      -- If debugging this module,
+      -- notify user that a function was specialized
+      let debug_message =
+            hang (text "Constructor specialized function") 2 $
+            old $$ text "----" $$ new
+            where
+              old = pprFDef def
+              new = vcat (map pprFDef specialized_functions)
+      debug debug_message $
+        return (specialized_functions, Just (name, specializations))
+  | otherwise =
+      debug (text "Unspecialized function" <+> pprVar (definiendum def)) $
+      return ([def], Nothing)
 
-    specialize_functions :: IntMap.IntMap WantedSpecializations
-                         -> [FDef Mem]
-                         -> Specialize ([FDef Mem], IntMap.IntMap CreatedSpecializations)
-    specialize_functions wanted_map xs = do
-      (defss, assocs) <- mapAndUnzipM (specialize_function wanted_map) xs
-      let m = IntMap.fromList [(fromIdent $ varID v, c)
-                              | (v, c) <- catMaybes assocs]
-      return (concat defss, m)
+withWantedSpecializationsF = withWantedSpecializations Just assumeFDef
+
+withWantedSpecializationsG = withWantedSpecializations get_function assumeGDef
+  where
+    get_function (Def v ann (FunEnt f)) = Just $ Def v ann f
+    get_function _ = Nothing
 
 -- | Create decision trees of some functions and pass them to some
 --   computation.  Run the computation to compute wanted specializations.
 --   Return the wanted specializations, and the list of functions that 
 --   shouldn't be specialized.
-withWantedSpecializations :: [FDef Mem]
+withWantedSpecializations :: (Def t Mem -> Maybe (Def Fun Mem))
+                          -> (forall a. Def t Mem -> Specialize a -> Specialize a)
+                          -> [Def t Mem]
                           -> Specialize a
                           -> Specialize (a, IntMap.IntMap WantedSpecializations)
-withWantedSpecializations defs m = Specialize $ ReaderT $ \env -> do
-  -- Create wanted specializations.  Skip the ones that can't be specialized
-  -- anyway.
-  let tenv = typeEnvironment env
-  m_wanted_specialization_list <- forM defs $ \def -> 
-    let dfun = functionDecisionTree tenv $ definiens def
-    in if isSingletonTree dfun
-       then return Nothing
-       else do ref <- newIORef dfun
-               return $ Just (definiendum def, ref)
-  let wanted_specialization_list = catMaybes m_wanted_specialization_list
-  
-  -- Add wanted specializations to environment.  Skip the ones that can't 
-  -- be specialized anyway.
-  let insert_specializations e = foldr ins e wanted_specialization_list
-        where ins (v,s) e = IntMap.insert (fromIdent $ varID v) s e
-  let local_env = env {currentSpecializations =
-                          insert_specializations $ currentSpecializations env}
+withWantedSpecializations get_function assume_def defs m =
+  Specialize $ ReaderT $ \env -> do
+    -- Create wanted specializations.  Skip the ones that can't be specialized
+    -- anyway.
+    let tenv = typeEnvironment env
+    m_wanted_specialization_list <- forM defs $ \def ->
+      case get_function def
+      of Just f_def ->
+           let dfun = functionDecisionTree tenv $ definiens f_def
+           in if isSingletonTree dfun
+              then return Nothing
+              else do ref <- newIORef dfun
+                      return $ Just (definiendum f_def, ref)
+         Nothing -> return Nothing
+    let wanted_specialization_list = catMaybes m_wanted_specialization_list
+    
+    -- Add wanted specializations to environment.  Skip the ones that can't 
+    -- be specialized anyway.
+    let insert_specializations e = foldr ins e wanted_specialization_list
+          where ins (v,s) e = IntMap.insert (fromIdent $ varID v) s e
+    let local_env =
+          env {currentSpecializations =
+                  insert_specializations $ currentSpecializations env}
 
-  -- Run the computation
-  return_value <- runSpecialize (assume_defs defs m) local_env
-  
-  -- Read and return the set of wanted specializations
-  wanted <-
-    let insert_specialization m (v, ref) = do
-          s <- readIORef ref
-          return $! if hasSpecializations s
-                    then IntMap.insert (fromIdent $ varID v) s m
-                    else m
-    in foldM insert_specialization IntMap.empty wanted_specialization_list
+    -- Run the computation
+    return_value <- runSpecialize (foldr assume_def m defs) local_env
+    
+    -- Read and return the set of wanted specializations
+    wanted <-
+      let insert_specialization m (v, ref) = do
+            s <- readIORef ref
+            return $! if hasSpecializations s
+                      then IntMap.insert (fromIdent $ varID v) s m
+                      else m
+      in foldM insert_specialization IntMap.empty wanted_specialization_list
 
-  return (return_value, wanted)
-  where
-    assume_defs defs m = foldr assumeFDef m defs
+    return (return_value, wanted)
 
 specializeExport export = do
   f <- specializeFun (exportFunction export)
   return $ export {exportFunction = f}
   
-specializeTopLevel :: [DefGroup (FDef Mem)] -> [Export Mem]
-                   -> Specialize ([DefGroup (FDef Mem)], [Export Mem])
+specializeTopLevel :: [DefGroup (GDef Mem)] -> [Export Mem]
+                   -> Specialize ([DefGroup (GDef Mem)], [Export Mem])
 specializeTopLevel (defs:defss) exports = do
   ((defss', exports'), specializations, defs') <-
-    specializeDefGroup defs $ specializeTopLevel defss exports
+    specializeDefGroupG defs $ specializeTopLevel defss exports
   case specializations of
     Nothing -> return (defs' : defss', exports')
     Just spcl_map -> liftTypeEvalM $ do
       (defs'', (defss'', exports'')) <-
-        assumeFDefGroup defs'
+        assumeGDefGroup defs'
         (case defs'
          of NonRec {} -> return defs'
-            Rec ds -> Rec <$> mapM (specializeCallsDef spcl_map) ds)
+            Rec ds -> Rec <$> mapM (specializeCallsGDef spcl_map) ds)
         (specializeCallsTopLevel spcl_map defss' exports')
       return (defs'' : defss'', exports'')
 
@@ -799,7 +863,7 @@ specializeModule (Module module_name imports defs exports) =
     (defs', exports') <- specializeTopLevel defs exports
     return $ Module module_name imports defs' exports' 
   where
-    assume_imports m = foldr assumeFDef m imports
+    assume_imports m = foldr assumeGDef m imports
 
 -------------------------------------------------------------------------------
 
@@ -870,18 +934,25 @@ specializeCallsFun spcl_map (FunM f) =
 specializeCallsDef spcl_map def =
   mapMDefiniens (specializeCallsFun spcl_map) def
 
+specializeCallsGDef spcl_map def =
+  mapMDefiniens specialize_function def
+  where
+    specialize_function (FunEnt f) =
+      FunEnt `liftM` specializeCallsFun spcl_map f
+    specialize_function (DataEnt d) = return $ DataEnt d
+
 specializeCallsExport spcl_map export = do
   f <- specializeCallsFun spcl_map $ exportFunction export
   return $ export {exportFunction = f}
 
 specializeCallsTopLevel :: CreatedSpecializationsMap
-                        -> [DefGroup (FDef Mem)]
+                        -> [DefGroup (GDef Mem)]
                         -> [Export Mem]
-                        -> TypeEvalM ([DefGroup (FDef Mem)], [Export Mem])
+                        -> TypeEvalM ([DefGroup (GDef Mem)], [Export Mem])
 specializeCallsTopLevel spcl_map (defs : defss) exports = do
   (defs', (defss', exports')) <-
-    assumeFDefGroup defs
-    (mapM (specializeCallsDef spcl_map) defs)
+    assumeGDefGroup defs
+    (mapM (specializeCallsGDef spcl_map) defs)
     (specializeCallsTopLevel spcl_map defss exports)
   return (defs' : defss', exports')
 

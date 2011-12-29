@@ -255,12 +255,26 @@ pprFDefFlags flags (Def v ann f) =
 pprFDefGroup :: DefGroup (FDef Mem) -> Doc
 pprFDefGroup dg = pprFDefGroupFlags defaultPprFlags dg
 
-pprFDefGroupFlags flags dg =
+pprFDefGroupFlags flags dg = pprDefGroupFlags pprFDefFlags flags dg
+pprGDefGroupFlags flags dg = pprDefGroupFlags pprGDefFlags flags dg
+
+pprDefGroupFlags ppr_member flags dg =
   case dg
   of NonRec _ -> text "nonrec {" $$ nest 2 members $$ text "}"
      Rec _ -> text "rec {" $$ nest 2 members $$ text "}"
   where
-    members = vcat $ map (pprFDefFlags flags) $ defGroupMembers dg
+    members = vcat $ map (ppr_member flags) $ defGroupMembers dg
+
+pprGDef def = pprGDefFlags defaultPprFlags def
+
+pprGDefFlags flags (Def v ann (FunEnt f)) =
+  pprFDefFlags flags (Def v ann f)
+
+pprGDefFlags flags (Def v ann (DataEnt d)) =
+  hang (pprVar v <+> colon <+> ty_doc <+> equals) 4 $
+  pprExpFlags flags (constExp d)
+  where
+    ty_doc = pprType $ constType d
 
 pprExport e = pprExportFlags defaultPprFlags e
 
@@ -274,5 +288,5 @@ pprModuleFlags flags (Module modname imports defs exports) =
   {-text "imports {" $$
   nest 2 (vcat (map pprDef imports)) $$
   text "}" $$-}
-  vcat (map (pprFDefGroupFlags flags) defs) $$
+  vcat (map (pprGDefGroupFlags flags) defs) $$
   vcat (map (pprExportFlags flags) exports)

@@ -129,17 +129,18 @@ bindValue (VarP v _)  e m | isSimpleExp e = local (Map.insert v e) m
 
 partialEvaluateModule :: Module SF -> Module SF
 partialEvaluateModule (Module module_name [] defss exports) =
-  let (defss', exports') = runPE (pevalDefGroups defss exports)
+  let (defss', exports') = runPE (pevalDefGroups pevalGlobalDef defss exports)
   in Module module_name [] defss' exports'
 
-pevalDefGroups :: [DefGroup (FDef SF)] -> [Export SF]
-               -> PE ([DefGroup (FDef SF)], [Export SF])
-pevalDefGroups (defs:defss) exports = do
+pevalDefGroups :: (Def t SF -> PE (Def t SF))
+               -> [DefGroup (Def t SF)] -> [Export SF]
+               -> PE ([DefGroup (Def t SF)], [Export SF])
+pevalDefGroups do_def (defs:defss) exports = do
   (defs', (defss', exports')) <-
-    pevalDefGroup defs $ pevalDefGroups defss exports
+    pevalDefGroup do_def defs $ pevalDefGroups do_def defss exports
   return (defs' : defss', exports')
 
-pevalDefGroups [] exports = do
+pevalDefGroups _ [] exports = do
   exports' <- mapM pevalExport exports
   return ([], exports')
 
@@ -148,11 +149,17 @@ pevalExport export = do
   fun <- pevalFun (exportFunction export)
   return $ export {exportFunction = fun}
 
-pevalDefGroup :: DefGroup (FDef SF) -> PE a -> PE (DefGroup (FDef SF), a)
-pevalDefGroup dg m = do
-  dg' <- mapM pevalDef dg
+pevalDefGroup :: (Def t SF -> PE (Def t SF))
+              -> DefGroup (Def t SF) -> PE a -> PE (DefGroup (Def t SF), a)
+pevalDefGroup do_def dg m = do
+  dg' <- mapM do_def dg
   x <- m
   return (dg', x)
+
+pevalGlobalDef def = mapMDefiniens do_entity def
+  where
+    do_entity (FunEnt f) = FunEnt `liftM` pevalFun f
+    do_entity (DataEnt d) = return $ DataEnt d
 
 pevalDef :: FDef SF -> PE (FDef SF)
 pevalDef def = mapMDefiniens pevalFun def
@@ -205,7 +212,7 @@ pevalExp expression =
        return $ ExpSF $ LetE inf pat rhs' body'
 
      LetfunE inf defs body -> do
-       (defs', body') <- pevalDefGroup defs $ pevalExp body
+       (defs', body') <- pevalDefGroup pevalDef defs $ pevalExp body
        return $ ExpSF $ LetfunE inf defs' body'
 
      CaseE inf scr alts -> do

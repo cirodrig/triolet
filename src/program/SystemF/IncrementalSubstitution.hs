@@ -11,6 +11,7 @@ module SystemF.IncrementalSubstitution
         freshenHead,
         freshenFun,
         freshenAlt,
+        freshenEnt,
         discardSubstitution,
         applySubstitution,
         applySubstitutionFun,
@@ -214,6 +215,16 @@ freshenAlt s (AltM (Alt decon params body)) =
   return $ AltSM $ Alt { altCon = decon'
                        , altParams = castPats params'
                        , altBody = deferSubstitution s' body}
+
+freshenConstant :: EvalMonad m => Subst -> Constant Mem -> m (Constant SM)
+freshenConstant s (Constant inf ty e) = do
+  ty' <- substitute (typeSubst s) ty
+  let e' = deferSubstitution s e
+  return $ Constant inf ty' e'
+
+freshenEnt :: EvalMonad m => Subst -> Ent Mem -> m (Ent SM)
+freshenEnt s (FunEnt f) = FunEnt `liftM` freshenFun s f
+freshenEnt s (DataEnt c) = DataEnt `liftM` freshenConstant s c
 
 -- | Discard the substitution without applying it.
 --

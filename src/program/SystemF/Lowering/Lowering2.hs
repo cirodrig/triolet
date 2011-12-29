@@ -122,13 +122,10 @@ retValToList (RetVal val) = [val]
 -- | Compile a data constructor.  If the data constructor takes no   
 --   arguments, the constructor value is returned; otherwise a function 
 --   is returned.  All type arguments must be provided.
-compileConstructor :: Var -> DataConType -> [Type] -> [Type] -> [LL.Val] -> GenLower RetVal
-compileConstructor con con_type ty_args ex_types args = do
-  layout <- lift $ do
-    (_, result_type) <-
-      instantiateDataConTypeWithExistentials con_type (ty_args ++ ex_types)
-    tenv <- getTypeEnv
-    getAlgLayout tenv result_type
+compileConstructor :: LayoutCon -> Type -> [LL.Val] -> GenLower RetVal
+compileConstructor con data_type args = do
+  tenv <- lift getTypeEnv
+  layout <- lift $ getAlgLayout tenv data_type
   fmap RetVal $ algebraicIntro layout con args
 
 compileCase :: Type             -- ^ Case statement result type
@@ -176,6 +173,27 @@ bindPattern (PatM (v ::: ty) _) (RetVal value) m = do
     bindAtom1 ll_var (LL.ValA [value])
     m
 
+-- | Lower an expression to a constant value, without generating any code.
+lowerConstantExp :: Maybe Label -> ExpM -> Lower (LL.Val, [LL.GlobalDef], Bool)
+lowerConstantExp m_name expression =
+  case fromExpM expression
+  of VarE _ v -> do val <- lowerNonIntrinsicVar v
+                    return (val, [], True)
+     LitE _ l -> return (lowerLit l, [], True)
+     ConE _ con args -> do
+       -- Compute the constructed value's type
+       result_type <- getConType con
+       tenv <- getTypeEnv
+       layout <- getAlgLayout tenv result_type
+
+       -- Create a static value
+       let layout_con = layoutCon $ summarizeConstructor con
+       lowered_args <- mapM (lowerConstantExp Nothing) args
+       let (arg_vals, arg_defss, _) = unzip3 lowered_args
+       (con_value, con_defs, is_value) <-
+         staticObject m_name layout layout_con arg_vals
+       return (con_value, concat arg_defss ++ con_defs, is_value)
+
 lowerExpToVal :: ExpM -> GenLower LL.Val
 lowerExpToVal expression = do
   rv <- lowerExp expression
@@ -186,7 +204,7 @@ lowerExp :: ExpM -> GenLower RetVal
 lowerExp expression =
   case fromExpM expression
   of VarE _ v -> lowerVar v
-     LitE _ l -> lowerLit l
+     LitE _ l -> return $ RetVal $ lowerLit l
      ConE _ con args -> lowerCon con args
      AppE _ op ty_args args -> do
        ty <- lift $ inferExpType expression
@@ -205,38 +223,52 @@ lowerVar v =
   case LL.lowerIntrinsicOp v
   of Just lower_var -> do xs <- lower_var []
                           return $ listToRetVal xs
-     Nothing -> lift $ do ll_v <- lookupVar v
-                          return $ RetVal (LL.VarV ll_v)
+     Nothing -> lift $ liftM RetVal $ lowerNonIntrinsicVar v
+  
+lowerNonIntrinsicVar v = do
+  ll_v <- lookupVar v
+  return $ LL.VarV ll_v
 
+lowerLit :: Lit -> LL.Val
 lowerLit lit =
   case lit
   of IntL n ty ->
        case fromVarApp ty
        of Just (con, [])
             | con `isPyonBuiltin` The_int ->
-              return $ RetVal (LL.LitV $ LL.IntL LL.Signed LL.pyonIntSize n)
+              LL.LitV $ LL.IntL LL.Signed LL.pyonIntSize n
      FloatL n ty ->
        case fromVarApp ty
        of Just (con, [])
             | con `isPyonBuiltin` The_float ->
-              return $ RetVal (LL.LitV $ LL.FloatL LL.pyonFloatSize n)
+              LL.LitV $ LL.FloatL LL.pyonFloatSize n
 
 -- | Lower a data constructor application.  Generate code to construct a value.
 
 -- Lower arguments, then pack the result values into a record value
-lowerCon (TupleCon _) args = do
+lowerCon con args = do
+  result_type <- lift (getConType con)
   arg_values <- mapM lowerExpToVal args
-  let record_type = LL.constStaticRecord $
+  let layout_con = layoutCon $ summarizeConstructor con
+  compileConstructor layout_con result_type arg_values
+
+getConType (TupleCon ty_args) = do
+  tenv <- getTypeEnv
+  let arg_kinds = map (toBaseKind . typeKind tenv) ty_args
+  return $ typeApp (UTupleT arg_kinds) ty_args
+
+getConType (VarCon op ty_args ex_types) = do
+  tenv <- getTypeEnv
+  let Just op_data_con = lookupDataCon op tenv
+  (_, result_type) <-
+    instantiateDataConTypeWithExistentials
+    op_data_con (ty_args ++ ex_types)
+  return result_type
+
+{-  let record_type = LL.constStaticRecord $
                     map (LL.valueToFieldType . LL.valType) arg_values
   tuple_val <- emitAtom1 (LL.RecordType record_type) $
-               LL.PackA record_type arg_values
-  return $ RetVal tuple_val
-
-lowerCon (VarCon op ty_args ex_types) args = do
-  tenv <- lift getTypeEnv
-  let Just op_data_con = lookupDataCon op tenv
-  arg_vals <- mapM lowerExpToVal args
-  compileConstructor op op_data_con ty_args ex_types arg_vals
+               LL.PackA record_type arg_values-}
 
 -- | Lower an application term.
 --
@@ -293,9 +325,7 @@ lowerCase return_type scr alts = do
   compileCase return_type scrutinee_type scr_val (map lowerAlt alts)
 
 lowerAlt (AltM alt) =
-  let con = case altCon alt
-            of VarDeCon v _ _ -> VarTag v
-               TupleDeCon _   -> TupleTag
+  let con = layoutCon $ summarizeDeconstructor $ altCon alt
   in (con, lowerAltBody alt)
 
 lowerAltBody alt field_values =
@@ -381,29 +411,45 @@ lowerDefGroup defgroup k =
       | otherwise =
           assumeVar False v (functionType f) k
 
+lowerEntity :: Maybe Label -> Ent Mem -> Lower (LL.Var -> [LL.GlobalDef])
+lowerEntity _ (FunEnt f) = do
+  f' <- lowerFun f
+  return (\ll_var -> [LL.GlobalFunDef (LL.Def ll_var f')])
+
+lowerEntity lab (DataEnt d) = do
+  (const_value, extra_defs, is_value) <- lowerConstantExp lab (constExp d)
+  let global_def ll_var =
+        LL.GlobalDataDef (LL.Def ll_var (LL.StaticData const_value))
+  return $! if is_value
+            then \_ -> extra_defs
+            else \ll_var -> extra_defs ++ [global_def ll_var]
+
 -- | Lower a global definition group.
 --   The definitions and a list of exported functions are returned.
-lowerGlobalDefGroup :: DefGroup (FDef Mem)
-                    -> (LL.Group LL.FunDef -> [(LL.Var, ExportSig)] -> Lower a)
+lowerGlobalDefGroup :: DefGroup (GDef Mem)
+                    -> (LL.Group LL.GlobalDef -> [(LL.Var, ExportSig)] -> Lower a)
                     -> Lower a
-lowerGlobalDefGroup defgroup k = 
+lowerGlobalDefGroup defgroup k =
   case defgroup
   of NonRec def -> do
-       -- Lower the function before adding the variable to the environment
-       f' <- lowerFun $ definiens def
+       -- Lower the entity before adding the variable to the environment
+       let name = varName $ definiendum def
+       mk_entity <- lowerEntity name $ definiens def
        assume_variable def $ \(v', m_export) ->
-         k (LL.NonRec (LL.Def v' f')) (maybeToList m_export)
+         k (LL.Rec (mk_entity v')) (maybeToList m_export)
      Rec defs ->
        -- Add all variables to the environment, then lower
        assume_variables defs $ \lowered -> do
          let (vs', m_exports) = unzip lowered
              exports = catMaybes m_exports
-         fs' <- mapM (lowerFun . definiens) defs
-         k (LL.Rec $ zipWith LL.Def vs' fs') exports
+         entities <- forM (zip vs' defs) $ \(v', def) ->
+           let name = varName $ definiendum def
+           in liftM ($ v') $ lowerEntity name $ definiens def
+         k (LL.Rec $ concat entities) exports
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v annotation f) k =
+    assume_variable (Def v annotation ent) k =
       -- Decide whether the function is exported
       let is_exported = defAnnExported annotation
           
@@ -411,7 +457,11 @@ lowerGlobalDefGroup defgroup k =
           k' v
             | is_exported = k (v, Nothing)
             | otherwise = k (v, Just (v, PyonExportSig))
-      in assumeVar is_exported v (functionType f) k'
+
+          ty = case ent
+               of FunEnt f  -> functionType f
+                  DataEnt d -> constType d
+      in assumeVar is_exported v ty k'
 
 lowerExport :: ModuleName
             -> Export Mem
@@ -456,9 +506,9 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       return (LL.Def v wrapped_fun, CXXExportSig cxx_export_sig)
 
 lowerModuleCode :: ModuleName 
-                -> [DefGroup (FDef Mem)]
+                -> [DefGroup (GDef Mem)]
                 -> [Export Mem]
-                -> Lower ([LL.Group LL.FunDef], [(LL.Var, ExportSig)])
+                -> Lower ([LL.Group LL.GlobalDef], [(LL.Var, ExportSig)])
 lowerModuleCode module_name defss exports = lower_definitions defss
   where
     lower_definitions (defs:defss) =
@@ -469,7 +519,7 @@ lowerModuleCode module_name defss exports = lower_definitions defss
     lower_definitions [] = do
       ll_exports <- mapM (lowerExport module_name) exports
       let (functions, signatures) = unzip ll_exports
-      return ([LL.Rec functions], signatures)
+      return ([LL.Rec (map LL.GlobalFunDef functions)], signatures)
 
 lowerModule :: Module Mem -> IO LL.Module
 lowerModule (Module { modName = mod_name
@@ -493,7 +543,6 @@ lowerModule (Module { modName = mod_name
   return $ LL.Module { LL.moduleModuleName = mod_name
                      , LL.moduleNameSupply = ll_name_supply
                      , LL.moduleImports = LL.allBuiltinImports
-                     , LL.moduleGlobals = map (fmap LL.GlobalFunDef) 
-                                          ll_functions
+                     , LL.moduleGlobals = ll_functions
                      , LL.moduleExports = ll_export_sigs}
 

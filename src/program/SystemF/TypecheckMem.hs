@@ -355,6 +355,13 @@ typeInferCoerceE inf from_t to_t body = do
   
   return to_t
   
+checkConstant :: Constant Mem -> TCM ()
+checkConstant (Constant inf ty e) = do
+  typeCheckType ty
+  g_type <- typeInferExp e
+  checkType (text "Constant annotated with wrong type") (getSourcePos inf)
+    ty g_type
+
 typeCheckDefGroup :: DefGroup (FDef Mem) -> TCM b -> TCM b
 typeCheckDefGroup defgroup do_body = do
   (_, body_type) <-
@@ -365,6 +372,20 @@ typeCheckDefGroup defgroup do_body = do
   where
     -- To typecheck a definition, check the function it contains
     typeCheckDef def = typeInferFun $ definiens def
+
+typeCheckGlobalDefGroup :: DefGroup (GDef Mem) -> TCM b -> TCM b
+typeCheckGlobalDefGroup defgroup do_body = do
+  (_, body_type) <-
+    assumeGDefGroup defgroup
+    (mapM_ typeCheckDef $ defGroupMembers defgroup)
+    do_body
+  return body_type
+  where
+    -- To typecheck a definition, check the function it contains
+    typeCheckDef def =
+      case definiens def
+      of FunEnt f -> void $ typeInferFun f
+         DataEnt d -> checkConstant d
 
 typeCheckExport :: Export Mem -> TCM ()
 typeCheckExport (Export pos spec f) = do
@@ -378,10 +399,10 @@ typeCheckModule (Module module_name imports defs exports) = do
     runTypeEvalM do_typecheck varIDs global_type_env
 
 typeCheckTopLevel imports defss exports =
-  typeCheckDefGroup (Rec imports) $ typecheck_contents defss
+  typeCheckGlobalDefGroup (Rec imports) $ typecheck_contents defss
   where
     typecheck_contents (defs:defss) =
-      typeCheckDefGroup defs $ typecheck_contents defss
+      typeCheckGlobalDefGroup defs $ typecheck_contents defss
 
     typecheck_contents [] =
       mapM_ typeCheckExport exports

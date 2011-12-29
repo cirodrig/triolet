@@ -27,6 +27,7 @@ module SystemF.Lowering.Datatypes2
 
         -- * Creating layouts
         LayoutCon(..),
+        layoutCon,
         Layout(ValLayout, MemLayout),
         getLayout,
         AlgLayout,
@@ -51,6 +52,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
+import Common.Label
 import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
@@ -142,7 +144,11 @@ that product type.
 --   information is required.  Other algebraic data types are annotated with
 --   a constructor name.
 data LayoutCon = VarTag !Var | TupleTag
-               deriving(Eq)
+               deriving(Eq, Show)
+
+layoutCon :: ConInstSummary -> LayoutCon
+layoutCon (Just v) = VarTag v
+layoutCon Nothing = TupleTag
 
 -- | An algebraic sum type.
 data AlgSum a =
@@ -201,7 +207,7 @@ data ValProd =
     , valFields      :: ![Layout]
 
       -- | Create a static value
-    , valBuilder      :: !([LL.Val] -> Lower (LL.Val, [LL.GlobalDef]))
+    , valBuilder      :: !(Maybe Label -> [LL.Val] -> Lower (LL.Val, [LL.GlobalDef]))
 
       -- | Create a value, given the fields of the product type.
       --   All fields including erased fields are passed.
@@ -258,7 +264,7 @@ data MemProd =
     , memFields       :: ![Layout]
 
       -- | Create a static value
-    , memBuilder      :: !([LL.Val] -> Lower (LL.Val, [LL.GlobalDef]))
+    , memBuilder      :: !(Maybe Label -> [LL.Val] -> Lower (LL.Val, [LL.GlobalDef]))
 
       -- | Initialize the product type, given the initializers for all its
       --   fields
@@ -487,8 +493,8 @@ enumProdLayout e_members (p_con, p_tag, p_prod) =
     p_layout =
       (p_tag, ValProd (VarTag p_con) ty (valFields p_prod) builder writer reader)
       where
-        builder inits = do
-          (val, defs) <- valBuilder p_prod inits
+        builder m_name inits = do
+          (val, defs) <- valBuilder p_prod m_name inits
           return (LL.RecV record_type [LL.LitV p_tag, val], defs)
 
         writer inits = do
@@ -531,7 +537,7 @@ productValLayout con fields =
       -- Create a record containing only non-erased fields
       LL.constStaticRecord [LL.valueToFieldType f | VLayout f <- fields]
 
-    builder args
+    builder m_name args
       | length args == num_fields = do
           -- Ignore the erased arguments
           let kept_args = [a | (a, VLayout _) <- zip args fields]
@@ -582,7 +588,7 @@ unitValLayout con fields =
 --   field values as arguments and ignores them.  The destructor 
 --   returns field values.
 nullaryValueConCode :: LL.Val -> [Layout]
-                    -> (([LL.Val] -> Lower (LL.Val, [LL.GlobalDef])),
+                    -> ((Maybe Label -> [LL.Val] -> Lower (LL.Val, [LL.GlobalDef])),
                         ([Initializer] -> Producer),
                         (LL.Val -> GenLower [LL.Val]))
 nullaryValueConCode value fields
@@ -591,7 +597,7 @@ nullaryValueConCode value fields
   where
     num_fields = length fields
 
-    builder fs
+    builder _ fs
       | length fs == num_fields = return (value, [])
       | otherwise = internalError "unitValLayout: Wrong number of fields"
 
@@ -632,12 +638,12 @@ boxedLayout' (MemProd con layout fields builder writer reader) =
           , valWriter = new_writer
           , valReader = new_reader}
   where
-    new_builder fields = do
+    new_builder m_name fields = do
       -- Construct the object
-      (val, defs) <- builder fields
+      (val, defs) <- builder Nothing fields
 
       -- Bind it to a global definition
-      tmp_var <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
+      tmp_var <- LL.newVar m_name (LL.PrimType LL.OwnedType)
       let object_def = LL.GlobalDataDef (LL.Def tmp_var (LL.StaticData val))
       return (LL.VarV tmp_var, object_def : defs)
 
@@ -709,9 +715,9 @@ referenceLayout layout =
   MemProd (VarTag $ pyonBuiltin The_referenced) IndirectMemLayout
   [MemLayout layout] builder writer reader
   where
-    builder [obj_value] = do
+    builder m_name [obj_value] = do
       -- Create a global data definition with this value 
-      tmp_var <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
+      tmp_var <- LL.newVar m_name (LL.PrimType LL.PointerType)
       let obj_def = LL.GlobalDataDef $ LL.Def tmp_var (LL.StaticData obj_value)
       return (LL.VarV tmp_var, [obj_def])
           
@@ -764,7 +770,7 @@ productMemLayout con fields =
   where
     layout = memRecordLayout $ dynamicRecordLayout fields
 
-    builder args
+    builder _ args
       | length args /= length fields = 
           internalError "productMemLayout: Wrong number of field initializers"
       | otherwise = do
@@ -845,9 +851,9 @@ taggedSumMemLayout members = Sum tagged_members get_tag
           MemProd cons (tagged_layout tag layout) fs
           tagged_builder tagged_writer tagged_reader
           where
-            tagged_builder values = do
+            tagged_builder m_name values = do
               let (record_type, _) = static_tagged_type layout
-              (payload, defs) <- builder values
+              (payload, defs) <- builder m_name values
               let val = LL.RecV record_type [LL.LitV tag, payload]
               return (val, defs)
 
@@ -889,9 +895,9 @@ objectLayout mem_layout =
     member_layout (MemProd cons layout fields builder writer reader) =
       MemProd cons (object_layout layout) fields obj_builder obj_writer obj_reader
       where
-        obj_builder values = do
+        obj_builder m_name values = do
           let Just (field_type, is_pointerless) = memStaticFieldType layout
-          (payload, defs) <- builder values
+          (payload, defs) <- builder m_name values
           let record_type =
                 LL.mutableStaticRecord [LL.RecordField objectHeaderRecord,
                                      LL.valueToFieldType $ LL.valType payload]
@@ -960,20 +966,25 @@ lowerFunctionType env ty = runLowering env $ do
   return ll_type
 
 -- | Generate a static data definition from a data constructor application.
-staticObject :: AlgLayout -> Var -> [LL.Val] -> Lower (LL.Val, [LL.GlobalDef])
-staticObject (AlgMemLayout ml) con fields =
-  staticMemObject ml (VarTag con) fields
-staticObject (AlgValLayout (AVLayout vl)) con fields =
-  staticValObject vl (VarTag con) fields
+--   Return the lowered value, auxiliary global definitions, and a flag
+--   indicating whether it's a pass-by-value value.
+staticObject :: Maybe Label -> AlgLayout -> LayoutCon -> [LL.Val]
+             -> Lower (LL.Val, [LL.GlobalDef], Bool)
+staticObject m_name (AlgMemLayout ml) con fields =
+  staticMemObject m_name ml con fields
+staticObject m_name (AlgValLayout (AVLayout vl)) con fields =
+  staticValObject m_name vl con fields
 
-staticMemObject ml con fields =
+staticMemObject m_name ml con fields =
   case findMember ((con ==) . memConstructor) ml
-  of Just mb -> memBuilder mb fields
+  of Just mb -> do (val, defs) <- memBuilder mb m_name fields
+                   return (val, defs, False)
      Nothing -> internalError "staticObject: Constructor not found"
 
-staticValObject vl con fields =
+staticValObject m_name vl con fields =
   case findMember ((con ==) . valConstructor) vl
-  of Just mb -> valBuilder mb fields
+  of Just mb -> do (val, defs) <- valBuilder mb m_name fields
+                   return (val, defs, True)
      Nothing -> internalError "staticObject: Constructor not found"
 
 -- | Generate the low-level translation of a data constructor.  If the
@@ -983,16 +994,19 @@ staticValObject vl con fields =
 --
 --   The arguments should be initializer functions (for bare objects) or
 --   values (for boxed or value objects).
-algebraicIntro :: AlgLayout -> Var -> [LL.Val] -> GenLower LL.Val
+algebraicIntro :: AlgLayout -> LayoutCon -> [LL.Val] -> GenLower LL.Val
 algebraicIntro (AlgMemLayout ml) con fields =
-  algMemIntro ml (VarTag con) fields
+  algMemIntro ml con fields
 algebraicIntro (AlgValLayout (AVLayout vl)) con fields =
-  algValIntro vl (VarTag con) fields
+  algValIntro vl con fields
 
 algMemIntro ml con fields =
   case findMember ((con ==) . memConstructor) ml
   of Just mb -> algMemIntro' mb fields
-     Nothing -> internalError "algebraicIntro: Constructor not found"
+     Nothing -> let x = case ml
+                        of One x -> show (memConstructor x)
+                           Sum xs _ -> show $ map (memConstructor . snd) xs
+                in trace (show con ++ "\n" ++ x) $ internalError "algebraicIntro: Constructor not found"
 
 algMemIntro' (MemProd { memLayout = layout
                       , memFields = fs
