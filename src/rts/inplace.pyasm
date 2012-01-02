@@ -11,6 +11,16 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+function inline intSumScatterReduction_make_init (unit dummy) -> int
+{
+  int 0;
+};
+
+function inline countingScatterReduction_make_init (unit dummy) -> int
+{
+  int 0;
+};
+
 function inline intUpdateInPlace_initializer (owned f, pointer ret) -> unit
 {
   !ret = int call f (nil);
@@ -21,6 +31,11 @@ function inline intUpdateInPlace_updater (owned f, unit _, pointer ret) -> unit
 {
   !ret = int call f (int load ret);
   nil;
+};
+
+function inline floatSumScatterReduction_make_init (unit dummy) -> float
+{
+  float 0.0;
 };
 
 function inline floatUpdateInPlace_initializer (owned f, pointer ret) -> unit

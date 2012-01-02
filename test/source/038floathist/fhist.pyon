@@ -1,0 +1,6 @@
+
+def f(a):
+    domain = arrayRange((0,0), (2, 3))
+    return scatter(array2Scatter(domain, floatSumScatter), a)
+
+export cplusplus f : list(((int, int), float)) -> array2(float)

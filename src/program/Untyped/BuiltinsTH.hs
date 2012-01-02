@@ -22,7 +22,8 @@ pyonSourceTypes =
    "Maybe", "Any",
    "shape", "list_dim", "dim0", "dim1", "dim2",
    "index", "slice", "cartesianDomain",
-   "view"]
+   "view",
+   "Scatter"]
 
 -- | Predefined data types not visible to the Pyon parser
 pyonOtherTypes :: [String]
@@ -55,7 +56,9 @@ pyonSourceGlobals =
   , "rows"
   , "cols"
   , "outerproduct"
-  , "shift"
+  , "displaceView"
+  , "multiplyView"
+  , "divideView"
   , "view2"
   , "stencil2D"
   , "extend2D"
@@ -63,6 +66,12 @@ pyonSourceGlobals =
   , "listiter"
   , "matrixiter"
   , "floor"
+  , "intSumScatter"
+  , "floatSumScatter"
+  , "countingScatter"
+  , "array1Scatter"
+  , "array2Scatter"
+  , "scatter"
   , "__undefined__"
   , "__and__"
   , "__or__"
@@ -117,6 +126,7 @@ pyonOtherGlobals =
     "getSlice",
     "at_point",
     "displaceDomain", "multiplyDomain", "divideDomain",
+    "multiplyIndex", "divideIndex",
     "sliceObject", "justVal", "nothingVal"
   ]
 

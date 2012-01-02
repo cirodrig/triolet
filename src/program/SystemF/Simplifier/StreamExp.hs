@@ -554,7 +554,7 @@ interpretViewShape' ty = interpretViewShape ty >>= check
 data StreamOpInterpreter =
   StreamOpInterpreter
   { checkArity :: !(Int -> Int -> Bool)
-  , interpretOp :: !(ExpInfo -> [Type] -> [ExpM] -> TypeEvalM ExpS)
+  , interpretOp :: !(ExpInfo -> [Type] -> [ExpM] -> TypeEvalM (Maybe ExpS))
   }
 
 streamOpTable :: IntMap.IntMap StreamOpInterpreter
@@ -601,9 +601,12 @@ interpretViewGenerate = StreamOpInterpreter check_arity interpret
     interpret inf ty_args args = do
       let [stream_shape, ty] = ty_args
           [shape_dict, repr, dom, f] = args
-      sh <- interpretViewShape' stream_shape
-      let op = GenerateOp sh ty
-      return $ OpSE inf op [repr] [dom, f] [] Nothing
+      m_sh <- interpretViewShape stream_shape
+      return $! case m_sh of
+        Nothing -> Nothing
+        Just sh ->
+          let op = GenerateOp sh ty
+          in Just $ OpSE inf op [repr] [dom, f] [] Nothing
 
 interpretSequenceGenerate = StreamOpInterpreter check_arity interpret
   where
@@ -613,7 +616,7 @@ interpretSequenceGenerate = StreamOpInterpreter check_arity interpret
       let [ty] = ty_args
           [repr, dom, f] = args
       let op = GenerateOp SequenceType ty
-      return $ OpSE inf op [repr] [dom, f] [] Nothing
+      return $ Just $ OpSE inf op [repr] [dom, f] [] Nothing
 
 interpretSequenceZip n_inputs = StreamOpInterpreter check_arity interpret
   where
@@ -625,7 +628,7 @@ interpretSequenceZip n_inputs = StreamOpInterpreter check_arity interpret
           Just (repr_args, transformer : inputs) = breakAt (1 + n_inputs) args
       let op = ZipOp SequenceType input_types output_type
       stream_exps <- mapM interpretStreamSubExp inputs
-      return $ OpSE inf op repr_args [transformer] stream_exps Nothing
+      return $ Just $ OpSE inf op repr_args [transformer] stream_exps Nothing
     
     n_ty_args = n_inputs + 1
     n_args = 2 * n_inputs + 2
@@ -640,10 +643,13 @@ interpretViewZip n_inputs = StreamOpInterpreter check_arity interpret
           output_type = last ty_args'
           (shape_dict_arg : args') = args
           Just (repr_args, transformer : inputs) = breakAt (1 + n_inputs) args'
-      sh <- interpretViewShape' stream_shape
-      let op = ZipOp sh input_types output_type
-      stream_exps <- mapM interpretStreamSubExp inputs
-      return $ OpSE inf op repr_args [transformer] stream_exps Nothing
+      m_sh <- interpretViewShape stream_shape
+      case m_sh of
+        Nothing -> return Nothing
+        Just sh -> do
+          let op = ZipOp sh input_types output_type
+          stream_exps <- mapM interpretStreamSubExp inputs
+          return $ Just $ OpSE inf op repr_args [transformer] stream_exps Nothing
     
     n_ty_args = n_inputs + 2
     n_args = 2 * n_inputs + 3
@@ -662,7 +668,7 @@ interpretReduce stream_type = StreamOpInterpreter check_arity interpret
           op = ConsumeOp stream_type (Reduce ty)
 
       stream_exp <- interpretStreamSubExp source
-      return $ OpSE inf op [repr] [reducer, init] [stream_exp] maybe_return_arg
+      return $ Just $ OpSE inf op [repr] [reducer, init] [stream_exp] maybe_return_arg
 
 interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
   where
@@ -679,7 +685,7 @@ interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
           op = ConsumeOp stream_type (Reduce1 ty)
 
       stream_exp <- interpretStreamSubExp source
-      return $ OpSE inf op [repr] [reducer] [stream_exp] maybe_return_arg
+      return $ Just $ OpSE inf op [repr] [reducer] [stream_exp] maybe_return_arg
 
 interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
   where
@@ -690,7 +696,7 @@ interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
           [repr, src] = args
           op = ToSequenceOp stream_type ty
       src_stream <- interpretStreamSubExp src
-      return $ OpSE inf op [repr] [] [src_stream] Nothing
+      return $ Just $ OpSE inf op [repr] [] [src_stream] Nothing
 
 interpretBind = StreamOpInterpreter check_arity interpret
   where
@@ -700,7 +706,7 @@ interpretBind = StreamOpInterpreter check_arity interpret
     interpret inf [t1, t2] [repr, producer, transformer] = do
       producer' <- interpretStreamSubExp producer
       transformer' <- interpretStreamSubExp transformer
-      return $ OpSE inf (BindOp t1 t2) [repr] [] [producer', transformer'] Nothing
+      return $ Just $ OpSE inf (BindOp t1 t2) [repr] [] [producer', transformer'] Nothing
 
 interpretGenerateBind = StreamOpInterpreter check_arity interpret
   where
@@ -709,7 +715,7 @@ interpretGenerateBind = StreamOpInterpreter check_arity interpret
     
     interpret inf [t] [shape, transformer] = do
       transformer' <- interpretStreamSubExp transformer
-      return $ OpSE inf (GenerateBindOp t) [] [shape] [transformer'] Nothing
+      return $ Just $ OpSE inf (GenerateBindOp t) [] [shape] [transformer'] Nothing
 
 interpretReturn = StreamOpInterpreter check_arity interpret
   where
@@ -717,7 +723,7 @@ interpretReturn = StreamOpInterpreter check_arity interpret
     check_arity _ _ = False
     
     interpret inf [ty] [repr, gen] = do
-      return $ OpSE inf (ReturnOp ty) [repr] [gen] [] Nothing
+      return $ Just $ OpSE inf (ReturnOp ty) [repr] [gen] [] Nothing
 
 interpretEmpty stream_type = StreamOpInterpreter check_arity interpret
   where
@@ -725,7 +731,7 @@ interpretEmpty stream_type = StreamOpInterpreter check_arity interpret
     check_arity _ _ = False
     
     interpret inf [ty] [repr] = do
-      return $ OpSE inf (EmptyOp stream_type ty) [repr] [] [] Nothing
+      return $ Just $ OpSE inf (EmptyOp stream_type ty) [repr] [] [] Nothing
 
 {-
 
@@ -820,7 +826,7 @@ interpretStreamAppExp inf op ty_args args =
        case IntMap.lookup (fromIdent $ varID op_var) streamOpTable 
        of Just interpreter
             | checkArity interpreter (length ty_args) (length args) ->
-                liftM Just $ interpretOp interpreter inf ty_args args
+                interpretOp interpreter inf ty_args args
           _ -> return Nothing
 
      -- Match a shape-polymorphic function call.  The operator is a function
@@ -829,7 +835,6 @@ interpretStreamAppExp inf op ty_args args =
        case IntMap.lookup (fromIdent $ varID op_var) viewOpTable 
        of Just interpreter
             | checkArity interpreter (1 + length ty_args) (1 + length args) ->
-                liftM Just $
                 interpretOp interpreter inf (ty_arg : ty_args) (arg : args)
           _ -> return Nothing
 

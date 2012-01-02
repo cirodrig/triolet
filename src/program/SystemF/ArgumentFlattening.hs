@@ -1089,7 +1089,9 @@ deadValue t = do
                return expr
          (CoT (VarT k), [t1, t2])
            | k == boxV ->
-               return $ ExpM $ AppE defaultExpInfo make_coercion_op [t1, t2] []
+               return $ ExpM $ AppE defaultExpInfo make_x_coercion_op [t1, t2] []
+           | k == bareV ->
+               return $ ExpM $ AppE defaultExpInfo make_b_coercion_op [t1, t2] []
          _ -> internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
@@ -1097,14 +1099,15 @@ deadValue t = do
       return dead_bare
     _ -> internalError "deadValue: Unexpected kind"
   where
-    dead_box = ExpM $ AppE defaultExpInfo dead_box_op [t] []
-    dead_bare = ExpM $ AppE defaultExpInfo dead_bare_op [t] []
-    dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadBox)
-    dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadRef)
+    dead_box = appE' dead_box_op [t] []
+    dead_bare = appE' dead_bare_op [t] []
+    dead_box_op = varE' (pyonBuiltin The_deadBox)
+    dead_bare_op = varE' (pyonBuiltin The_deadRef)
     dead_proof_op p = VarCon (pyonBuiltin The_deadProof) [p] []
     dead_finindint_op i = VarCon (pyonBuiltin The_fiInt) [i] []
     dead_indint_op i = VarCon (pyonBuiltin The_iInt) [i] []
-    make_coercion_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_unsafeMakeCoercion)
+    make_x_coercion_op = varE' (pyonBuiltin The_unsafeMakeCoercion)
+    make_b_coercion_op = varE' (pyonBuiltin The_unsafeMakeBareCoercion)
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>
               PlanMode -> Specificity -> Type -> m FlatRet

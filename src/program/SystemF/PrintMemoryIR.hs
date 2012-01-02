@@ -286,7 +286,7 @@ pprModule m = pprModuleFlags defaultPprFlags m
 pprModuleFlags flags (Module modname imports defs exports) =
   text "module" <+> text (showModuleName modname) $$
   {-text "imports {" $$
-  nest 2 (vcat (map pprDef imports)) $$
+  nest 2 (vcat (map (pprGDefFlags flags) imports)) $$
   text "}" $$-}
   vcat (map (pprGDefGroupFlags flags) defs) $$
   vcat (map (pprExportFlags flags) exports)

@@ -843,22 +843,25 @@ mkCartesianClass = do
         monomorphic $ functionType [ix_ty, ix_ty] dom_ty
       displace_scheme =
         monomorphic $ functionType [dom_ty, ix_ty] dom_ty
-      scale_scheme =
-        monomorphic $ functionType [dom_ty, ConTy (tiBuiltin the_con_int)] dom_ty
+      multiply_index_scheme =
+        monomorphic $ functionType [ix_ty, ix_ty] ix_ty
   rec let cls =
             mkClass "Cartesian" sh
             [TFunAppTy (tiBuiltin the_con_cartesianDomain) [ix_ty] `IsEqual` dom_ty]
             (pyonBuiltin SystemF.The_CartesianDict)
             (pyonBuiltin SystemF.The_cartesianDict)
-            [loBound, hiBound, arrayRange, displace, multiply, divide, unbounded]
+            [loBound, hiBound, arrayRange, displace, multiply, divide,
+             multiplyI, divideI, unbounded]
             [dim0_instance, dim1_instance, dim2_instance]
       loBound <- mkClassMethod cls 0 "loBound" bound_scheme
       hiBound <- mkClassMethod cls 1 "hiBound" bound_scheme
       arrayRange <- mkClassMethod cls 2 "arrayRange" range_scheme
       displace <- mkClassMethod cls 3 "displaceDomain" displace_scheme
-      multiply <- mkClassMethod cls 4 "multiplyDomain" scale_scheme
-      divide <- mkClassMethod cls 5 "divideDomain" scale_scheme
-      unbounded <- mkClassMethod cls 6 "unbounded" (monomorphic dom_ty)
+      multiply <- mkClassMethod cls 4 "multiplyDomain" displace_scheme
+      divide <- mkClassMethod cls 5 "divideDomain" displace_scheme
+      multiplyI <- mkClassMethod cls 6 "multiplyIndex" multiply_index_scheme
+      divideI <- mkClassMethod cls 7 "divideIndex" multiply_index_scheme
+      unbounded <- mkClassMethod cls 8 "unbounded" (monomorphic dom_ty)
       let dim0_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim0))
             [ InstanceMethod $
@@ -873,6 +876,10 @@ mkCartesianClass = do
               pyonBuiltin SystemF.The_CartesianDict_dim0_multiplyDomain
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_divideDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_multiplyIndex
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_divideIndex
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_unbounded]
       let int_type = ConTy (tiBuiltin the_con_int)
@@ -891,6 +898,10 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_divideDomain
             , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_multiplyIndex
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_divideIndex
+            , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_unbounded]
       let dim2_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim2))
@@ -906,6 +917,10 @@ mkCartesianClass = do
               pyonBuiltin SystemF.The_CartesianDict_dim2_multiplyDomain
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_divideDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_multiplyIndex
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_divideIndex
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_unbounded]
   return cls
@@ -977,6 +992,7 @@ mkPassableClass = do
               [int_instance, float_instance, bool_instance, none_instance,
                maybe_val_instance, maybe_instance,
                complex_instance, sliceobject_instance,
+               scatter_instance,
                list_dim_instance,
                dim1_instance, dim2_instance,
                any_instance,
@@ -1053,6 +1069,11 @@ mkPassableClass = do
           polyExplicitInstance [b, c] [] cls
           (ConTy (tiBuiltin the_con_view) @@ ConTy b @@ ConTy c)
           (pyonBuiltin SystemF.The_repr_view)
+          []
+  ; let scatter_instance =
+          polyExplicitInstance [b, c] [] cls
+          (ConTy (tiBuiltin the_con_Scatter) @@ ConTy b @@ ConTy c)
+          (pyonBuiltin SystemF.The_repr_Scatter)
           []
   ; let complex_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
@@ -1240,17 +1261,6 @@ mkLenType =
        tT `IsInst` tiBuiltin the_c_Indexable],
       functionType [tT @@ aT] int_type)
 
-mkShiftType =
-  forallType [Star, Star] $ \[sh, a] ->
-  let shT = ConTy sh
-      aT = ConTy a
-      indexT = TFunAppTy (tiBuiltin the_con_index) [shT]
-      view_type = ConTy (tiBuiltin the_con_view) @@ shT @@ aT
-  in ([passable aT,
-       shT `IsInst` tiBuiltin the_c_Cartesian,
-       indexT `IsInst` tiBuiltin the_c_Additive],
-      functionType [indexT, view_type] view_type)
-
 mkWidthHeightType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
@@ -1375,6 +1385,59 @@ mkHistogramType =
                     ConTy (tiBuiltin the_con_iter) @@ ConTy sh @@ int_type]
       (ConTy (tiBuiltin the_con_array1) @@ int_type))
 
+mkIntSumScatterType =
+  let int_type = ConTy $ tiBuiltin the_con_int
+  in return $ monomorphic $
+     ConTy (tiBuiltin the_con_Scatter) @@ int_type @@ int_type
+
+mkFloatSumScatterType =
+  let float_type = ConTy $ tiBuiltin the_con_float
+  in return $ monomorphic $
+     ConTy (tiBuiltin the_con_Scatter) @@ float_type @@ float_type
+
+mkCountingScatterType =
+  let none_type = ConTy $ tiBuiltin the_con_NoneType
+      int_type = ConTy $ tiBuiltin the_con_int
+  in return $ monomorphic $
+     ConTy (tiBuiltin the_con_Scatter) @@ int_type @@ none_type
+
+mkArray1ScatterType =
+  forallType [Star, Star] $ \[s, i] ->
+  let sT = ConTy s
+      iT = ConTy i
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([passable sT, passable iT],
+      functionType [ConTy $ tiBuiltin the_con_dim1,
+                    ConTy (tiBuiltin the_con_Scatter) @@ sT @@ iT]
+      (ConTy (tiBuiltin the_con_Scatter) @@
+       (ConTy (tiBuiltin the_con_array1) @@ sT) @@
+       (TupleTy 2 @@ int_type @@ iT)))
+
+mkArray2ScatterType =
+  forallType [Star, Star] $ \[s, i] ->
+  let sT = ConTy s
+      iT = ConTy i
+      int_type = ConTy $ tiBuiltin the_con_int
+      index_type = TupleTy 2 @@ int_type @@ int_type
+  in ([passable sT, passable iT],
+      functionType [ConTy $ tiBuiltin the_con_dim2,
+                    ConTy (tiBuiltin the_con_Scatter) @@ sT @@ iT]
+      (ConTy (tiBuiltin the_con_Scatter) @@
+       (ConTy (tiBuiltin the_con_array2) @@ sT) @@
+       (TupleTy 2 @@ index_type @@ iT)))
+
+mkScatterType =
+  forallType [Star :-> Star, Star, Star] $ \[t, i, r] ->
+  let tT = ConTy t
+      iT = ConTy i
+      rT = ConTy r
+  in ([shapeType tT `IsInst` tiBuiltin the_c_Shape,
+       tT `IsInst` tiBuiltin the_c_Traversable,
+       passable (tT @@ iT),
+       passable iT,
+       passable rT],
+      functionType [ConTy (tiBuiltin the_con_Scatter) @@ rT @@ iT, tT @@ iT] rT)
+
 mkFloorType =
   return $ monomorphic $
   functionType [ConTy $ tiBuiltin the_con_float] (ConTy $ tiBuiltin the_con_int)
@@ -1424,6 +1487,19 @@ mkMatrixIterType =
   in ([],
       functionType [ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_dim2) @@ aT]
       (iterType (ConTy $ tiBuiltin the_con_array2) aT))
+
+mkDisplaceViewType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      index_type = TFunAppTy (tiBuiltin the_con_index) [shapeType tT]
+  in ([tT `IsInst` tiBuiltin the_c_Indexable,
+       shapeType tT `IsInst` tiBuiltin the_c_Shape,
+       shapeType tT `IsInst` tiBuiltin the_c_Cartesian,
+       index_type `IsInst` tiBuiltin the_c_Additive,
+       passable aT],
+      functionType [tT @@ aT, index_type]
+      (ConTy (tiBuiltin the_con_view) @@ shapeType tT @@ aT))
 
 mkIterBindType =
   forallType [Star, Star] $ \[a, b] ->
@@ -1513,6 +1589,8 @@ initializeTIBuiltins = do
             , ("view", Star :-> Star :-> Star, 
                [| pyonBuiltin SystemF.The_view |])
             , ("Any", Star, [| pyonBuiltin SystemF.The_Any |])
+            , ("Scatter", Star :-> Star :-> Star,
+               [| pyonBuiltin SystemF.The_ScatterReduction |])
             , ("list_dim", Star, [| pyonBuiltin SystemF.The_list_dim |])
             , ("dim0", Star, [| pyonBuiltin SystemF.The_dim0 |])
             , ("dim1", Star, [| pyonBuiltin SystemF.The_dim1 |])
@@ -1601,9 +1679,6 @@ initializeTIBuiltins = do
               ("outerproduct", [| mkOuterProductType |]
               , [| pyonBuiltin SystemF.The_outerproduct |]
               ),
-              ("shift", [| mkShiftType |]
-              , [| pyonBuiltin SystemF.The_shift |]
-              ),
               ("view2", [| mkView2Type |]
               , [| pyonBuiltin SystemF.The_create_view2 |]
               ),
@@ -1622,6 +1697,15 @@ initializeTIBuiltins = do
               ("cols", [| mkRowsColsType |]
               , [| pyonBuiltin SystemF.The_cols |]
               ),
+              ("displaceView", [| mkDisplaceViewType |]
+              , [| pyonBuiltin SystemF.The_displaceView |]
+              ),
+              ("multiplyView", [| mkDisplaceViewType |]
+              , [| pyonBuiltin SystemF.The_multiplyView |]
+              ),
+              ("divideView", [| mkDisplaceViewType |]
+              , [| pyonBuiltin SystemF.The_divideView |]
+              ),
               ("safeIndex", [| mkSafeIndexType |]
               , [| pyonBuiltin SystemF.The_safeIndex |]
               ),
@@ -1633,6 +1717,24 @@ initializeTIBuiltins = do
               ),
               ("floor", [| mkFloorType |]
               , [| pyonBuiltin SystemF.The_floor |]
+              ),
+              ("intSumScatter", [| mkIntSumScatterType |]
+              , [| pyonBuiltin SystemF.The_intSumScatterReduction |]
+              ),
+              ("floatSumScatter", [| mkFloatSumScatterType |]
+              , [| pyonBuiltin SystemF.The_floatSumScatterReduction |]
+              ),
+              ("countingScatter", [| mkCountingScatterType |]
+              , [| pyonBuiltin SystemF.The_countingScatterReduction |]
+              ),
+              ("array1Scatter", [| mkArray1ScatterType |]
+              , [| pyonBuiltin SystemF.The_array1ScatterReduction |]
+              ),
+              ("array2Scatter", [| mkArray2ScatterType |]
+              , [| pyonBuiltin SystemF.The_array2ScatterReduction |]
+              ),
+              ("scatter", [| mkScatterType |]
+              , [| pyonBuiltin SystemF.The_fun_scatterReduce |]
               ),
               ("listiter", [| mkListIterType |]
               , [| pyonBuiltin SystemF.The_fun_asList_Stream |]
@@ -1701,7 +1803,8 @@ initializeTIBuiltins = do
             , ([| the_c_Vector |], ["scale", "magnitude", "dot"])
             , ([| the_c_Cartesian |], ["loBound", "hiBound", "arrayRange",
                                        "displaceDomain", "multiplyDomain",
-                                       "divideDomain", "unbounded"])
+                                       "divideDomain", "multiplyIndex",
+                                       "divideIndex", "unbounded"])
             ]
 
           -- Construct initializers

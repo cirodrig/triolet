@@ -257,7 +257,7 @@ instance Definiens Ent where
   definiensIsInliningCandidate phase (Def v ann (FunEnt f)) =
     definiensIsInliningCandidate phase (Def v ann f)
   definiensIsInliningCandidate phase (Def v ann (DataEnt d)) =
-    True
+    definiensIsInliningCandidate phase (Def v ann d)
 
   definiensValue (Def v ann (FunEnt f)) =
     definiensValue (Def v ann f)

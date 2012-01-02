@@ -209,6 +209,9 @@ max_ii @(m n : intindex) (a : IInt m) (b : IInt n)
       iPosInfty @sum_t
   };
 
+zero_ii : IInt 0 = iInt @0 (fiInt @0 0);
+
+one_ii : IInt 1 = iInt @1 (fiInt @1 1);
 
 -- Operations on finite indexed ints aren't inlined until near the end,
 -- because they don't enable other optimizations.  By delaying inlining,
@@ -608,7 +611,7 @@ CartesianDict_dim0_displaceDomain
 
 CartesianDict_dim0_multiplyDomain
   (dom : dim0)
-  (n : int)
+  (n : Stored NoneType)
   -> dim0
   attribute(inline) =
   mk_dim0;
@@ -616,7 +619,7 @@ CartesianDict_dim0_multiplyDomain
 
 CartesianDict_dim0_divideDomain
   (dom : dim0)
-  (n : int)
+  (n : Stored NoneType)
   -> dim0
   attribute(inline) =
   mk_dim0;
@@ -685,54 +688,62 @@ CartesianDict_dim1_displaceDomain
 
 CartesianDict_dim1_multiplyDomain
   (dom : dim1)
-  (n : int)
+  (n : Stored int)
   -> dim1
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
+  case n of stored @int (n_u : int).
+
+  -- Stride must remain positive
+  if n_u <=# 0 then except @dim1 else
   
   let lb2 : MaybeVal int =
         case lb of {
-          justVal @int (lb_i : int). justVal @int (lb_i *# n)
+          justVal @int (lb_i : int). justVal @int (lb_i *# n_u)
         ; nothingVal @int. nothingVal @int
         } in
 
   let ub2 : MaybeVal int =
         case ub of {
-          justVal @int (ub_i : int). justVal @int (ub_i *# n)
+          justVal @int (ub_i : int). justVal @int (ub_i *# n_u)
         ; nothingVal @int. nothingVal @int
         } in
   mk_dim1 (interval lb2 ub2)
-          (linearMap (stride *# n) (alignment *# n));
+          (linearMap (stride *# n_u) (alignment *# n_u));
 
 
 CartesianDict_dim1_divideDomain
   (dom : dim1)
-  (n : int)
+  (n : Stored int)
   -> dim1
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
+  case n of stored @int (n_u : int).
+
+  -- Stride must remain positive
+  if n_u <=# 0 then except @dim1 else
 
   -- Ensure that it divides exactly
-  if or (stride %# n /=# 0) (alignment %# n /=# 0)
+  if or (stride %# n_u /=# 0) (alignment %# n_u /=# 0)
   then except @(dim1) else
   
   let lb2 : MaybeVal int =
         case lb of {
-          justVal @int (lb_i : int). justVal @int (lb_i //# n)
+          justVal @int (lb_i : int). justVal @int (lb_i //# n_u)
         ; nothingVal @int. nothingVal @int
         } in
 
   let ub2 : MaybeVal int =
         case ub of {
-          justVal @int (ub_i : int). justVal @int (ub_i //# n)
+          justVal @int (ub_i : int). justVal @int (ub_i //# n_u)
         ; nothingVal @int. nothingVal @int
         } in
   mk_dim1 (interval lb2 ub2)
-          (linearMap (stride //# n) (alignment //# n));
+          (linearMap (stride //# n_u) (alignment //# n_u));
 
 
 CartesianDict_dim2_loBound
@@ -820,85 +831,170 @@ CartesianDict_dim2_displaceDomain
 
 CartesianDict_dim2_multiplyDomain
   (dom : dim2)
-  (n : int)
+  (v : PyonTuple2 (Stored int) (Stored int))
   -> dim2
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  mk_dim2 (CartesianDict_dim1_multiplyDomain dom_y n)
-          (CartesianDict_dim1_multiplyDomain dom_x n);
+  case v of pyonTuple2 @(Stored int) @(Stored int)
+    (v_y : Stored int) (v_x : Stored int).
+  mk_dim2 (CartesianDict_dim1_multiplyDomain dom_y v_y)
+          (CartesianDict_dim1_multiplyDomain dom_x v_x);
   
   
 CartesianDict_dim2_divideDomain
   (dom : dim2)
-  (n : int)
+  (v : PyonTuple2 (Stored int) (Stored int))
   -> dim2
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  mk_dim2 (CartesianDict_dim1_divideDomain dom_y n)
-          (CartesianDict_dim1_divideDomain dom_x n);
+  case v of pyonTuple2 @(Stored int) @(Stored int)
+    (v_y : Stored int) (v_x : Stored int).
+  mk_dim2 (CartesianDict_dim1_divideDomain dom_y v_y)
+          (CartesianDict_dim1_divideDomain dom_x v_x);
 
 -------------------------------------------------------------------------------
 -- Imperative computation
 
-intSumScatterReduction (dummy : NoneType)
- -> ScatterReduction (Stored int) (Stored int) =
+intUpdateInPlace_int_coercion : coerce @bare (Stored int) (Stored int) =
+  idBareCoercion @(Stored int);
 
+
+intUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored int) (Stored int) =
+  mutateInPlace @(Stored int) @(Stored int)
+  intUpdateInPlace_int_coercion;
+
+
+intUpdateInPlace_combiner (x : Stored int) (y : Stored int)
+  (ret : OutPtr (Stored int))
+  -> IEffect (Stored int) =
+  case x of stored @int (ux : int).
+  case y of stored @int (uy : int).
+  stored @int (ux +# uy) ret;
+
+
+floatUpdateInPlace_float_coercion : coerce @bare (Stored float) (Stored float) =
+  idBareCoercion @(Stored float);
+
+
+floatUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored float) (Stored float) =
+  mutateInPlace @(Stored float) @(Stored float)
+  floatUpdateInPlace_float_coercion;
+
+
+floatUpdateInPlace_combiner (x : Stored float) (y : Stored float)
+  (ret : OutPtr (Stored float))
+  -> IEffect (Stored float) =
+  case x of stored @float (ux : float).
+  case y of stored @float (uy : float).
+  stored @float (AdditiveDict_float_add ux uy) ret;
+
+
+intSumScatterReduction : ScatterReduction (Stored int) (Stored int) =
   let type Sint = Stored int in
   scatterReduction @Sint @Sint @Sint @int
   repr_int
   intUpdateInPlace_initializer
-  (\ (modify : int -> int) (ix : Stored int)
-     (tok_in : EffTok) (ret : OutPtr Sint) -> EffTok.
-     intUpdateInPlace_updater modify tok_in ret)
-  (\ (x : Sint) (y : Sint) (ret : OutPtr Sint) -> IEffect Sint.
-     case x of stored @int (ux : int).
-     case y of stored @int (uy : int).
-     stored @int (ux +# uy) ret)
-  (mutateInPlace @Sint @Sint (idBareCoercion @Sint))
-  (\ (i : Sint) -> int -> int.
-     case i of stored @int (ui : int).
-     (\ (n : int) -> int. ui +# n))
-  (\ (dummy : NoneType) -> int. 0);
+  intSumScatterReduction_updater
+  intUpdateInPlace_combiner
+  intUpdateInPlace_finalizer
+  intSumScatterReduction_make_update
+  intSumScatterReduction_make_init;
 
 
-floatSumScatterReduction (dummy : NoneType)
-  -> ScatterReduction (Stored float) (Stored float) =
+intSumScatterReduction_updater (modify : int -> int) (ix : Stored int)
+  (tok_in : EffTok) (ret : OutPtr (Stored int)) -> EffTok =
+  intUpdateInPlace_updater modify tok_in ret;
 
+
+intSumScatterReduction_make_update (i : Stored int) -> int -> int =
+  case i of stored @int (ui : int).
+  (\ (n : int) -> int. ui +# n);
+
+
+intSumScatterReduction_make_init (dummy : NoneType) -> int = 0;
+
+
+floatSumScatterReduction : ScatterReduction (Stored float) (Stored float) =
   let type Sfloat = Stored float in
   scatterReduction @Sfloat @Sfloat @Sfloat @float
   repr_float
   floatUpdateInPlace_initializer
-  (\ (f : float -> float) (ix : Stored float) (tok_in : EffTok)
-     (ret : OutPtr (Stored float)) -> EffTok.
-     floatUpdateInPlace_updater f tok_in ret)
-  (\ (x : Sfloat) (y : Sfloat) (ret : OutPtr Sfloat) -> IEffect Sfloat.
-     case x of stored @float (ux : float).
-     case y of stored @float (uy : float).
-     stored @float (AdditiveDict_float_add ux uy) ret)
-  (mutateInPlace @Sfloat @Sfloat (idBareCoercion @Sfloat))
-  (\ (i : Sfloat) -> float -> float.
-     case i of stored @float (ui : float).
-     (\ (n : float) -> float. AdditiveDict_float_add ui n))
-  (\ (dummy : NoneType) -> float. 0.0);
+  floatSumScatterReduction_updater
+  floatUpdateInPlace_combiner
+  floatUpdateInPlace_finalizer
+  floatSumScatterReduction_make_update
+  floatSumScatterReduction_make_init;
 
 
-countingScatterReduction (dummy : NoneType)
-  -> ScatterReduction (Stored int) (Stored NoneType) =
+floatSumScatterReduction_updater (modify : float -> float) (ix : Stored float)
+  (tok_in : EffTok) (ret : OutPtr (Stored float)) -> EffTok =
+  floatUpdateInPlace_updater modify tok_in ret;
+
+
+floatSumScatterReduction_make_update (i : Stored float) -> float -> float =
+  case i of stored @float (ui : float).
+  (\ (n : float) -> float. AdditiveDict_float_add ui n);
+
+
+floatSumScatterReduction_make_init (dummy : NoneType) -> float = 0.0;
+
+
+countingScatterReduction : ScatterReduction (Stored int) (Stored NoneType) =
 
   scatterReduction @(Stored int) @(Stored NoneType) @(Stored int) @int
   repr_int
   intUpdateInPlace_initializer
-  (\ (f : int -> int) (ix : Stored NoneType) (tok_in : EffTok)
-     (ret : OutPtr (Stored int)) -> EffTok.
-     intUpdateInPlace_updater f tok_in ret)
-  (\ (x : Stored int) (y : Stored int) (ret : OutPtr (Stored int))
-     -> IEffect (Stored int).
-     case x of stored @int (ux : int).
-     case y of stored @int (uy : int).
-     stored @int (ux +# uy) ret)
-  (mutateInPlace @(Stored int) @(Stored int) (idBareCoercion @(Stored int)))
-  (\ (dummy : Stored NoneType) -> int -> int. (\ (x : int) -> int. x +# 1))
-  (\ (dummy : NoneType) -> int. 0);
+  countingScatterReduction_updater
+  intUpdateInPlace_combiner
+  intUpdateInPlace_finalizer
+  countingScatterReduction_make_update
+  countingScatterReduction_make_init;
+
+
+countingScatterReduction_updater (modify : int -> int) (ix : Stored NoneType)
+  (tok_in : EffTok) (ret : OutPtr (Stored int)) -> EffTok =
+  intUpdateInPlace_updater modify tok_in ret;
+
+
+countingScatterReduction_make_update (i : Stored NoneType) -> int -> int =
+  (\ (n : int) -> int. n +# 1);
+
+
+countingScatterReduction_make_init (dummy : NoneType) -> int = 0;
+
+
+comapScatterReductionIndex @(r i1 i2 : bare)
+  (repr_i1 : Repr i1)
+  (repr_i2 : Repr i2)
+  (repr_r : Repr r)
+  (transform : i2 -> Writer i1)
+  (sr : ScatterReduction r i1)
+  -> ScatterReduction r i2
+  attribute(inline, inline_final) =
+
+  case sr of
+    scatterReduction @r @i1 @(s : bare) @(a : val)
+    (repr_s : Repr s)
+    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
+    (updater : (a -> a) -> i1 -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Writer s)
+    (finalizer : UpdateInPlaceFinalizer s r)
+    (update_f : i1 -> a -> a)
+    (init_f : NoneType -> a).
+
+  letfun
+    updater2 (f : a -> a) (index : i2) (tok_in : EffTok) (out_ptr : OutPtr s)
+      -> EffTok =
+      case boxed @i1 (transform index) of boxed @i1 (index1 : i1).
+      updater f index1 tok_in out_ptr in
+
+  letfun
+    update_f2 (index : i2) -> a -> a =
+      case boxed @i1 (transform index) of boxed @i1 (index1 : i1).
+      update_f index1 in
+
+  scatterReduction @r @i2 @s @a repr_s initializer
+  updater2 combiner finalizer update_f2 init_f;
 
 
 arrScatterReduction @(N : intindex) @(e i : bare)
@@ -1027,6 +1123,116 @@ array1ScatterReduction @(e i : bare)
             array_finalizer
             make_updater
             make_init)
+           ret)) of
+    boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
+  case s_retval of storedBox @ret_type (retval : ret_type).
+  retval;
+
+
+array2ScatterReduction @(e i : bare)
+  (repr_i : Repr i)
+  (repr_e : Repr e)
+  (dom : dim2)
+  (reduction_op : ScatterReduction e i)
+  -> ScatterReduction (array2 e) (PyonTuple2 (index dim2) i) =
+
+  let type i2 = (PyonTuple2 (index dim2) i) in
+  let type ret_type = ScatterReduction (array2 e) i2 in
+
+  let repr_i2 : Repr i2 =
+        repr_PyonTuple2 @(index dim2) @i repr_index2 repr_i in
+
+  -- Compute array size
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  case boxed @(StoredBox ret_type)
+       (dim1ToArrayDesc @(StoredBox ret_type) dom_y
+        (\ @(M : intindex) (lb_y : int) (stride_y : int) (count_y : FIInt M)
+           (ret : OutPtr (StoredBox ret_type))
+           -> IEffect (StoredBox ret_type).
+           dim1ToArrayDesc @(StoredBox ret_type) dom_x
+           (\ @(N : intindex) (lb_x : int) (stride_x : int) (count_x : FIInt N)
+              (ret : OutPtr (StoredBox ret_type))
+              -> IEffect (StoredBox ret_type).
+
+              let type index_1d = PyonTuple2 (Stored int) i in
+              let type index_2d = PyonTuple2 (Stored int) index_1d in
+
+              let repr_inner_array : Repr (arr N e) =
+                    repr_arr @N @e count_x repr_e in
+              let repr_array : Repr (arr M (arr N e)) =
+                    repr_arr @M @(arr N e) count_y repr_inner_array in
+              let repr_inner_index : Repr index_1d =
+                    repr_PyonTuple2 @(Stored int) @i repr_int repr_i in
+              let repr_index : Repr index_2d =
+                    repr_PyonTuple2 @(Stored int) @index_1d repr_int repr_inner_index in
+
+
+              -- Create a plain array scatter reducer using two calls to
+              -- 'arrScatterReduction'
+              let x_scatter_reduction : ScatterReduction (arr N e) index_1d  =
+                    arrScatterReduction @N @e @i repr_i repr_e count_x reduction_op in
+              let xy_scatter_reduction : ScatterReduction (arr M (arr N e)) index_2d =
+                    arrScatterReduction @M @(arr N e) @index_1d
+                    repr_inner_index repr_inner_array count_y x_scatter_reduction in
+
+              -- Change the index to the expected data type
+              -- Deconstruct the result.
+              let arr_scatter_reduction : ScatterReduction (arr M (arr N e)) i2 =
+                   comapScatterReductionIndex @(arr M (arr N e)) @index_2d @i2
+                   repr_index repr_i2 repr_array
+                   (\ (index_in : i2) (ret : OutPtr index_2d) -> IEffect index_2d.
+                      case index_in of
+                        pyonTuple2 @(index dim2) @i
+                        (yx : index dim2) (z : i).
+                      case yx of
+                        pyonTuple2 @(Stored int) @(Stored int)
+                        (y : Stored int) (x : Stored int).
+                      case x of stored @int (u_x : int).
+                      case y of stored @int (u_y : int).
+
+                      pyonTuple2 @(Stored int) @index_1d
+                      (stored @int u_y)
+                      (pyonTuple2 @(Stored int) @i
+                       (stored @int u_x) (copy @i repr_i z))
+                      ret)
+                   xy_scatter_reduction in
+              case arr_scatter_reduction of
+                scatterReduction @(arr M (arr N e)) @i2 @(s : bare) @(a : val)
+                (repr_s : Repr s)
+                (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
+                (updater : (a -> a) -> i2 -> EffTok -> OutPtr s -> EffTok)
+                (combiner : s -> s -> Writer s)
+                (finalizer : UpdateInPlaceFinalizer s (arr M (arr N e)))
+                (make_updater : i2 -> a -> a)
+                (make_init : NoneType -> a).
+
+              -- Create a scatter reducer that wraps it in an array
+              let array_finalizer : UpdateInPlaceFinalizer s (array2 e) =
+                    mutateAndCopy @s @(array2 e)
+                    (\ (accumulator : s) (ret : OutPtr (array2 e))
+                       -> IEffect (array2 e).
+                       mk_array2 @e @M @N
+                       lb_y stride_y count_y lb_x stride_x count_x
+                       (referenced @(arr M (arr N e))
+                        (case finalizer of {
+                           mutateInPlace @s @(arr M (arr N e)) (co : coerce @bare s (arr M (arr N e))).
+                             copy @(arr M (arr N e)) repr_array
+                             (coerce @s @(arr M (arr N e)) accumulator)
+                         ; mutateAndCopy @s @(arr M (arr N e)) (f : s -> Writer (arr M (arr N e))).
+                             f accumulator
+                         }))
+                       ret) in
+
+              storedBox @ret_type
+              (scatterReduction @(array2 e) @i2 @s @a
+               repr_s
+               initializer
+               updater
+               combiner
+               array_finalizer
+               make_updater
+               make_init)
+              ret)
            ret)) of
     boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
   case s_retval of storedBox @ret_type (retval : ret_type).
@@ -1243,6 +1449,20 @@ TraversableDict_array2_build
 -------------------------------------------------------------------------------
 -- Shape dictionary methods
 
+ShapeDict_dim0 : ShapeDict dim0 =
+  shapeDict @dim0
+  repr_NoneType
+  repr_NoneType
+  ShapeDict_dim0_member
+  ShapeDict_dim0_intersect
+  ShapeDict_dim0_flatten
+  ShapeDict_dim0_generate
+  ShapeDict_dim0_map
+  ShapeDict_dim0_zipWith
+  ShapeDict_dim0_zipWith3
+  ShapeDict_dim0_zipWith4
+  ShapeDict_dim0_slice;
+
 ShapeDict_dim0_member (d : dim0) (i : index dim0) -> bool attribute(inline) =
   True;
 
@@ -1346,6 +1566,21 @@ ShapeDict_dim0_slice @(t : bare -> bare) @(a : bare)
   mk_view @dim0 @a mk_dim0
   (\ (ix : Stored NoneType) -> Writer a.
     at_index @a repr container (coerce @(index dim0) @(index (shape t)) ix));
+
+
+ShapeDict_list_dim : ShapeDict list_dim =
+  shapeDict @list_dim
+  repr_int
+  repr_SliceObject
+  ShapeDict_list_dim_member
+  ShapeDict_list_dim_intersect
+  ShapeDict_list_dim_flatten
+  ShapeDict_list_dim_generate
+  ShapeDict_list_dim_map
+  ShapeDict_list_dim_zipWith
+  ShapeDict_list_dim_zipWith3
+  ShapeDict_list_dim_zipWith4
+  ShapeDict_list_dim_slice;
 
 
 ShapeDict_list_dim_member
@@ -1606,6 +1841,21 @@ ShapeDict_list_dim_slice @(t : bare -> bare) @(a : bare)
     at_index @a repr container s_index ret);
 
 
+ShapeDict_dim1 : ShapeDict dim1 =
+  shapeDict @dim1
+  repr_int
+  repr_SliceObject
+  ShapeDict_dim1_member
+  ShapeDict_dim1_intersect
+  ShapeDict_dim1_flatten
+  ShapeDict_dim1_generate
+  ShapeDict_dim1_map
+  ShapeDict_dim1_zipWith
+  ShapeDict_dim1_zipWith3
+  ShapeDict_dim1_zipWith4
+  ShapeDict_dim1_slice;
+
+
 ShapeDict_dim1_member (dom : dim1) (ix : Stored int)
   -> bool attribute(inline) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
@@ -1735,6 +1985,21 @@ ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
   ShapeDict_dim1 @a repr slice_dom
   (\ (i : index dim1) (ret : OutPtr a) -> IEffect a.
     at_index @a repr container (coerce @(index dim1) @(index (shape t)) i) ret);
+
+
+ShapeDict_dim2 : ShapeDict dim2 =
+  shapeDict @dim2
+  repr_index2
+  repr_slice2
+  ShapeDict_dim2_member
+  ShapeDict_dim2_intersect
+  ShapeDict_dim2_flatten
+  ShapeDict_dim2_generate
+  ShapeDict_dim2_map
+  ShapeDict_dim2_zipWith
+  ShapeDict_dim2_zipWith3
+  ShapeDict_dim2_zipWith4
+  ShapeDict_dim2_slice;
 
 
 ShapeDict_dim2_member (dom : dim2) (ix : index dim2) -> bool =
@@ -2215,7 +2480,7 @@ histogram @(sh : box)
         repr_int
         (mk_dim1 (interval (justVal @int lo_bound) (justVal @int hi_bound))
                  (linearMap 1 0))
-        (countingScatterReduction None) in
+        countingScatterReduction in
 
   let traversable : TraversableDict (\ (a : bare). StoredBox (Stream sh a)) =
         traversableDict @(\ (a : bare). StoredBox (Stream sh a))
@@ -3003,15 +3268,19 @@ view_transform @(sh : box) @(a : bare)
      f i2 ret);
 
 
-shift @(sh : box) @(a : bare)
-  (repr : Repr a) (cartesian : CartesianDict sh)
-  (additive : AdditiveDict (index sh))
-  (disp : index sh)
-  (vw : view sh a)
-  -> view sh a
+displaceView @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (cartesian : CartesianDict (shape t))
+  (additive : AdditiveDict (index (shape t)))
+  (repr : Repr a)
+  (c : t a)
+  (disp : index (shape t))
+  -> view (shape t) a
   attribute(inline) =
 
-  let type ix = index sh in
+  let type sh = shape t in
+  let type ix = index (shape t) in
   case cartesian of
     cartesianDict @sh
     (has_shape : coerce @box (cartesianDomain (index sh)) sh)
@@ -3019,9 +3288,16 @@ shift @(sh : box) @(a : bare)
     (hiBound : sh -> Writer (Maybe ix))
     (arrayRange : ix -> ix -> sh)
     (displaceDomain : sh -> ix -> sh)
-    (multiplyDomain : sh -> int -> sh)
-    (divideDomain : sh -> int -> sh)
+    (multiplyDomain : sh -> ix -> sh)
+    (divideDomain : sh -> ix -> sh)
+    (multiplyIndex : ix -> ix -> Writer ix)
+    (divideIndex : ix -> ix -> Writer ix)
     (unbounded : sh).
+
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
 
   case additive of
     additiveDict @ix
@@ -3032,10 +3308,89 @@ shift @(sh : box) @(a : bare)
 
   -- Note that we transform from new index to old index by subtracting the
   -- displacement 
-  view_transform @sh @a repr
-  (\ (s : sh) -> sh. displaceDomain s disp)
-  (\ (i : ix) -> Writer ix. sub i disp)
-  vw;
+  view_generate @sh shape_dict @a repr (displaceDomain (get_shape @a c) disp)
+  (\ (i : ix) (ret : OutPtr a) -> IEffect a.
+     case boxed @ix (sub i disp) of boxed @ix (i2 : ix).
+     at_index @a repr c i2 ret);
+
+
+multiplyView @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (cartesian : CartesianDict (shape t))
+  (additive : AdditiveDict (index (shape t)))
+  (repr : Repr a)
+  (c : t a)
+  (scale : index (shape t))
+  -> view (shape t) a
+  attribute(inline) =
+
+  let type sh = shape t in
+  let type ix = index (shape t) in
+  case cartesian of
+    cartesianDict @sh
+    (has_shape : coerce @box (cartesianDomain (index sh)) sh)
+    (loBound : sh -> Writer (Maybe ix))
+    (hiBound : sh -> Writer (Maybe ix))
+    (arrayRange : ix -> ix -> sh)
+    (displaceDomain : sh -> ix -> sh)
+    (multiplyDomain : sh -> ix -> sh)
+    (divideDomain : sh -> ix -> sh)
+    (multiplyIndex : ix -> ix -> Writer ix)
+    (divideIndex : ix -> ix -> Writer ix)
+    (unbounded : sh).
+
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  -- Note that we transform from new index to old index by dividing the
+  -- scale factor 
+  view_generate @sh shape_dict @a repr (multiplyDomain (get_shape @a c) scale)
+  (\ (i : ix) (ret : OutPtr a) -> IEffect a.
+     case boxed @ix (divideIndex i scale) of boxed @ix (i2 : ix).
+     at_index @a repr c i2 ret);
+
+
+divideView @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (cartesian : CartesianDict (shape t))
+  (additive : AdditiveDict (index (shape t)))
+  (repr : Repr a)
+  (c : t a)
+  (scale : index (shape t))
+  -> view (shape t) a
+  attribute(inline) =
+
+  let type sh = shape t in
+  let type ix = index (shape t) in
+  case cartesian of
+    cartesianDict @sh
+    (has_shape : coerce @box (cartesianDomain (index sh)) sh)
+    (loBound : sh -> Writer (Maybe ix))
+    (hiBound : sh -> Writer (Maybe ix))
+    (arrayRange : ix -> ix -> sh)
+    (displaceDomain : sh -> ix -> sh)
+    (multiplyDomain : sh -> ix -> sh)
+    (divideDomain : sh -> ix -> sh)
+    (multiplyIndex : ix -> ix -> Writer ix)
+    (divideIndex : ix -> ix -> Writer ix)
+    (unbounded : sh).
+
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  -- Note that we transform from new index to old index by multiplying the
+  -- scale factor.
+  -- 'divideDomain' will throw an error if the scale factor is invalid.
+  view_generate @sh shape_dict @a repr (divideDomain (get_shape @a c) scale)
+  (\ (i : ix) (ret : OutPtr a) -> IEffect a.
+     case boxed @ix (multiplyIndex i scale) of boxed @ix (i2 : ix).
+     at_index @a repr c i2 ret);
 
 -------------------------------------------------------------------------------
 -- ShapeDict-like internal functions

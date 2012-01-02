@@ -256,10 +256,16 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_rangeIndexed) |])
   , (PyonName module_stream "histogram",
      Right [| pyonBuiltin (SystemF.The_histogram) |])-}
+  , (PyonName module_inplace "intSumScatterReduction_make_init",
+     Right [| pyonBuiltin (SystemF.The_intSumScatterReduction_make_init) |])
+  , (PyonName module_inplace "countingScatterReduction_make_init",
+     Right [| pyonBuiltin (SystemF.The_countingScatterReduction_make_init) |])
   , (PyonName module_inplace "intUpdateInPlace_initializer",
      Right [| pyonBuiltin (SystemF.The_intUpdateInPlace_initializer) |])
   , (PyonName module_inplace "intUpdateInPlace_updater",
      Right [| pyonBuiltin (SystemF.The_intUpdateInPlace_updater) |])
+  , (PyonName module_inplace "floatSumScatterReduction_make_init",
+     Right [| pyonBuiltin (SystemF.The_floatSumScatterReduction_make_init) |])
   , (PyonName module_inplace "floatUpdateInPlace_initializer",
      Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_initializer) |])
   , (PyonName module_inplace "floatUpdateInPlace_updater",

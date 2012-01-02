@@ -250,7 +250,18 @@ data VectorDict : bare -> box
    a -> a -> float);
 };
 
--- Cartesian domains, indexed by their index type
+-- Cartesian domains, indexed by their index type.
+--
+-- The methods are:
+-- 1. Get lower bound of finite range
+-- 2. Get upper bound of finite range
+-- 3. Create a finite range
+-- 4. Displace a domain by an offset
+-- 5. Scale a domain by a scale factor
+-- 6. Scale a domain by an inverse scale factor
+-- 7. Scale an index by a scale factor
+-- 8. Scale an index by an inverse scale factor
+-- 9. The largest domain
 data CartesianDict : box -> box
 {
   cartesianDict
@@ -261,8 +272,10 @@ data CartesianDict : box -> box
    sh -> Writer (Maybe (index sh)),
    index sh -> index sh -> sh,
    sh -> index sh -> sh,
-   sh -> int -> sh,
-   sh -> int -> sh,
+   sh -> index sh -> sh,
+   sh -> index sh -> sh,
+   index sh -> index sh -> Writer (index sh),
+   index sh -> index sh -> Writer (index sh),
    sh);
 };
 
@@ -428,12 +441,38 @@ floatUpdateInPlace_updater : (float -> float) -> EffTok
                           -> OutPtr (Stored float)
                           -> EffTok;
 
-intSumScatterReduction : NoneType
-                      -> ScatterReduction (Stored int) (Stored int);
-floatSumScatterReduction : NoneType
-                        -> ScatterReduction (Stored float) (Stored float);
-countingScatterReduction : NoneType
-                        -> ScatterReduction (Stored int) (Stored NoneType);
+-- Helper functions for scatter reductions
+intUpdateInPlace_combiner : Stored int -> Stored int -> OutPtr (Stored int)
+                         -> IEffect (Stored int);
+intUpdateInPlace_int_coercion : coerce @bare (Stored int) (Stored int);
+intUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored int) (Stored int);
+
+floatUpdateInPlace_combiner : Stored float -> Stored float -> OutPtr (Stored float)
+                           -> IEffect (Stored float);
+floatUpdateInPlace_float_coercion : coerce @bare (Stored float) (Stored float);
+floatUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored float) (Stored float);
+
+-- Scatter reduction algorithms
+intSumScatterReduction : ScatterReduction (Stored int) (Stored int);
+intSumScatterReduction_updater : (int -> int)
+                              -> Stored int -> EffTok -> OutPtr (Stored int)
+                              -> EffTok;
+intSumScatterReduction_make_update : Stored int -> int -> int;
+intSumScatterReduction_make_init : NoneType -> int;
+
+floatSumScatterReduction : ScatterReduction (Stored float) (Stored float);
+floatSumScatterReduction_updater : (float -> float)
+                              -> Stored float -> EffTok -> OutPtr (Stored float)
+                              -> EffTok;
+floatSumScatterReduction_make_update : Stored float -> float -> float;
+floatSumScatterReduction_make_init : NoneType -> float;
+
+countingScatterReduction : ScatterReduction (Stored int) (Stored NoneType);
+countingScatterReduction_updater : (int -> int)
+                                -> Stored NoneType -> EffTok -> OutPtr (Stored int)
+                                -> EffTok;
+countingScatterReduction_make_update : Stored NoneType -> int -> int;
+countingScatterReduction_make_init : NoneType -> int;
 
 arrScatterReduction : (N : intindex)
                    -> (s i : bare)
@@ -443,12 +482,28 @@ arrScatterReduction : (N : intindex)
                    -> ScatterReduction s i
                    -> ScatterReduction (arr N s) (PyonTuple2 (Stored int) i);
 
+comapScatterReductionIndex :
+    (s i1 i2 : bare)
+ -> Repr i1
+ -> Repr i2
+ -> Repr s
+ -> (i2 -> Writer i1)
+ -> ScatterReduction s i1
+ -> ScatterReduction s i2;
+
 array1ScatterReduction : (s i : bare)
                       -> Repr i
                       -> Repr s
                       -> dim1
                       -> ScatterReduction s i
                       -> ScatterReduction (array1 s) (PyonTuple2 (Stored int) i);
+
+array2ScatterReduction : (s i : bare)
+                      -> Repr i
+                      -> Repr s
+                      -> dim2
+                      -> ScatterReduction s i
+                      -> ScatterReduction (array2 s) (PyonTuple2 (index dim2) i);
 
 -------------------------------------------------------------------------------
 -- Streams
@@ -647,6 +702,7 @@ repr_Box : (a : box) -> Repr (BareType a);
 repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
 repr_view : (sh : box) -> (a : bare) -> Repr (BareType (view sh a));
+repr_Scatter : (a b : bare) -> Repr (BareType (ScatterReduction a b));
 
 -- Representation of a referenced object that contains nothing and will
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,
@@ -1174,9 +1230,13 @@ CartesianDict_dim0_arrayRange :
 CartesianDict_dim0_displaceDomain :
     dim0 -> index dim0 -> dim0;
 CartesianDict_dim0_multiplyDomain :
-    dim0 -> int -> dim0;
+    dim0 -> index dim0 -> dim0;
 CartesianDict_dim0_divideDomain :
-    dim0 -> int -> dim0;
+    dim0 -> index dim0 -> dim0;
+CartesianDict_dim0_multiplyIndex :
+    index dim0 -> index dim0 -> Writer (index dim0);
+CartesianDict_dim0_divideIndex :
+    index dim0 -> index dim0 -> Writer (index dim0);
 CartesianDict_dim0_unbounded :
     dim0;
 CartesianDict_dim1_loBound :
@@ -1188,9 +1248,13 @@ CartesianDict_dim1_arrayRange :
 CartesianDict_dim1_displaceDomain :
     dim1 -> index dim1 -> dim1;
 CartesianDict_dim1_multiplyDomain :
-    dim1 -> int -> dim1;
+    dim1 -> index dim1 -> dim1;
 CartesianDict_dim1_divideDomain :
-    dim1 -> int -> dim1;
+    dim1 -> index dim1 -> dim1;
+CartesianDict_dim1_multiplyIndex :
+    index dim1 -> index dim1 -> Writer (index dim1);
+CartesianDict_dim1_divideIndex :
+    index dim1 -> index dim1 -> Writer (index dim1);
 CartesianDict_dim1_unbounded :
     dim1;
 CartesianDict_dim2_loBound :
@@ -1202,9 +1266,13 @@ CartesianDict_dim2_arrayRange :
 CartesianDict_dim2_displaceDomain :
     dim2 -> index dim2 -> dim2;
 CartesianDict_dim2_multiplyDomain :
-    dim2 -> int -> dim2;
+    dim2 -> index dim2 -> dim2;
 CartesianDict_dim2_divideDomain :
-    dim2 -> int -> dim2;
+    dim2 -> index dim2 -> dim2;
+CartesianDict_dim2_multiplyIndex :
+    index dim2 -> index dim2 -> Writer (index dim2);
+CartesianDict_dim2_divideIndex :
+    index dim2 -> index dim2 -> Writer (index dim2);
 CartesianDict_dim2_unbounded :
     dim2;
 
@@ -1597,6 +1665,36 @@ fun_reduce1 : (t : bare -> bare)
 
 fun_indices : (sh : box) -> ShapeDict sh -> sh -> Stream sh (index sh);
 
+displaceView : (t : bare -> bare) -> (a : bare)
+            -> IndexableDict t
+            -> ShapeDict (shape t)
+            -> CartesianDict (shape t)
+            -> AdditiveDict (index (shape t))
+            -> Repr a
+            -> t a
+            -> index (shape t)
+            -> view (shape t) a;
+
+multiplyView : (t : bare -> bare) -> (a : bare)
+            -> IndexableDict t
+            -> ShapeDict (shape t)
+            -> CartesianDict (shape t)
+            -> AdditiveDict (index (shape t))
+            -> Repr a
+            -> t a
+            -> index (shape t)
+            -> view (shape t) a;
+
+divideView : (t : bare -> bare) -> (a : bare)
+          -> IndexableDict t
+          -> ShapeDict (shape t)
+          -> CartesianDict (shape t)
+          -> AdditiveDict (index (shape t))
+          -> Repr a
+          -> t a
+          -> index (shape t)
+          -> view (shape t) a;
+
 -------------------------------------------------------------------------------
 -- Domain loops
 
@@ -1716,10 +1814,6 @@ view_transform : (sh : box) -> (a : bare)
               -> (index sh -> Writer (index sh))
               -> view sh a
               -> view sh a;
-
-shift : (sh : box) -> (a : bare)
-     -> Repr a -> CartesianDict sh -> AdditiveDict (index sh)
-     -> index sh -> view sh a -> view sh a;
 
 
 -- Reinterpret a stream as having list shape

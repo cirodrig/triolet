@@ -368,13 +368,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             -- , (pyonBuiltin The_safeSubscript, rwSafeSubscript)
             ]
 
-    exprs = [ (pyonBuiltin The_count, count_expr) 
-            , (pyonBuiltin The_zero_ii, zero_ii_expr)
-            , (pyonBuiltin The_one_ii, one_ii_expr)
-            , (pyonBuiltin The_ShapeDict_list_dim, shape_dict_list_dim)
-            , (pyonBuiltin The_ShapeDict_dim0, shape_dict_dim0)
-            , (pyonBuiltin The_ShapeDict_dim1, shape_dict_dim1)
-            , (pyonBuiltin The_ShapeDict_dim2, shape_dict_dim2)
+    exprs = [ (pyonBuiltin The_count, count_expr)
             ]
     
     -- The following expression represents the "count" stream:
@@ -405,75 +399,6 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
         mk_view =
           VarCon (pyonBuiltin The_mk_view)
           [VarT $ pyonBuiltin The_list_dim, storedIntType] []
-
-    zero_ii_expr =
-      return $
-      conE defaultExpInfo (iInt_con (IntT 0)) [ExpM $ VarE defaultExpInfo (pyonBuiltin The_zero_fii)]
-    one_ii_expr =
-      return $
-      conE defaultExpInfo (iInt_con (IntT 1)) [ExpM $ VarE defaultExpInfo (pyonBuiltin The_one_fii)]
-    iInt_con n = VarCon (pyonBuiltin The_iInt) [n] []
-    
-    shape_dict shape_type index_repr slice_repr
-      member intersect flatten generate map zip zip3 zip4 slice =
-      let dictionary_members = [index_repr, slice_repr, member, intersect,
-                                flatten, generate, map, zip, zip3, zip4,
-                                slice]
-          con = VarCon (pyonBuiltin The_shapeDict) [shape_type] []
-      in mkConE defaultExpInfo con
-         [mkVarE $ pyonBuiltin x | x <- dictionary_members] :: FreshVarM ExpM
-
-    shape_dict_list_dim =
-      shape_dict (VarT $ pyonBuiltin The_list_dim)
-      The_repr_int The_repr_SliceObject
-      The_ShapeDict_list_dim_member
-      The_ShapeDict_list_dim_intersect
-      The_ShapeDict_list_dim_flatten
-      The_ShapeDict_list_dim_generate
-      The_ShapeDict_list_dim_map
-      The_ShapeDict_list_dim_zipWith
-      The_ShapeDict_list_dim_zipWith3
-      The_ShapeDict_list_dim_zipWith4
-      The_ShapeDict_list_dim_slice
-
-    shape_dict_dim0 =
-      shape_dict (VarT $ pyonBuiltin The_dim0)
-      The_repr_NoneType The_repr_NoneType
-      The_ShapeDict_dim0_member
-      The_ShapeDict_dim0_intersect
-      The_ShapeDict_dim0_flatten
-      The_ShapeDict_dim0_generate
-      The_ShapeDict_dim0_map
-      The_ShapeDict_dim0_zipWith
-      The_ShapeDict_dim0_zipWith3
-      The_ShapeDict_dim0_zipWith4
-      The_ShapeDict_dim0_slice
-
-    shape_dict_dim1 =
-      shape_dict (VarT $ pyonBuiltin The_dim1)
-      The_repr_int The_repr_SliceObject
-      The_ShapeDict_dim1_member
-      The_ShapeDict_dim1_intersect
-      The_ShapeDict_dim1_flatten
-      The_ShapeDict_dim1_generate
-      The_ShapeDict_dim1_map
-      The_ShapeDict_dim1_zipWith
-      The_ShapeDict_dim1_zipWith3
-      The_ShapeDict_dim1_zipWith4
-      The_ShapeDict_dim1_slice
-
-    shape_dict_dim2 =
-      shape_dict (VarT $ pyonBuiltin The_dim2)
-      The_repr_index2 The_repr_slice2
-      The_ShapeDict_dim2_member
-      The_ShapeDict_dim2_intersect
-      The_ShapeDict_dim2_flatten
-      The_ShapeDict_dim2_generate
-      The_ShapeDict_dim2_map
-      The_ShapeDict_dim2_zipWith
-      The_ShapeDict_dim2_zipWith3
-      The_ShapeDict_dim2_zipWith4
-      The_ShapeDict_dim2_slice
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.

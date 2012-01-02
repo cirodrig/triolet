@@ -779,6 +779,11 @@ interpretConstant c = interpret_exp $ constExp c
          ConE _ con args ->
            let args_values = map interpret_exp args
            in valueCode $ DataAV $ AbsData con args_values
+         AppE _ _ _ _ ->
+           -- This must be a value or boxed expression.
+           -- Allow this expression to be inlined.
+           -- Note that work may be duplicated by inlining.
+           labelCode expression topCode
          _ ->
            internalError "interpretConstant: Unexpected expression"
 
