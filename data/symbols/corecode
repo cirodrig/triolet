@@ -889,91 +889,91 @@ floatUpdateInPlace_combiner (x : Stored float) (y : Stored float)
   stored @float (AdditiveDict_float_add ux uy) ret;
 
 
-intSumScatterReduction : ScatterReduction (Stored int) (Stored int) =
+intSumScatter : Scatter (Stored int) (Stored int) =
   let type Sint = Stored int in
-  scatterReduction @Sint @Sint @Sint @int
+  mk_scatter @Sint @Sint @Sint @int
   repr_int
   intUpdateInPlace_initializer
-  intSumScatterReduction_updater
+  intSumScatter_updater
   intUpdateInPlace_combiner
   intUpdateInPlace_finalizer
-  intSumScatterReduction_make_update
-  intSumScatterReduction_make_init;
+  intSumScatter_make_update
+  intSumScatter_make_init;
 
 
-intSumScatterReduction_updater (modify : int -> int) (ix : Stored int)
+intSumScatter_updater (modify : int -> int) (ix : Stored int)
   (tok_in : EffTok) (ret : OutPtr (Stored int)) -> EffTok =
   intUpdateInPlace_updater modify tok_in ret;
 
 
-intSumScatterReduction_make_update (i : Stored int) -> int -> int =
+intSumScatter_make_update (i : Stored int) -> int -> int =
   case i of stored @int (ui : int).
   (\ (n : int) -> int. ui +# n);
 
 
-intSumScatterReduction_make_init (dummy : NoneType) -> int = 0;
+intSumScatter_make_init (dummy : NoneType) -> int = 0;
 
 
-floatSumScatterReduction : ScatterReduction (Stored float) (Stored float) =
+floatSumScatter : Scatter (Stored float) (Stored float) =
   let type Sfloat = Stored float in
-  scatterReduction @Sfloat @Sfloat @Sfloat @float
+  mk_scatter @Sfloat @Sfloat @Sfloat @float
   repr_float
   floatUpdateInPlace_initializer
-  floatSumScatterReduction_updater
+  floatSumScatter_updater
   floatUpdateInPlace_combiner
   floatUpdateInPlace_finalizer
-  floatSumScatterReduction_make_update
-  floatSumScatterReduction_make_init;
+  floatSumScatter_make_update
+  floatSumScatter_make_init;
 
 
-floatSumScatterReduction_updater (modify : float -> float) (ix : Stored float)
+floatSumScatter_updater (modify : float -> float) (ix : Stored float)
   (tok_in : EffTok) (ret : OutPtr (Stored float)) -> EffTok =
   floatUpdateInPlace_updater modify tok_in ret;
 
 
-floatSumScatterReduction_make_update (i : Stored float) -> float -> float =
+floatSumScatter_make_update (i : Stored float) -> float -> float =
   case i of stored @float (ui : float).
   (\ (n : float) -> float. AdditiveDict_float_add ui n);
 
 
-floatSumScatterReduction_make_init (dummy : NoneType) -> float = 0.0;
+floatSumScatter_make_init (dummy : NoneType) -> float = 0.0;
 
 
-countingScatterReduction : ScatterReduction (Stored int) (Stored NoneType) =
+countingScatter : Scatter (Stored int) (Stored NoneType) =
 
-  scatterReduction @(Stored int) @(Stored NoneType) @(Stored int) @int
+  mk_scatter @(Stored int) @(Stored NoneType) @(Stored int) @int
   repr_int
   intUpdateInPlace_initializer
-  countingScatterReduction_updater
+  countingScatter_updater
   intUpdateInPlace_combiner
   intUpdateInPlace_finalizer
-  countingScatterReduction_make_update
-  countingScatterReduction_make_init;
+  countingScatter_make_update
+  countingScatter_make_init;
 
 
-countingScatterReduction_updater (modify : int -> int) (ix : Stored NoneType)
+countingScatter_updater (modify : int -> int) (ix : Stored NoneType)
   (tok_in : EffTok) (ret : OutPtr (Stored int)) -> EffTok =
   intUpdateInPlace_updater modify tok_in ret;
 
 
-countingScatterReduction_make_update (i : Stored NoneType) -> int -> int =
+countingScatter_make_update (i : Stored NoneType) -> int -> int =
   (\ (n : int) -> int. n +# 1);
 
 
-countingScatterReduction_make_init (dummy : NoneType) -> int = 0;
+countingScatter_make_init (dummy : NoneType) -> int = 0;
 
 
-comapScatterReductionIndex @(r i1 i2 : bare)
+comapScatterIndex @(r i1 i2 : bare)
   (repr_i1 : Repr i1)
   (repr_i2 : Repr i2)
   (repr_r : Repr r)
   (transform : i2 -> Writer i1)
-  (sr : ScatterReduction r i1)
-  -> ScatterReduction r i2
+  (sr : Scatter r i1)
+  -> Scatter r i2
   attribute(inline, inline_final) =
 
   case sr of
-    scatterReduction @r @i1 @(s : bare) @(a : val)
+    mk_scatter @r @i1 @(s : bare) @(a : val)
     (repr_s : Repr s)
     (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
     (updater : (a -> a) -> i1 -> EffTok -> OutPtr s -> EffTok)
@@ -993,20 +993,20 @@ comapScatterReductionIndex @(r i1 i2 : bare)
       case boxed @i1 (transform index) of boxed @i1 (index1 : i1).
       update_f index1 in
 
-  scatterReduction @r @i2 @s @a repr_s initializer
+  mk_scatter @r @i2 @s @a repr_s initializer
   updater2 combiner finalizer update_f2 init_f;
 
 
-arrScatterReduction @(N : intindex) @(e i : bare)
+arrScatter @(N : intindex) @(e i : bare)
   (repr_i : Repr i)
   (repr_e : Repr e)
   (count : FIInt N)
-  (reduction_op : ScatterReduction e i)
-  -> ScatterReduction (arr N e) (PyonTuple2 (Stored int) i)
+  (reduction_op : Scatter e i)
+  -> Scatter (arr N e) (PyonTuple2 (Stored int) i)
   attribute(inline, inline_final) =
 
   case reduction_op of
-    scatterReduction @e @i @(s : bare) @(a : val)
+    mk_scatter @e @i @(s : bare) @(a : val)
     (repr_s : Repr s)
     (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
     (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
@@ -1020,7 +1020,7 @@ arrScatterReduction @(N : intindex) @(e i : bare)
 
   case count of fiInt @N (u_count : int).
 
-  scatterReduction @arr_t @i2 @(arr N s) @a
+  mk_scatter @arr_t @i2 @(arr N s) @a
   (repr_arr @N @s count repr_s)
   (\ (f : NoneType -> a) (p : OutPtr (arr N s)) -> EffTok.
      -- Initialize all array elements
@@ -1070,15 +1070,15 @@ arrScatterReduction @(N : intindex) @(e i : bare)
    init_f;
 
 
-array1ScatterReduction @(e i : bare)
+array1Scatter @(e i : bare)
   (repr_i : Repr i)
   (repr_e : Repr e)
   (dom : dim1)
-  (reduction_op : ScatterReduction e i)
-  -> ScatterReduction (array1 e) (PyonTuple2 (Stored int) i) =
+  (reduction_op : Scatter e i)
+  -> Scatter (array1 e) (PyonTuple2 (Stored int) i) =
 
   let type i2 = (PyonTuple2 (Stored int) i) in
-  let type ret_type = ScatterReduction (array1 e) i2 in
+  let type ret_type = Scatter (array1 e) i2 in
 
   -- Compute array size
   case boxed @(StoredBox ret_type)
@@ -1088,8 +1088,8 @@ array1ScatterReduction @(e i : bare)
            -> IEffect (StoredBox ret_type).
 
            -- Create a plain array scatter reducer
-           case arrScatterReduction @N @e @i repr_i repr_e count reduction_op of
-             scatterReduction @(arr N e) @i2 @(s : bare) @(a : val)
+           case arrScatter @N @e @i repr_i repr_e count reduction_op of
+             mk_scatter @(arr N e) @i2 @(s : bare) @(a : val)
              (repr_s : Repr s)
              (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
              (updater : (a -> a) -> i2 -> EffTok -> OutPtr s -> EffTok)
@@ -1115,7 +1115,7 @@ array1ScatterReduction @(e i : bare)
                     ret) in
 
            storedBox @ret_type
-           (scatterReduction @(array1 e) @i2 @s @a
+           (mk_scatter @(array1 e) @i2 @s @a
             repr_s
             initializer
             updater
@@ -1129,15 +1129,15 @@ array1ScatterReduction @(e i : bare)
   retval;
 
 
-array2ScatterReduction @(e i : bare)
+array2Scatter @(e i : bare)
   (repr_i : Repr i)
   (repr_e : Repr e)
   (dom : dim2)
-  (reduction_op : ScatterReduction e i)
-  -> ScatterReduction (array2 e) (PyonTuple2 (index dim2) i) =
+  (reduction_op : Scatter e i)
+  -> Scatter (array2 e) (PyonTuple2 (index dim2) i) =
 
   let type i2 = (PyonTuple2 (index dim2) i) in
-  let type ret_type = ScatterReduction (array2 e) i2 in
+  let type ret_type = Scatter (array2 e) i2 in
 
   let repr_i2 : Repr i2 =
         repr_PyonTuple2 @(index dim2) @i repr_index2 repr_i in
@@ -1168,17 +1168,17 @@ array2ScatterReduction @(e i : bare)
 
 
               -- Create a plain array scatter reducer using two calls to
-              -- 'arrScatterReduction'
-              let x_scatter_reduction : ScatterReduction (arr N e) index_1d  =
-                    arrScatterReduction @N @e @i repr_i repr_e count_x reduction_op in
-              let xy_scatter_reduction : ScatterReduction (arr M (arr N e)) index_2d =
-                    arrScatterReduction @M @(arr N e) @index_1d
+              -- 'arrScatter'
+              let x_scatter_reduction : Scatter (arr N e) index_1d  =
+                    arrScatter @N @e @i repr_i repr_e count_x reduction_op in
+              let xy_scatter_reduction : Scatter (arr M (arr N e)) index_2d =
+                    arrScatter @M @(arr N e) @index_1d
                     repr_inner_index repr_inner_array count_y x_scatter_reduction in
 
               -- Change the index to the expected data type
               -- Deconstruct the result.
-              let arr_scatter_reduction : ScatterReduction (arr M (arr N e)) i2 =
-                   comapScatterReductionIndex @(arr M (arr N e)) @index_2d @i2
+              let arr_scatter_reduction : Scatter (arr M (arr N e)) i2 =
+                   comapScatterIndex @(arr M (arr N e)) @index_2d @i2
                    repr_index repr_i2 repr_array
                    (\ (index_in : i2) (ret : OutPtr index_2d) -> IEffect index_2d.
                       case index_in of
@@ -1197,7 +1197,7 @@ array2ScatterReduction @(e i : bare)
                       ret)
                    xy_scatter_reduction in
               case arr_scatter_reduction of
-                scatterReduction @(arr M (arr N e)) @i2 @(s : bare) @(a : val)
+                mk_scatter @(arr M (arr N e)) @i2 @(s : bare) @(a : val)
                 (repr_s : Repr s)
                 (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
                 (updater : (a -> a) -> i2 -> EffTok -> OutPtr s -> EffTok)
@@ -1224,7 +1224,7 @@ array2ScatterReduction @(e i : bare)
                        ret) in
 
               storedBox @ret_type
-              (scatterReduction @(array2 e) @i2 @s @a
+              (mk_scatter @(array2 e) @i2 @s @a
                repr_s
                initializer
                updater
@@ -2409,13 +2409,13 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
   };
 
 
-fun_scatterReduce @(t : bare -> bare) @(i r : bare)
+fun_scatter @(t : bare -> bare) @(i r : bare)
   (shape_dict : ShapeDict (shape t))
   (traversable : TraversableDict t)
   (repr_s : Repr (t i))
   (repr_i : Repr i)
   (repr_r : Repr r)
-  (op : ScatterReduction r i)
+  (op : Scatter r i)
   (src : t i)
   (ret : OutPtr r)
   -> IEffect r
@@ -2474,13 +2474,13 @@ histogram @(sh : box)
 
   let type Sint = Stored int in
   let type SNone = Stored NoneType in
-  let sr : ScatterReduction (array1 Sint) (PyonTuple2 Sint SNone) =
-        array1ScatterReduction @Sint @SNone
+  let sr : Scatter (array1 Sint) (PyonTuple2 Sint SNone) =
+        array1Scatter @Sint @SNone
         repr_NoneType
         repr_int
         (mk_dim1 (interval (justVal @int lo_bound) (justVal @int hi_bound))
                  (linearMap 1 0))
-        countingScatterReduction in
+        countingScatter in
 
   let traversable : TraversableDict (\ (a : bare). StoredBox (Stream sh a)) =
         traversableDict @(\ (a : bare). StoredBox (Stream sh a))
@@ -2509,7 +2509,7 @@ histogram @(sh : box)
   of boxed @(BareType (Stream sh (PyonTuple2 Sint SNone)))
      (b_input2 : BareType (Stream sh (PyonTuple2 Sint SNone))).
 
-  fun_scatterReduce @(\ (a : bare). BareType (Stream sh a))
+  fun_scatter @(\ (a : bare). BareType (Stream sh a))
   @(PyonTuple2 Sint SNone) @(array1 Sint)
   shape_dict
   traversable
@@ -3895,14 +3895,14 @@ reduce1_list_dim @(a : bare)
 scatter_list_dim @(i r : bare)
   (repr_i : Repr i)
   (repr_r : Repr r)
-  (op : ScatterReduction r i)
+  (op : Scatter r i)
   (src : view list_dim i)
   (ret : OutPtr r)
   -> IEffect r
   attribute(inline, inline_sequential) =
 
   case op of
-    scatterReduction @r @i @(s : bare) @(a : val)
+    mk_scatter @r @i @(s : bare) @(a : val)
     (repr_s : Repr s)
     (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
     (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
@@ -4040,14 +4040,14 @@ Sequence_reduce1 @(a : bare)
 Sequence_scatter @(i r : bare)
   (repr_i : Repr i)
   (repr_r : Repr r)
-  (op : ScatterReduction r i)
+  (op : Scatter r i)
   (src : Sequence i)
   (ret : OutPtr r)
   -> IEffect r
   attribute(inline, inline_final) =
 
   case op of
-    scatterReduction @r @i @(s : bare) @(a : val)
+    mk_scatter @r @i @(s : bare) @(a : val)
     (repr_s : Repr s)
     (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
     (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)

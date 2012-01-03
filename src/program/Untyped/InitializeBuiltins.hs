@@ -1590,7 +1590,7 @@ initializeTIBuiltins = do
                [| pyonBuiltin SystemF.The_view |])
             , ("Any", Star, [| pyonBuiltin SystemF.The_Any |])
             , ("Scatter", Star :-> Star :-> Star,
-               [| pyonBuiltin SystemF.The_ScatterReduction |])
+               [| pyonBuiltin SystemF.The_Scatter |])
             , ("list_dim", Star, [| pyonBuiltin SystemF.The_list_dim |])
             , ("dim0", Star, [| pyonBuiltin SystemF.The_dim0 |])
             , ("dim1", Star, [| pyonBuiltin SystemF.The_dim1 |])
@@ -1719,22 +1719,22 @@ initializeTIBuiltins = do
               , [| pyonBuiltin SystemF.The_floor |]
               ),
               ("intSumScatter", [| mkIntSumScatterType |]
-              , [| pyonBuiltin SystemF.The_intSumScatterReduction |]
+              , [| pyonBuiltin SystemF.The_intSumScatter |]
               ),
               ("floatSumScatter", [| mkFloatSumScatterType |]
-              , [| pyonBuiltin SystemF.The_floatSumScatterReduction |]
+              , [| pyonBuiltin SystemF.The_floatSumScatter |]
               ),
               ("countingScatter", [| mkCountingScatterType |]
-              , [| pyonBuiltin SystemF.The_countingScatterReduction |]
+              , [| pyonBuiltin SystemF.The_countingScatter |]
               ),
               ("array1Scatter", [| mkArray1ScatterType |]
-              , [| pyonBuiltin SystemF.The_array1ScatterReduction |]
+              , [| pyonBuiltin SystemF.The_array1Scatter |]
               ),
               ("array2Scatter", [| mkArray2ScatterType |]
-              , [| pyonBuiltin SystemF.The_array2ScatterReduction |]
+              , [| pyonBuiltin SystemF.The_array2Scatter |]
               ),
               ("scatter", [| mkScatterType |]
-              , [| pyonBuiltin SystemF.The_fun_scatterReduce |]
+              , [| pyonBuiltin SystemF.The_fun_scatter |]
               ),
               ("listiter", [| mkListIterType |]
               , [| pyonBuiltin SystemF.The_fun_asList_Stream |]

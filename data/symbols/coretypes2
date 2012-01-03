@@ -413,9 +413,9 @@ data UpdateInPlaceFinalizer : bare -> bare -> box
 --
 -- Token passing is used to represent dependences during the in-place part of
 -- the reduction.
-data ScatterReduction : bare -> bare -> box
+data Scatter : bare -> bare -> box
 {
-  scatterReduction (r i : bare) (s : bare, a : val)
+  mk_scatter (r i : bare) (s : bare, a : val)
   (Repr s,
    (NoneType -> a) -> OutPtr s -> EffTok,       -- Initializer
    (a -> a) -> i -> EffTok -> OutPtr s -> EffTok, -- Updater
@@ -453,57 +453,57 @@ floatUpdateInPlace_float_coercion : coerce @bare (Stored float) (Stored float);
 floatUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored float) (Stored float);
 
 -- Scatter reduction algorithms
-intSumScatterReduction : ScatterReduction (Stored int) (Stored int);
-intSumScatterReduction_updater : (int -> int)
+intSumScatter : Scatter (Stored int) (Stored int);
+intSumScatter_updater : (int -> int)
                               -> Stored int -> EffTok -> OutPtr (Stored int)
                               -> EffTok;
-intSumScatterReduction_make_update : Stored int -> int -> int;
-intSumScatterReduction_make_init : NoneType -> int;
+intSumScatter_make_update : Stored int -> int -> int;
+intSumScatter_make_init : NoneType -> int;
 
-floatSumScatterReduction : ScatterReduction (Stored float) (Stored float);
-floatSumScatterReduction_updater : (float -> float)
+floatSumScatter : Scatter (Stored float) (Stored float);
+floatSumScatter_updater : (float -> float)
                               -> Stored float -> EffTok -> OutPtr (Stored float)
                               -> EffTok;
-floatSumScatterReduction_make_update : Stored float -> float -> float;
-floatSumScatterReduction_make_init : NoneType -> float;
+floatSumScatter_make_update : Stored float -> float -> float;
+floatSumScatter_make_init : NoneType -> float;
 
-countingScatterReduction : ScatterReduction (Stored int) (Stored NoneType);
-countingScatterReduction_updater : (int -> int)
+countingScatter : Scatter (Stored int) (Stored NoneType);
+countingScatter_updater : (int -> int)
                                 -> Stored NoneType -> EffTok -> OutPtr (Stored int)
                                 -> EffTok;
-countingScatterReduction_make_update : Stored NoneType -> int -> int;
-countingScatterReduction_make_init : NoneType -> int;
+countingScatter_make_update : Stored NoneType -> int -> int;
+countingScatter_make_init : NoneType -> int;
 
-arrScatterReduction : (N : intindex)
+arrScatter : (N : intindex)
                    -> (s i : bare)
                    -> Repr i
                    -> Repr s
                    -> FIInt N
-                   -> ScatterReduction s i
-                   -> ScatterReduction (arr N s) (PyonTuple2 (Stored int) i);
+                   -> Scatter s i
+                   -> Scatter (arr N s) (PyonTuple2 (Stored int) i);
 
-comapScatterReductionIndex :
+comapScatterIndex :
     (s i1 i2 : bare)
  -> Repr i1
  -> Repr i2
  -> Repr s
  -> (i2 -> Writer i1)
- -> ScatterReduction s i1
- -> ScatterReduction s i2;
+ -> Scatter s i1
+ -> Scatter s i2;
 
-array1ScatterReduction : (s i : bare)
+array1Scatter : (s i : bare)
                       -> Repr i
                       -> Repr s
                       -> dim1
-                      -> ScatterReduction s i
-                      -> ScatterReduction (array1 s) (PyonTuple2 (Stored int) i);
+                      -> Scatter s i
+                      -> Scatter (array1 s) (PyonTuple2 (Stored int) i);
 
-array2ScatterReduction : (s i : bare)
+array2Scatter : (s i : bare)
                       -> Repr i
                       -> Repr s
                       -> dim2
-                      -> ScatterReduction s i
-                      -> ScatterReduction (array2 s) (PyonTuple2 (index dim2) i);
+                      -> Scatter s i
+                      -> Scatter (array2 s) (PyonTuple2 (index dim2) i);
 
 -------------------------------------------------------------------------------
 -- Streams
@@ -702,7 +702,7 @@ repr_Box : (a : box) -> Repr (BareType a);
 repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
 repr_view : (sh : box) -> (a : bare) -> Repr (BareType (view sh a));
-repr_Scatter : (a b : bare) -> Repr (BareType (ScatterReduction a b));
+repr_Scatter : (a b : bare) -> Repr (BareType (Scatter a b));
 
 -- Representation of a referenced object that contains nothing and will
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,
@@ -1458,7 +1458,7 @@ reduce1_dim1 : (a : bare)
 
 scatter_list_dim : (i r : bare)
   -> Repr i -> Repr r
-  -> ScatterReduction r i
+  -> Scatter r i
   -> view list_dim i
   -> Writer r;
 
@@ -1561,7 +1561,7 @@ Sequence_reduce1 : (a : bare)
 		 -> Writer a;
 
 Sequence_scatter : (i r : bare) -> Repr i -> Repr r
-                -> ScatterReduction r i
+                -> Scatter r i
                 -> Sequence i
                 -> Writer r;
 
@@ -1970,16 +1970,16 @@ rangeIndexed : (n : intindex)
             -> IInt n
             -> Stream (arr_shape n dim0) (Stored int);
 
-fun_scatterReduce : (t : bare -> bare)
-                 -> (i r : bare)
-                 -> ShapeDict (shape t)
-                 -> TraversableDict t
-                 -> Repr (t i)
-                 -> Repr i
-                 -> Repr r
-                 -> ScatterReduction r i
-                 -> t i
-                 -> Writer r;
+fun_scatter : (t : bare -> bare)
+           -> (i r : bare)
+           -> ShapeDict (shape t)
+           -> TraversableDict t
+           -> Repr (t i)
+           -> Repr i
+           -> Repr r
+           -> Scatter r i
+           -> t i
+           -> Writer r;
 
 histogram : (sh : box)
          -> ShapeDict sh
