@@ -266,6 +266,10 @@ procedure inline minus_fii (FinIndInt x, FinIndInt y) -> FinIndInt {
   FinIndInt {x_data - y_data};
 };
 
+function inline not (bool b) -> bool {
+  ~b;
+};
+
 // Compute the GCD of two positive or negative numbers
 function gcd (int x, int y) -> int {
   // Get absolute value of arguments

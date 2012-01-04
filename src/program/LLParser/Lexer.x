@@ -104,6 +104,7 @@ rules :-
 "!+" / @notsym		{ tok DerefPlusTok }
 "&&" / @notsym		{ tok AndTok }
 "||" / @notsym		{ tok OrTok }
+"~" / @notsym		{ tok NotTok }
 
 -- Other symbols
 \" @string \"		{ stringTok }

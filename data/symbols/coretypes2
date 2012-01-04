@@ -1284,6 +1284,7 @@ max_int : int -> int -> int;
 
 or : bool -> bool -> bool;
 and : bool -> bool -> bool;
+not : bool -> bool;
 
 -- An internal slice object.
 -- The two integers are (in_stride, in_offset).

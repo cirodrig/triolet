@@ -702,6 +702,7 @@ getUnaryType op types = gut <$> types
   where
     gut xs@(~[x]) =
       case op of NegateOp -> negate
+                 NotOp -> notop
       where
         single_parameter =
           case xs of [_] -> Nothing
@@ -713,11 +714,17 @@ getUnaryType op types = gut <$> types
         number_check (PrimT (IntType {})) = Nothing
         number_check (PrimT (FloatType {})) = Nothing
         number_check _ = Just "Expecting integral or floating-point type"
+        
+        bool_check (PrimT BoolType) = Nothing
+        bool_check _ = Just "Expecting a boolean"
 
         retval `checking` checks =
           -- FIXME: check checks
           retval
         
+        notop =
+          x `checking` [single_parameter, bool_check x]
+
         negate =
           x `checking` [single_parameter, number_check x]
 

@@ -69,6 +69,8 @@ extern procedure pyon.internal.prim.min_fii
 extern procedure pyon.internal.prim.minus_fii
   (FinIndInt, FinIndInt) -> FinIndInt;
 
+extern function pyon.internal.prim.not (bool) -> bool;
+
 extern function pyon.internal.prim.gcd (int, int) -> int;
 
 extern function pyon.internal.prim.extgcd_x (int, int) -> int;

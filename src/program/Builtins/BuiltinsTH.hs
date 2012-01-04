@@ -429,6 +429,7 @@ pyonBuiltinVariableNames =
   , "max_int"
   , "or"
   , "and"
+  , "not"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
   , "oper_BITWISEXOR"

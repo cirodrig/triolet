@@ -55,6 +55,7 @@ data Token =
   | DerefPlusTok
   | AndTok
   | OrTok
+  | NotTok
   | WildTok
   | AlignofTok
   | AsTok
@@ -132,6 +133,7 @@ showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
 showToken AndTok = "boolean and"
 showToken OrTok = "boolean or"
+showToken NotTok = "boolean not"
 showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"

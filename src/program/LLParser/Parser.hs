@@ -183,7 +183,8 @@ fieldSpec = record_field <|> array_index <?> "field specifier"
 
 -- | Operators recognized by the parser
 operators =
-  [ [ Infix (binaryOp StarTok MulOp) AssocLeft
+  [ [ Prefix (unaryOp NotTok NotOp)]
+  , [ Infix (binaryOp StarTok MulOp) AssocLeft
     , Infix (binaryOp PercentTok ModOp) AssocNone
     , Infix (binaryOp IntegerDivideTok IntDivOp) AssocNone
     , Infix (binaryOp DivideTok DivOp) AssocNone]

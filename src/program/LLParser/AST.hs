@@ -40,7 +40,7 @@ data BinOp =
   | OrOp                        -- ^ '||'
   deriving(Show)
 
-data UnaryOp = NegateOp deriving(Show)
+data UnaryOp = NegateOp | NotOp deriving(Show)
 
 -- | A data type, represented by a primitive type, a record type, or bytes.
 data Type a =

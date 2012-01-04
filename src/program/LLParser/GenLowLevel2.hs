@@ -390,6 +390,11 @@ genUnaryOp op arg =
                 op = LL.PrimSubZ sgn sz
                 atom = LL.PrimA op [operand, arg_val]
             return $ GenAtom rt atom
+     NotOp ->
+       case returnType arg
+       of rt@[PrimType BoolType] -> do
+            arg_val <- asVal arg
+            return $ GenAtom rt $ LL.PrimA LL.PrimNot [arg_val]
 
 genBinaryOp :: BinOp -> GenExpr -> GenExpr -> G GenExpr
 genBinaryOp op l_arg r_arg = 
