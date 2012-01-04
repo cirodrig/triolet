@@ -2,7 +2,7 @@ TestConfig {
   synopsis	 = "Stencil computation",
   pyonSources	 = ["stencil.pyon"],
   llpyonSources  = [],
-  cSources	 = ["main.c"],
-  cxxSources	 = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "OK"
 }

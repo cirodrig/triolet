@@ -1,8 +1,9 @@
 
 def heat(m : array2(float)):
+  sten_domain = arrayRange((-1,-1), (2,2))
   def sten(x):
     return (x[-1, 0] + x[0, -1] + x[1, 0] + x[0, 1]) / 4
 
-  return stencil2D(-1, 1, -1, 1, sten, m)
+  return stencil2D(domain(m), sten_domain, sten, extend2D(m))
 
-export ccall heat : array2(float) -> array2(float)
+export cplusplus heat : array2(float) -> array2(float)
