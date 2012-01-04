@@ -1134,6 +1134,11 @@ mkDim1Type =
   in return $ monomorphic $
      functionType [mint, mint, int, int] (ConTy (tiBuiltin the_con_dim1))
 
+mkDim2Type =
+  return $ monomorphic $
+  functionType [ConTy (tiBuiltin the_con_dim1), ConTy (tiBuiltin the_con_dim1)]
+  (ConTy (tiBuiltin the_con_dim2))
+
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
       aT = ConTy a
@@ -1300,19 +1305,14 @@ mkStencil2DType =
       aT = ConTy a
       bT = ConTy b
       int_type = ConTy $ tiBuiltin the_con_int
+      dim2_type = ConTy $ tiBuiltin the_con_dim2
   in ([tT `IsInst` tiBuiltin the_c_Indexable,
        shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
        passable aT, passable bT],
-      functionType [int_type, int_type, int_type, int_type,
-                    functionType [ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim2) @@ aT] bT,
+      functionType [dim2_type, dim2_type,
+                    functionType [ConTy (tiBuiltin the_con_view) @@ dim2_type @@ aT] bT,
                     tT @@ aT]
       (ConTy (tiBuiltin the_con_array2) @@ bT))
-
-mkRange2DType =
-  return $ monomorphic $
-  let int_type = ConTy $ tiBuiltin the_con_int
-      int2_type = TupleTy 2 @@ int_type @@ int_type
-  in functionType [int2_type] (ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_dim2) @@ int2_type)
 
 mkExtend2DType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
@@ -1688,9 +1688,6 @@ initializeTIBuiltins = do
               ("extend2D", [| mkExtend2DType |]
               , [| pyonBuiltin SystemF.The_extend2D |]
               ),              
-              ("range2D", [| mkRange2DType |]
-              , [| pyonBuiltin SystemF.The_range2D |]
-              ),              
               ("rows", [| mkRowsColsType |]
               , [| pyonBuiltin SystemF.The_rows |]
               ),
@@ -1767,6 +1764,9 @@ initializeTIBuiltins = do
           datacons =
             [ ("complex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.The_complex |]
+              ),
+              ("dim2", [| mkDim2Type |]
+              , [| pyonBuiltin SystemF.The_mk_dim2 |]
               ),
               ("Just", [| mkJustType |]
               , [| pyonBuiltin SystemF.The_just |]

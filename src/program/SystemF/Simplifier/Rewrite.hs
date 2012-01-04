@@ -329,6 +329,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
   where
     table = [ (pyonBuiltin The_convertToBare, rwConvertToBare)
             , (pyonBuiltin The_convertToBoxed, rwConvertToBoxed)
+            -- , (pyonBuiltin The_stencil2D, rwStencil2D)
             --, (pyonBuiltin The_darr1_reduce, rwDarr1Reduce)
             --, (pyonBuiltin The_darr1_reduce1, rwDarr1Reduce1)
             --, (pyonBuiltin The_darr2_reduce, rwDarr2Reduce)
@@ -551,6 +552,32 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
       conE inf (VarCon (pyonBuiltin The_boxed) [whnf_type] []) [arg]
 
 rwConvertToBoxed _ _ _ = return Nothing
+
+-- | Rewrite 'stencil2D' to 'viewStencil2D' if the argument is a view.
+rwStencil2D :: RewriteRule
+rwStencil2D inf [container_type, t1, t2]
+  (indexable : is_2d : repr1 : repr2 : dom1 : dom2 : f : inp : other_args) = do
+  -- Is the input argument's type @view dim2 t1@?
+  container_type' <- reduceToWhnf $ AppT container_type t1
+  case fromVarApp container_type' of
+    Just (op, [stored_arg]) | op `isPyonBuiltin` The_StoredBox -> do
+      arg' <- reduceToWhnf stored_arg
+      case fromVarApp arg' of
+        Just (op, [shape_arg, _]) | op `isPyonBuiltin` The_view -> do
+
+          -- Unbox the argument and create the new function
+          tenv <- getTypeEnv
+          liftM Just $
+            caseE (return inp)
+            [mkAlt tenv (pyonBuiltin The_storedBox) [stored_arg]
+             (\ [] [view_dom] ->
+               return $
+               appE inf (varE inf (pyonBuiltin The_viewStencil2D))
+               [t1, t2]
+               (repr1 : repr2 : dom1 : dom2 : f : varE' view_dom :
+                other_args))]
+        _ -> return Nothing
+    _ -> return Nothing
 
 {-
 -- | Convert a reduction on a @mk_darr1@ to a primitive reduction.

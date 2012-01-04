@@ -1361,6 +1361,8 @@ extgcd_x : int -> int -> int;
 isEmptyInterval : Interval -> bool;
 inInterval : int -> Interval -> bool;
 intersectInterval : Interval -> Interval -> Interval;
+convolveInterval : Interval -> Interval -> Interval;
+subsetInterval : Interval -> Interval -> bool;
 inLM : int -> LinearMap -> bool;
 evalLM : int -> LinearMap -> int;
 invEvalLM : int -> LinearMap -> int;
@@ -1948,13 +1950,22 @@ transpose : (t : bare -> bare) -> (a : bare)
 stencil2D : (t : bare -> bare) -> (a b : bare)
 	 -> IndexableDict t
 	 -> coerce @box (shape t) dim2
-	 -> Repr a -> Repr b
-	 -> int -> int -> int -> int
+	 -> Repr a
+         -> Repr b
+	 -> dim2
+         -> dim2
 	 -> (view dim2 a -> Writer b)
 	 -> t a
 	 -> Writer (array2 b);
 
-range2D : index dim2 -> Stream dim2 (index dim2);
+viewStencil2D : (a b : bare)
+	 -> Repr a
+         -> Repr b
+	 -> dim2
+         -> dim2
+	 -> (view dim2 a -> Writer b)
+	 -> view dim2 a
+	 -> Writer (array2 b);
 
 extend2D : (t : bare -> bare) -> (a : bare)
         -> IndexableDict t
