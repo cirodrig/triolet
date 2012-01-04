@@ -1012,7 +1012,7 @@ namespace Pyon {
       
       // Member Functions
       void initialize(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end) { 
-        pyon_Array2_initialize(y_min, y_end, x_min, x_end, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() );
+        pyon_Array2_initialize(y_min, 1, y_end, x_min, 1, x_end, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() );
       }
       void create(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end) { this->allocate(); initialize(y_min, y_end, x_min, x_end); }
 
@@ -1034,7 +1034,7 @@ namespace Pyon {
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        PyonBarePtr array2_contents = pyon_Array2_get_contents(this->getBareData());
+        PyonBarePtr array2_contents = pyon_Array2_get_contents(this->getObject());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return Incomplete<T_Bare>(array2_contents + index * element_size ); 
       }
