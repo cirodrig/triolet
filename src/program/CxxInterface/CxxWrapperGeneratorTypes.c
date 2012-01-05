@@ -92,8 +92,12 @@ QName_tmplName_create(Pool* p, TmplName* tmplName){
 
 void 
 finalize_Type(Type* type) {
-  if (type->function.parameterList != NULL) {
+  switch(type->kind) {
+  case FUNCTION:
     free(type->function.parameterList);
+    break;
+  default:
+    break;
   }
 }
 
@@ -201,14 +205,15 @@ DeclarationList_append(Pool* p, DeclarationList* list, Declaration* declaration)
 
 void 
 finalize_Expression(Expression* expression){
-  if(expression->kind == CONSTRUCTOR) {
-    if(expression->constructorInvocation.argumentList != NULL){
-      free(expression->constructorInvocation.argumentList);
-    }
-  } else if(expression->kind == FUNCTION_CALL) {
-    if(expression->functionCall.argumentList != NULL){
-      free(expression->functionCall.argumentList);
-    }
+  switch(expression->kind) {
+  case CONSTRUCTOR:
+    free(expression->constructorInvocation.argumentList);
+    break;
+  case FUNCTION_CALL:
+    free(expression->functionCall.argumentList);
+    break;
+  default:
+    break;
   }
 }
 
