@@ -195,6 +195,12 @@ namespace Pyon {
    */
   template<typename bare_type>
   class Incomplete {
+
+    void create(const typename bare_type::initializer& i)
+    {
+      this->allocate();
+      initialize(i);
+    }
 #if BEGIN_SIGNATURE
   public:
     // Exactly one of the following three predicates is true at any time.
@@ -206,8 +212,13 @@ namespace Pyon {
     Incomplete(const Incomplete &other);
 
     void allocate(void);
+    void initialize(const bare_type::initializer&);
+
+    // These convenience functions should provide the same functionality
+    // as the functions that take a bare_type::initializer argument
     void initialize(...);
     void create(...) { allocate(); initialize(...); }
+
     bare_type freeze(void);
 #endif
   };
@@ -370,6 +381,25 @@ namespace Pyon {
       typedef typename AsBareType<T3>::type T3_Bare;
       typedef typename AsBareType<T4>::type T4_Bare;
     public:
+      struct initializer {
+        typename T1_Bare::initializer init_1;
+        typename T2_Bare::initializer init_2;
+        typename T3_Bare::initializer init_3;
+        typename T4_Bare::initializer init_4;
+
+        initializer(const typename T1_Bare::initializer& i1,
+                    const typename T2_Bare::initializer& i2,
+                    const typename T3_Bare::initializer& i3,
+                    const typename T4_Bare::initializer& i4)
+          : init_1(i1), init_2(i2), init_3(i3), init_4(i4) {}
+      };
+      static initializer defaultInitializer(void) {
+        return initializer(T1_Bare::defaultInitializer(),
+                           T2_Bare::defaultInitializer(),
+                           T3_Bare::defaultInitializer(),
+                           T4_Bare::defaultInitializer());
+      }
+    public:
       // Constructors
       Tuple<T1, T2, T3, T4>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
       
@@ -513,6 +543,22 @@ namespace Pyon {
       typedef typename AsBareType<T2>::type T2_Bare;
       typedef typename AsBareType<T3>::type T3_Bare;
     public:
+      struct initializer {
+        typename T1_Bare::initializer init_1;
+        typename T2_Bare::initializer init_2;
+        typename T3_Bare::initializer init_3;
+
+        initializer(const typename T1_Bare::initializer& i1,
+                    const typename T2_Bare::initializer& i2,
+                    const typename T3_Bare::initializer& i3)
+          : init_1(i1), init_2(i2), init_3(i3) {}
+      };
+      static initializer defaultInitializer(void) {
+        return initializer(T1_Bare::defaultInitializer(),
+                           T2_Bare::defaultInitializer(),
+                           T3_Bare::defaultInitializer());
+      }
+    public:
       // Constructors
       Tuple<T1, T2, T3>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
       
@@ -630,6 +676,19 @@ namespace Pyon {
       typedef typename AsBareType<T1>::type T1_Bare;
       typedef typename AsBareType<T2>::type T2_Bare;
     public:
+      struct initializer {
+        typename T1_Bare::initializer init_1;
+        typename T2_Bare::initializer init_2;
+
+        initializer(const typename T1_Bare::initializer& i1,
+                    const typename T2_Bare::initializer& i2)
+          : init_1(i1), init_2(i2) {}
+      };
+      static initializer defaultInitializer(void) {
+        return initializer(T1_Bare::defaultInitializer(),
+                           T2_Bare::defaultInitializer());
+      }
+    public:
       // Constructors
       Tuple<T1,T2>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
       
@@ -706,6 +765,12 @@ namespace Pyon {
     private:
       typedef typename AsBareType<T>::type T_Bare;
     public:
+      struct initializer {
+        int length;
+        initializer(int _length) : length(_length) {};
+      };
+      // no definition of defaultInitializer
+    public:
       // Constructors
       List<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
       
@@ -744,6 +809,13 @@ namespace Pyon {
   class Array1 : public BareType {
     private:
       typedef typename AsBareType<T>::type T_Bare;
+    public:
+      struct initializer {
+        int min;
+        int end;
+        initializer(int _min, int _end) : min(_min), end(_end) {};
+      };
+      // no definition of defaultInitializer
     public:
       // Constructors
       Array1<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
@@ -791,6 +863,16 @@ namespace Pyon {
   class Array2 : public BareType {
     private:
       typedef typename AsBareType<T>::type T_Bare;
+    public:
+      struct initializer {
+        int ymin;
+        int yend;
+        int xmin;
+        int xend;
+        initializer(int _ymin, int _yend, int _xmin, int _xend)
+          : ymin(_ymin), yend(_yend), xmin(_xmin), xend(_xend) {}
+      };
+      // no definition of defaultInitializer
     public:
       // Constructors
       Array2<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
@@ -844,6 +926,135 @@ namespace Pyon {
 
 
 /******************************************************************************/
+/*          Stored Classes: BareType versions of ValType classes              */
+/******************************************************************************/
+
+  /* Implementation of Stored<NoneType> */
+
+    template<>
+  class Stored<NoneType> : public BareType {
+    public:
+      struct initializer {}; // Class is empty
+      static initializer defaultInitializer(void) { return initializer(); }
+
+      // Constructors
+      Stored<NoneType>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return 0;}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return 1;}
+      
+      static inline void
+      copy(Stored<NoneType> n, Incomplete< Stored<NoneType> >& incompleteN);
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+      
+      //Member Functions
+      operator NoneType() {
+        return NoneType();
+      }
+  };
+
+  /* Implementation of Stored<Int> */
+
+    template<>
+  class Stored<Int> : public BareType {
+    public:
+      struct initializer {}; // Class is empty
+      static initializer defaultInitializer(void) { return initializer(); }
+
+      // Constructors
+      Stored<Int>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return sizeof(int32_t);}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return sizeof(int32_t);}
+      
+      static inline void 
+      copy(Stored<Int> i, Incomplete< Stored<Int> >& incompleteI);
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+
+      // Member Functions
+      operator Int() {
+        int32_t* nativePtr = (int32_t*) getBareData();
+        return Int(*nativePtr);
+      }
+  };
+
+  /* Implementation of Stored<Bool> */
+
+    template<>
+  class Stored<Bool> : public BareType {
+    public:
+      struct initializer {}; // Class is empty
+      static initializer defaultInitializer(void) { return initializer(); }
+
+      // Constructors
+      Stored<Bool>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return sizeof(char);}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return sizeof(char);}
+      
+      static inline void 
+      copy(Stored<Bool> b, Incomplete< Stored<Bool> >& incompleteB);
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+
+      // Member Functions
+      operator Bool() {
+        char* nativePtr = (char*) getBareData();
+        return Bool(*nativePtr);
+      }
+
+  };
+
+  /* Implementation of Stored<Float> */
+  template<>
+  class Stored<Float> : public BareType {
+    public:
+      struct initializer {}; // Class is empty
+      static initializer defaultInitializer(void) { return initializer(); }
+
+      // Constructors
+      Stored<Float>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return sizeof(float);}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return sizeof(float);}
+      
+      static inline void 
+      copy(Stored<Float> f, Incomplete< Stored<Float> >& incompleteF);
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+
+      // Member Functions
+      operator Float() {
+        float* nativePtr = (float*) getBareData();
+        return Float(*nativePtr);
+      }
+
+  };
+
+
+/******************************************************************************/
 /*                      Incomplete BareType Objects                           */
 /******************************************************************************/
 
@@ -854,8 +1065,11 @@ namespace Pyon {
     public:
       Incomplete < Stored<T> >(void) : IncompleteSingleRef< Stored<T> >() {}
       Incomplete < Stored<T> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
-      void initialize() { }
-      void create() { this->allocate(); initialize(); }
+      void initialize(const typename Stored<T>::initializer&) { }
+      void create(const typename Stored<T>::initializer&)
+      { this->allocate(); initialize(); }
+      void initialize() { initialize(Stored<T>::defaultInitializer()); }
+      void create() { create(Stored<T>::defaultInitializer()); }
       void operator=(const T& other) {
         typename T::type *data = (typename T::type *) this->getObject();
         *data = other.nativeElement; 
@@ -869,8 +1083,11 @@ namespace Pyon {
     public:
       Incomplete < Stored<NoneType> >(void) : IncompleteSingleRef< Stored<NoneType> >() {}
       Incomplete < Stored<NoneType> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
-      void initialize() { }
-      void create() { this->allocate(); initialize(); }
+      void initialize(const Stored<NoneType>::initializer&) { }
+      void create(const Stored<NoneType>::initializer&)
+      { this->allocate(); initialize(); }
+      void initialize() { initialize(Stored<NoneType>::defaultInitializer()); }
+      void create() { create(Stored<NoneType>::defaultInitializer()); }
       void operator=(const NoneType& other) { }
   };
   
@@ -889,8 +1106,20 @@ namespace Pyon {
       Incomplete< Tuple<T1,T2,T3,T4> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2,T3,T4> >(_s) {}
       
       // Member Functions
-      void initialize() { }
-      void create() { this->allocate(); initialize(); }
+      void initialize(const typename Tuple<T1,T2,T3,T4>::initializer& init)
+      {
+        get<0>().initialize(init.init_1);
+        get<1>().initialize(init.init_2);
+        get<2>().initialize(init.init_3);
+        get<3>().initialize(init.init_4);
+      }
+      void create(const typename Tuple<T1,T2,T3,T4>::initializer& init)
+      {
+        this->allocate();
+        initialize(init);
+      }
+      void initialize() {initialize(Tuple<T1,T2,T3,T4>::defaultInitializer());}
+      void create() {create(Tuple<T1,T2,T3,T4>::defaultInitializer());}
 
         template<int index>
       Incomplete<typename get_return_type<index, T1, T2, T3, T4>::type> 
@@ -912,8 +1141,19 @@ namespace Pyon {
       Incomplete< Tuple<T1,T2,T3> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2,T3> >(_s) {}
       
       // Member Functions
-      void initialize() { }
-      void create() { this->allocate(); initialize(); }
+      void initialize(const typename Tuple<T1,T2,T3>::initializer& init)
+      {
+        get<0>().initialize(init.init_1);
+        get<1>().initialize(init.init_2);
+        get<2>().initialize(init.init_3);
+      }
+      void create(const typename Tuple<T1,T2,T3>::initializer& init)
+      {
+        this->allocate();
+        initialize(init);
+      }
+      void initialize() {initialize(Tuple<T1,T2,T3>::defaultInitializer());}
+      void create() {create(Tuple<T1,T2,T3>::defaultInitializer());}
 
         template<int index>
       Incomplete<typename get_return_type<index, T1, T2, T3>::type> 
@@ -934,8 +1174,18 @@ namespace Pyon {
       Incomplete< Tuple<T1,T2> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2> >(_s) {}
       
       // Member Functions
-      void initialize() { }
-      void create() { this->allocate(); initialize(); }
+      void initialize(const typename Tuple<T1,T2>::initializer& init)
+      {
+        get<0>().initialize(init.init_1);
+        get<1>().initialize(init.init_2);
+      }
+      void create(const typename Tuple<T1,T2>::initializer& init)
+      {
+        this->allocate();
+        initialize(init);
+      }
+      void initialize() {initialize(Tuple<T1,T2>::defaultInitializer());}
+      void create() {create(Tuple<T1,T2>::defaultInitializer());}
 
         template<int index>
       Incomplete<typename get_return_type<index, T1, T2>::type> 
@@ -957,13 +1207,18 @@ namespace Pyon {
         : IncompleteSingleRef< List<T> >(_s) {}
 
       // Member Functions
-      void initialize(int _length) {
-        pyon_List_initialize(_length,
+      void initialize(const typename List<T>::initializer& init) {
+        pyon_List_initialize(init.length,
                              T_Bare::getSize(),
                              T_Bare::getAlignment(),
                              this->getObject());
       }
-      void create(int _length) { this->allocate(); initialize(_length); }
+      void create(const typename List<T>::initializer& init)
+      { this->allocate(); initialize(init); }
+      void initialize(int length)
+      { initialize(typename List<T>::initializer(length)); }
+      void create(int length)
+      { create(typename List<T>::initializer(length)); }
 
       Incomplete< T_Bare > 
       at(int index) { 
@@ -985,10 +1240,19 @@ namespace Pyon {
       Incomplete< Array1<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array1<T> >(_s) { }
       
       // Member Functions
-      void initialize(int min, int end) { 
-        pyon_Array1_initialize(min, end, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() );
+      void initialize(const typename Array1<T>::initializer &init)
+      {
+        pyon_Array1_initialize(init.min, 1, init.end,
+                               T_Bare::getSize(),
+                               T_Bare::getAlignment(),
+                               this->getObject());
       }
-      void create(int min, int end) { this->allocate(); initialize(min, end); }
+      void create(const typename Array1<T>::initializer &init)
+      { this->allocate(); initialize(init); }
+      void initialize(int min, int end)
+      { initialize(typename Array1<T>::initializer(min, end)); }
+      void create(int min, int end)
+      { create(typename Array1<T>::initializer(min, end)); }
 
       Incomplete< T_Bare > 
       at(int index) { 
@@ -1011,10 +1275,22 @@ namespace Pyon {
       Incomplete< Array2<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array2<T> >(_s) { }
       
       // Member Functions
-      void initialize(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end) { 
-        pyon_Array2_initialize(y_min, 1, y_end, x_min, 1, x_end, T_Bare::getSize(), T_Bare::getAlignment(), this->getObject() );
+      void initialize(const typename Array2<T>::initializer &init)
+      {
+        pyon_Array2_initialize(init.ymin, 1, init.yend,
+                               init.xmin, 1, init.xend,
+                               T_Bare::getSize(),
+                               T_Bare::getAlignment(),
+                               this->getObject());
       }
-      void create(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end) { this->allocate(); initialize(y_min, y_end, x_min, x_end); }
+      void create(const typename Array2<T>::initializer &init)
+      { this->allocate(); initialize(init); }
+
+      void initialize(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end)
+      { initialize(typename Array2<T>::initializer(y_min, y_end, x_min, x_end)); }
+
+      void create(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end)
+      { create(typename Array2<T>::initializer(y_min, y_end, x_min, x_end)); }
 
       Incomplete< T_Bare > 
       at(int rowIndex, int columnIndex) { 
@@ -1041,124 +1317,34 @@ namespace Pyon {
 
   };
 
-
-
-
 /******************************************************************************/
-/*          Stored Classes: BareType versions of ValType classes              */
+/*      Class methods that depend on T and Incomplete<T> are defined here     */
 /******************************************************************************/
+    
 
-  /* Implementation of Stored<NoneType> */
+  inline void
+  Stored<NoneType>::copy(Stored<NoneType> n,
+                         Incomplete<Stored<NoneType> >& incompleteN)
+  { // Do nothing
+  }
 
-    template<>
-  class Stored<NoneType> : public BareType {
-    public:
-      // Constructors
-      Stored<NoneType>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+  inline void 
+  Stored<Int>::copy(Stored<Int> i, Incomplete< Stored<Int> >& incompleteI)
+  {
+    incompleteI = Incomplete< Stored<Int> >(i.getBareData());
+  }
 
-      // Static Member Functions
-      static unsigned int 
-      getSize() __attribute__((const)) { return 0;}
-      
-      static unsigned int 
-      getAlignment() __attribute__((const)) {return 1;}
-      
-      static void 
-      copy(Stored<NoneType> n, Incomplete< Stored<NoneType> >& incompleteN) { }
-      
-      static bool 
-      isPOD() __attribute__((const)) { return true; }
-      
-      //Member Functions
-      operator NoneType() {
-        return NoneType();
-      }
-  };
+  inline void 
+  Stored<Bool>::copy(Stored<Bool> b, Incomplete< Stored<Bool> >& incompleteB)
+  {
+    incompleteB = Incomplete<Stored<Bool> >(b.getBareData());
+  }
 
-  /* Implementation of Stored<Int> */
-
-    template<>
-  class Stored<Int> : public BareType {
-    public:
-      // Constructors
-      Stored<Int>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
-      
-      // Static Member Functions
-      static unsigned int 
-      getSize() __attribute__((const)) { return sizeof(int32_t);}
-      
-      static unsigned int 
-      getAlignment() __attribute__((const)) {return sizeof(int32_t);}
-      
-      static void 
-      copy(Stored<Int> i, Incomplete< Stored<Int> >& incompleteI) { incompleteI = Incomplete< Stored<Int> >(i.getBareData()); }
-      
-      static bool 
-      isPOD() __attribute__((const)) { return true; }
-
-      // Member Functions
-      operator Int() {
-        int32_t* nativePtr = (int32_t*) getBareData();
-        return Int(*nativePtr);
-      }
-  };
-
-  /* Implementation of Stored<Bool> */
-
-    template<>
-  class Stored<Bool> : public BareType {
-    public:
-      // Constructors
-      Stored<Bool>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
-      
-      // Static Member Functions
-      static unsigned int 
-      getSize() __attribute__((const)) { return sizeof(char);}
-      
-      static unsigned int 
-      getAlignment() __attribute__((const)) {return sizeof(char);}
-      
-      static void 
-      copy(Stored<Bool> b, Incomplete< Stored<Bool> >& incompleteB) { incompleteB = Incomplete< Stored<Bool> >(b.getBareData()); }
-      
-      static bool 
-      isPOD() __attribute__((const)) { return true; }
-
-      // Member Functions
-      operator Bool() {
-        char* nativePtr = (char*) getBareData();
-        return Bool(*nativePtr);
-      }
-
-  };
-
-  /* Implementation of Stored<Float> */
-  template<>
-  class Stored<Float> : public BareType {
-    public:
-      // Constructors
-      Stored<Float>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
-
-      // Static Member Functions
-      static unsigned int 
-      getSize() __attribute__((const)) { return sizeof(float);}
-      
-      static unsigned int 
-      getAlignment() __attribute__((const)) {return sizeof(float);}
-      
-      static void 
-      copy(Stored<Float> f, Incomplete< Stored<Float> >& incompleteF) { incompleteF = Incomplete< Stored<Float> >(f.getBareData()); }
-      
-      static bool 
-      isPOD() __attribute__((const)) { return true; }
-
-      // Member Functions
-      operator Float() {
-        float* nativePtr = (float*) getBareData();
-        return Float(*nativePtr);
-      }
-
-  };
+  inline void 
+  Stored<Float>::copy(Stored<Float> f, Incomplete< Stored<Float> >& incompleteF)
+  {
+    incompleteF = Incomplete< Stored<Float> >(f.getBareData());
+  }
 
 } // end namespace
 

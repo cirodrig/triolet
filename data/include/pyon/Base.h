@@ -63,6 +63,15 @@ namespace Pyon {
     PyonBarePtr getBareData(void) const {return bare_data;}
 
 #if BEGIN_SIGNATURE
+    struct initializer {
+      // The initializer should be a POD type.  It is passed by value
+      // to Incomplete<typeof(this)>::create.
+    };
+
+    // This function may be undefined if there is no reasonable default
+    // initializer value
+    static initializer defaultInitializer(void);
+
     static unsigned int getSize(void);
     static unsigned int getAlignment(void);
     static void copy(T, Incomplete<T>&);
