@@ -93,6 +93,7 @@ Expression* Expression_objectID_create(Pool* p, QName *objectID);
 Expression* Expression_cast_create(Pool* p, Type* type, QName* qName);
 Expression* Expression_constructor_create(Pool* p, QName* qName, int argumentCount, Expression** argumentList);
 Expression* Expression_function_call_create(Pool* p, Expression* expression, int argumentCount, Expression** argumentList);
+Expression* Expression_member_access_create(Pool *p, Expression* expression, Name *name);
 
 Statement* Statement_assignment_create(Pool* p, Expression* lhsExpression, Expression* rhsExpression);
 Statement* Statement_expression_create(Pool* p, Expression* expression);
