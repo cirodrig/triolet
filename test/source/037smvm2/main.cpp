@@ -1,7 +1,7 @@
 
 #include <iostream>
 #include <math.h>
-#include <Pyon.h>
+#include <pyon.h>
 #include "smvm_cxx.h"
 
 using namespace Pyon;

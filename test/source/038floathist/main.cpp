@@ -1,6 +1,6 @@
 
 #include <stdio.h>
-#include <Pyon.h>
+#include <pyon.h>
 #include <PyonData.h>
 #include "fhist_cxx.h"
 
