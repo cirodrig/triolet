@@ -269,6 +269,13 @@ data ConsumerOp =
     -- >   {reducer} {stream} {output pointer}
   | Reduce1 Type
 
+    -- | Reduce using a scatter algorithm
+    --
+    -- > (scatter @{other type arguments} @{in_type} @{out_type}
+    -- >   {other arguments})
+    -- >   {reducer} {stream} {output pointer}
+  | Scatter Type Type
+
     -- | Reduce sequentially.  The type arguments are the input type and the
     --   accumulator type.
     --
@@ -352,6 +359,7 @@ instance Renameable StreamType where
 instance Renameable ConsumerOp where
   rename rn (Reduce t) = Reduce (rename rn t)
   rename rn (Reduce1 t) = Reduce1 (rename rn t)
+  rename rn (Scatter t1 t2) = Scatter (rename rn t1) (rename rn t2)
   rename rn (Fold t1 t2) = Fold (rename rn t1) (rename rn t2)
   rename rn (Build t) = Build (rename rn t)
 
@@ -386,6 +394,7 @@ instance Substitutable ConsumerOp where
   type Substitution ConsumerOp = Substitute.TypeSubst
   substituteWorker s (Reduce t) = Reduce `liftM` substitute s t
   substituteWorker s (Reduce1 t) = Reduce1 `liftM` substitute s t
+  substituteWorker s (Scatter t1 t2) = Scatter `liftM` substitute s t1 `ap` substitute s t2
   substituteWorker s (Fold t1 t2) = Fold `liftM` substitute s t1 `ap` substitute s t2
   substituteWorker s (Build t) = Build `liftM` substitute s t
 
@@ -484,6 +493,7 @@ pprStreamOp' (ConsumeOp st op) =
   let (name, tys) = case op
                     of Reduce ty -> ("reduce", [ty])
                        Reduce1 ty -> ("reduce1", [ty])
+                       Scatter in_ty out_ty -> ("scatter", [in_ty, out_ty])
                        Fold in_ty acc_ty -> ("fold", [in_ty, acc_ty])
                        Build ty -> ("build", [ty])
   in nameApplication name (pprStreamType st : map pprTypePrec tys)
@@ -565,6 +575,8 @@ streamOpTable =
            , (pyonBuiltin The_reduce1_list_dim, interpretReduce1 ListViewType)
            , (pyonBuiltin The_Sequence_reduce, interpretReduce SequenceType)
            , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 SequenceType)
+           , (pyonBuiltin The_Sequence_scatter, interpretScatter SequenceType)
+           , (pyonBuiltin The_Sequence_fold, interpretFold SequenceType)
            , (pyonBuiltin The_Sequence_generate, interpretSequenceGenerate)
            , (pyonBuiltin The_Sequence_map, interpretSequenceZip 1)
            , (pyonBuiltin The_Sequence_zipWith, interpretSequenceZip 2)
@@ -686,6 +698,42 @@ interpretReduce1 stream_type = StreamOpInterpreter check_arity interpret
 
       stream_exp <- interpretStreamSubExp source
       return $ Just $ OpSE inf op [repr] [reducer] [stream_exp] maybe_return_arg
+
+interpretScatter stream_type = StreamOpInterpreter check_arity interpret
+  where
+    -- There is one optional argument for the output pointer
+    check_arity ty_args args =
+      ty_args == 2 && (args == 4 || args == 5)
+
+    interpret inf ty_args args = do
+      let [in_type, out_type] = ty_args
+          in_repr : out_repr : reducer : source : other_args = args
+          maybe_return_arg = case other_args
+                             of [] -> Nothing
+                                [x] -> Just x
+          op = ConsumeOp stream_type (Scatter in_type out_type)
+
+      stream_exp <- interpretStreamSubExp source
+      return $ Just $ OpSE inf op [in_repr, out_repr] [reducer]
+        [stream_exp] maybe_return_arg
+
+interpretFold stream_type = StreamOpInterpreter check_arity interpret
+  where
+    -- There is one optional argument for the output pointer
+    check_arity ty_args args =
+      ty_args == 2 && (args == 5 || args == 6)
+
+    interpret inf ty_args args = do
+      let [in_type, acc_type] = ty_args
+          in_repr : acc_repr : reducer : init : source : other_args = args
+          maybe_return_arg = case other_args
+                             of [] -> Nothing
+                                [x] -> Just x
+          op = ConsumeOp stream_type (Fold in_type acc_type)
+
+      stream_exp <- interpretStreamSubExp source
+      return $ Just $ OpSE inf op [in_repr, acc_repr] [reducer, init]
+        [stream_exp] maybe_return_arg
 
 interpretToSequence stream_type = StreamOpInterpreter check_arity interpret
   where
@@ -946,6 +994,20 @@ embedOp (ConsumeOp st (Reduce1 ty)) =
               ListViewType -> pyonBuiltin The_reduce1_list_dim
               ArrViewType 1 -> pyonBuiltin The_reduce1_dim1
   in (varE' op, [ty])
+
+embedOp (ConsumeOp st (Scatter in_ty out_ty)) =
+  let op = case st
+           of SequenceType -> pyonBuiltin The_Sequence_scatter
+              ListViewType -> pyonBuiltin The_scatter_list_dim
+              ArrViewType 1 -> pyonBuiltin The_scatter_dim1
+  in (varE' op, [in_ty, out_ty])
+
+embedOp (ConsumeOp st (Fold in_ty acc_ty)) =
+  let op = case st
+           of SequenceType -> pyonBuiltin The_Sequence_fold
+              ListViewType -> pyonBuiltin The_fold_list_dim
+              ArrViewType 1 -> pyonBuiltin The_fold_dim1
+  in (varE' op, [in_ty, acc_ty])
 
 embedOp (ConsumeOp st (Build ty)) =
   let op = case st
@@ -1357,14 +1419,33 @@ sequentializeStreamExp expression =
 
             -- Assign the Repr to a variable to avoid replicating the
             -- same expression many times
-            repr_var <- newAnonymousVar ObjectLevel
-            fold_exp <-
-              sequentializeFold ty ty repr_var
-              (ExpM $ VarE defaultExpInfo repr_var) init reducer src
-            let fold_with_return = appE inf fold_exp [] (maybeToList ret_arg)
-            let repr_pat = patM (repr_var ::: varApp (pyonBuiltin The_Repr) [ty])
-            return $ letE repr_pat repr fold_with_return
+            let_repr ty repr $ \repr_var -> do
+              fold_exp <-
+                sequentializeFold ty ty repr_var
+                (varE' repr_var) init reducer src
+              return $ appE inf fold_exp [] (maybeToList ret_arg)
+          Fold in_ty acc_ty -> runMaybeT $ do
+            let [reducer, init] = misc_args
+                [repr_in, repr_acc] = repr_args
+
+            -- Assign the Repr to a variable to avoid replicating the
+            -- same expression many times
+            let_repr in_ty repr_in $ \repr_in_var ->
+              let_repr acc_ty repr_acc $ \repr_acc_var -> do
+                fold_exp <-
+                  sequentializeFold acc_ty in_ty repr_acc_var
+                  (varE' repr_in_var) init reducer src
+                return $ appE inf fold_exp [] (maybeToList ret_arg)
      _ -> return Nothing
+  where
+    -- Bind a Repr value to a temporary variable
+    let_repr ty val k = do
+      repr_var <- newAnonymousVar ObjectLevel
+      k_expr <- k repr_var
+      let repr_pat = patM (repr_var ::: varApp (pyonBuiltin The_Repr) [ty])
+      return $ letE repr_pat val k_expr
+      
+
 
 -- | Convert a fold over a sequence to a sequential loop.
 --

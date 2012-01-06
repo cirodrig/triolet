@@ -4207,7 +4207,7 @@ Sequence_scatter @(i r : bare)
   (src : Sequence i)
   (ret : OutPtr r)
   -> IEffect r
-  attribute(inline, inline_final) =
+  attribute(inline, inline_sequential) =
 
   case op of
     mk_scatter @r @i @(s : bare) @(a : val)
