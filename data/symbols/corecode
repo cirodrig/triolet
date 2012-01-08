@@ -1154,7 +1154,7 @@ array1Scatter @(e i : bare)
            (ret : OutPtr (StoredBox ret_type))
            -> IEffect (StoredBox ret_type).
 
-           -- Create a plain array scatter reducer
+           -- Create a plain array scatter reducer.
            case arrScatter @N @e @i repr_i repr_e count reduction_op of
              mk_scatter @(arr N e) @i2 @(s : bare) @(a : val)
              (repr_s : Repr s)
@@ -1181,11 +1181,29 @@ array1Scatter @(e i : bare)
                       }))
                     ret) in
 
+           -- Transform dim1 indices to linear indices
+           letfun
+             linearized_updater
+               (f : a -> a) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
+               -> EffTok =
+               case ix of pyonTuple2 @(Stored int) @i (arr_ix : Stored int) (val : i).
+               case arr_ix of stored @int (u_arr_ix : int).
+
+               -- Drop values whose indices are out of bounds due to alignment
+               let zeroed_ix : int = u_arr_ix -# lb in
+               if zeroed_ix %# stride /=# 0 then tok_in else
+               let linearized_ix : int = zeroed_ix //# stride in
+               case boxed @i2 (pyonTuple2 @(Stored int) @i
+                               (stored @int linearized_ix) (copy @i repr_i val)) of
+                 boxed @i2 (new_ix : i2).
+               updater f new_ix tok_in ret
+           in
+
            storedBox @ret_type
            (mk_scatter @(array1 e) @i2 @s @a
             repr_s
             initializer
-            updater
+            linearized_updater
             combiner
             array_finalizer
             make_updater
@@ -1290,11 +1308,38 @@ array2Scatter @(e i : bare)
                          }))
                        ret) in
 
+              -- Transform dim2 indices to linear indices
+              letfun
+                linearized_updater
+                  (f : a -> a) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
+                  -> EffTok =
+                  case ix of pyonTuple2 @(index dim2) @i
+                             (arr_ix : index dim2) (val : i).
+                  case arr_ix of pyonTuple2 @(Stored int) @(Stored int)
+                                 (ix_y : Stored int) (ix_x : Stored int).
+                  case ix_y of stored @int (u_ix_y : int).
+                  case ix_x of stored @int (u_ix_x : int).
+
+                  -- Drop values whose indices are out of bounds due to alignment
+                  let zeroed_ix_y : int = u_ix_y -# lb_y in
+                  let zeroed_ix_x : int = u_ix_x -# lb_x in
+                  if zeroed_ix_y %# stride_y /=# 0 then tok_in else
+                  if zeroed_ix_x %# stride_x /=# 0 then tok_in else
+                  let linearized_ix_y : int = zeroed_ix_y //# stride_y in
+                  let linearized_ix_x : int = zeroed_ix_x //# stride_x in
+                  case boxed @i2 (pyonTuple2 @(index dim2) @i
+                                  (pyonTuple2 @(Stored int) @(Stored int)
+                                   (stored @int linearized_ix_y) (stored @int linearized_ix_x))
+                                  (copy @i repr_i val)) of
+                    boxed @i2 (new_ix : i2).
+                  updater f new_ix tok_in ret
+              in
+
               storedBox @ret_type
               (mk_scatter @(array2 e) @i2 @s @a
                repr_s
                initializer
-               updater
+               linearized_updater
                combiner
                array_finalizer
                make_updater
