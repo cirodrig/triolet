@@ -105,6 +105,7 @@ mkShapeTyFun = do
   rec { (con, fam) <- mkTyFunction "shape" shape_kind []
                       (pyonBuiltin SystemF.The_shape)
                       [list_instance, array1_instance, array2_instance,
+                       array3_instance,
                        view_instance, iter_instance]
 
       ; let list_instance =
@@ -119,6 +120,10 @@ mkShapeTyFun = do
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_array2)
               (ConTy $ tiBuiltin the_con_dim2)
+      ; let array3_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_array3)
+              (ConTy $ tiBuiltin the_con_dim3)
       ; sh <- newTyVar Star Nothing
       ; let view_instance =
               mkTyFamilyInstance [sh] [] (tfSignature fam)
@@ -136,7 +141,7 @@ mkShapeTyFun = do
 mkArrayTyFun = do
   rec { (con, fam) <- mkTyFunction "array" (Star :-> Star :-> Star) []
                       (pyonBuiltin SystemF.The_array)
-                      [inst0, inst1, inst2]
+                      [inst0, inst1, inst2, inst3]
 
       ; let inst0 =
               mkTyFamilyInstance [] [] (tfSignature fam)
@@ -150,13 +155,18 @@ mkArrayTyFun = do
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_dim2)
               (ConTy $ tiBuiltin the_con_array2)
+      ; let inst3 =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_dim3)
+              (ConTy $ tiBuiltin the_con_array3)
       }
   return con
 
 mkIndexTyFun = do
   rec { (con, fam) <- mkTyFunction "index" (Star :-> Star) []
                       (pyonBuiltin SystemF.The_index)
-                      [list_instance, dim1_instance, dim2_instance]
+                      [list_instance,
+                       dim1_instance, dim2_instance, dim3_instance]
       ; let list_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_list_dim)
@@ -169,6 +179,10 @@ mkIndexTyFun = do
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_dim2)
               (TupleTy 2 @@ int_type @@ int_type)
+      ; let dim3_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_dim3)
+              (TupleTy 3 @@ int_type @@ int_type @@ int_type)
       }
   return con
   where
@@ -177,7 +191,8 @@ mkIndexTyFun = do
 mkSliceTyFun = do
   rec { (con, fam) <- mkTyFunction "slice" (Star :-> Star) []
                       (pyonBuiltin SystemF.The_slice)
-                      [list_instance, dim1_instance, dim2_instance]
+                      [list_instance,
+                       dim1_instance, dim2_instance, dim3_instance]
       ; let list_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_list_dim)
@@ -190,6 +205,10 @@ mkSliceTyFun = do
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_dim2)
               (TupleTy 2 @@ slice_type @@ slice_type)
+      ; let dim3_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_dim3)
+              (TupleTy 3 @@ slice_type @@ slice_type @@ slice_type)
       }
   return con
   where
@@ -199,7 +218,8 @@ mkSliceTyFun = do
 mkCartesianDomainTyFun = do
   rec { (con, fam) <- mkTyFunction "cartesianDomain" (Star :-> Star) []
                       (pyonBuiltin SystemF.The_cartesianDomain)
-                      [dim0_instance, dim1_instance, dim2_instance]
+                      [dim0_instance,
+                       dim1_instance, dim2_instance, dim3_instance]
       ; let dim0_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_NoneType)
@@ -212,6 +232,10 @@ mkCartesianDomainTyFun = do
               mkTyFamilyInstance [] [] (tfSignature fam)
               (TupleTy 2 @@ int_type @@ int_type)
               (ConTy $ tiBuiltin the_con_dim2)
+      ; let dim3_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (TupleTy 3 @@ int_type @@ int_type @@ int_type)
+              (ConTy $ tiBuiltin the_con_dim3)
       }
   return con
   where
@@ -333,7 +357,8 @@ mkTraversableClass = do
                   (pyonBuiltin SystemF.The_TraversableDict)
                   (pyonBuiltin SystemF.The_traversableDict)
                   [iter, build]
-                  [list_instance, array1_instance, array2_instance,
+                  [list_instance,
+                   array1_instance, array2_instance, array3_instance,
                    view_list_dim_instance,
                    view_dim0_instance,
                    view_dim1_instance,
@@ -352,6 +377,14 @@ mkTraversableClass = do
                   pyonBuiltin SystemF.The_TraversableDict_list_traverse
                 , InstanceMethod $
                   pyonBuiltin SystemF.The_TraversableDict_list_build]
+
+            array3_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_array3)
+                [ InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_array3_traverse
+                , InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_array3_build]
 
             array2_instance =
                 monomorphicInstance cls
@@ -457,11 +490,12 @@ mkShapeClass = do
                 (pyonBuiltin SystemF.The_shapeDict)
                 [member, intersection, flattenStream, generate, mapStream,
                  zipWithStream, zipWith3Stream, zipWith4Stream, getSlice]
-                [list_dim_instance, dim0_instance, dim1_instance, dim2_instance]
+                [list_dim_instance, dim0_instance, dim1_instance,
+                 dim2_instance, dim3_instance]
 
       member <- mkClassMethod cls 0 "member" in_range_scheme
       intersection <- mkClassMethod cls 1 "intersection" intersect_scheme
-      flattenStream <- mkClassMethod cls 2 "flattenStream" flattenStreamScheme
+      flattenStream <- mkClassMethod cls 2 "flatten" flattenStreamScheme
       generate <- mkClassMethod cls 3 "generate" gen_scheme
       mapStream <- mkClassMethod cls 4 "mapStream" map_scheme
       zipWithStream <- mkClassMethod cls 5 "zipWithStream" zip_scheme
@@ -517,6 +551,18 @@ mkShapeClass = do
               InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_zipWith3,
               InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_zipWith4,
               InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_slice]
+          dim3_instance =
+            monomorphicInstance cls
+            (ConTy (tiBuiltin the_con_dim3))
+            [ InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_member,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_intersect,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_flatten,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_generate,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_map,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_zipWith,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_zipWith3,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_zipWith4,
+              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_slice]
 
   return cls
   where
@@ -852,7 +898,7 @@ mkCartesianClass = do
             (pyonBuiltin SystemF.The_cartesianDict)
             [loBound, hiBound, arrayRange, displace, multiply, divide,
              multiplyI, divideI, unbounded]
-            [dim0_instance, dim1_instance, dim2_instance]
+            [dim0_instance, dim1_instance, dim2_instance, dim3_instance]
       loBound <- mkClassMethod cls 0 "loBound" bound_scheme
       hiBound <- mkClassMethod cls 1 "hiBound" bound_scheme
       arrayRange <- mkClassMethod cls 2 "arrayRange" range_scheme
@@ -923,6 +969,26 @@ mkCartesianClass = do
               pyonBuiltin SystemF.The_CartesianDict_dim2_divideIndex
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_unbounded]
+      let dim3_instance =
+            monomorphicInstance cls (ConTy (tiBuiltin the_con_dim3))
+            [ InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_loBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_hiBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_arrayRange
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_displaceDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_multiplyDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_divideDomain
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_multiplyIndex
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_divideIndex
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_unbounded]
   return cls
 
 mkRemainderClass = do
@@ -994,10 +1060,10 @@ mkPassableClass = do
                complex_instance, sliceobject_instance,
                scatter_instance,
                list_dim_instance,
-               dim1_instance, dim2_instance,
+               dim1_instance, dim2_instance, dim3_instance,
                any_instance,
                list_instance,
-               array1_instance, array2_instance,
+               array1_instance, array2_instance, array3_instance,
                iter_instance,
                view_instance,
                tuple2_instance, tuple3_instance,
@@ -1024,6 +1090,9 @@ mkPassableClass = do
   ; let dim2_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_dim2)
           (pyonBuiltin SystemF.The_repr_dim2) []
+  ; let dim3_instance =
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_dim3)
+          (pyonBuiltin SystemF.The_repr_dim3) []
   ; let any_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_Any)
           (pyonBuiltin SystemF.The_repr_Any) []
@@ -1059,6 +1128,11 @@ mkPassableClass = do
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_array2) @@ ConTy b)
           (pyonBuiltin SystemF.The_repr_array2)
+          []
+  ; let array3_instance =
+          polyExplicitInstance [b] [passable $ ConTy b] cls
+          (ConTy (tiBuiltin the_con_array3) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_array3)
           []
   ; let iter_instance =
           polyExplicitInstance [b, c] [] cls
@@ -1138,6 +1212,12 @@ mkDim2Type =
   return $ monomorphic $
   functionType [ConTy (tiBuiltin the_con_dim1), ConTy (tiBuiltin the_con_dim1)]
   (ConTy (tiBuiltin the_con_dim2))
+
+mkDim3Type =
+  let dim1_type = ConTy (tiBuiltin the_con_dim1)
+  in return $ monomorphic $
+     functionType [dim1_type, dim1_type, dim1_type]
+     (ConTy (tiBuiltin the_con_dim3))
 
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
@@ -1426,6 +1506,19 @@ mkArray2ScatterType =
        (ConTy (tiBuiltin the_con_array2) @@ sT) @@
        (TupleTy 2 @@ index_type @@ iT)))
 
+mkArray3ScatterType =
+  forallType [Star, Star] $ \[s, i] ->
+  let sT = ConTy s
+      iT = ConTy i
+      int_type = ConTy $ tiBuiltin the_con_int
+      index_type = TupleTy 3 @@ int_type @@ int_type @@ int_type
+  in ([passable sT, passable iT],
+      functionType [ConTy $ tiBuiltin the_con_dim3,
+                    ConTy (tiBuiltin the_con_Scatter) @@ sT @@ iT]
+      (ConTy (tiBuiltin the_con_Scatter) @@
+       (ConTy (tiBuiltin the_con_array3) @@ sT) @@
+       (TupleTy 2 @@ index_type @@ iT)))
+
 mkScatterType =
   forallType [Star :-> Star, Star, Star] $ \[t, i, r] ->
   let tT = ConTy t
@@ -1586,6 +1679,7 @@ initializeTIBuiltins = do
             , ("array0", Star :-> Star, [| pyonBuiltin SystemF.The_array0 |])
             , ("array1", Star :-> Star, [| pyonBuiltin SystemF.The_array1 |])
             , ("array2", Star :-> Star, [| pyonBuiltin SystemF.The_array2 |])
+            , ("array3", Star :-> Star, [| pyonBuiltin SystemF.The_array3 |])
             , ("view", Star :-> Star :-> Star, 
                [| pyonBuiltin SystemF.The_view |])
             , ("Any", Star, [| pyonBuiltin SystemF.The_Any |])
@@ -1595,6 +1689,7 @@ initializeTIBuiltins = do
             , ("dim0", Star, [| pyonBuiltin SystemF.The_dim0 |])
             , ("dim1", Star, [| pyonBuiltin SystemF.The_dim1 |])
             , ("dim2", Star, [| pyonBuiltin SystemF.The_dim2 |])
+            , ("dim3", Star, [| pyonBuiltin SystemF.The_dim3 |])
             ]
 
           type_functions =
@@ -1730,6 +1825,9 @@ initializeTIBuiltins = do
               ("array2Scatter", [| mkArray2ScatterType |]
               , [| pyonBuiltin SystemF.The_array2Scatter |]
               ),
+              ("array3Scatter", [| mkArray3ScatterType |]
+              , [| pyonBuiltin SystemF.The_array3Scatter |]
+              ),
               ("scatter", [| mkScatterType |]
               , [| pyonBuiltin SystemF.The_fun_scatter |]
               ),
@@ -1764,6 +1862,9 @@ initializeTIBuiltins = do
               ),
               ("dim2", [| mkDim2Type |]
               , [| pyonBuiltin SystemF.The_mk_dim2 |]
+              ),
+              ("dim3", [| mkDim3Type |]
+              , [| pyonBuiltin SystemF.The_mk_dim3 |]
               ),
               ("Just", [| mkJustType |]
               , [| pyonBuiltin SystemF.The_just |]

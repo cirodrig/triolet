@@ -18,9 +18,9 @@ instance Lift Kind where
 pyonSourceTypes :: [String] 
 pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list",
-   "array", "array0", "array1", "array2",
+   "array", "array0", "array1", "array2", "array3",
    "Maybe", "Any",
-   "shape", "list_dim", "dim0", "dim1", "dim2",
+   "shape", "list_dim", "dim0", "dim1", "dim2", "dim3",
    "index", "slice", "cartesianDomain",
    "view",
    "Scatter"]
@@ -41,6 +41,7 @@ pyonSourceGlobals =
   , "list_dim"
   , "dim1"
   , "dim2"
+  , "dim3"
   , "map"
   , "reduce"
   , "reduce1"
@@ -70,6 +71,7 @@ pyonSourceGlobals =
   , "countingScatter"
   , "array1Scatter"
   , "array2Scatter"
+  , "array3Scatter"
   , "scatter"
   , "__undefined__"
   , "__and__"

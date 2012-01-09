@@ -192,6 +192,7 @@ shapePureTF = shapeLike $ \op args ->
         | op `isPyonBuiltin` The_array0 -> return_dim0
         | op `isPyonBuiltin` The_array1 -> return_dim1
         | op `isPyonBuiltin` The_array2 -> return_dim2
+        | op `isPyonBuiltin` The_array3 -> return_dim3
         | op `isPyonBuiltin` The_array ->
             case args
             of [dim, _] -> do
@@ -200,17 +201,19 @@ shapePureTF = shapeLike $ \op args ->
                    VarT v | v `isPyonBuiltin` The_dim0 -> return_dim0
                           | v `isPyonBuiltin` The_dim1 -> return_dim1
                           | v `isPyonBuiltin` The_dim2 -> return_dim2
+                          | v `isPyonBuiltin` The_dim3 -> return_dim3
                    _ -> return Nothing
         | op `isPyonBuiltin` The_arr ->
             case args
             of [arg, _] -> return $ Just $ array_shape arg
      _ -> return Nothing
   where
-    return_list_dim, return_dim0, return_dim1, return_dim2 :: EvalMonad m => m (Maybe Type)
+    return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
     return_list_dim = return $ Just $ VarT (pyonBuiltin The_list_dim)
     return_dim0 = return $ Just $ VarT (pyonBuiltin The_dim0)
     return_dim1 = return $ Just $ VarT (pyonBuiltin The_dim1)
     return_dim2 = return $ Just $ VarT (pyonBuiltin The_dim2)
+    return_dim3 = return $ Just $ VarT (pyonBuiltin The_dim3)
 
 cartPureTF = typeFunction 1 $ \[index_type] -> do
   index_type' <- reduceToWhnf index_type
@@ -223,6 +226,9 @@ cartPureTF = typeFunction 1 $ \[index_type] -> do
     Just (op, [t1, t2])
       | op `isPyonBuiltin` The_PyonTuple2 ->
           ifM (is_int t1 >&&> is_int t2) return_dim2 can't_reduce
+    Just (op, [t1, t2, t3])
+      | op `isPyonBuiltin` The_PyonTuple3 ->
+          ifM (is_int t1 >&&> is_int t2 >&&> is_int t3) return_dim3 can't_reduce
     _ -> can't_reduce
   where
     is_int :: EvalMonad m => Type -> m Bool
@@ -231,10 +237,11 @@ cartPureTF = typeFunction 1 $ \[index_type] -> do
       return $! case ty
                 of VarT v -> v `isPyonBuiltin` The_int
                    _      -> False
-    return_dim0, return_dim1, return_dim2 :: EvalMonad m => m Type
+    return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m Type
     return_dim0 = return $ VarT (pyonBuiltin The_dim0)
     return_dim1 = return $ VarT (pyonBuiltin The_dim1)
     return_dim2 = return $ VarT (pyonBuiltin The_dim2)
+    return_dim3 = return $ VarT (pyonBuiltin The_dim3)
 
 cartMemTF = typeFunction 1 $ \[index_type] -> do
   index_type' <- reduceToWhnf index_type
@@ -252,6 +259,9 @@ cartMemTF = typeFunction 1 $ \[index_type] -> do
     Just (op, [t1, t2])
       | op `isPyonBuiltin` The_PyonTuple2 ->
           ifM (is_int t1 >&&> is_int t2) return_dim2 can't_reduce
+    Just (op, [t1, t2, t3])
+      | op `isPyonBuiltin` The_PyonTuple3 ->
+          ifM (is_int t1 >&&> is_int t2 >&&> is_int t3) return_dim3 can't_reduce
     _ -> can't_reduce
   where
     is_int :: EvalMonad m => Type -> m Bool
@@ -270,6 +280,7 @@ cartMemTF = typeFunction 1 $ \[index_type] -> do
     return_dim0 = return $ VarT (pyonBuiltin The_dim0)
     return_dim1 = return $ VarT (pyonBuiltin The_dim1)
     return_dim2 = return $ VarT (pyonBuiltin The_dim2)
+    return_dim3 = return $ VarT (pyonBuiltin The_dim3)
 
 -- | Compute the shape of a data type in the memory type system
 shapeMemTF = shapeLike $ \op args ->
@@ -291,16 +302,18 @@ shapeMemTF = shapeLike $ \op args ->
         | op `isPyonBuiltin` The_array0 -> return_dim0
         | op `isPyonBuiltin` The_array1 -> return_dim1
         | op `isPyonBuiltin` The_array2 -> return_dim2
+        | op `isPyonBuiltin` The_array3 -> return_dim3
         | op `isPyonBuiltin` The_array ->
             case args
             of [arg, _] -> return $ Just $ array_shape arg
      _ -> return Nothing
   where
-    return_list_dim, return_dim0, return_dim1, return_dim2 :: EvalMonad m => m (Maybe Type)
+    return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
     return_list_dim = return $ Just $ VarT (pyonBuiltin The_list_dim)
     return_dim0 = return $ Just $ VarT (pyonBuiltin The_dim0)
     return_dim1 = return $ Just $ VarT (pyonBuiltin The_dim1)
     return_dim2 = return $ Just $ VarT (pyonBuiltin The_dim2)
+    return_dim3 = return $ Just $ VarT (pyonBuiltin The_dim3)
 
 indexPureTF = typeFunction 1 compute_eliminator
   where
@@ -314,11 +327,13 @@ indexPureTF = typeFunction 1 compute_eliminator
            | op `isPyonBuiltin` The_dim0 -> return none_type
            | op `isPyonBuiltin` The_dim1 -> return int_type
            | op `isPyonBuiltin` The_dim2 -> return int2_type
+           | op `isPyonBuiltin` The_dim3 -> return int3_type
         _ -> return $ varApp (pyonBuiltin The_index) [shape_arg']
 
     none_type = VarT (pyonBuiltin The_NoneType)
     int_type = VarT (pyonBuiltin The_int)
     int2_type = varApp (pyonBuiltin The_PyonTuple2) [int_type, int_type]
+    int3_type = varApp (pyonBuiltin The_PyonTuple3) [int_type, int_type, int_type]
 
 indexMemTF = typeFunction 1 compute_eliminator
   where
@@ -332,6 +347,7 @@ indexMemTF = typeFunction 1 compute_eliminator
            | op `isPyonBuiltin` The_dim0 -> return none_type
            | op `isPyonBuiltin` The_dim1 -> return int_type
            | op `isPyonBuiltin` The_dim2 -> return int2_type
+           | op `isPyonBuiltin` The_dim3 -> return int3_type
         _ -> return $ varApp (pyonBuiltin The_index) [shape_arg']
 
     compute_eliminator ts =
@@ -341,6 +357,8 @@ indexMemTF = typeFunction 1 compute_eliminator
     int_type = varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_int)]
     int2_type = varApp (pyonBuiltin The_PyonTuple2)
                 [int_type, int_type]
+    int3_type = varApp (pyonBuiltin The_PyonTuple3)
+                [int_type, int_type, int_type]
 
 slicePureTF = typeFunction 1 compute_eliminator
   where
@@ -354,12 +372,15 @@ slicePureTF = typeFunction 1 compute_eliminator
            | op `isPyonBuiltin` The_dim0 -> return none_type
            | op `isPyonBuiltin` The_dim1 -> return slice_type
            | op `isPyonBuiltin` The_dim2 -> return slice2_type
+           | op `isPyonBuiltin` The_dim2 -> return slice3_type
         _ -> return $ varApp (pyonBuiltin The_slice) [shape_arg']
 
     none_type = VarT (pyonBuiltin The_NoneType)
     slice_type = VarT (pyonBuiltin The_SliceObject)
     slice2_type = varApp (pyonBuiltin The_PyonTuple2)
                   [slice_type, slice_type]
+    slice3_type = varApp (pyonBuiltin The_PyonTuple3)
+                  [slice_type, slice_type, slice_type]
 
 sliceMemTF = typeFunction 1 compute_eliminator
   where
@@ -373,6 +394,7 @@ sliceMemTF = typeFunction 1 compute_eliminator
            | op `isPyonBuiltin` The_dim0 -> return none_type
            | op `isPyonBuiltin` The_dim1 -> return slice_type
            | op `isPyonBuiltin` The_dim2 -> return slice2_type
+           | op `isPyonBuiltin` The_dim3 -> return slice3_type
         _ -> return $ varApp (pyonBuiltin The_slice) [shape_arg']
 
     none_type = varApp (pyonBuiltin The_Stored)
@@ -380,6 +402,8 @@ sliceMemTF = typeFunction 1 compute_eliminator
     slice_type = VarT (pyonBuiltin The_SliceObject)
     slice2_type = varApp (pyonBuiltin The_PyonTuple2)
                   [slice_type, slice_type]
+    slice3_type = varApp (pyonBuiltin The_PyonTuple3)
+                  [slice_type, slice_type, slice_type]
 
 {-
 viewPureTF = typeFunction 1 compute_eliminator
@@ -431,7 +455,8 @@ streamPureTF = typeFunction 1 compute_stream
             return_con The_Stream1 []
           | op `isPyonBuiltin` The_dim0 ||
             op `isPyonBuiltin` The_dim1 ||
-            op `isPyonBuiltin` The_dim2 ->
+            op `isPyonBuiltin` The_dim2 ||
+            op `isPyonBuiltin` The_dim3 ->
               return_con The_view [shape_arg']
         _ -> return_con The_Stream [shape_arg']
       where
@@ -452,7 +477,8 @@ streamMemTF = typeFunction 1 compute_stream
               return_con The_Stream1 []
           | op `isPyonBuiltin` The_dim0 ||
             op `isPyonBuiltin` The_dim1 ||
-            op `isPyonBuiltin` The_dim2 ->
+            op `isPyonBuiltin` The_dim2 ||
+            op `isPyonBuiltin` The_dim3 ->
               return_con The_view [shape_arg']
         _ -> return_con The_Stream [shape_arg']
       where

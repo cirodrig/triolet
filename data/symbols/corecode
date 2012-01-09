@@ -1,5 +1,22 @@
 
 -------------------------------------------------------------------------------
+-- Repr dictionaries
+
+repr_index2 : Repr (PyonTuple2 (Stored int) (Stored int)) =
+  repr_PyonTuple2 @(Stored int) @(Stored int) repr_int repr_int;
+
+repr_slice2 : Repr (PyonTuple2 SliceObject SliceObject) =
+  repr_PyonTuple2 @SliceObject @SliceObject repr_SliceObject repr_SliceObject;
+
+repr_index3 : Repr (PyonTuple3 (Stored int) (Stored int) (Stored int)) =
+  repr_PyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+  repr_int repr_int repr_int;
+
+repr_slice3 : Repr (PyonTuple3 SliceObject SliceObject SliceObject) =
+  repr_PyonTuple3 @SliceObject @SliceObject @SliceObject
+  repr_SliceObject repr_SliceObject repr_SliceObject;
+
+-------------------------------------------------------------------------------
 -- Additive dictionaries
 
 AdditiveDict_PyonTuple2_add @(a b : bare)
@@ -722,11 +739,15 @@ CartesianDict_dim1_arrayRange
   (lo : index dim1)
   (hi : index dim1)
   -> dim1
-  attribute(inline) =
+  attribute(inline, inline_final) =
   case lo of stored @int (lo_i : int).
   case hi of stored @int (hi_i : int).
-  mk_dim1 (interval (justVal @int lo_i) (justVal @int hi_i))
-          (linearMap 1 0);
+
+  -- Check for empty range
+  if lo_i ># hi_i
+  then mk_dim1 (interval (justVal @int 0) (justVal @int 0)) (linearMap 1 0)
+  else mk_dim1 (interval (justVal @int lo_i) (justVal @int hi_i))
+               (linearMap 1 0);
 
 
 CartesianDict_dim1_displaceDomain
@@ -917,6 +938,134 @@ CartesianDict_dim2_divideDomain
   case v of pyonTuple2 @(Stored int) @(Stored int)
     (v_y : Stored int) (v_x : Stored int).
   mk_dim2 (CartesianDict_dim1_divideDomain dom_y v_y)
+          (CartesianDict_dim1_divideDomain dom_x v_x);
+
+
+CartesianDict_dim3_loBound
+  (dom : dim3)
+  (ret : OutPtr (Maybe (index dim3)))
+  -> IEffect (Maybe (index dim3))
+  attribute(inline) =
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
+  case iv_z of interval (lb_z : MaybeVal int) (ub_z : MaybeVal int).
+  case lb_z of {
+    justVal @int (z : int).
+      case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
+      case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+      case lb_y of {
+        justVal @int (y : int).
+          case dom_x of mk_dim1 (iv_x : Interval) (lm : LinearMap).
+          case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+          case lb_x of {
+            justVal @int (x : int).
+              just @(PyonTuple3 (Stored int) (Stored int) (Stored int))
+                   (pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                    (stored @int z) (stored @int y) (stored @int x)) ret
+          ; nothingVal @int.
+              nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+          }
+      ; nothingVal @int.
+          nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+      }
+  ; nothingVal @int.
+      nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+  };
+  
+
+CartesianDict_dim3_hiBound
+  (dom : dim3)
+  (ret : OutPtr (Maybe (index dim3)))
+  -> IEffect (Maybe (index dim3))
+  attribute(inline) =
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
+  case iv_z of interval (lb_z : MaybeVal int) (ub_z : MaybeVal int).
+  case ub_z of {
+    justVal @int (z : int).
+      case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
+      case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+      case ub_y of {
+        justVal @int (y : int).
+          case dom_x of mk_dim1 (iv_x : Interval) (lm : LinearMap).
+          case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+          case ub_x of {
+            justVal @int (x : int).
+              just @(PyonTuple3 (Stored int) (Stored int) (Stored int))
+                   (pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                   (stored @int z) (stored @int y) (stored @int x)) ret
+          ; nothingVal @int.
+              nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+          }
+      ; nothingVal @int.
+          nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+      }
+  ; nothingVal @int.
+      nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+  };
+
+
+CartesianDict_dim3_arrayRange
+  (lo : index dim3)
+  (hi : index dim3)
+  -> dim3
+  attribute(inline) =
+  case lo of
+    pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+               (lo_z : Stored int) (lo_y : Stored int) (lo_x : Stored int).
+  case lo_z of stored @int (lo_z_i : int).
+  case lo_y of stored @int (lo_y_i : int).
+  case lo_x of stored @int (lo_x_i : int).
+  case hi of
+    pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+               (hi_z : Stored int) (hi_y : Stored int) (hi_x : Stored int).
+  case hi_z of stored @int (hi_z_i : int).
+  case hi_y of stored @int (hi_y_i : int).
+  case hi_x of stored @int (hi_x_i : int).
+  mk_dim3 (mk_dim1 (interval (justVal @int lo_z_i) (justVal @int hi_z_i))
+                   (linearMap 1 0))
+          (mk_dim1 (interval (justVal @int lo_y_i) (justVal @int hi_y_i))
+                   (linearMap 1 0))
+          (mk_dim1 (interval (justVal @int lo_x_i) (justVal @int hi_x_i))
+                   (linearMap 1 0));
+
+
+CartesianDict_dim3_displaceDomain
+  (dom : dim3)
+  (ix : index dim3)
+  -> dim3
+  attribute(inline) =
+  case ix of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+             (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  mk_dim3 (CartesianDict_dim1_displaceDomain dom_z ix_z)
+          (CartesianDict_dim1_displaceDomain dom_y ix_y)
+          (CartesianDict_dim1_displaceDomain dom_x ix_x);
+
+
+CartesianDict_dim3_multiplyDomain
+  (dom : dim3)
+  (v : PyonTuple3 (Stored int) (Stored int) (Stored int))
+  -> dim3
+  attribute(inline) =
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  case v of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+    (v_z : Stored int) (v_y : Stored int) (v_x : Stored int).
+  mk_dim3 (CartesianDict_dim1_multiplyDomain dom_z v_z)
+          (CartesianDict_dim1_multiplyDomain dom_y v_y)
+          (CartesianDict_dim1_multiplyDomain dom_x v_x);
+  
+  
+CartesianDict_dim3_divideDomain
+  (dom : dim3)
+  (v : PyonTuple3 (Stored int) (Stored int) (Stored int))
+  -> dim3
+  attribute(inline) =
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  case v of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+    (v_z : Stored int) (v_y : Stored int) (v_x : Stored int).
+  mk_dim3 (CartesianDict_dim1_divideDomain dom_z v_z)
+          (CartesianDict_dim1_divideDomain dom_y v_y)
           (CartesianDict_dim1_divideDomain dom_x v_x);
 
 -------------------------------------------------------------------------------
@@ -1351,6 +1500,169 @@ array2Scatter @(e i : bare)
   retval;
 
 
+array3Scatter @(e i : bare)
+  (repr_i : Repr i)
+  (repr_e : Repr e)
+  (dom : dim3)
+  (reduction_op : Scatter e i)
+  -> Scatter (array3 e) (PyonTuple2 (index dim3) i) =
+
+  let type i3 = (PyonTuple2 (index dim3) i) in
+  let type ret_type = Scatter (array3 e) i3 in
+
+  let repr_i3 : Repr i3 =
+        repr_PyonTuple2 @(index dim3) @i repr_index3 repr_i in
+
+  -- Compute array size
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  case boxed @(StoredBox ret_type)
+       (dim1ToArrayDesc @(StoredBox ret_type) dom_z
+        (\ @(L : intindex) (lb_z : int) (stride_z : int) (count_z : FIInt L)
+           (ret : OutPtr (StoredBox ret_type))
+           -> IEffect (StoredBox ret_type).
+           dim1ToArrayDesc @(StoredBox ret_type) dom_y
+           (\ @(M : intindex) (lb_y : int) (stride_y : int) (count_y : FIInt M)
+              (ret : OutPtr (StoredBox ret_type))
+              -> IEffect (StoredBox ret_type).
+              dim1ToArrayDesc @(StoredBox ret_type) dom_x
+              (\ @(N : intindex) (lb_x : int) (stride_x : int) (count_x : FIInt N)
+                 (ret : OutPtr (StoredBox ret_type))
+                 -> IEffect (StoredBox ret_type).
+
+                 let type index_1d = PyonTuple2 (Stored int) i in
+                 let type index_2d = PyonTuple2 (Stored int) index_1d in
+                 let type index_3d = PyonTuple2 (Stored int) index_2d in
+                 let type arr1d = arr N e in
+                 let type arr2d = arr M arr1d in
+                 let type arr3d = arr L arr2d in
+
+                 let repr_inner_array : Repr arr1d =
+                       repr_arr @N @e count_x repr_e in
+                 let repr_plane : Repr arr2d =
+                       repr_arr @M @arr1d count_y repr_inner_array in
+                 let repr_array : Repr arr3d =
+                       repr_arr @L @arr2d count_z repr_plane in
+                 let repr_inner_index : Repr index_1d =
+                       repr_PyonTuple2 @(Stored int) @i repr_int repr_i in
+                 let repr_plane_index : Repr index_2d =
+                       repr_PyonTuple2 @(Stored int) @index_1d repr_int repr_inner_index in
+                 let repr_index : Repr index_3d =
+                       repr_PyonTuple2 @(Stored int) @index_2d repr_int repr_plane_index in
+
+                 -- Create a plain array scatter reducer using three calls to
+                 -- 'arrScatter'
+                 let x_scatter_reduction : Scatter arr1d index_1d  =
+                       arrScatter @N @e @i repr_i repr_e count_x reduction_op in
+                 let xy_scatter_reduction : Scatter arr2d index_2d =
+                       arrScatter @M @arr1d @index_1d
+                       repr_inner_index repr_inner_array count_y x_scatter_reduction in
+                 let xyz_scatter_reduction : Scatter arr3d index_3d =
+                       arrScatter @L @arr2d @index_2d
+                       repr_plane_index repr_plane count_z xy_scatter_reduction in
+
+                 -- Change the index to the expected data type
+                 -- Deconstruct the result.
+                 let arr_scatter_reduction : Scatter arr3d i3 =
+                      comapScatterIndex @arr3d @index_3d @i3
+                      repr_index repr_i3 repr_array
+                      (\ (index_in : i3) (ret : OutPtr index_3d) -> IEffect index_3d.
+                         case index_in of
+                           pyonTuple2 @(index dim3) @i
+                           (zyx : index dim3) (val : i).
+                         case zyx of
+                           pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                           (z : Stored int) (y : Stored int) (x : Stored int).
+                         case z of stored @int (u_z : int).
+                         case x of stored @int (u_x : int).
+                         case y of stored @int (u_y : int).
+
+                         pyonTuple2 @(Stored int) @index_2d
+                         (stored @int u_z)
+                         (pyonTuple2 @(Stored int) @index_1d
+                          (stored @int u_y)
+                          (pyonTuple2 @(Stored int) @i
+                           (stored @int u_x) (copy @i repr_i val)))
+                         ret)
+                      xyz_scatter_reduction in
+                 case arr_scatter_reduction of
+                   mk_scatter @arr3d @i3 @(s : bare) @(a : val)
+                   (repr_s : Repr s)
+                   (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
+                   (updater : (a -> a) -> i3 -> EffTok -> OutPtr s -> EffTok)
+                   (combiner : s -> s -> Writer s)
+                   (finalizer : UpdateInPlaceFinalizer s arr3d)
+                   (make_updater : i3 -> a -> a)
+                   (make_init : NoneType -> a).
+
+                 -- Create a scatter reducer that wraps it in an array
+                 let array_finalizer : UpdateInPlaceFinalizer s (array3 e) =
+                       mutateAndCopy @s @(array3 e)
+                       (\ (accumulator : s) (ret : OutPtr (array3 e))
+                          -> IEffect (array3 e).
+                          mk_array3 @e @L @M @N
+                          lb_z stride_z count_z
+                          lb_y stride_y count_y
+                          lb_x stride_x count_x
+                          (referenced @arr3d
+                           (case finalizer of {
+                              mutateInPlace @s @arr3d (co : coerce @bare s arr3d).
+                                copy @arr3d repr_array
+                                (coerce @s @arr3d accumulator)
+                            ; mutateAndCopy @s @arr3d (f : s -> Writer arr3d).
+                                f accumulator
+                            }))
+                          ret) in
+
+                 -- Transform dim3 indices to linear indices
+                 letfun
+                   linearized_updater
+                     (f : a -> a) (ix : i3) (tok_in : EffTok) (ret : OutPtr s)
+                     -> EffTok =
+                     case ix of pyonTuple2 @(index dim3) @i
+                                (arr_ix : index dim3) (val : i).
+                     case arr_ix of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                                    (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
+                     case ix_z of stored @int (u_ix_z : int).
+                     case ix_y of stored @int (u_ix_y : int).
+                     case ix_x of stored @int (u_ix_x : int).
+
+                     -- Drop values whose indices are out of bounds due to alignment
+                     let zeroed_ix_z : int = u_ix_z -# lb_z in
+                     let zeroed_ix_y : int = u_ix_y -# lb_y in
+                     let zeroed_ix_x : int = u_ix_x -# lb_x in
+                     if zeroed_ix_z %# stride_z /=# 0 then tok_in else
+                     if zeroed_ix_y %# stride_y /=# 0 then tok_in else
+                     if zeroed_ix_x %# stride_x /=# 0 then tok_in else
+                     let linearized_ix_z : int = zeroed_ix_z //# stride_z in
+                     let linearized_ix_y : int = zeroed_ix_y //# stride_y in
+                     let linearized_ix_x : int = zeroed_ix_x //# stride_x in
+                     case boxed @i3 (pyonTuple2 @(index dim3) @i
+                                     (pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                                      (stored @int linearized_ix_z)
+                                      (stored @int linearized_ix_y)
+                                      (stored @int linearized_ix_x))
+                                     (copy @i repr_i val)) of
+                       boxed @i3 (new_ix : i3).
+                     updater f new_ix tok_in ret
+                 in
+
+                 storedBox @ret_type
+                 (mk_scatter @(array3 e) @i3 @s @a
+                  repr_s
+                  initializer
+                  linearized_updater
+                  combiner
+                  array_finalizer
+                  make_updater
+                  make_init)
+                 ret)
+              ret)
+            ret)) of
+    boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
+  case s_retval of storedBox @ret_type (retval : ret_type).
+  retval;
+
+
 -------------------------------------------------------------------------------
 -- Traversable methods
 
@@ -1411,6 +1723,18 @@ TraversableDict_view_dim2_build
 
 TraversableDict_view_dim2_traverse
   @(a : bare) (repr : Repr a) (vw : view dim2 a) -> Stream dim2 a
+  attribute(inline) =
+  vw;
+
+
+TraversableDict_view_dim3_build
+  @(a : bare) (repr : Repr a) (s : Stream dim3 a) -> view dim3 a
+  attribute(inline) =
+  s;
+
+
+TraversableDict_view_dim3_traverse
+  @(a : bare) (repr : Repr a) (vw : view dim3 a) -> Stream dim3 a
   attribute(inline) =
   vw;
 
@@ -1555,6 +1879,102 @@ TraversableDict_array2_build
              -- Evaluate the function
              f ix ret)))
          ret)
+     ret)
+  ret;
+
+
+TraversableDict_array3_traverse
+  @(a : bare) (repr : Repr a) (ar : array3 a)
+  -> view dim3 a attribute(inline) =
+  case ar of
+    mk_array3 @a @(L M N : intindex)
+    (lo_z : int) (stride_z : int) (size_z : FIInt L)
+    (lo_y : int) (stride_y : int) (size_y : FIInt M)
+    (lo_x : int) (stride_x : int) (size_x : FIInt N)
+    (ayref : Referenced (arr L (arr M (arr N a)))).
+  let type arr3d = arr L (arr M (arr N a)) in
+
+  case ayref of referenced @arr3d (ay : arr3d).
+
+  let linear_map_z : LinearMap = linearMap stride_z lo_z in
+  let linear_map_y : LinearMap = linearMap stride_y lo_y in
+  let linear_map_x : LinearMap = linearMap stride_x lo_x in
+  case size_y of fiInt @M (height : int).
+  case size_x of fiInt @N (width : int).
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+  let plane_repr : Repr (arr M (arr N a)) =
+        repr_arr @M @(arr N a) size_y row_repr in
+  let type Sint = Stored int in
+
+  view_generate @dim3 ShapeDict_dim3 @a repr
+  (mk_dim3 (arrayDescToDim1 @L lo_z stride_z size_z)
+           (arrayDescToDim1 @M lo_y stride_y size_y)
+           (arrayDescToDim1 @N lo_x stride_x size_x))
+  (\ (ix : PyonTuple3 Sint Sint Sint) (ret : OutPtr a) -> IEffect a.
+     case ix of pyonTuple3 @Sint @Sint @Sint
+                (ix_z : Sint) (ix_y : Sint) (ix_x : Sint).
+     case ix_z of stored @int (ix_z_i : int).
+     case ix_y of stored @int (ix_y_i : int).
+     case ix_x of stored @int (ix_x_i : int).
+     let real_ix_z : int = invEvalLM ix_z_i linear_map_z in
+     let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
+     let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
+     copy @a repr
+     (subscript @N @a repr
+      (subscript @M @(arr N a) row_repr
+       (subscript @L @(arr M (arr N a)) plane_repr ay real_ix_z)
+       real_ix_y)
+      real_ix_x)
+     ret);
+
+
+TraversableDict_array3_build
+  @(a : bare) (repr : Repr a) (s : view dim3 a) (ret : OutPtr (array3 a))
+  -> IEffect (array3 a) attribute(inline, inline_dimensionality) =
+
+  case s of mk_view @dim3 @a (dom : dim3) (f : index dim3 -> Writer a).
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+
+  -- Compute array parameters
+  dim1ToArrayDesc @(array3 a) dom_z
+  (\ @(L : intindex)
+     (lb_z : int) (stride_z : int) (size_z : FIInt L) (ret : OutPtr (array3 a))
+     -> IEffect (array3 a).
+     dim1ToArrayDesc @(array3 a) dom_y
+     (\ @(M : intindex)
+        (lb_y : int) (stride_y : int) (size_y : FIInt M) (ret : OutPtr (array3 a))
+        -> IEffect (array3 a).
+        dim1ToArrayDesc @(array3 a) dom_x
+        (\ @(N : intindex)
+           (lb_x : int) (stride_x : int) (size_x : FIInt N) (ret : OutPtr (array3 a))
+           -> IEffect (array3 a).
+
+           let linear_map_z : LinearMap = linearMap stride_z lb_z in
+           let linear_map_y : LinearMap = linearMap stride_y lb_y in
+           let linear_map_x : LinearMap = linearMap stride_x lb_x in
+           let type out_arr = arr L (arr M (arr N a)) in
+           let type Sint = Stored int in
+
+           mk_array3 @a @L @M @N lb_z stride_z size_z
+                                 lb_y stride_y size_y
+                                 lb_x stride_x size_x
+           (referenced @out_arr
+            (arr3D_build @L @M @N @a repr size_z size_y size_x
+             (\ (z : int) (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+                let logical_z : int = evalLM z linear_map_z in
+                let logical_y : int = evalLM y linear_map_y in
+                let logical_x : int = evalLM x linear_map_x in
+                case boxed @(PyonTuple3 Sint Sint Sint)
+                     (pyonTuple3 @Sint @Sint @Sint
+                      (stored @int logical_z)
+                      (stored @int logical_y) (stored @int logical_x)) of
+                  boxed @(PyonTuple3 Sint Sint Sint)
+                        (ix : PyonTuple3 Sint Sint Sint).
+
+                -- Evaluate the function
+                f ix ret)))
+            ret)
+        ret)
      ret)
   ret;
 
@@ -2303,6 +2723,273 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
   ShapeDict_dim2 @a repr slice_dom
   (\ (i : index dim2) (ret : OutPtr a) -> IEffect a.
     at_index @a repr container (coerce @(index dim2) @(index (shape t)) i) ret);
+
+
+ShapeDict_dim3 : ShapeDict dim3 =
+  shapeDict @dim3
+  repr_index3
+  repr_slice3
+  ShapeDict_dim3_member
+  ShapeDict_dim3_intersect
+  ShapeDict_dim3_flatten
+  ShapeDict_dim3_generate
+  ShapeDict_dim3_map
+  ShapeDict_dim3_zipWith
+  ShapeDict_dim3_zipWith3
+  ShapeDict_dim3_zipWith4
+  ShapeDict_dim3_slice;
+
+
+ShapeDict_dim3_member (dom : dim3) (ix : index dim3) -> bool =
+  -- Take the conjunction of x, y, z membership conditions
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  case ix of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+             (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
+  if ShapeDict_dim1_member dom_z ix_z
+  then if ShapeDict_dim1_member dom_y ix_y
+       then ShapeDict_dim1_member dom_x ix_x
+       else False
+  else False;
+
+
+ShapeDict_dim3_intersect (domA : dim3) (domB : dim3) -> dim3 =
+  -- Take the intersection in each dimension
+  case domA of mk_dim3 (domA_z : dim1) (domA_y : dim1) (domA_x : dim1).
+  case domB of mk_dim3 (domB_z : dim1) (domB_y : dim1) (domB_x : dim1).
+  mk_dim3 (ShapeDict_dim1_intersect domA_z domB_z)
+          (ShapeDict_dim1_intersect domA_y domB_y)
+          (ShapeDict_dim1_intersect domA_x domB_x);
+
+
+ShapeDict_dim3_flatten_helper
+  (iv_z : Interval)
+  (iv_y : Interval)
+  (iv_x : Interval)
+  (stride_z : int)
+  (stride_y : int)
+  (stride_x : int)
+  -> (list_dim, MaybeVal (MaybeVal int, int), int, int, int)
+  attribute(inline, inline_sequential) =
+
+  case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+  case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case iv_z of interval (lb_z : MaybeVal int) (ub_z : MaybeVal int).
+
+  -- Lower bound must be finite
+  case lb_x of {
+    justVal @int (lb_x_i : int).
+      case ub_x of {
+        justVal @int (ub_x_i : int).
+          -- Domain has finite x extent
+          let count_x : int = (ub_x_i -# lb_x_i) //# stride_x in
+
+          case lb_y of {
+            justVal @int (lb_y_i : int).
+              case ub_y of {
+                justVal @int (ub_y_i : int).
+                  -- Domain has finite y extent
+                    let count_y : int = (ub_y_i -# lb_y_i) //# stride_y in
+                    let count_xy : int = count_x *# count_y in
+                    case lb_z of {
+                      justVal @int (lb_z_i : int).
+
+                        -- Compute the number of points in the domain
+                        let list_size : MaybeVal int =
+                              case ub_z of {
+                                justVal @int (ub_z_i : int).
+                                  -- Domain is bounded on all sides
+                                  let count_z : int =
+                                        (ub_z_i -# lb_z_i) //# stride_z in
+                                  justVal @int (count_xy *# count_z)
+                              ; nothingVal @int.
+
+                                  -- Domain is unbounded in the z-dimension
+                                  nothingVal @int
+                              } in
+
+                        (mk_list_dim list_size,
+                         justVal @(MaybeVal int, int)
+                         (justVal @int count_y, count_x),
+                         lb_z_i, lb_y_i, lb_x_i)
+
+                    ; nothingVal @int.
+                        except @(list_dim, MaybeVal (MaybeVal int, int),
+                                 int, int, int)
+                    }
+                ; nothingVal @int.
+
+                    -- Domain has infinite y extent
+                    case lb_z of {
+                      justVal @int (lb_z_i : int).
+                        (mk_list_dim (nothingVal @int),
+                         justVal @(MaybeVal int, int)
+                         (nothingVal @int, count_x),
+                         lb_z_i, lb_y_i, lb_x_i)
+                    ; nothingVal @int.
+                        except @(list_dim, MaybeVal (MaybeVal int, int),
+                                 int, int, int)
+                    }
+                }
+            ; nothingVal @int.
+                except @(list_dim, MaybeVal (MaybeVal int, int), int, int, int)
+            }
+
+      ; nothingVal @int.
+          -- Domain has infinite x extent
+          case lb_y of {
+            justVal @int (lb_y_i : int).
+              case lb_x of {
+                justVal @int (lb_x_i : int).
+                  (mk_list_dim (nothingVal @int),
+                   nothingVal @(MaybeVal int, int), lb_x_i, lb_y_i, lb_x_i)
+              ; nothingVal @int.
+                  except @(list_dim, MaybeVal (MaybeVal int, int),
+                           int, int, int)
+              }
+
+          ; nothingVal @int.
+              except @(list_dim, MaybeVal (MaybeVal int, int), int, int, int)
+          }
+      }
+
+  ; nothingVal @int.
+      except @(list_dim, MaybeVal (MaybeVal int, int), int, int, int)
+  };
+
+
+ShapeDict_dim3_flatten @(a : bare)
+  (repr : Repr a) (s : Stream dim3 a) -> Stream list_dim a
+  attribute(inline, inline_dimensionality) =
+  case s of mk_view @dim3 @a (dom : dim3) (f : index dim3 -> Writer a).
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  case dom_z of mk_dim1 (iv_z : Interval) (lm_z : LinearMap).
+  case dom_x of mk_dim1 (iv_x : Interval) (lm_x : LinearMap).
+  case dom_y of mk_dim1 (iv_y : Interval) (lm_y : LinearMap).
+  case iv_z of interval (lb_z : MaybeVal int) (ub_z : MaybeVal int).
+  case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+  case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case lm_z of linearMap (stride_z : int) (alignment_z : int).
+  case lm_x of linearMap (stride_x : int) (alignment_x : int).
+  case lm_y of linearMap (stride_y : int) (alignment_y : int).
+
+  -- Compute stream dimensions and indices
+  case ShapeDict_dim3_flatten_helper iv_z iv_y iv_x stride_z stride_y stride_x
+  of (flattened_size : list_dim,
+      divisors : MaybeVal (MaybeVal int, int),
+      lb_z_i : int, lb_y_i : int, lb_x_i : int).
+
+  viewStream @a
+  (mk_view @list_dim @a flattened_size
+   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+      -- Linearize the index
+      case si of stored @int (i : int).
+      case case divisors of {
+             justVal @(MaybeVal int, int) (divisors_yx : (MaybeVal int, int)).
+
+               -- Finite in the X dimension
+               case divisors_yx of (divisor_xy : MaybeVal int, count_x : int).
+               case divisor_xy of {
+                 justVal @int (count_xy : int).
+
+                   -- Finite in all dimensions
+                   let i_xy : int = i %# count_xy in
+                   let i_z : int = i //# count_xy in
+                   (i_z, i_xy //# count_x, i_xy %# count_x)
+
+               ; nothingVal @int.
+                   -- Infinite in the Y dimension
+                   (0, i //# count_x, i %# count_x)
+               }
+           ; nothingVal @(MaybeVal int, int). (0, 0, i)
+           }
+      of (i_z : int, i_y : int, i_x : int).
+
+      -- Apply the stride to get an index in the domain
+      let dim2_i_z : int = lb_z_i +# i_z *# stride_z in 
+      let dim2_i_y : int = lb_y_i +# i_y *# stride_y in 
+      let dim2_i_x : int = lb_x_i +# i_x *# stride_x in 
+
+      let type Sint = Stored int in
+      let type index3d = PyonTuple3 Sint Sint Sint in
+      case boxed @index3d
+           (pyonTuple3 @Sint @Sint @Sint
+            (stored @int dim2_i_z) (stored @int dim2_i_y) (stored @int dim2_i_x))
+      of boxed @index3d (index_3d : index3d).
+      f index_3d ret));
+
+
+ShapeDict_dim3_map @(a b : bare)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (transformer : a -> Writer b)
+  (s : Stream dim3 a)
+  -> Stream dim3 b attribute(inline) =
+  view_map @dim3
+  ShapeDict_dim3 @a @b repr_a repr_b transformer s;
+
+
+ShapeDict_dim3_zipWith @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (transformer : a -> b -> Writer c)
+  (sa : Stream dim3 a)
+  (sb : Stream dim3 b)
+  -> Stream dim3 c attribute(inline) =
+  view_zipWith @dim3 ShapeDict_dim3 @a @b @c
+  repr_a repr_b repr_c transformer sa sb;
+
+
+ShapeDict_dim3_zipWith3 @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (transformer : a -> b -> c -> Writer d)
+  (sa : Stream dim3 a)
+  (sb : Stream dim3 b)
+  (sc : Stream dim3 c)
+  -> Stream dim3 d attribute(inline) =
+  view_zipWith3 @dim3 ShapeDict_dim3 @a @b @c @d
+  repr_a repr_b repr_c repr_d transformer sa sb sc;
+
+
+ShapeDict_dim3_zipWith4 @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (repr_e : Repr e)
+  (transformer : a -> b -> c -> d -> Writer e)
+  (sa : Stream dim3 a)
+  (sb : Stream dim3 b)
+  (sc : Stream dim3 c)
+  (sd : Stream dim3 d)
+  -> Stream dim3 e attribute(inline) =
+  view_zipWith4 @dim3 ShapeDict_dim3 @a @b @c @d @e
+  repr_a repr_b repr_c repr_d repr_e transformer sa sb sc sd;
+
+
+ShapeDict_dim3_slice @(t : bare -> bare) @(a : bare)
+  (is_dim3 : coerce @box (shape t) dim3)
+  (indexable : IndexableDict t)
+  (repr : Repr a)
+  (container : t a)
+  (slice_argument : slice dim3)
+  -> view dim3 a attribute(inline) =
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  -- Compute the slice's domain
+  case slice_argument of
+    pyonTuple3 @SliceObject @SliceObject @SliceObject
+    (slice_z : SliceObject) (slice_y : SliceObject) (slice_x : SliceObject).
+
+  let dom : dim3 = coerce @(shape t) @dim3 (get_shape @a container) in
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  let slice_dom : dim3 =
+        mk_dim3 (internalApplyArraySlice slice_z dom_z)
+                (internalApplyArraySlice slice_y dom_y)
+                (internalApplyArraySlice slice_x dom_x) in
+
+  view_generate @dim3
+  ShapeDict_dim3 @a repr slice_dom
+  (\ (i : index dim3) (ret : OutPtr a) -> IEffect a.
+    at_index @a repr container (coerce @(index dim3) @(index (shape t)) i) ret);
+
 
 -------------------------------------------------------------------------------
 -- Indexable dictionary functions
@@ -4518,6 +5205,31 @@ arr2D_build @(M N : intindex) @(a : bare)
         (subscript_out @N @a repr
          (subscript_out @M @(arr N a) row_repr arr_ptr y) x)));
 
+
+arr3D_build @(L M N : intindex) @(a : bare)
+  (repr : Repr a)
+  (size_z : FIInt L)
+  (size_y : FIInt M)
+  (size_x : FIInt N)
+  (f : int -> int -> int -> Writer a)
+  (arr_ptr : OutPtr (arr L (arr M (arr N a))))
+  -> IEffect (arr L (arr M (arr N a)))
+  attribute(inline) =
+
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+  let plane_repr : Repr (arr M (arr N a)) =
+        repr_arr @M @(arr N a) size_y row_repr in
+  doall @L @(arr L (arr M (arr N a))) @(arr M (arr N a)) size_z
+  (\ (z : int) -> IEffect (arr M (arr N a)).
+     doall @M @(arr M (arr N a)) @(arr N a) size_y
+     (\ (y : int) -> IEffect (arr N a).
+        doall @N @(arr N a) @a size_x
+        (\ (x : int) -> IEffect a.
+           f z y x
+           (subscript_out @N @a repr
+            (subscript_out @M @(arr N a) row_repr
+             (subscript_out @L @(arr M (arr N a)) plane_repr arr_ptr z) y) x))));
+
 -------------------------------------------------------------------------------
 -- Domain loops (sequential)
 
@@ -5129,6 +5841,17 @@ arr2D_traverse @(M N : intindex) @(a : bare)
 
 arr2D_build @(M N : intindex) @(a : bare)
   (repr : Repr a) (height : FIInt M) (width : FIInt N)
+  (s : darr2 M N a)
+  (ret : OutPtr (arr M (arr N a)))
+  -> IEffect (arr M (arr N a))
+  attribute(inline, inline_final) =
+
+  case s of mk_darr2 @M @N @a (f : int -> int -> Writer a).
+  primitive_darr2_generate @M @N @a repr height width f ret;
+
+
+arr3D_build @(L M N : intindex) @(a : bare)
+  (repr : Repr a) (depth : FIInt L) (height : FIInt M) (width : FIInt N)
   (s : darr2 M N a)
   (ret : OutPtr (arr M (arr N a)))
   -> IEffect (arr M (arr N a))
