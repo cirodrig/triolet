@@ -1818,13 +1818,6 @@ view_transform : (sh : box) -> (a : bare)
               -> view sh a
               -> view sh a;
 
-
--- Reinterpret a stream as having list shape
-fun_asList_Stream : (sh a : bare)
-                 -> ShapeDict sh
-                 -> Stream sh a
-                 -> Stream dim1 a;
-
 -- An identity function needed in the frontend
 fun_from_MatrixView_Stream : (a : bare)
 			  -> Stream dim2 a

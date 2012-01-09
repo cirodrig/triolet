@@ -63,7 +63,6 @@ pyonSourceGlobals =
   , "stencil2D"
   , "extend2D"
   , "histogram"
-  , "listiter"
   , "matrixiter"
   , "floor"
   , "intSumScatter"
@@ -85,6 +84,7 @@ pyonSourceGlobals =
   , "__gt__"
   , "__ge__"
   , "domain"
+  , "flatten"
   , "__iter__"
   , "__build__"
   , "__add__"
@@ -121,7 +121,7 @@ pyonOtherGlobals =
   [ "do", "guard", "iterBind",
     "safeIndex", "safeSlice",
     "member", "intersection",
-    "flattenStream", "generate",
+    "generate",
     "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
     "getSlice",
     "at_point",

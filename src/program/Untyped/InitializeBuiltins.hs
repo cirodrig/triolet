@@ -1733,9 +1733,6 @@ initializeTIBuiltins = do
               ("scatter", [| mkScatterType |]
               , [| pyonBuiltin SystemF.The_fun_scatter |]
               ),
-              ("listiter", [| mkListIterType |]
-              , [| pyonBuiltin SystemF.The_fun_asList_Stream |]
-              ),
               ("matrixiter", [| mkMatrixIterType |]
               , [| pyonBuiltin SystemF.The_fun_from_MatrixView_Stream |]
               ),
@@ -1789,7 +1786,7 @@ initializeTIBuiltins = do
             , ([| the_c_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
             , ([| the_c_Traversable |], ["__iter__", "__build__"])
             , ([| the_c_Shape |], ["member", "intersection",
-                                   "flattenStream", "generate", "mapStream", 
+                                   "flatten", "generate", "mapStream", 
                                    "zipWithStream", "zipWith3Stream",
                                    "zipWith4Stream", "getSlice"])
             , ([| the_c_Indexable |], ["at_point", "domain"])
