@@ -6,7 +6,7 @@
 
 using namespace Pyon;
 
-typedef Tuple<List<Tuple<Int, Float> >, List<Int> > SparseMatrix;
+typedef Tuple<List<Tuple<Int, Float> >, Array1<Int> > SparseMatrix;
 
 struct RowItem
 {
@@ -27,12 +27,11 @@ SparseMatrix CreateMatrix(void)
   static int matrix_row_indices[] = {0, 0, 1, 3, 4};
 
   Incomplete<SparseMatrix> matrix;
-  matrix.create();
+  matrix.create(SparseMatrix::initializer(4, Array1<Int>::initializer(0, 5)));
 
   {
     Incomplete<List<Tuple<Int, Float> > > values = matrix.get<0>();
     int i;
-    values.initialize(4);
     for (i = 0; i < 4; i++) {
       values.at(i).get<0>() = matrix_values[i].index;
       values.at(i).get<1>() = matrix_values[i].value;
@@ -40,9 +39,8 @@ SparseMatrix CreateMatrix(void)
   }
 
   {
-    Incomplete<List<Int> > indices = matrix.get<1>();
+    Incomplete<Array1<Int> > indices = matrix.get<1>();
     int i;
-    indices.initialize(5);
     for (i = 0; i < 5; i++) {
       indices.at(i) = matrix_row_indices[i];
     }
