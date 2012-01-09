@@ -63,6 +63,8 @@ pyonSourceGlobals =
   , "view2"
   , "stencil2D"
   , "extend2D"
+  , "stencil3D"
+  , "extend3D"
   , "histogram"
   , "matrixiter"
   , "floor"

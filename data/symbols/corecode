@@ -3980,6 +3980,107 @@ extend2D @(t : bare -> bare) @(a : bare)
      ret);
 
 
+extend3D @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (is_3d : coerce @box (shape t) dim3)
+  (repr : Repr a)
+  (container : t a)
+  -> view dim3 a
+  attribute(inline, inline_sequential) =
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  case coerce @(shape t) @dim3 (get_shape @a container) of
+    mk_dim3 (dim_z : dim1) (dim_y : dim1) (dim_x : dim1).
+  case dim_z of mk_dim1 (z_interval : Interval) (z_linear_map : LinearMap).
+  case z_interval of interval (lb_z : MaybeVal int) (ub_z : MaybeVal int).
+  case z_linear_map of linearMap (stride_z : int) (alignment_z : int).
+  case dim_y of mk_dim1 (y_interval : Interval) (y_linear_map : LinearMap).
+  case y_interval of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
+  case y_linear_map of linearMap (stride_y : int) (alignment_y : int).
+  case dim_x of mk_dim1 (x_interval : Interval) (x_linear_map : LinearMap).
+  case x_interval of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
+  case x_linear_map of linearMap (stride_x : int) (alignment_x : int).
+
+  -- Input must be nonempty
+  if or (case lb_z of {
+           justVal @int (lb_z_i : int).
+             case ub_z of {
+               justVal @int (ub_z_i : int). lb_z_i ==# ub_z_i
+             ; nothingVal @int. False
+             }
+         ; nothingVal @int. False
+         })
+        (or (case lb_y of {
+               justVal @int (lb_y_i : int).
+                 case ub_y of {
+                   justVal @int (ub_y_i : int). lb_y_i ==# ub_y_i
+                 ; nothingVal @int. False
+                 }
+             ; nothingVal @int. False
+             })
+             (case lb_x of {
+               justVal @int (lb_x_i : int).
+                 case ub_x of {
+                   justVal @int (ub_x_i : int). lb_x_i ==# ub_x_i
+                 ; nothingVal @int. False
+                 }
+             ; nothingVal @int. False
+             }))
+  then except @(view dim3 a) else
+
+  -- Create a view with no bounds
+  let unbounded_interval : Interval =
+        interval (nothingVal @int) (nothingVal @int) in
+  let dom : dim3 =
+        mk_dim3 (mk_dim1 unbounded_interval z_linear_map)
+                (mk_dim1 unbounded_interval y_linear_map)
+                (mk_dim1 unbounded_interval x_linear_map) in
+
+  let type Sint = Stored int in
+  mk_view @dim3 @a dom
+  (\ (ix : PyonTuple3 Sint Sint Sint) (ret : OutPtr a)
+     -> IEffect a.
+     case ix of pyonTuple3 @Sint @Sint @Sint
+                (sz : Sint) (sy : Sint) (sx : Sint).
+     case sz of stored @int (z : int).
+     case sy of stored @int (y : int).
+     case sx of stored @int (x : int).
+
+     -- Coerce the indices to be in bounds
+     letfun
+       coerce_to_bounds
+         (i : int) (lb : MaybeVal int) (ub : MaybeVal int) (stride : int)
+         -> int =
+         letfun
+           coerce_upper (dummy : NoneType) -> int =
+             case ub of {
+               justVal @int (ub_i : int).
+                 if i >=# ub_i then ub_i -# stride else i
+             ; nothingVal @int. i
+             } in
+         case lb of {
+           justVal @int (lb_i : int).
+             if i <# lb_i then lb_i else coerce_upper None
+         ; nothingVal @int. coerce_upper None
+         } in
+     let real_z : int = coerce_to_bounds z lb_z ub_z stride_z in
+     let real_y : int = coerce_to_bounds y lb_y ub_y stride_y in
+     let real_x : int = coerce_to_bounds x lb_x ub_x stride_x in
+
+     -- Create new index
+     case boxed @(PyonTuple3 Sint Sint Sint)
+          (pyonTuple3 @Sint @Sint @Sint
+           (stored @int real_z) (stored @int real_y) (stored @int real_x)) of
+       boxed @(PyonTuple3 Sint Sint Sint)
+             (inbounds_ix : PyonTuple3 Sint Sint Sint).
+     at_index @a repr container
+     (coerce @(index dim3) @(index (shape t)) inbounds_ix)
+     ret);
+
+
 stencil2D @(t : bare -> bare) @(a b : bare)
   (indexable : IndexableDict t)
   (is_2d : coerce @box (shape t) dim2)
@@ -4074,6 +4175,121 @@ stencil2D @(t : bare -> bare) @(a b : bare)
            ret) in
 
   TraversableDict_array2_build @b repr_b output_view ret;
+
+
+stencil3D @(t : bare -> bare) @(a b : bare)
+  (indexable : IndexableDict t)
+  (is_3d : coerce @box (shape t) dim3)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (output_dom : dim3)
+  (stencil_dom : dim3)
+  (gen_f : view dim3 a -> Writer b)
+  (input : t a)
+  (ret: OutPtr (array3 b))
+  -> IEffect (array3 b)
+  attribute(inline, inline_final) =
+
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> shape t).
+
+  let input_dom : dim3 = coerce @(shape t) @dim3 (get_shape @a input) in
+
+  case output_dom of mk_dim3 (output_dom_z : dim1) (output_dom_y : dim1) (output_dom_x : dim1).
+  case output_dom_z of mk_dim1 (output_z_iv : Interval) (output_z_lm : LinearMap).
+  case output_dom_y of mk_dim1 (output_y_iv : Interval) (output_y_lm : LinearMap).
+  case output_dom_x of mk_dim1 (output_x_iv : Interval) (output_x_lm : LinearMap).
+  case output_z_lm of linearMap (output_z_stride : int) (output_z_align : int).
+  case output_y_lm of linearMap (output_y_stride : int) (output_y_align : int).
+  case output_x_lm of linearMap (output_x_stride : int) (output_x_align : int).
+
+  case input_dom of mk_dim3 (input_dom_z : dim1) (input_dom_y : dim1) (input_dom_x : dim1).
+  case input_dom_z of mk_dim1 (input_z_iv : Interval) (input_z_lm : LinearMap).
+  case input_dom_y of mk_dim1 (input_y_iv : Interval) (input_y_lm : LinearMap).
+  case input_dom_x of mk_dim1 (input_x_iv : Interval) (input_x_lm : LinearMap).
+  case input_z_lm of linearMap (input_z_stride : int) (input_z_align : int).
+  case input_y_lm of linearMap (input_y_stride : int) (input_y_align : int).
+  case input_x_lm of linearMap (input_x_stride : int) (input_x_align : int).
+
+  case stencil_dom of mk_dim3 (stencil_dom_z : dim1) (stencil_dom_y : dim1) (stencil_dom_x : dim1).
+  case stencil_dom_z of mk_dim1 (stencil_z_iv : Interval) (stencil_z_lm : LinearMap).
+  case stencil_dom_y of mk_dim1 (stencil_y_iv : Interval) (stencil_y_lm : LinearMap).
+  case stencil_dom_x of mk_dim1 (stencil_x_iv : Interval) (stencil_x_lm : LinearMap).
+  case stencil_z_lm of linearMap (stencil_z_stride : int) (stencil_z_align : int).
+  case stencil_y_lm of linearMap (stencil_y_stride : int) (stencil_y_align : int).
+  case stencil_x_lm of linearMap (stencil_x_stride : int) (stencil_x_align : int).
+
+  -- Verify that all stencil inputs are in the input domain:
+
+  -- 1. any linear combination of output and stencil strides must be a
+  -- multiple of the input stride.
+  if gcd output_z_stride stencil_z_stride %# input_z_stride /=# 0
+  then except @(IEffect (array3 b)) else
+
+  if gcd output_y_stride stencil_y_stride %# input_y_stride /=# 0
+  then except @(IEffect (array3 b)) else
+
+  if gcd output_x_stride stencil_x_stride %# input_x_stride /=# 0
+  then except @(IEffect (array3 b)) else
+
+  -- 2. The alignment of the output plus the alignment of the stencil must be
+  --    equal to the alignment of the input, modulo the input stride.
+  if (output_z_align +# stencil_z_align -# input_z_align) %# input_z_stride /=# 0
+  then except @(IEffect (array3 b)) else
+
+  if (output_y_align +# stencil_y_align -# input_y_align) %# input_y_stride /=# 0
+  then except @(IEffect (array3 b)) else
+
+  if (output_x_align +# stencil_x_align -# input_x_align) %# input_x_stride /=# 0
+  then except @(IEffect (array3 b)) else
+
+  -- 3. The bounds of the output range plus the bounds of the stencil range
+  --    must be within the bounds of the input range.
+  if not (subsetInterval (convolveInterval output_z_iv stencil_z_iv) input_z_iv)
+  then except @(IEffect (array3 b)) else
+
+  if not (subsetInterval (convolveInterval output_y_iv stencil_y_iv) input_y_iv)
+  then except @(IEffect (array3 b)) else
+
+  if not (subsetInterval (convolveInterval output_x_iv stencil_x_iv) input_x_iv)
+  then except @(IEffect (array3 b)) else
+
+  -- Loop over all stencil indices
+  let type Sint = Stored int in
+  let output_view : view dim3 b =
+        view_generate @dim3 ShapeDict_dim3 @b repr_b output_dom
+        (\ (ix : index dim3) (ret : OutPtr b) -> IEffect b.
+           case ix of
+             pyonTuple3 @Sint @Sint @Sint
+             (ix_z : Sint) (ix_y : Sint) (ix_x : Sint).
+           case ix_z of stored @int (o_z : int).
+           case ix_y of stored @int (o_y : int).
+           case ix_x of stored @int (o_x : int).
+
+           -- Apply the generator function to a view of the input array
+           gen_f
+           (view_generate @dim3 ShapeDict_dim3 @a repr_a stencil_dom
+            (\ (s_ix : index dim3) (s_ret : OutPtr a) -> IEffect a.
+               case s_ix of
+                 pyonTuple3 @Sint @Sint @Sint
+                 (s_ix_z : Sint) (s_ix_y : Sint) (s_ix_x : Sint).
+               case s_ix_z of stored @int (s_z : int).
+               case s_ix_y of stored @int (s_y : int).
+               case s_ix_x of stored @int (s_x : int).
+
+               -- The real index is the output index plus the stencil index
+               case boxed @(index dim3)
+                    (pyonTuple3 @Sint @Sint @Sint
+                     (stored @int (o_z +# s_z))
+                     (stored @int (o_y +# s_y))
+                     (stored @int (o_x +# s_x))) of
+                 boxed @(index dim3) (i_ix : index dim3).
+               at_index @a repr_a input (coerce @(index dim3) @(index (shape t)) i_ix) s_ret))
+           ret) in
+
+  TraversableDict_array3_build @b repr_b output_view ret;
 
 -------------------------------------------------------------------------------
 -- High-level list comprehension functions

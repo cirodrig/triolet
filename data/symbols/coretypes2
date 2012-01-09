@@ -2063,6 +2063,17 @@ stencil2D : (t : bare -> bare) -> (a b : bare)
 	 -> t a
 	 -> Writer (array2 b);
 
+stencil3D : (t : bare -> bare) -> (a b : bare)
+	 -> IndexableDict t
+	 -> coerce @box (shape t) dim3
+	 -> Repr a
+         -> Repr b
+	 -> dim3
+         -> dim3
+	 -> (view dim3 a -> Writer b)
+	 -> t a
+	 -> Writer (array3 b);
+
 viewStencil2D : (a b : bare)
 	 -> Repr a
          -> Repr b
@@ -2078,6 +2089,13 @@ extend2D : (t : bare -> bare) -> (a : bare)
         -> Repr a
         -> t a
         -> view dim2 a;
+
+extend3D : (t : bare -> bare) -> (a : bare)
+        -> IndexableDict t
+        -> coerce @box (shape t) dim3
+        -> Repr a
+        -> t a
+        -> view dim3 a;
 
 create_view2 : (a : bare) -> Repr a
             -> index dim2 -> index dim2 -> (index dim2 -> Writer a) -> view dim2 a;

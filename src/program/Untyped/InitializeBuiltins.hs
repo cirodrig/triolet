@@ -1380,31 +1380,36 @@ mkView2Type =
       (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim2) @@ aT))
 
 mkStencil2DType =
+  mkStencilType (ConTy $ tiBuiltin the_con_dim2) (ConTy $ tiBuiltin the_con_array2)
+
+mkStencil3DType =
+  mkStencilType (ConTy $ tiBuiltin the_con_dim3) (ConTy $ tiBuiltin the_con_array3)
+  
+mkStencilType domain_type array_type =
   forallType [Star :-> Star, Star, Star] $ \[t, a, b] ->
   let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
-      int_type = ConTy $ tiBuiltin the_con_int
-      dim2_type = ConTy $ tiBuiltin the_con_dim2
   in ([tT `IsInst` tiBuiltin the_c_Indexable,
-       shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
+       shapeType tT `IsEqual` domain_type,
        passable aT, passable bT],
-      functionType [dim2_type, dim2_type,
-                    functionType [ConTy (tiBuiltin the_con_view) @@ dim2_type @@ aT] bT,
+      functionType [domain_type, domain_type,
+                    functionType [ConTy (tiBuiltin the_con_view) @@ domain_type @@ aT] bT,
                     tT @@ aT]
-      (ConTy (tiBuiltin the_con_array2) @@ bT))
+      (array_type @@ bT))
 
-mkExtend2DType =
+mkExtend2DType = mkExtendType (ConTy $ tiBuiltin the_con_dim2)
+mkExtend3DType = mkExtendType (ConTy $ tiBuiltin the_con_dim3)
+  
+mkExtendType domain_type =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
       aT = ConTy a
-      int_type = ConTy $ tiBuiltin the_con_int
-      int2_type = TupleTy 2 @@ int_type @@ int_type
-  in ([tT `IsInst` tiBuiltin the_c_Indexable,
-       shapeType tT `IsEqual` ConTy (tiBuiltin the_con_dim2),
+    in ([tT `IsInst` tiBuiltin the_c_Indexable,
+       shapeType tT `IsEqual` domain_type,
        passable aT],
       functionType [tT @@ aT]
-      (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim2) @@ aT))
+      (ConTy (tiBuiltin the_con_view) @@ domain_type @@ aT))
 
 mkRowsColsType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
@@ -1782,6 +1787,12 @@ initializeTIBuiltins = do
               ),              
               ("extend2D", [| mkExtend2DType |]
               , [| pyonBuiltin SystemF.The_extend2D |]
+              ),              
+              ("stencil3D", [| mkStencil3DType |]
+              , [| pyonBuiltin SystemF.The_stencil3D |]
+              ),              
+              ("extend3D", [| mkExtend3DType |]
+              , [| pyonBuiltin SystemF.The_extend3D |]
               ),              
               ("rows", [| mkRowsColsType |]
               , [| pyonBuiltin SystemF.The_rows |]
