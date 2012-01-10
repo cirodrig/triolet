@@ -500,6 +500,60 @@ procedure pyon_Array2_get_bounds (pointer arr)
    size_x};
 };
 
+data pointer pyon_Array3_size = sizeof PyonArray3;
+data pointer pyon_Array3_alignment = alignof PyonArray3;
+
+procedure pyon_Array3_initialize
+  (int z_min, int z_stride, int z_size,
+   int y_min, int y_stride, int y_size,
+   int x_min, int x_stride, int x_size,
+   uint elt_size, uint elt_align, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value y_size, array(value x_size, elt_type));
+
+  ret @! PyonArray3.first_z = z_min;
+  ret @! PyonArray3.stride_z = z_stride;
+  ret @! PyonArray3.size_z = FinIndInt {z_size};
+  ret @! PyonArray3.first_y = y_min;
+  ret @! PyonArray3.stride_y = y_stride;
+  ret @! PyonArray3.size_y = FinIndInt {y_size};
+  ret @! PyonArray3.first_x = x_min;
+  ret @! PyonArray3.stride_x = x_stride;
+  ret @! PyonArray3.size_x = FinIndInt {x_size};
+  ret @! PyonArray3.contents = pointer primcall pyon_alloc(sizeof array_type);
+  ();
+};
+
+procedure pyon_Array3_get_contents (pointer arr) -> pointer {
+  arr @! PyonArray3.contents;
+};
+
+procedure pyon_Array3_get_bounds (pointer arr)
+  -> PyonTuple3(PyonTuple3(int, int, int),
+                PyonTuple3(int, int, int),
+                PyonTuple3(int, int, int))
+{
+  FinIndInt {size_z} = arr @! PyonArray3.size_z;
+  FinIndInt {size_y} = arr @! PyonArray3.size_y;
+  FinIndInt {size_x} = arr @! PyonArray3.size_x;
+  PyonTuple3(PyonTuple3(int, int, int),
+             PyonTuple3(int, int, int),
+             PyonTuple3(int, int, int))
+  {PyonTuple3(int, int, int)
+   {arr @! PyonArray3.first_z,
+    arr @! PyonArray3.stride_z,
+    size_z},
+   PyonTuple3(int, int, int)
+   {arr @! PyonArray3.first_y,
+    arr @! PyonArray3.stride_y,
+    size_y},
+   PyonTuple3(int, int, int)
+   {arr @! PyonArray3.first_x,
+    arr @! PyonArray3.stride_x,
+    size_x}};
+};
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // Exported to C for the C interface
 

@@ -227,6 +227,19 @@ record PyonArray2 {
   pointer contents;		// Pointer to matrix contents
 };
 
+record PyonArray3 {
+  int first_z;
+  int stride_z;
+  FinIndInt size_z;
+  int first_y;
+  int stride_y;
+  FinIndInt size_y;
+  int first_x;
+  int stride_x;
+  FinIndInt size_x;
+  pointer contents;		// Pointer to matrix contents
+};
+
 /* This data structure is used by 'blocked_reduce' to store data that's
  * used in C
  */

@@ -48,6 +48,20 @@ extern procedure pyon.internal.list.pyon_Array2_get_contents "pyon_Array2_get_co
 extern procedure pyon.internal.list.pyon_Array2_get_bounds "pyon_Array2_get_bounds"
   (pointer) -> PyonTuple6(int, int, int, int, int, int);
 
+extern data pointer pyon.internal.list.pyon_Array3_size "pyon_Array3_size";
+extern data pointer pyon.internal.list.pyon_Array3_alignment "pyon_Array3_alignment";
+
+extern procedure pyon.internal.list.pyon_Array3_initialize "pyon_Array3_initialize"
+  (int, int, int, int, int, int, int, int, int, uint, uint, pointer) -> ();
+
+extern procedure pyon.internal.list.pyon_Array3_get_contents "pyon_Array3_get_contents"
+  (pointer) -> pointer;
+
+extern procedure pyon.internal.list.pyon_Array3_get_bounds "pyon_Array3_get_bounds"
+  (pointer) -> PyonTuple3(PyonTuple3(int, int, int),
+                          PyonTuple3(int, int, int),
+                          PyonTuple3(int, int, int));
+
 
 extern procedure pyon.internal.list.pyon_List_PyonInt_FromArray "pyon_List_PyonInt_FromArray"
   (int, pointer) -> pointer;

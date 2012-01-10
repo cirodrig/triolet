@@ -147,6 +147,39 @@ namespace Pyon {
   };
   extern "C" Array2Bounds
   pyon_Array2_get_bounds(PyonBarePtr array) __attribute__((pure));
+
+  extern "C" const PyonUInt pyon_Array3_size;
+  extern "C" const PyonUInt pyon_Array3_alignment;
+  extern "C" void
+  pyon_Array3_initialize(PyonInt z_min,
+                         PyonInt z_stride,
+                         PyonInt z_size,
+                         PyonInt y_min,
+                         PyonInt y_stride,
+                         PyonInt y_size,
+                         PyonInt x_min,
+                         PyonInt x_stride,
+                         PyonInt x_size,
+                         PyonUInt elt_size,
+                         PyonUInt elt_align,
+                         PyonBarePtr ret);
+
+  extern "C" PyonBarePtr
+  pyon_Array3_get_contents(PyonBarePtr array) __attribute__((pure));
+
+  struct Array3Bounds {
+    int32_t zmin;
+    int32_t zstride;
+    int32_t zsize;
+    int32_t ymin;
+    int32_t ystride;
+    int32_t ysize;
+    int32_t xmin;
+    int32_t xstride;
+    int32_t xsize;
+  };
+  extern "C" Array3Bounds
+  pyon_Array3_get_bounds(PyonBarePtr array) __attribute__((pure));
 }
 
 #endif

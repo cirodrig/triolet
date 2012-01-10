@@ -259,6 +259,9 @@ namespace Pyon {
   
     template<typename T>
   class Array2;
+
+    template<typename T>
+  class Array3;
   
   /* Stored Classes: BareType versions of ValType classes (specializations of 
    * class Stored, extend class BareType ) */
@@ -302,6 +305,8 @@ namespace Pyon {
     template<typename T>
   class Incomplete< Array2<T> >;
 
+    template<typename T>
+  class Incomplete< Array3<T> >;
 
 
 /******************************************************************************/
@@ -922,6 +927,81 @@ namespace Pyon {
 
   };
 
+/* ------------------------------- Array3 ----------------------------------- */
+
+  template<typename T>
+  class Array3 : public BareType {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      struct initializer {
+        int zmin;
+        int zend;
+        int ymin;
+        int yend;
+        int xmin;
+        int xend;
+        initializer(int _zmin, int _zend,
+                    int _ymin, int _yend,
+                    int _xmin, int _xend)
+          : zmin(_zmin), zend(_zend), ymin(_ymin),
+            yend(_yend), xmin(_xmin), xend(_xend) {}
+      };
+      // no definition of defaultInitializer
+    public:
+      // Constructors
+      Array3<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_Array3_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_Array3_alignment;
+      }
+      
+      static void
+      copy(Array3<T> array3, Incomplete< Array3<T> > &incompleteArray3) { 
+          incompleteArray3 = Incomplete< Array3<T> >(array3.getBareData());
+      }
+
+      static bool
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Bare
+      at(int zIndex, int rowIndex, int columnIndex) {
+        Array3Bounds array3Bounds = pyon_Array3_get_bounds(getBareData());
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array3Bounds.xmin;
+        int xi = x_displacement / array3Bounds.xstride;
+        if (x_displacement % array3Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array3Bounds.ymin;
+        int yi = y_displacement / array3Bounds.ystride;
+        if (y_displacement % array3Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t z_displacement = zIndex - array3Bounds.zmin;
+        int zi = z_displacement / array3Bounds.zstride;
+        if (z_displacement % array3Bounds.zstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array3Bounds.zsize;
+        int32_t plane_n_members = row_n_members * array3Bounds.ysize;
+        int index = zi * plane_n_members + yi * row_n_members + xi;
+        PyonBarePtr array3_contents = pyon_Array3_get_contents(getBareData());
+        int element_size = addPadding<T_Bare>(T_Bare::getSize());
+        return T_Bare(array3_contents + index * element_size);
+      }
+
+  };
 
 
 
@@ -1313,6 +1393,75 @@ namespace Pyon {
         PyonBarePtr array2_contents = pyon_Array2_get_contents(this->getObject());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return Incomplete<T_Bare>(array2_contents + index * element_size ); 
+      }
+
+  };
+
+  /* Implementation of Incomplete< Array3<T> > */
+
+    template<typename T>
+  class Incomplete< Array3<T> > : public IncompleteSingleRef< Array3<T> > {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+    public:
+      // Constructors
+      Incomplete< Array3<T> >(void) : IncompleteSingleRef< Array3<T> >() { }
+      Incomplete< Array3<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array3<T> >(_s) { }
+      
+      // Member Functions
+      void initialize(const typename Array3<T>::initializer &init)
+      {
+        pyon_Array3_initialize(init.zmin, 1, init.zend,
+                               init.ymin, 1, init.yend,
+                               init.xmin, 1, init.xend,
+                               T_Bare::getSize(),
+                               T_Bare::getAlignment(),
+                               this->getObject());
+      }
+      void create(const typename Array3<T>::initializer &init)
+      { this->allocate(); initialize(init); }
+
+      void initialize(int32_t z_min, int32_t z_end, int32_t y_min,
+                      int32_t y_end, int32_t x_min, int32_t x_end)
+      {
+        initialize(typename Array3<T>::initializer(z_min, z_end, y_min,
+                                                   y_end, x_min, x_end));
+      }
+
+      void create(int32_t z_min, int32_t z_end, int32_t y_min,
+                  int32_t y_end, int32_t x_min, int32_t x_end)
+      {
+        create(typename Array3<T>::initializer(z_min, z_end, y_min,
+                                               y_end, x_min, x_end));
+      }
+
+      Incomplete< T_Bare > 
+      at(int zIndex, int rowIndex, int columnIndex) { 
+        Array3Bounds array3Bounds = pyon_Array3_get_bounds(this->getObject());
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array3Bounds.xmin;
+        int xi = x_displacement / array3Bounds.xstride;
+        if (x_displacement % array3Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array3Bounds.ymin;
+        int yi = y_displacement / array3Bounds.ystride;
+        if (y_displacement % array3Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t z_displacement = zIndex - array3Bounds.zmin;
+        int zi = z_displacement / array3Bounds.zstride;
+        if (z_displacement % array3Bounds.zstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array3Bounds.xsize;
+        int32_t plane_n_members = row_n_members * array3Bounds.ysize;
+        int index = zi * plane_n_members + yi * row_n_members + xi;
+        PyonBarePtr contents = pyon_Array3_get_contents(this->getObject());
+        int element_size = addPadding<T_Bare>(T_Bare::getSize());
+        return Incomplete<T_Bare>(contents + index * element_size);
       }
 
   };
