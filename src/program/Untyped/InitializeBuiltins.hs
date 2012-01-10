@@ -1337,6 +1337,18 @@ mkRangeType =
   in return $ monomorphic $
      functionType [int_type] (listIterType int_type)
 
+mkChainType =
+  forallType [Star] $ \[a] ->
+  let iter_type =
+        ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_list_dim) @@ ConTy a
+  in ([passable (ConTy a)], functionType [iter_type, iter_type] iter_type)
+
+mkSingletonIterType =
+  forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy a] $
+   ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_list_dim) @@ ConTy a)
+
 mkLenType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
@@ -1571,14 +1583,6 @@ mkMapStreamType =
        passable aT, passable bT],
       functionType [functionType [aT] bT, iterType tT aT] (iterType tT bT))
 
-mkListIterType =
-  forallType [Star, Star] $ \[sh, a] ->
-  let shT = ConTy sh
-      aT = ConTy a
-  in ([shT `IsInst` tiBuiltin the_c_Shape],
-      functionType [ConTy (tiBuiltin the_con_iter) @@ shT @@ aT]
-      (iterType (ConTy $ tiBuiltin the_con_list) aT))
-
 mkMatrixIterType =
   forallType [Star] $ \[a] ->
   let aT = ConTy a
@@ -1766,6 +1770,12 @@ initializeTIBuiltins = do
               ),
               ("range", [| mkRangeType |]
               , [| pyonBuiltin SystemF.The_range |]
+              ),
+              ("chain", [| mkChainType |]
+              , [| pyonBuiltin SystemF.The_chain |]
+              ),
+              ("singletonIter", [| mkSingletonIterType |]
+              , [| pyonBuiltin SystemF.The_singletonIter |]
               ),
               ("len", [| mkLenType |]
               , [| pyonBuiltin SystemF.The_len |]

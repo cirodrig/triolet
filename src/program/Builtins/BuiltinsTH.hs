@@ -31,6 +31,7 @@ pyonBuiltinTypeNames =
   , "Sequence"
   , "StreamNext"
   , "BindState"
+  , "ChainState"
   , "FIInt"
   , "IInt"
   , "SomeIInt"
@@ -129,6 +130,8 @@ pyonBuiltinVariableNames =
   , "streamValue"
   , "bindFromSource"
   , "bindFromTrans"
+  , "chainFromFirst"
+  , "chainFromNext"
   , "make_list"
   , "mk_array0"
   , "mk_array1"
@@ -482,6 +485,8 @@ pyonBuiltinVariableNames =
   , "fun_zip4"
   , "count"
   , "range"
+  , "singletonIter"
+  , "chain"
   , "len"
   , "safeIndex"
   , "safeSlice"
@@ -551,6 +556,7 @@ pyonBuiltinVariableNames =
   , "Sequence_list_build"
   , "Sequence_array1_build"
   , "empty_list_dim_view"
+  , "singleton_list_dim_view"
     
     -- Sequence functions
   , "Stream1_empty"
@@ -560,6 +566,7 @@ pyonBuiltinVariableNames =
   , "Sequence_build_list"
   , "Sequence_empty"
   , "Sequence_return"
+  , "Sequence_chain"
   , "Sequence_guard"
   , "Sequence_bind"
   , "Sequence_generate_bind"
@@ -586,6 +593,7 @@ pyonBuiltinVariableNames =
   , "fold_dim2"
 
     -- Primitive functions
+  , "primitive_list_dim_chain"
   , "primitive_list_dim_reduce"
   , "primitive_dim1_reduce"
   , "primitive_dim2_reduce"

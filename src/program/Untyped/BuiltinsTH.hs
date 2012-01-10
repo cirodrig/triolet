@@ -50,6 +50,8 @@ pyonSourceGlobals =
   , "zip4"
   , "count"
   , "range"
+  , "chain"
+  , "singletonIter"
   , "indices"
   , "len"
   , "width"

@@ -1,0 +1,5 @@
+
+def f(x, y):
+  return [z for z in chain(singletonIter(x), singletonIter(y))]
+
+export cplusplus f : int * int -> list(int)

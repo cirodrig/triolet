@@ -3894,6 +3894,43 @@ range (length : int) -> Stream list_dim (Stored int)
       copy @(Stored int) repr_int i));
 
 
+singletonIter @(a : bare) (repr : Repr a) (w : Writer a) -> Stream list_dim a
+  attribute(inline) =
+  viewStream @a (singleton_list_dim_view @a repr w);
+
+
+singleton_list_dim_view @(a : bare) (repr : Repr a) (w : Writer a)
+  -> view list_dim a
+  attribute(inline, inline_dimensionality) =
+  view_generate @list_dim ShapeDict_list_dim @a repr
+  (mk_list_dim (justVal @int 1))
+  (\ (i : Stored int) -> Writer a. w);
+
+
+chain @(a : bare)
+  (repr : Repr a) (i1 : Stream list_dim a) (i2 : Stream list_dim a)
+  -> Stream list_dim a
+  attribute(inline) =
+  case i1 of {
+    viewStream @a (v1 : view list_dim a).
+      case i2 of {
+        viewStream @a (v2 : view list_dim a).
+          viewStream @a (primitive_list_dim_chain @a repr v1 v2)
+      ; sequenceStream @a (s2 : Sequence a).
+          sequenceStream @a
+          (Sequence_chain @a repr (viewToSequence @a repr v1) s2)
+      }
+  ; sequenceStream @a (s1 : Sequence a).
+      case i2 of {
+        viewStream @a (v2 : view list_dim a).
+          sequenceStream @a
+          (Sequence_chain @a repr s1 (viewToSequence @a repr v2))
+      ; sequenceStream @a (s2 : Sequence a).
+          sequenceStream @a
+          (Sequence_chain @a repr s1 s2)
+      }
+  };
+
 extend2D @(t : bare -> bare) @(a : bare)
   (indexable : IndexableDict t)
   (is_2d : coerce @box (shape t) dim2)
@@ -5113,6 +5150,43 @@ Sequence_return @(a : bare)
      	  (boxed @(Stored bool) (stored @bool True))
 	  (convertToBoxed @a repr ret));
 
+Sequence_chain @(a : bare)
+  (repr : Repr a)
+  (s1 : Sequence a)
+  (s2 : Sequence a)
+  -> Sequence a
+  attribute(inline, inline_final) =
+  -- Create a stream consisting of all contents of s1 followed by all contents
+  -- of s2
+  case s1 of sequence @a @(state1 : box)
+             (s1 : state1) (f1 : state1 -> StreamNext state1 a).
+  case s2 of sequence @a @(state2 : box)
+             (s2 : state2) (f2 : state2 -> StreamNext state2 a).
+
+  let type state = ChainState state1 state2 in
+  sequence @a @state (chainFromFirst @state1 @state2 s1 s2)
+  (\ (s : state) -> StreamNext state a.
+     letfun
+       pull_from_second (s2 : state2) -> StreamNext state a =
+         -- Pull from second stream
+         case f2 s2 of {
+           streamValue @state2 @a (new_s2 : state2) (result : BoxedType a).
+             streamValue @state @a (chainFromNext @state1 @state2 new_s2) result
+         ; streamEmpty @state2 @a.
+             streamEmpty @state @a
+         } in
+     case s of {
+       chainFromFirst @state1 @state2 (s1 : state1) (s2 : state2).
+         -- Pull from first stream
+         case f1 s1 of {
+           streamValue @state1 @a (new_s1 : state1) (result : BoxedType a).
+             streamValue @state @a (chainFromFirst @state1 @state2 new_s1 s2) result
+         ; streamEmpty @state1 @a.
+             pull_from_second s2
+         }
+     ; chainFromNext @state1 @state2 (s2 : state2).
+         pull_from_second s2
+     });
 
 Sequence_reduce @(a : bare)
   (repr : Repr a)
@@ -5448,6 +5522,40 @@ arr3D_build @(L M N : intindex) @(a : bare)
 
 -------------------------------------------------------------------------------
 -- Domain loops (sequential)
+
+primitive_list_dim_chain @(a : bare) (repr : Repr a)
+  (v1 : view list_dim a)
+  (v2 : view list_dim a)
+  -> view list_dim a
+  attribute(inline, inline_final) =
+  case v1 of
+    mk_view @list_dim @a (dom1 : list_dim) (f1 : Stored int -> Writer a).
+  case v2 of
+    mk_view @list_dim @a (dom2 : list_dim) (f2 : Stored int -> Writer a).
+
+  case dom1 of mk_list_dim (size1 : MaybeVal int).
+  case dom2 of mk_list_dim (size2 : MaybeVal int).
+  case size1 of {
+    justVal @int (sz : int).
+      let dom : list_dim =
+            mk_list_dim (case size2 of {
+                           justVal @int (sz2 : int). justVal @int (sz +# sz2)
+                         ; nothingVal @int. nothingVal @int}) in
+      mk_view @list_dim @a dom
+      (\ (ix : Stored int) (ret : OutPtr a) -> IEffect a.
+         -- Get a value from the first or the second view
+         case ix of stored @int (i : int).
+         if i <# sz
+         then f1 ix ret
+         else case boxed @(Stored int) (stored @int (i -# sz)) of
+                boxed @(Stored int) (ix2 : Stored int).
+              f2 ix2 ret)
+
+  ; nothingVal @int.
+      -- The first domain is infinite, so the second is unreachable
+      mk_view @list_dim @a dom1 f1
+  };
+
 
 primitive_list_dim_reduce @(a : bare)
   (repr : Repr a)

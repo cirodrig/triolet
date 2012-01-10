@@ -558,6 +558,15 @@ data BindState : box -> bare -> bare -> box
      trans_st -> StreamNext trans_st trans_elt);
 };
 
+-- State of a chained stream
+data ChainState : box -> box -> box
+{
+  chainFromFirst (a b : box) () (a, b);
+  chainFromNext (a b : box) () (b);
+};
+
+
+
 -------------------------------------------------------------------------------
 -- Views
 
@@ -1808,6 +1817,12 @@ divideView : (t : bare -> bare) -> (a : bare)
 -------------------------------------------------------------------------------
 -- Domain loops
 
+primitive_list_dim_chain : (a : bare)
+                        -> Repr a
+                        -> view list_dim a
+                        -> view list_dim a
+                        -> view list_dim a;
+
 primitive_list_dim_reduce : (a : bare)
   -> Repr a
   -> list_dim
@@ -1996,6 +2011,13 @@ count : Stream list_dim (Stored int);
 
 range : int -> Stream list_dim (Stored int);
 
+singletonIter : (a : bare) -> Repr a -> Writer a -> Stream list_dim a;
+
+-- Helper function for 'singletonIter'
+singleton_list_dim_view : (a : bare) -> Repr a -> Writer a -> view list_dim a;
+
+chain : (a : bare) -> Repr a -> Stream list_dim a -> Stream list_dim a -> Stream list_dim a;
+
 len : (t : bare -> bare) -> (a : bare)
    -> (coerce @box (shape t) list_dim)
    -> IndexableDict t
@@ -2164,6 +2186,7 @@ Stream1_bind : (a b : bare)
 
 Sequence_empty : (a : bare) -> Repr a -> Sequence a;
 Sequence_return : (a : bare) -> Repr a -> Writer a -> Sequence a;
+Sequence_chain : (a : bare) -> Repr a -> Sequence a -> Sequence a -> Sequence a;
 Sequence_guard : (a : bare) -> Repr a -> bool -> Sequence a -> Sequence a;
 Sequence_bind : (a b : bare)
 	     -> Repr a -> Sequence a -> (a -> Sequence b) -> Sequence b;

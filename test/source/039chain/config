@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Iterator chaining",
+  pyonSources	 = ["chain.pyon"],
+  llpyonSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
+  expectedResult = ShouldPrint "121,169,"
+}
