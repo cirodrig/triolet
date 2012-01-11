@@ -1465,7 +1465,7 @@ sequentializeFold :: Type       -- ^ Accumulator type
                   -> MaybeT TypeEvalM ExpM
 sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
   case source
-  of OpSE inf (GenerateOp _ _) _ [shape, f] [] Nothing -> do
+  of OpSE inf (GenerateOp _ gen_ty) _ [shape, f] [] Nothing -> do
        -- Create a @for@ loop
        tenv <- getTypeEnv
        varAppE (pyonBuiltin The_primitive_list_dim_fold)
@@ -1477,24 +1477,24 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
                            initEffectType acc_ty))
           (\ [] [i_var, a_var, r_var] ->
             -- > let x = f i in combiner acc x ret
-            localE acc_ty (appExp (return f) [] [mkVarE i_var]) $ \x_var ->
+            localE gen_ty (appExp (return f) [] [mkVarE i_var]) $ \x_var ->
             return $ appE' combiner [] [varE' a_var, varE' x_var, varE' r_var]),
         return acc]
 
      -- Sequentialize 'map'
-     OpSE inf (ZipOp _ [in_ty] _) [in_repr, _] [zip_f] [in_stream] Nothing -> do
+     OpSE inf (ZipOp _ [in_ty] zip_ty) [in_repr, _] [zip_f] [in_stream] Nothing -> do
        -- Apply the function to whatever 'in_stream' returns.
        map_combiner <-
          lamE $ mkFun []
          (\ [] -> return ([acc_ty, in_ty, outType acc_ty], initEffectType acc_ty))
          (\ [] [acc_var, in_var, r_var] ->
-             localE a_ty (appExp (return zip_f) [] [mkVarE in_var]) $ \x_var ->
+             localE zip_ty (appExp (return zip_f) [] [mkVarE in_var]) $ \x_var ->
              return $ appE' combiner [] [varE' acc_var, varE' x_var, varE' r_var])
        sequentializeFold acc_ty in_ty acc_repr_var in_repr acc map_combiner in_stream
 
-     OpSE inf (ReturnOp _) _ [w] [] Nothing ->
+     OpSE inf (ReturnOp ret_ty) _ [w] [] Nothing ->
        -- Accumulate the written value
-       localE a_ty (return w) $ \x_var ->
+       localE ret_ty (return w) $ \x_var ->
        return $ appE' combiner [] [acc, varE' x_var]
      OpSE inf (EmptyOp _ _) _ _ [] Nothing ->
        -- Return the accumulator
