@@ -993,7 +993,7 @@ namespace Pyon {
         if (z_displacement % array3Bounds.zstride != 0)
           pyonError("Array index out of bounds\n");
 
-        int32_t row_n_members = array3Bounds.zsize;
+        int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
         PyonBarePtr array3_contents = pyon_Array3_get_contents(getBareData());
