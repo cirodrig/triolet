@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Three-dimensional scatter",
+  pyonSources	 = ["hist.pyon"],
+  llpyonSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
+  expectedResult = ShouldPrint "Ok"
+}
