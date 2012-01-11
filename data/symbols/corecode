@@ -357,7 +357,7 @@ intersectInterval (iv1 : Interval) (iv2 : Interval) -> Interval =
               nothingVal @int.
                 u1
             ; justVal @int (uu2 : int).
-                justVal @int (max_int uu1 uu2)
+                justVal @int (min_int uu1 uu2)
             }
         } in
   case l3 of {
@@ -2399,7 +2399,7 @@ ShapeDict_dim1_member (dom : dim1) (ix : Stored int)
   else False;
 
 
-ShapeDict_dim1_intersect (d : dim1) (e : dim1) -> dim1 attribute(inline, inline_sequential) =
+ShapeDict_dim1_intersect (d : dim1) (e : dim1) -> dim1 attribute(inline, inline_final) =
   case d of mk_dim1 (iv1 : Interval) (m1 : LinearMap).
   case e of mk_dim1 (iv2 : Interval) (m2 : LinearMap).
   case intersectLM m1 m2 of {
@@ -2564,7 +2564,7 @@ ShapeDict_dim2_flatten_helper
   (stride_y : int)
   (stride_x : int)
   -> (list_dim, MaybeVal int, int, int)
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_final) =
 
   case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
   case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
@@ -2769,7 +2769,7 @@ ShapeDict_dim3_flatten_helper
   (stride_y : int)
   (stride_x : int)
   -> (list_dim, MaybeVal (MaybeVal int, int), int, int, int)
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_final) =
 
   case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
   case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
@@ -2809,7 +2809,7 @@ ShapeDict_dim3_flatten_helper
 
                         (mk_list_dim list_size,
                          justVal @(MaybeVal int, int)
-                         (justVal @int count_y, count_x),
+                         (justVal @int count_xy, count_x),
                          lb_z_i, lb_y_i, lb_x_i)
 
                     ; nothingVal @int.
@@ -2838,10 +2838,10 @@ ShapeDict_dim3_flatten_helper
           -- Domain has infinite x extent
           case lb_y of {
             justVal @int (lb_y_i : int).
-              case lb_x of {
-                justVal @int (lb_x_i : int).
+              case lb_z of {
+                justVal @int (lb_z_i : int).
                   (mk_list_dim (nothingVal @int),
-                   nothingVal @(MaybeVal int, int), lb_x_i, lb_y_i, lb_x_i)
+                   nothingVal @(MaybeVal int, int), lb_z_i, lb_y_i, lb_x_i)
               ; nothingVal @int.
                   except @(list_dim, MaybeVal (MaybeVal int, int),
                            int, int, int)
