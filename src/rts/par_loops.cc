@@ -161,7 +161,7 @@ struct BlockedReducer2 {
     value = blocked_reduce2_accumulate_range(plan->data, value, start_y, end_y, start_x, end_x);
   };
 
-  void join (BlockedReducer &other) {
+  void join (BlockedReducer2 &other) {
     value = blocked_reduce2_reduce(plan->data, value, other.value);
   };
 };
