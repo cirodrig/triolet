@@ -385,6 +385,9 @@ ssaStmt next_stmt statement =
        rhs' <- ssaExpr rhs
        lhs' <- defineParam lhs
        fall_through $ Assign pos lhs' rhs'
+     Assert pos es -> do
+       es' <- mapM ssaExpr es
+       fall_through $ Assert pos es'
      If pos c t f _ -> do
        c' <- ssaExpr c
        (true_suite, false_suite, join) <- ifControl (ssaSuite t) (ssaSuite f)

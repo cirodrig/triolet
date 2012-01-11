@@ -104,6 +104,10 @@ data Stmt id =
     , stmtLhs :: Parameter id
     , stmtRhs :: Expr id
     }
+  | Assert 
+    { stmtPos :: !SourcePos 
+    , stmtExprs :: [Expr id]
+    }
   | If 
     { stmtPos :: SourcePos 
     , stmtCond :: Expr id

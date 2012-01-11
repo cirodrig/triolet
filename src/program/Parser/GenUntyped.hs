@@ -370,6 +370,14 @@ doStmt statement rest =
          rhs' <- doExpr rhs
          body <- rest
          return $ U.LetE (U.Ann pos) lhs' rhs' body
+
+     Assert pos es -> do
+       -- Translate to "if e then ... else __undefined__"
+       let ann = U.Ann pos
+           make_if test e = U.IfE ann test e (U.UndefinedE ann)
+       es' <- mapM doExpr es
+       body' <- rest
+       return $ foldr make_if body' es'
          
      If pos c t f (Just join_point) -> doIf pos c t f join_point rest
      If _   _ _ _ Nothing           -> internalError "doStmt"

@@ -692,6 +692,8 @@ singleStatement stmt =
                                <*> suite bodyClause -}
        Py.StmtExpr {Py.stmt_expr = e} ->
          singleton . ExprStmt source_pos <$> expression ValueLevel e
+       Py.Assert {Py.assert_exprs = es} ->
+         singleton . Assert source_pos <$> traverse (expression ValueLevel) es
        Py.Conditional {Py.cond_guards = guards, Py.cond_else = els} ->
          foldr ifelse (suite els) guards
        Py.Assign {Py.assign_to = dsts, Py.assign_expr = src} -> 
@@ -917,6 +919,7 @@ instance MentionsVars (Stmt Int) where
         case s
         of ExprStmt _ e   -> mentionedVars e
            Assign _ _ e   -> mentionedVars e
+           Assert _ es    -> mentionedVars es
            Return _ _ _ e -> mentionedVars e
            If _ e s1 s2 _ -> mentionedVars e `Set.union`
                              mentionedVars s1 `Set.union`

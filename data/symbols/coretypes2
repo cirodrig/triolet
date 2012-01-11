@@ -1909,6 +1909,8 @@ primitive_dim1_fold : (acc : bare)
 -------------------------------------------------------------------------------
 -- Other functions
 
+fun_undefined : (a : box) -> a;
+
 -- Convert an indexed int to a finite indexed int.  Raise an exception
 -- if not finite.
 fromIndInt : (N : intindex) -> IInt N -> FIInt N;

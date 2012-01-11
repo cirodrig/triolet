@@ -284,7 +284,7 @@ mkAppE pos oper ts args = AppTE (mkExpInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
-  mkConE pos (SystemF.pyonBuiltin SystemF.The_fun_undefined) [ty] [] []
+  mkAppE pos (mkVarE pos (SystemF.pyonBuiltin SystemF.The_fun_undefined)) [ty] []
 
 mkCoerceE :: SourcePos -> TIType -> TIType -> TIExp -> TIExp
 mkCoerceE pos from_ty to_ty e =

@@ -6038,6 +6038,8 @@ fun_fromJust @(a : bare) (repr : Repr a) (x : Maybe a) (ret : OutPtr a)
   };
 
 
+fun_undefined @(a : box) -> a = except @a;
+
 {-
 
 
