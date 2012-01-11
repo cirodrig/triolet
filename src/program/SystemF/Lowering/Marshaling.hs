@@ -34,6 +34,7 @@ pyonType (ArrayET n ty) =
            of 0 -> pyonBuiltin The_array0
               1 -> pyonBuiltin The_array1
               2 -> pyonBuiltin The_array2
+              3 -> pyonBuiltin The_array3
   in varApp op [pyonType ty]
 pyonType PyonIntET = VarT (pyonBuiltin The_int)
 pyonType PyonFloatET = VarT (pyonBuiltin The_float)
@@ -54,6 +55,8 @@ computeReprDict ty =
            polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array1)
        | op `isPyonBuiltin` The_array2 ->
            polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array2)
+       | op `isPyonBuiltin` The_array3 ->
+           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array3)
        | op `isPyonBuiltin` The_PyonTuple2 ->
            polymorphic_repr 2 args (LL.llBuiltin LL.the_fun_repr_PyonTuple2)
        | op `isPyonBuiltin` The_PyonTuple3 ->
@@ -508,6 +511,8 @@ getCxxExportType tenv ty =
            unary (ArrayET 1) args
        | con `isPyonBuiltin` The_array2 ->
            unary (ArrayET 2) args
+       | con `isPyonBuiltin` The_array3 ->
+           unary (ArrayET 3) args
      _ -> unsupported
   where
     unary con [arg] = con (getCxxExportType tenv arg)

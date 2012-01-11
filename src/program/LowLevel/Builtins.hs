@@ -37,6 +37,7 @@ module LowLevel.Builtins
         the_fun_repr_array0,
         the_fun_repr_array1,
         the_fun_repr_array2,
+        the_fun_repr_array3,
         the_fun_repr_PyonTuple2,
         the_fun_repr_PyonTuple3,
         the_fun_repr_PyonTuple4,

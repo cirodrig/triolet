@@ -192,6 +192,8 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.The_repr_array1 |])
   , (PyonName module_list "repr_array2",
      Right [| pyonBuiltin SystemF.The_repr_array2 |])
+  , (PyonName module_list "repr_array3",
+     Right [| pyonBuiltin SystemF.The_repr_array3 |])
   --, (PyonName module_list "list_len",
   --   Right [| pyonBuiltin SystemF.The_len |])
   , (PyonName module_list "list_build",
