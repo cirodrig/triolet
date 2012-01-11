@@ -116,6 +116,8 @@ isSimpleExp expression =
      LetE {} -> False
      LetfunE {} -> False
      CaseE {} -> False
+     ExceptE {} -> False
+     CoerceE {} -> False
 
 -- | Given a value and the pattern it is bound to, add the bound value(s)
 -- to the environment.  The caller should verify that the value has no
@@ -224,6 +226,9 @@ pevalExp expression =
          Nothing -> do
            alts' <- mapM pevalAlt alts
            return $ ExpSF $ CaseE inf scr' alts'
+
+     ExceptE inf ty ->
+       return $ ExpSF $ ExceptE inf ty
      
      CoerceE inf from_t to_t body -> do
        body' <- pevalExp body
