@@ -372,7 +372,7 @@ slicePureTF = typeFunction 1 compute_eliminator
            | op `isPyonBuiltin` The_dim0 -> return none_type
            | op `isPyonBuiltin` The_dim1 -> return slice_type
            | op `isPyonBuiltin` The_dim2 -> return slice2_type
-           | op `isPyonBuiltin` The_dim2 -> return slice3_type
+           | op `isPyonBuiltin` The_dim3 -> return slice3_type
         _ -> return $ varApp (pyonBuiltin The_slice) [shape_arg']
 
     none_type = VarT (pyonBuiltin The_NoneType)
