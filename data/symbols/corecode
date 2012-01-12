@@ -2614,6 +2614,13 @@ ShapeDict_dim2_flatten_helper
   };
 
 
+ShapeDict_dim2_flatten_helper2 (i : int) (divisor : MaybeVal int) -> (int, int)
+  attribute(inline, inline_final) =
+  case divisor of {
+    justVal @int (count_x : int). (i //# count_x, i %# count_x)
+  ; nothingVal @int. (0, i)
+  };
+
 ShapeDict_dim2_flatten @(a : bare)
   (repr : Repr a) (s : Stream dim2 a) -> Stream list_dim a
   attribute(inline, inline_dimensionality) =
@@ -2635,10 +2642,7 @@ ShapeDict_dim2_flatten @(a : bare)
    (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
       -- Linearize the index
       case si of stored @int (i : int).
-      case case divisor of {
-             justVal @int (count_x : int). (i //# count_x, i %# count_x)
-           ; nothingVal @int. (0, i)
-           }
+      case ShapeDict_dim2_flatten_helper2 i divisor
       of (i_y : int, i_x : int).
 
       -- Apply the stride to get an index in the domain
@@ -2857,6 +2861,30 @@ ShapeDict_dim3_flatten_helper
   };
 
 
+ShapeDict_dim3_flatten_helper2
+  (i : int) (divisors : MaybeVal (MaybeVal int, int))
+  -> (int, int, int)
+  attribute(inline, inline_final) =
+  case divisors of {
+    justVal @(MaybeVal int, int) (divisors_yx : (MaybeVal int, int)).
+
+      -- Finite in the X dimension
+      case divisors_yx of (divisor_xy : MaybeVal int, count_x : int).
+      case divisor_xy of {
+        justVal @int (count_xy : int).
+
+          -- Finite in all dimensions
+          let i_xy : int = i %# count_xy in
+          let i_z : int = i //# count_xy in
+          (i_z, i_xy //# count_x, i_xy %# count_x)
+
+      ; nothingVal @int.
+          -- Infinite in the Y dimension
+          (0, i //# count_x, i %# count_x)
+      }
+  ; nothingVal @(MaybeVal int, int). (0, 0, i)
+  };
+
 ShapeDict_dim3_flatten @(a : bare)
   (repr : Repr a) (s : Stream dim3 a) -> Stream list_dim a
   attribute(inline, inline_dimensionality) =
@@ -2883,25 +2911,7 @@ ShapeDict_dim3_flatten @(a : bare)
    (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
       -- Linearize the index
       case si of stored @int (i : int).
-      case case divisors of {
-             justVal @(MaybeVal int, int) (divisors_yx : (MaybeVal int, int)).
-
-               -- Finite in the X dimension
-               case divisors_yx of (divisor_xy : MaybeVal int, count_x : int).
-               case divisor_xy of {
-                 justVal @int (count_xy : int).
-
-                   -- Finite in all dimensions
-                   let i_xy : int = i %# count_xy in
-                   let i_z : int = i //# count_xy in
-                   (i_z, i_xy //# count_x, i_xy %# count_x)
-
-               ; nothingVal @int.
-                   -- Infinite in the Y dimension
-                   (0, i //# count_x, i %# count_x)
-               }
-           ; nothingVal @(MaybeVal int, int). (0, 0, i)
-           }
+      case ShapeDict_dim3_flatten_helper2 i divisors
       of (i_z : int, i_y : int, i_x : int).
 
       -- Apply the stride to get an index in the domain

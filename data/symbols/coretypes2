@@ -965,6 +965,8 @@ ShapeDict_dim2_generate :
 ShapeDict_dim2_flatten_helper : Interval -> Interval -> int -> int
   -> (list_dim, MaybeVal int, int, int);
 
+ShapeDict_dim2_flatten_helper2 : int -> MaybeVal int -> (int, int);
+
 ShapeDict_dim2_flatten :
   (a : bare) -> Repr a -> Stream dim2 a -> Stream list_dim a;
 
@@ -1009,6 +1011,9 @@ ShapeDict_dim3_generate :
 ShapeDict_dim3_flatten_helper : Interval -> Interval -> Interval
   -> int -> int -> int
   -> (list_dim, MaybeVal (MaybeVal int, int), int, int, int);
+
+ShapeDict_dim3_flatten_helper2 : int -> MaybeVal (MaybeVal int, int)
+                              -> (int, int, int);
 
 ShapeDict_dim3_flatten :
   (a : bare) -> Repr a -> Stream dim3 a -> Stream list_dim a;
