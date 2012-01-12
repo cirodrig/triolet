@@ -13,6 +13,7 @@ module Parser.SSA
         SSAExpr,
         SSAIterFor,
         SSAIterIf,
+        SSAIterLet,
         SSAComprehension,
         SSAStmt,
         computeSSA
@@ -49,6 +50,7 @@ type SSAParameter = Parameter SSAID
 type SSAExpr = Expr SSAID
 type SSAIterFor = IterFor SSAID
 type SSAIterIf = IterIf SSAID
+type SSAIterLet = IterLet SSAID
 type SSAComprehension = Comprehension SSAID
 type SSAStmt = Stmt SSAID
 
@@ -310,16 +312,23 @@ ssaSlice (ExprSlice e) =
   ExprSlice <$> ssaExpr e
 
 ssaIterFor :: PIterFor Expr -> SSA (SSAIterFor Expr)
-ssaIterFor (IterFor pos params dom body) =
-  IterFor pos <$> traverse defineParam params <*> ssaExpr dom <*> ssaComp body
+ssaIterFor (IterFor pos params dom body) = do
+  dom' <- ssaExpr dom
+  IterFor pos <$> traverse defineParam params <*> pure dom' <*> ssaComp body
 
 ssaIterIf :: PIterIf Expr -> SSA (SSAIterIf Expr)
 ssaIterIf (IterIf pos cond body) =
   IterIf pos <$> ssaExpr cond <*> ssaComp body
 
+ssaIterLet :: PIterLet Expr -> SSA (SSAIterLet Expr)
+ssaIterLet (IterLet pos tgt rhs body) = do
+  rhs' <- ssaExpr rhs
+  IterLet pos <$> defineParam tgt <*> pure rhs' <*> ssaComp body
+
 ssaComp :: PComprehension Expr -> SSA (SSAComprehension Expr)
 ssaComp (CompFor it) = CompFor <$> ssaIterFor it
 ssaComp (CompIf it)  = CompIf <$> ssaIterIf it
+ssaComp (CompLet it) = CompLet <$> ssaIterLet it
 ssaComp (CompBody e) = CompBody <$> ssaExpr e
 
 -- | Restructure a statement list into a list of non-control-flow statements 

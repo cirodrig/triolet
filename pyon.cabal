@@ -45,7 +45,7 @@ Executable pyon
     monads-fd,
     fgl,
     pretty,
-    language-python-pyon == 0.2.2,
+    language-python-pyon == 0.2.3,
     language-c,
     parsec == 3.*,
     unix,

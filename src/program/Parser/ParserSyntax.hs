@@ -23,6 +23,7 @@ type PParameter = Parameter Int
 type PExpr = Expr Int
 type PIterFor t = IterFor Int t
 type PIterIf t = IterIf Int t
+type PIterLet t = IterLet Int t
 type PComprehension t = Comprehension Int t
 type PStmt = Stmt Int
 
@@ -89,9 +90,13 @@ data IterFor id a =
 data IterIf id a =
     IterIf SourcePos (Expr id) (Comprehension id a)
 
+data IterLet id a =
+    IterLet SourcePos (Parameter id) (Expr id) (Comprehension id a)
+
 data Comprehension id a =
     CompFor (IterFor id a)
   | CompIf (IterIf id a)
+  | CompLet (IterLet id a)
   | CompBody (a id)
 
 data Stmt id =

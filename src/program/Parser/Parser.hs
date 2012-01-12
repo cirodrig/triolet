@@ -639,6 +639,12 @@ comprehension convertBody comprehension =
         where
           pos = toSourcePos $ Py.comp_if_annot ci
 
+      compLet cl = IterLet pos <$> exprToParam (Py.comp_let_target cl)
+                               <*> expression ValueLevel (Py.comp_let_expr cl)
+                               <*> compIter (Py.comp_let_iter cl)
+        where
+          pos = toSourcePos $ Py.comp_let_annot cl
+
       compBody = convertBody (Py.comprehension_expr comprehension)
 
       compIter Nothing =
@@ -647,6 +653,8 @@ comprehension convertBody comprehension =
         CompFor <$> compFor cf
       compIter (Just (Py.IterIf {Py.comp_iter_if = ci})) = 
         CompIf <$> compIf ci
+      compIter (Just (Py.IterLet {Py.comp_iter_let = cl})) =
+        CompLet <$> compLet cl
 
 noneExpr pos = Literal pos NoneLit
 
@@ -960,9 +968,14 @@ instance MentionsVars (IterIf Int Expr) where
     mentionedVars (IterIf _ e c) =
       mentionedVars e `Set.union` mentionedVars c
 
+instance MentionsVars (IterLet Int Expr) where
+    mentionedVars (IterLet _ _ e c) =
+      mentionedVars e `Set.union` mentionedVars c
+
 instance MentionsVars (Comprehension Int Expr) where
     mentionedVars (CompFor it) = mentionedVars it
     mentionedVars (CompIf it) = mentionedVars it
+    mentionedVars (CompLet it) = mentionedVars it
     mentionedVars (CompBody e) = mentionedVars e
 
 -------------------------------------------------------------------------------

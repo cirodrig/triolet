@@ -337,8 +337,15 @@ doGuard (IterIf pos cond body) = do
   body' <- doComprehension body
   return $ callVariable pos (tiBuiltin the_v_guard) [cond', body']
 
+doIterLet (IterLet pos target rhs body) = do
+  rhs' <- doExpr rhs
+  convertParameter target $ \target' -> do
+    body' <- doComprehension body
+    return $ U.LetE (U.Ann pos) target' rhs' body'
+
 doComprehension (CompFor iter) = doIterator iter
 doComprehension (CompIf iter) = doGuard iter
+doComprehension (CompLet iter) = doIterLet iter
 doComprehension (CompBody e) = do
   e' <- doExpr e
   return $ callVariable noSourcePos (tiBuiltin the_v_do) [e']
