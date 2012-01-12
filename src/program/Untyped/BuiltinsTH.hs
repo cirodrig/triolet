@@ -90,6 +90,7 @@ pyonSourceGlobals =
   , "__gt__"
   , "__ge__"
   , "domain"
+  , "intersection"
   , "flatten"
   , "__iter__"
   , "__build__"
@@ -126,7 +127,7 @@ pyonOtherGlobals :: [String]
 pyonOtherGlobals =
   [ "do", "guard", "iterBind",
     "safeIndex", "safeSlice",
-    "member", "intersection",
+    "member",
     "generate",
     "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
     "getSlice",
