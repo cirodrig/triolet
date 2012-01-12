@@ -255,13 +255,14 @@ data VectorDict : bare -> box
 -- The methods are:
 -- 1. Get lower bound of finite range
 -- 2. Get upper bound of finite range
--- 3. Create a finite range
--- 4. Displace a domain by an offset
--- 5. Scale a domain by a scale factor
--- 6. Scale a domain by an inverse scale factor
--- 7. Scale an index by a scale factor
--- 8. Scale an index by an inverse scale factor
--- 9. The largest domain
+-- 3. Get strides
+-- 4. Create a finite range
+-- 5. Displace a domain by an offset
+-- 6. Scale a domain by a scale factor
+-- 7. Scale a domain by an inverse scale factor
+-- 8. Scale an index by a scale factor
+-- 9. Scale an index by an inverse scale factor
+-- 10.The largest domain
 data CartesianDict : box -> box
 {
   cartesianDict
@@ -270,6 +271,7 @@ data CartesianDict : box -> box
   (coerce @box (cartesianDomain (index sh)) sh,
    sh -> Writer (Maybe (index sh)),
    sh -> Writer (Maybe (index sh)),
+   sh -> Writer (index sh),
    index sh -> index sh -> sh,
    sh -> index sh -> sh,
    sh -> index sh -> sh,
@@ -1328,6 +1330,8 @@ CartesianDict_dim0_loBound :
     dim0 -> Writer (Maybe (index dim0));
 CartesianDict_dim0_hiBound :
     dim0 -> Writer (Maybe (index dim0));
+CartesianDict_dim0_stride :
+    dim0 -> Writer (index dim0);
 CartesianDict_dim0_arrayRange :
     index dim0 -> index dim0 -> dim0;
 CartesianDict_dim0_displaceDomain :
@@ -1346,6 +1350,8 @@ CartesianDict_dim1_loBound :
     dim1 -> Writer (Maybe (index dim1));
 CartesianDict_dim1_hiBound :
     dim1 -> Writer (Maybe (index dim1));
+CartesianDict_dim1_stride :
+    dim1 -> Writer (index dim1);
 CartesianDict_dim1_arrayRange :
     index dim1 -> index dim1 -> dim1;
 CartesianDict_dim1_displaceDomain :
@@ -1364,6 +1370,8 @@ CartesianDict_dim2_loBound :
     dim2 -> Writer (Maybe (index dim2));
 CartesianDict_dim2_hiBound :
     dim2 -> Writer (Maybe (index dim2));
+CartesianDict_dim2_stride :
+    dim2 -> Writer (index dim2);
 CartesianDict_dim2_arrayRange :
     index dim2 -> index dim2 -> dim2;
 CartesianDict_dim2_displaceDomain :
@@ -1382,6 +1390,8 @@ CartesianDict_dim3_loBound :
     dim3 -> Writer (Maybe (index dim3));
 CartesianDict_dim3_hiBound :
     dim3 -> Writer (Maybe (index dim3));
+CartesianDict_dim3_stride :
+    dim3 -> Writer (index dim3);
 CartesianDict_dim3_arrayRange :
     index dim3 -> index dim3 -> dim3;
 CartesianDict_dim3_displaceDomain :

@@ -885,6 +885,8 @@ mkCartesianClass = do
       maybe_index_type = ConTy (tiBuiltin the_con_Maybe) @@ ix_ty
   let bound_scheme =
         monomorphic $ functionType [dom_ty] maybe_index_type
+      stride_scheme =
+        monomorphic $ functionType [dom_ty] ix_ty
       range_scheme =
         monomorphic $ functionType [ix_ty, ix_ty] dom_ty
       displace_scheme =
@@ -896,24 +898,27 @@ mkCartesianClass = do
             [TFunAppTy (tiBuiltin the_con_cartesianDomain) [ix_ty] `IsEqual` dom_ty]
             (pyonBuiltin SystemF.The_CartesianDict)
             (pyonBuiltin SystemF.The_cartesianDict)
-            [loBound, hiBound, arrayRange, displace, multiply, divide,
+            [loBound, hiBound, stride, arrayRange, displace, multiply, divide,
              multiplyI, divideI, unbounded]
             [dim0_instance, dim1_instance, dim2_instance, dim3_instance]
       loBound <- mkClassMethod cls 0 "loBound" bound_scheme
       hiBound <- mkClassMethod cls 1 "hiBound" bound_scheme
-      arrayRange <- mkClassMethod cls 2 "arrayRange" range_scheme
-      displace <- mkClassMethod cls 3 "displaceDomain" displace_scheme
-      multiply <- mkClassMethod cls 4 "multiplyDomain" displace_scheme
-      divide <- mkClassMethod cls 5 "divideDomain" displace_scheme
-      multiplyI <- mkClassMethod cls 6 "multiplyIndex" multiply_index_scheme
-      divideI <- mkClassMethod cls 7 "divideIndex" multiply_index_scheme
-      unbounded <- mkClassMethod cls 8 "unbounded" (monomorphic dom_ty)
+      stride <- mkClassMethod cls 2 "stride" stride_scheme
+      arrayRange <- mkClassMethod cls 3 "arrayRange" range_scheme
+      displace <- mkClassMethod cls 4 "displaceDomain" displace_scheme
+      multiply <- mkClassMethod cls 5 "multiplyDomain" displace_scheme
+      divide <- mkClassMethod cls 6 "divideDomain" displace_scheme
+      multiplyI <- mkClassMethod cls 7 "multiplyIndex" multiply_index_scheme
+      divideI <- mkClassMethod cls 8 "divideIndex" multiply_index_scheme
+      unbounded <- mkClassMethod cls 9 "unbounded" (monomorphic dom_ty)
       let dim0_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim0))
             [ InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_loBound
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_hiBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim0_stride
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_arrayRange
             , InstanceMethod $
@@ -936,6 +941,8 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_hiBound
             , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim1_stride
+            , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_arrayRange
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_displaceDomain
@@ -956,6 +963,8 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_hiBound
             , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim2_stride
+            , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_arrayRange
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_displaceDomain
@@ -975,6 +984,8 @@ mkCartesianClass = do
               pyonBuiltin SystemF.The_CartesianDict_dim3_loBound
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim3_hiBound
+            , InstanceMethod $
+              pyonBuiltin SystemF.The_CartesianDict_dim3_stride
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim3_arrayRange
             , InstanceMethod $
@@ -1920,7 +1931,8 @@ initializeTIBuiltins = do
                                     "exp", "log", "sqrt",
                                     "sin", "cos", "tan", "pi"])
             , ([| the_c_Vector |], ["scale", "magnitude", "dot"])
-            , ([| the_c_Cartesian |], ["loBound", "hiBound", "arrayRange",
+            , ([| the_c_Cartesian |], ["loBound", "hiBound", "stride",
+                                       "arrayRange",
                                        "displaceDomain", "multiplyDomain",
                                        "divideDomain", "multiplyIndex",
                                        "divideIndex", "unbounded"])

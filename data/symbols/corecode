@@ -677,6 +677,13 @@ CartesianDict_dim0_hiBound
   just @(Stored NoneType) (stored @NoneType None);
 
 
+CartesianDict_dim0_stride
+  (dom : dim0)
+  -> Writer (index dim0)
+  attribute(inline) =
+  stored @NoneType None;
+
+
 CartesianDict_dim0_arrayRange
   (lo : index dim0)
   (hi : index dim0)
@@ -734,6 +741,15 @@ CartesianDict_dim1_hiBound
   ; nothingVal @int. nothing @(Stored int) ret
   };
 
+
+CartesianDict_dim1_stride
+  (dom : dim1)
+  -> Writer (index dim1)
+  attribute(inline) =
+  case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
+  case lm of linearMap (stride : int) (alignment : int).
+  stored @int stride;
+  
 
 CartesianDict_dim1_arrayRange
   (lo : index dim1)
@@ -884,6 +900,16 @@ CartesianDict_dim2_hiBound
   };
 
 
+CartesianDict_dim2_stride
+  (dom : dim2)
+  -> Writer (index dim2)
+  attribute(inline) =
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+  pyonTuple2 @(Stored int) @(Stored int)
+  (CartesianDict_dim1_stride dom_y)
+  (CartesianDict_dim1_stride dom_x);
+
+
 CartesianDict_dim2_arrayRange
   (lo : index dim2)
   (hi : index dim2)
@@ -1003,6 +1029,17 @@ CartesianDict_dim3_hiBound
   ; nothingVal @int.
       nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
   };
+
+
+CartesianDict_dim3_stride
+  (dom : dim3)
+  -> Writer (index dim3)
+  attribute(inline) =
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+  pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+  (CartesianDict_dim1_stride dom_z)
+  (CartesianDict_dim1_stride dom_y)
+  (CartesianDict_dim1_stride dom_x);
 
 
 CartesianDict_dim3_arrayRange
@@ -4444,6 +4481,7 @@ displaceView @(t : bare -> bare) @(a : bare)
     (has_shape : coerce @box (cartesianDomain (index sh)) sh)
     (loBound : sh -> Writer (Maybe ix))
     (hiBound : sh -> Writer (Maybe ix))
+    (get_stride : sh -> Writer ix)
     (arrayRange : ix -> ix -> sh)
     (displaceDomain : sh -> ix -> sh)
     (multiplyDomain : sh -> ix -> sh)
@@ -4490,6 +4528,7 @@ multiplyView @(t : bare -> bare) @(a : bare)
     (has_shape : coerce @box (cartesianDomain (index sh)) sh)
     (loBound : sh -> Writer (Maybe ix))
     (hiBound : sh -> Writer (Maybe ix))
+    (get_stride : sh -> Writer ix)
     (arrayRange : ix -> ix -> sh)
     (displaceDomain : sh -> ix -> sh)
     (multiplyDomain : sh -> ix -> sh)
@@ -4529,6 +4568,7 @@ divideView @(t : bare -> bare) @(a : bare)
     (has_shape : coerce @box (cartesianDomain (index sh)) sh)
     (loBound : sh -> Writer (Maybe ix))
     (hiBound : sh -> Writer (Maybe ix))
+    (get_stride : sh -> Writer ix)
     (arrayRange : ix -> ix -> sh)
     (displaceDomain : sh -> ix -> sh)
     (multiplyDomain : sh -> ix -> sh)

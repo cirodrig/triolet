@@ -109,6 +109,7 @@ pyonSourceGlobals =
   , "dot"
   , "loBound"
   , "hiBound"
+  , "stride"
   , "arrayRange"
   , "unbounded"
   , "__fromfloat__"
