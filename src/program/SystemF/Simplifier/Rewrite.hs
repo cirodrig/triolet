@@ -354,7 +354,6 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             --, (pyonBuiltin The_LinStream_zipWith3_array, rwZip3ArrayStream)
             --, (pyonBuiltin The_LinStream_zipWith4_array, rwZip4ArrayStream)
             , (pyonBuiltin The_defineIntIndex, rwDefineIntIndex)
-            , (pyonBuiltin The_AdditiveDict_int_negate, rwNegateInt)
             , (pyonBuiltin The_EqDict_int_ne, rwIntComparison (/=))
             , (pyonBuiltin The_OrdDict_int_lt, rwIntComparison (<))
             , (pyonBuiltin The_OrdDict_int_le, rwIntComparison (<=))
@@ -363,12 +362,11 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
               -- No rewrite rule for integer (==).  It's handled by
               -- the 'rwIntEqApp' function.
             
-            -- , (pyonBuiltin The_histogram, rwHistogram)
-            -- , (pyonBuiltin The_fun_reduce, rwReduce)
-            -- , (pyonBuiltin The_fun_reduce1, rwReduce1)
-            {- , (pyonBuiltin The_oper_CAT_MAP, rwCatMap) -}
-            -- , (pyonBuiltin The_for, rwFor)
-            -- , (pyonBuiltin The_safeSubscript, rwSafeSubscript)
+            , (pyonBuiltin The_AdditiveDict_int_negate, rwNegateInt)
+            , (pyonBuiltin The_AdditiveDict_int_add, rwAddInt)
+            , (pyonBuiltin The_AdditiveDict_int_sub, rwSubInt)
+            , (pyonBuiltin The_RemainderDict_int_floordiv, rwFloorDivInt)
+            , (pyonBuiltin The_RemainderDict_int_mod, rwModInt)
             ]
 
     exprs = [ (pyonBuiltin The_count, count_expr)
@@ -1263,13 +1261,6 @@ rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
 
 rwDefineIntIndex _ _ _ = return Nothing
 
-rwNegateInt :: RewriteRule
-rwNegateInt inf [] [ExpM (LitE _ lit)] =
-  let IntL m t = lit
-  in return $! Just $! ExpM (LitE inf (IntL (negate m) t))
-
-rwNegateInt _ _ _ = return Nothing
-
 -- | If comparing two integer literals, replace it with constant True or False
 rwIntComparison :: (Integer -> Integer -> Bool) -> RewriteRule
 rwIntComparison op inf [] [arg1, arg2]
@@ -1283,6 +1274,76 @@ rwIntComparison op inf [] [arg1, arg2]
   where
     true_value = ExpM (ConE inf (VarCon (pyonBuiltin The_True) [] []) [])
     false_value = ExpM (ConE inf (VarCon (pyonBuiltin The_False) [] []) [])
+
+rwNegateInt :: RewriteRule
+rwNegateInt inf [] [ExpM (LitE _ lit)] =
+  let IntL m t = lit
+  in return $! Just $! ExpM (LitE inf (IntL (negate m) t))
+
+rwNegateInt _ _ _ = return Nothing
+
+rwAddInt :: RewriteRule
+rwAddInt inf [] [e1, e2]
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+      let IntL m t = l1
+          IntL n _ = l2
+      in return $! Just $! ExpM (LitE inf (IntL (m + n) t))
+
+  -- Eliminate add of zero
+  | ExpM (LitE _ (IntL 0 _)) <- e1 = return $ Just e2
+  | ExpM (LitE _ (IntL 0 _)) <- e2 = return $ Just e1
+
+rwAddInt _ _ _ = return Nothing
+
+rwSubInt :: RewriteRule
+rwSubInt inf [] [e1, e2]
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+      let IntL m t = l1
+          IntL n _ = l2
+      in return $! Just $! ExpM (LitE inf (IntL (m - n) t))
+
+  -- Eliminate subtract of zero
+  | ExpM (LitE _ (IntL 0 _)) <- e1 = return $ Just $ negateIntExp inf e2
+  | ExpM (LitE _ (IntL 0 _)) <- e2 = return $ Just e1
+
+rwSubInt _ _ _ = return Nothing
+
+rwFloorDivInt :: RewriteRule
+rwFloorDivInt inf [] [e1, e2]
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+      let IntL m t = l1
+          IntL n _ = l2
+      in if n == 0
+         then return $ Just $ ExpM (ExceptE inf t) -- divide by zero
+         else return $! Just $! ExpM (LitE inf (IntL (m `div` n) t))
+
+  -- Simplify division by 1 or -1
+  | ExpM (LitE _ (IntL 1 _)) <- e2 = return $ Just e1
+  | ExpM (LitE _ (IntL (-1) _)) <- e2 = return $ Just $ negateIntExp inf e1
+
+rwFloorDivInt _ _ _ = return Nothing
+
+rwModInt :: RewriteRule
+rwModInt inf [] [e1, e2]
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+      let IntL m t = l1
+          IntL n _ = l2
+      in if n == 0
+         then return $ Just $ ExpM (ExceptE inf t) -- divide by zero
+         else return $! Just $! ExpM (LitE inf (IntL (m `mod` n) t))
+
+  -- Simplify remainder division by 1 or -1
+  | ExpM (LitE _ (IntL 1 _)) <- e2 = return $ Just $ zero_lit
+  | ExpM (LitE _ (IntL (-1) _)) <- e2 = return $ Just $ zero_lit
+  where
+    zero_lit = ExpM $ LitE inf (IntL 0 int_type)
+    int_type = VarT $ pyonBuiltin The_int
+
+rwModInt _ _ _ = return Nothing
+
+negateIntExp inf e = appE inf neg_op [] [e]
+  where
+    neg_op = varE' (pyonBuiltin The_AdditiveDict_int_negate)
 
 {-
 {-
