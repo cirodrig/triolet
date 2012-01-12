@@ -355,12 +355,14 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             --, (pyonBuiltin The_LinStream_zipWith4_array, rwZip4ArrayStream)
             , (pyonBuiltin The_defineIntIndex, rwDefineIntIndex)
             , (pyonBuiltin The_AdditiveDict_int_negate, rwNegateInt)
-            , (pyonBuiltin The_EqDict_int_eq, rwIntComparison (==))
             , (pyonBuiltin The_EqDict_int_ne, rwIntComparison (/=))
             , (pyonBuiltin The_OrdDict_int_lt, rwIntComparison (<))
             , (pyonBuiltin The_OrdDict_int_le, rwIntComparison (<=))
             , (pyonBuiltin The_OrdDict_int_gt, rwIntComparison (>))
             , (pyonBuiltin The_OrdDict_int_ge, rwIntComparison (>=))
+              -- No rewrite rule for integer (==).  It's handled by
+              -- the 'rwIntEqApp' function.
+            
             -- , (pyonBuiltin The_histogram, rwHistogram)
             -- , (pyonBuiltin The_fun_reduce, rwReduce)
             -- , (pyonBuiltin The_fun_reduce1, rwReduce1)

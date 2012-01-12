@@ -9,6 +9,7 @@ A data value that's in the correct representation for a @case@ statement is
 represented by a 'DataAV' term.
 -}
 
+{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 module SystemF.Simplifier.AbsValue
        (-- * Abstract values
         AbsCode,
@@ -21,8 +22,12 @@ module SystemF.Simplifier.AbsValue
         codeExp,
         codeTrivialExp,
         codeValue,
+        litCode,
+        trueCode, falseCode,
+        varEqualityTestCode,
         AbsValue(..),
         AbsData(..),
+        AbsProp(..),
         funValue,
         initializerValue,
         scrutineeDataValue,
@@ -31,6 +36,7 @@ module SystemF.Simplifier.AbsValue
         -- * Interpretation
         applyCode,
         interpretCon,
+        interpretConAsValue,
         interpretInitializer,
         interpretConstant,
 
@@ -169,6 +175,21 @@ codeTrivialExp code =
 codeValue :: AbsCode -> AbsValue
 codeValue = _codeValue
 
+litCode :: Lit -> AbsCode
+litCode l = valueCode $ LitAV l
+
+trueCode, falseCode :: AbsCode
+trueCode =
+  valueCode $ DataAV $ AbsData (VarCon (pyonBuiltin The_True) [] []) []
+falseCode =
+  valueCode $ DataAV $ AbsData (VarCon (pyonBuiltin The_False) [] []) []
+
+-- | Create abstract code of the boolean expression @v == L@ for some variable
+--   @v@ and literal @L@.
+varEqualityTestCode :: Var -> Lit -> AbsCode
+varEqualityTestCode v l =
+  valueCode $ BoolAV $ AbsValueProp v (litCode l)
+
 data AbsValue =
     TopAV                       -- ^ Unknown value
   | VarAV !Var                  -- ^ A variable
@@ -176,6 +197,8 @@ data AbsValue =
   | FunAV !AbsFun               -- ^ A function
   | DataAV !AbsData             -- ^ A fully applied constructor
   | HeapAV !AbsHeap             -- ^ A heap fragment
+  | BoolAV !AbsProp             -- ^ A boolean value carrying the truth
+                                --   value of a proposition
 
 data AbsComputation =
     TopAC                       -- ^ Unknown computation
@@ -225,6 +248,16 @@ data AbsData =
 --   the contents of the heap fragment.
 newtype AbsHeap = AbsHeap {fromAbsHeap :: HeapMap AbsCode}
 
+data AbsProp =
+  -- | A proposition of the form @v = N@, for variable @v@ and value @N@.
+  --   @N@ can be represented by a trivial expression
+  --   ('codeTrivialExp' returns a 'Just' value).
+  --   Where this proposition is true, we can substitute @N@ for @v@.
+  AbsValueProp
+  { apVar   :: !Var
+  , apValue :: AbsCode
+  }
+
 -------------------------------------------------------------------------------
 -- Printing
 
@@ -245,6 +278,7 @@ pprAbsValue (LitAV l) = pprLit l
 pprAbsValue (FunAV f) = pprAbsFun f
 pprAbsValue (DataAV d) = pprAbsData d
 pprAbsValue (HeapAV hp) = pprAbsHeap hp
+pprAbsValue (BoolAV b) = text "BOOL" <> parens (pprAbsProp b)
 
 pprAbsComputation TopAC = text "TOP"
 pprAbsComputation (ReturnAC c) = text "RET" <+> pprAbsCode c
@@ -270,6 +304,9 @@ pprAbsData (AbsData (TupleCon _) fs) =
 
 pprAbsHeap (AbsHeap (HeapMap xs)) =
   braces $ vcat $ punctuate semi [pprVar a <+> text "|->" <+> pprAbsCode v | (a, v) <- xs]
+
+pprAbsProp (AbsValueProp v l) =
+  pprVar v <+> equals <+> pprAbsCode l
 
 -------------------------------------------------------------------------------
 -- Substitution
@@ -483,6 +520,12 @@ substituteAbsValue s value =
        return $! case h'
                  of Nothing -> TopAV
                     Just hm -> HeapAV hm
+     BoolAV (AbsValueProp v l) ->
+       -- Substitute for 'v' if possible
+       case lookupAbsValue v s
+       of Nothing -> return value
+          Just (VarAV v') -> return $ BoolAV (AbsValueProp v' l)
+          Just _  -> return TopAV
 
 instance Substitutable AbsCode where
   type Substitution AbsCode = AbsSubst
@@ -747,6 +790,16 @@ interpretCon con fields =
     compute_initializer_value ValK f  = return (ReturnAC f)
     compute_initializer_value _    _  =
       internalError "constructorDataValue: Unexpected field kind"
+
+-- | Interpret a data constructor application that is certain not to raise
+--   an exception.
+interpretConAsValue :: ConInst -> [AbsCode] -> TypeEvalM AbsCode
+interpretConAsValue cinst fields = do
+  comp <- interpretCon cinst fields
+  case comp of
+    TopAC -> return topCode
+    ReturnAC c -> return c
+    ExceptAC -> internalError "interpretConAsValue: Not a value"
 
 -- | Compute the value produced by an initializer function
 interpretInitializer :: AbsCode -> TypeEvalM AbsComputation
