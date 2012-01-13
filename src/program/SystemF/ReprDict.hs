@@ -203,6 +203,8 @@ withReprDict param_type k = do
 
 createDictEnv :: FreshVarM SingletonValueEnv
 createDictEnv = do
+  let bool_dict =
+        valueDict (pyonBuiltin The_bool) (pyonBuiltin The_repr_bool)
   let int_dict =
         valueDict (pyonBuiltin The_int) (pyonBuiltin The_repr_int)
   let float_dict =
@@ -270,7 +272,7 @@ createDictEnv = do
 
   let dict_env = DictEnv.DictEnv [repr_dict, storedBox_dict,
                                   stream_dict,
-                                  float_dict, int_dict, efftok_dict,
+                                  bool_dict, float_dict, int_dict, efftok_dict,
                                   sliceobj_dict,
                                   list_dict, array1_dict, array2_dict,
                                   complex_dict, array_dict,

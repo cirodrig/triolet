@@ -1092,6 +1092,11 @@ EqDict_int_ne : int -> int -> bool;
 EqDict_float_eq : float -> float -> bool;
 EqDict_float_ne : float -> float -> bool;
 
+EqDict_Tuple2_eq : (a b : bare) -> EqDict a -> EqDict b
+                -> PyonTuple2 a b -> PyonTuple2 a b -> bool;
+EqDict_Tuple2_ne : (a b : bare) -> EqDict a -> EqDict b
+                -> PyonTuple2 a b -> PyonTuple2 a b -> bool;
+
 OrdDict_int_lt : int -> int -> bool;
 OrdDict_int_le : int -> int -> bool;
 OrdDict_int_gt : int -> int -> bool;

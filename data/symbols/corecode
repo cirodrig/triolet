@@ -17,6 +17,30 @@ repr_slice3 : Repr (PyonTuple3 SliceObject SliceObject SliceObject) =
   repr_SliceObject repr_SliceObject repr_SliceObject;
 
 -------------------------------------------------------------------------------
+-- Eq dictionaries
+
+EqDict_Tuple2_eq @(a b : bare)
+  (eqA : EqDict a) (eqB : EqDict b) (x : PyonTuple2 a b) (y : PyonTuple2 a b)
+  -> bool
+  attribute(inline) =
+  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
+  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
+  case x of pyonTuple2 @a @b (xa : a) (xb : b).
+  case y of pyonTuple2 @a @b (ya : a) (yb : b).
+  and (eq_a xa ya) (eq_b xb yb);
+
+
+EqDict_Tuple2_ne @(a b : bare)
+  (eqA : EqDict a) (eqB : EqDict b) (x : PyonTuple2 a b) (y : PyonTuple2 a b)
+  -> bool
+  attribute(inline) =
+  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
+  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
+  case x of pyonTuple2 @a @b (xa : a) (xb : b).
+  case y of pyonTuple2 @a @b (ya : a) (yb : b).
+  and (ne_a xa ya) (ne_b xb yb);
+
+-------------------------------------------------------------------------------
 -- Additive dictionaries
 
 AdditiveDict_PyonTuple2_add @(a b : bare)

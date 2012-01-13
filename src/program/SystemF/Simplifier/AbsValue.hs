@@ -25,6 +25,7 @@ module SystemF.Simplifier.AbsValue
         litCode,
         trueCode, falseCode,
         varEqualityTestCode,
+        conjunctionCode,
         AbsValue(..),
         AbsData(..),
         AbsProp(..),
@@ -42,6 +43,7 @@ module SystemF.Simplifier.AbsValue
 
         -- * Concretization
         concretize,
+        absPropSubstitutions,
 
         -- * Printing
         pprAbsCode,
@@ -61,6 +63,7 @@ import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
 import Data.Maybe
+import Data.Monoid
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -190,6 +193,22 @@ varEqualityTestCode :: Var -> Lit -> AbsCode
 varEqualityTestCode v l =
   valueCode $ BoolAV $ AbsValueProp v (litCode l)
 
+conjunctionCode :: AbsCode -> AbsCode -> AbsCode
+conjunctionCode c1 c2 =
+  let p = case codeValue c1
+          of BoolAV p -> p
+             _ -> AbsAnyProp
+      q = case codeValue c2
+          of BoolAV p -> p
+             _ -> AbsAnyProp
+  in maybe topCode (valueCode . BoolAV) $ conjunction p q
+  where
+    conjunction AbsAnyProp AbsAnyProp = Nothing
+    conjunction AbsAnyProp p          = Just p
+    conjunction p          AbsAnyProp = Just p
+    conjunction p          q          = Just $ AbsConjunction p q
+
+
 data AbsValue =
     TopAV                       -- ^ Unknown value
   | VarAV !Var                  -- ^ A variable
@@ -249,14 +268,18 @@ data AbsData =
 newtype AbsHeap = AbsHeap {fromAbsHeap :: HeapMap AbsCode}
 
 data AbsProp =
-  -- | A proposition of the form @v = N@, for variable @v@ and value @N@.
-  --   @N@ can be represented by a trivial expression
-  --   ('codeTrivialExp' returns a 'Just' value).
-  --   Where this proposition is true, we can substitute @N@ for @v@.
-  AbsValueProp
-  { apVar   :: !Var
-  , apValue :: AbsCode
-  }
+    -- | A proposition of the form @v = N@, for variable @v@ and value @N@.
+    --   @N@ can be represented by a trivial expression
+    --   ('codeTrivialExp' returns a 'Just' value).
+    --   Where this proposition is true, we can substitute @N@ for @v@.
+    AbsValueProp
+    { apVar   :: !Var
+    , apValue :: AbsCode
+    }
+    -- | A conjunction of propositions
+  | AbsConjunction AbsProp AbsProp
+    -- | An unknown proposition
+  | AbsAnyProp
 
 -------------------------------------------------------------------------------
 -- Printing
@@ -307,6 +330,11 @@ pprAbsHeap (AbsHeap (HeapMap xs)) =
 
 pprAbsProp (AbsValueProp v l) =
   pprVar v <+> equals <+> pprAbsCode l
+
+pprAbsProp (AbsConjunction p1 p2) =
+  pprAbsProp p1 <+> text "&&" <+> pprAbsProp p2
+
+pprAbsProp AbsAnyProp = text "_"
 
 -------------------------------------------------------------------------------
 -- Substitution
@@ -520,12 +548,9 @@ substituteAbsValue s value =
        return $! case h'
                  of Nothing -> TopAV
                     Just hm -> HeapAV hm
-     BoolAV (AbsValueProp v l) ->
-       -- Substitute for 'v' if possible
-       case lookupAbsValue v s
-       of Nothing -> return value
-          Just (VarAV v') -> return $ BoolAV (AbsValueProp v' l)
-          Just _  -> return TopAV
+     BoolAV p -> case substituteAbsProp s p
+                 of Nothing -> return TopAV
+                    Just p' -> return $ BoolAV p'
 
 instance Substitutable AbsCode where
   type Substitution AbsCode = AbsSubst
@@ -581,6 +606,25 @@ instance Substitutable AbsData where
     con' <- substitute (typeSubst s) con
     fields' <- substitute s fields
     return $ AbsData con' fields'
+    
+substituteAbsProp :: AbsSubst -> AbsProp -> Maybe AbsProp
+substituteAbsProp s prop =
+  case prop
+  of AbsValueProp v l ->
+       -- Substitute for 'v' if possible
+       case lookupAbsValue v s 
+       of Nothing -> Just prop
+          Just (VarAV v') -> Just $ AbsValueProp v' l
+          Just _  -> Just $ AbsAnyProp
+     AbsConjunction p1 p2 ->
+       substituteAbsProp s p1 `conjunction` substituteAbsProp s p2
+     AbsAnyProp ->
+       Just $ AbsAnyProp
+  where
+    conjunction (Just p) (Just q) = Just $ AbsConjunction p q
+    conjunction (Just p) Nothing  = Just p
+    conjunction Nothing  (Just q) = Just q
+    conjunction Nothing  Nothing  = Nothing
 
 substituteAbsHeap :: EvalMonad m => AbsSubst -> AbsHeap -> m (Maybe AbsHeap)
 substituteAbsHeap s (AbsHeap (HeapMap xs)) = do
@@ -981,3 +1025,31 @@ concretizeHeapItem addr val
 
   -- Only data and variables should appear here
   | otherwise = internalError "concretizeHeapItem: Unexpected abstract value"
+
+-------------------------------------------------------------------------------
+
+-- | Given a proposition, get substitutions that can be performed if the
+--   proposition is true or false.
+absPropSubstitutions :: AbsProp -> (SFRename.Subst, SFRename.Subst)
+absPropSubstitutions prop =
+  case get_bindings prop
+  of (b1, b2) -> (make_subst b1, make_subst b2)
+  where
+    make_subst s = SFRename.Subst Substitute.empty (SFRename.fromListV s)
+
+    -- Get the bindings implied by this proposition.
+    -- The return value is (if_true, if_false).
+    get_bindings :: AbsProp
+                 -> ([(Var, SFRename.ValAss)], [(Var, SFRename.ValAss)])
+    get_bindings (AbsValueProp var value) =
+      case codeTrivialExp value
+      of Just trivial_value ->
+           return_true (var, SFRename.SubstitutedVar trivial_value)
+         Nothing ->
+           mempty
+    get_bindings (AbsConjunction p1 p2) =
+      get_bindings p1 `mappend` get_bindings p2
+
+    get_bindings AbsAnyProp = mempty
+
+    return_true x = ([x], [])
