@@ -2989,6 +2989,12 @@ ShapeDict_dim3_flatten @(a : bare)
       f index_3d ret));
 
 
+ShapeDict_dim3_generate @(a : bare)
+  (repr : Repr a) (dom : dim3) (f : index dim3 -> Writer a)
+  -> Stream dim3 a attribute(inline) =
+  view_generate @dim3 ShapeDict_dim3 @a repr dom f;
+
+
 ShapeDict_dim3_map @(a b : bare)
   (repr_a : Repr a) (repr_b : Repr b)
   (transformer : a -> Writer b)
