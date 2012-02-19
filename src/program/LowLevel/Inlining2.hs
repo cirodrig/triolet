@@ -38,10 +38,38 @@ emptyRenaming = IntMap.empty
 -- | The set of functions that can be inlined, and their numbers of endpoints.
 type InlinedFunctions = IntMap.IntMap (Fun, NumReturns)
 
+-- | The code of a continuation.
+--   Code is created by 'asContinuationCode' and turned into a statement by
+--   'fromContinuationCode'.
+--
+--   There are two special cases, for when a continuation just returns
+--   variables and when a continuation just calls a join point.  These special
+--   cases are always inlined directly, rather than being put into a join
+--   point.
+data ContinuationCode =
+    -- | A large continuation.
+    -- If the continuation is called from more than one point in a function, 
+    -- a local join point will be created to hold the code.
+    BigContinuation Stm
+    -- | A continuation that simply returns variables.
+  | ReturnContinuation [Val]
+    -- | A continuation that simply calls a join point.
+  | JoinContinuation Val [Val]
+
 -- | The continuation of a function call.
 --   Inlining may turn the continuation into a local function.
-data ContinuationCode =
-    HasContinuation [ParamVar] [ValueType] Stm
+data Continuation =
+    -- | The continuation of a local function call.
+    --   @HasContinuation PARAMETERS RETURN-TYPES STATEMENT$ is the 
+    --   continuation of the following function call, occurring in the body
+    --   of a function returning RETURN-TYPES.
+    --
+    --   > let PARAMETERS = call f args
+    --   > in STATEMENT
+    HasContinuation [ParamVar] [ValueType] !ContinuationCode
+
+    -- | 'IsTailCall' indicates that there is no continuation because the 
+    --   function is tail-called.
   | IsTailCall
 
 data NumReturns = Zero | One | Many deriving(Show)
@@ -232,16 +260,33 @@ worthInlining f
     isTinyJoinPoint f = True
   | otherwise = False
 
--- | Always inline join points if the body is one of the following:
+-- | Always inline join points if the body is a return statement
+--   or a tail-call.
+--   Since a non-inlined join point is a tail call, inlining is guaranteed
+--   to produce a simpler result in these cases.
+isTinyJoinPoint :: Fun -> Bool
+isTinyJoinPoint f = isTinyJoinBody $ funBody f
+
+-- | Decide whether the statement is as simple as a join point.
 --
 --   * A 'ValA' term
 --   * A tail call to a join point
-isTinyJoinPoint :: Fun -> Bool
-isTinyJoinPoint f =
-  case funBody f
-  of ReturnE (ValA _)             -> True
-     ReturnE (CallA JoinCall _ _) -> True
-     _                            -> False
+isTinyJoinBody :: Stm -> Bool
+isTinyJoinBody s =
+  case asContinuationCode s 
+  of BigContinuation _ -> False
+     _                 -> True
+
+-- | Create the 'ContinuationCode' of a statement.
+asContinuationCode :: Stm -> ContinuationCode
+asContinuationCode (ReturnE (ValA vs))             = ReturnContinuation vs
+asContinuationCode (ReturnE (CallA JoinCall v vs)) = JoinContinuation v vs
+asContinuationCode s                               = BigContinuation s
+
+fromContinuationCode :: ContinuationCode -> Stm
+fromContinuationCode (BigContinuation s) = s
+fromContinuationCode (ReturnContinuation vs) = ReturnE (ValA vs)
+fromContinuationCode (JoinContinuation v vs) = ReturnE (CallA JoinCall v vs)
 
 -- | Return True if it's possible to inline the function.
 funIsInlinable f =
@@ -260,7 +305,7 @@ funIsInlinable f =
 --   to this function.
 inlineCall :: (Fun, NumReturns) -- ^ Function to inline
            -> [Val]             -- ^ Function arguments
-           -> ContinuationCode  -- ^ Continuation of function call
+           -> Continuation      -- ^ Continuation of function call
            -> InlStm Stm
 inlineCall x args cont =
   {-# SCC "inlineCall" #-} inlineCall' x args cont
@@ -279,10 +324,14 @@ inlineCall' (!f, n_returns) args cont
         of IsTailCall -> do
              rtypes <- getReturns
              tellReturn         -- This continuation is an endpoint
-             return $ HasContinuation [ret_var] rtypes (ReturnE ret_call)
-           HasContinuation cont_vars cont_rtypes cont_stm ->
-             let app_cont_stm = LetE cont_vars ret_call cont_stm
-             in return $ HasContinuation [ret_var] cont_rtypes app_cont_stm
+             let new_cont = BigContinuation $ ReturnE ret_call
+             return $ HasContinuation [ret_var] rtypes new_cont
+
+           HasContinuation cont_vars cont_rtypes cont_code ->
+             let new_cont_code =
+                   BigContinuation $
+                   LetE cont_vars ret_call (fromContinuationCode cont_code)
+             in return $ HasContinuation [ret_var] cont_rtypes new_cont_code
       inlineSaturatedCall f n_returns (take n_params args) app_cont
 
   | otherwise = do
@@ -299,13 +348,14 @@ inlineCall' (!f, n_returns) args cont
           return $
             LetrecE (NonRec (Def partial_app_var partial_app)) $
             ReturnE (ValA [VarV partial_app_var])
-        HasContinuation [cont_var] cont_rtypes cont_stm 
+        HasContinuation [cont_var] cont_rtypes cont_code
           | PrimType OwnedType <- varType cont_var -> do
             -- This is not an endpoint.  If there are endpoints, they are 
             -- part of the continuation, 'cont_stm', and they have already
             -- been marked.
             return $
-              LetrecE (NonRec (Def cont_var partial_app)) cont_stm
+              LetrecE (NonRec (Def cont_var partial_app))
+              (fromContinuationCode cont_code)
         HasContinuation {} ->
           -- Wrong number of return values
           internalError "inlineCall: Type error detected"
@@ -325,7 +375,7 @@ inlineSaturatedCall (!f) (!n_returns) args IsTailCall = do
 --   graft the continuation onto the endpoint.
 --   Otherwise, turn the continuation into a join point.
 
-inlineSaturatedCall (!f) (!n_returns) args (HasContinuation params rtypes stm) =
+inlineSaturatedCall (!f) (!n_returns) args (HasContinuation params rtypes cont) =
   case n_returns
   of Zero -> 
        -- The function has no endpoints; the continuation is unreachable
@@ -334,26 +384,46 @@ inlineSaturatedCall (!f) (!n_returns) args (HasContinuation params rtypes stm) =
      One ->
        -- The function has one endpoint.  Graft the continuation onto the
        -- endpoint.
-       return $ insertContinuation params stm $
-         bindArguments args (funParams f) (funBody f)
-     Many -> do
-       -- Create a continuation function
-       cont_name <- newAnonymousVar (PrimType OwnedType)
-       let cont_function = closureFun params rtypes stm
+       insertContinuationInline f args params cont
+       --return $ insertContinuation params stm $
+       --  bindArguments args (funParams f) (funBody f)
+     Many ->
+       case cont
+       of BigContinuation stm ->
+            insertContinuationAsJoinPoint f args params rtypes stm
+          _ -> insertContinuationInline f args params cont
+  
+-- | Given a function that will be inlined, inline the function's
+--   continuation into its body.  Return the code of the inlined function.
+insertContinuationInline f args params cont =
+  let inlined_body = bindArguments args (funParams f) (funBody f)
+      cont_stm     = fromContinuationCode cont
+  in return $ insertContinuation params cont_stm inlined_body
 
-       f_return_vars <- mapM newAnonymousVar (funReturnTypes f)
-       let cont_call =
-             ReturnE $ closureCallA (VarV cont_name) (map VarV f_return_vars)
-       let inlined_body =
-             -- Bind the function's parameters
-             bindArguments args (funParams f) $
-             -- Define the continuation function
-             LetrecE (NonRec (Def cont_name cont_function)) $
-             -- Insert a call to the continuation at the end of the
-             -- inlined function body
-             insertContinuation f_return_vars cont_call $ funBody f
+-- | Given a function that will be inlined, inline the function's
+--   continuation into its body.  Return the code of the inlined function.
+insertContinuationAsJoinPoint f args params rtypes stm = do
+  let fun_params       = funParams f 
+      fun_return_types = funReturnTypes f 
+      fun_body         = funBody f
 
-       return inlined_body
+  -- Create a continuation function
+  cont_name <- newAnonymousVar (PrimType OwnedType)
+  let cont_function = closureFun params rtypes stm
+
+  f_return_vars <- mapM newAnonymousVar fun_return_types
+  let cont_call =
+        ReturnE $ closureCallA (VarV cont_name) (map VarV f_return_vars)
+  let inlined_body =
+        -- Bind the function's parameters
+        bindArguments args fun_params $
+        -- Define the continuation function
+        LetrecE (NonRec (Def cont_name cont_function)) $
+        -- Insert a call to the continuation at the end of the
+        -- inlined function body
+        insertContinuation f_return_vars cont_call fun_body
+
+  return inlined_body
 
 -- | Bind inlined function parameters to argument values
 bindArguments (arg:args) (param:params) e =
@@ -431,7 +501,7 @@ inlineFun f =
 --   'insertContinuation'.
 --
 --   The arguments should be renamed before they are passed to this function.
-inlineAtom :: Atom -> ContinuationCode -> InlStm Stm
+inlineAtom :: Atom -> Continuation -> InlStm Stm
 inlineAtom atom cont =
   case atom
   of CallA cc (VarV op) args -> do
@@ -444,7 +514,7 @@ inlineAtom atom cont =
     don't_inline =
       case cont
       of HasContinuation params _ k -> do
-           return $ LetE params atom k
+           return $ LetE params atom (fromContinuationCode k)
          IsTailCall -> do
            -- Is this a tail call to a join point?
            case atom of
@@ -478,7 +548,7 @@ inlineLet params rhs body = do
   renameParameters params $ \params' -> do
     body' <- inline body
     rtypes <- getReturns
-    inlineAtom rhs' $ HasContinuation params' rtypes body'
+    inlineAtom rhs' $ HasContinuation params' rtypes (asContinuationCode body')
       
 inlineLetrec defs body = inlineGroup defs (inline body)
 

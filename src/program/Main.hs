@@ -381,18 +381,19 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
 
-  -- Label join points, then inline
-  ll_mod <- LowLevel.convertJoinPoints ll_mod
-  ll_mod <- LowLevel.Inlining2.inlineModule ll_mod
-
-  -- Additional rounds: more inlining
-  ll_mod <- iterateM (LowLevel.commonSubexpressionElimination >=>
-                      return . LowLevel.eliminateDeadCode >=>
-                      LowLevel.Inlining2.inlineModule) 5 ll_mod
+  -- Several rounds of inlining and simplification
+  let round m = do
+        m <- LowLevel.convertJoinPoints m -- Label join points before inlining
+        -- putStrLn ""
+        -- putStrLn "After simplifying"
+        -- print $ LowLevel.pprModule m
+        m <- LowLevel.Inlining2.inlineModule m
+        -- Take advantage of optimization opportunities exposed by inlining
+        m <- LowLevel.commonSubexpressionElimination m
+        return $ LowLevel.eliminateDeadCode m
+  ll_mod <- iterateM round 6 ll_mod
 
   -- Cleanup
-  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
-  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   ll_mod <- return $ LowLevel.clearImportedFunctionDefinitions ll_mod
   putStrLn ""
   putStrLn "Optimized"
