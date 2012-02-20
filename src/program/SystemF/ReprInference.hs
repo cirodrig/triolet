@@ -573,7 +573,15 @@ cvtNormalizeReturnType t = do
 --   the continuation to the coerced expression.
 --
 --   Coercions may wrap the producer of the coerced value (the expression)
---   and/or the consumer of the coerced value (the continuation's result).
+--   with additional code.
+--
+--   It used to be the case that coercions could wrap the consumer of the
+--   coerced value (the continuation's result), which is why we take a
+--   continuation argument.  We no longer do that, though.  It would be
+--   possible to simplify this data type.
+--
+--   TODO: Change the data constructor to
+--   > Coercion !(ExpM -> RI ExpM)
 data Coercion =
     IdCoercion    
   | Coercion !(forall a. (ExpM -> RI (ExpM, a)) -> ExpM -> RI (ExpM, a))
@@ -600,15 +608,12 @@ toStoredCoercion ty = Coercion $ \k e ->
 fromStoredCoercion :: Type -> Coercion
 fromStoredCoercion ty = Coercion $ \k e -> do
   val_var <- newAnonymousVar ObjectLevel
-  (expr, x) <- k (ExpM $ VarE defaultExpInfo val_var)
-  
-  -- Create a case statement
   let decon = VarDeCon (pyonBuiltin The_stored) [ty] []
   let alt = AltM $ Alt { altCon = decon
                        , altParams = [patM (val_var ::: ty)]
-                       , altBody = expr}
+                       , altBody = ExpM $ VarE defaultExpInfo val_var}
       cas = ExpM $ CaseE defaultExpInfo e [alt]
-  return (cas, x)
+  k cas
 
 -- | Coerce @writer -> box@ using the @convertToBoxed@ function.
 --   The argument is the @bare@ type.
@@ -645,25 +650,16 @@ copyCoercion ty = Coercion $ \k e -> do
 --   representation.
 
 -- The generated code is:
--- let boxed_var = Boxed e
--- in case boxed_var
---    of Boxed read_var. k read_var
+-- k (case Boxed e of Boxed read_var. read_var)
 writeLocalCoercion :: Type -> Coercion
 writeLocalCoercion ty = Coercion $ \k e -> do
-  boxed_var <- newAnonymousVar ObjectLevel
   read_var <- newAnonymousVar ObjectLevel
-  (expr, x) <- k (ExpM $ VarE defaultExpInfo read_var)
-  
   let rhs = ExpM $ ConE defaultExpInfo box_con [e]
       expr_alt = AltM $ Alt { altCon = box_decon
                             , altParams = [patM (read_var ::: ty)]
-                            , altBody = expr}
-      body = ExpM $ CaseE defaultExpInfo
-             (ExpM $ VarE defaultExpInfo boxed_var)
-             [expr_alt]
-      pattern = patM (boxed_var ::: box_type)
-      local_expr = ExpM $ LetE defaultExpInfo pattern rhs body
-  return (local_expr, x)
+                            , altBody = ExpM $ VarE defaultExpInfo read_var}
+      body = ExpM $ CaseE defaultExpInfo rhs [expr_alt]
+  k body
   where
     box_con = VarCon (pyonBuiltin The_boxed) [ty] []
     box_decon = VarDeCon (pyonBuiltin The_boxed) [ty] []
