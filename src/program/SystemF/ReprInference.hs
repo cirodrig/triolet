@@ -513,7 +513,7 @@ cvtType mode (CoT (VarT k))
     -- Coercion type
     -- Always generate coercions on boxed objects.
     return (CoT (VarT k), boxT `FunT` boxT `FunT` valT)
-  
+
 cvtType mode (CoT _) =
   internalError "cvtType: Unexpected kind in coercion type"
 

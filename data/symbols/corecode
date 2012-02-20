@@ -2460,7 +2460,8 @@ ShapeDict_dim1_member (dom : dim1) (ix : Stored int)
   else False;
 
 
-ShapeDict_dim1_intersect (d : dim1) (e : dim1) -> dim1 attribute(inline, inline_final) =
+ShapeDict_dim1_intersect (d : dim1) (e : dim1)
+  -> dim1 attribute(inline, inline_final) =
   case d of mk_dim1 (iv1 : Interval) (m1 : LinearMap).
   case e of mk_dim1 (iv2 : Interval) (m2 : LinearMap).
   case intersectLM m1 m2 of {
@@ -2474,7 +2475,7 @@ ShapeDict_dim1_intersect (d : dim1) (e : dim1) -> dim1 attribute(inline, inline_
 
 ShapeDict_dim1_flatten @(a : bare)
   (repr : Repr a) (s : Stream dim1 a) -> Stream list_dim a
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
   case s of mk_view @dim1 @a (dom : dim1) (f : Stored int -> Writer a).
 
   -- Compute the size of the list

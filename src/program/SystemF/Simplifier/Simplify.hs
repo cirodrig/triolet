@@ -92,6 +92,13 @@ data SimplifierPhase =
     -- | Finally, functions are inlined without regard to rewrite rules. 
   | FinalSimplifierPhase
 
+    -- | Transformations that make high-level optimizations harder,
+    --   but produce better lowered code, are performed here.
+    --   Case-of-case is applied even to single-branch case statements.
+    --   The inlining threshold is turned down.
+  | PostFinalSimplifierPhase
+    deriving(Eq, Ord)
+
 -- | Parts of LREnv that don't change during a simplifier run.  By
 --   keeping these in a separate data structure, we reduce the work
 --   performed when updating the environment.
@@ -338,7 +345,11 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
     fun_size_threshold =
       -- Use a low threshold for compiler-inserted join points, because
       -- they generally don't provide useful opportunities for optimization
-      if defAnnJoinPoint ann then 8 else 800
+      if defAnnJoinPoint ann
+      then 8
+      else -- After the 'Final' phase, reduce the inlining threshold
+           -- in order to focus on intraprocedural code cleanup
+           if phase < PostFinalSimplifierPhase then 800 else 16
 
 -- | Decide whether the function is good for inlining, based on 
 --   its use annotation.  Functions that are used exactly once should be
@@ -375,6 +386,8 @@ phasePermitsInlining phase def =
              InlSequential -> True
              InlFinal      -> False
         FinalSimplifierPhase ->
+          True
+        PostFinalSimplifierPhase ->
           True
 
 -- | Add a pattern-bound variable to the environment.  
@@ -476,10 +489,13 @@ rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
 --   In later compiler phases, @Sequence@ methods are rewritten to sequential
 --   loops.  Other stream methods are inlined and don't require special
 --   transformations.
-interpretStreamInSimplifier inf op ty_args args = LR $ \env -> do
+interpretStreamInSimplifier inf op ty_args args = LR $ \env ->
   let phase = lrPhase $ lrConstants env
-  x <- runTypeEvalM (interpret_stream phase) (lrIdSupply $ lrConstants env) (lrTypeEnv env)
-  return $ Just x
+  in if phase > FinalSimplifierPhase
+     then return Nothing
+     else do
+       x <- runTypeEvalM (interpret_stream phase) (lrIdSupply $ lrConstants env) (lrTypeEnv env)
+       return $ Just x
   where
     interpret_stream phase = do
       ms <- interpretStreamAppExp inf op ty_args args
@@ -491,6 +507,7 @@ interpretStreamInSimplifier inf op ty_args args = LR $ \env -> do
              DimensionalitySimplifierPhase -> simplify_stream s
              SequentialSimplifierPhase -> serialize_stream s
              FinalSimplifierPhase -> serialize_stream s
+             PostFinalSimplifierPhase -> error "interpretStreamInSimplifier"
 
     simplify_stream s = do
       s' <- simplifyStreamExp s
@@ -2117,10 +2134,14 @@ rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values alts = do
   -- Product types are skipped because they are transformed by
   -- argument flattening instead.
   have_fuel <- checkFuel
+  tenv <- getTypeEnv
+  phase <- getPhase
   case scrut of
     ExpM (CaseE _ inner_scrut inner_alts)
       | have_fuel &&
-        {- not (is_product_case tenv) && -}
+        -- Before 'PostFinal', only transform when the outer case inspects
+        -- a sum type
+        (phase >= PostFinalSimplifierPhase || sum_case tenv alts) &&
         isUnfloatableCase scrut -> do
           -- Apply the case-of-case transformation
           rwCaseOfCase inf Nothing inner_scrut inner_alts alts
@@ -2129,6 +2150,16 @@ rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values alts = do
       let one_alt = length alts == 1
       alts' <- mapM (rwAlt is_stream_arg one_alt scrut_var known_values) alts
       rwExpReturn (ExpM $ CaseE inf scrut alts', topCode)
+  where
+    -- Check whether the outer case statement is inspecting a type with
+    -- more than one constructor
+    sum_case tenv (AltSM alt : _) =
+      -- Get the data type from the case alternative
+      case altCon alt
+      of TupleDeCon {} -> False
+         VarDeCon con _ _ ->
+           let Just (data_type, _) = lookupDataConWithType con tenv
+           in length (dataTypeDataConstructors data_type) /= 1
 
 -- | Find the alternative matching constructor @con@
 findAlternative :: [AltSM] -> ConInst -> AltSM
@@ -2705,6 +2736,7 @@ rewriteAtPhase phase mod = rewriteLocalExpr phase rules mod
          DimensionalitySimplifierPhase -> generalRewrites
          SequentialSimplifierPhase -> sequential_rewrites
          FinalSimplifierPhase -> sequential_rewrites
+         PostFinalSimplifierPhase -> sequential_rewrites
       where
         sequential_rewrites =
           combineRuleSets [generalRewrites, sequentializingRewrites]
