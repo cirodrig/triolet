@@ -82,7 +82,10 @@ data instance Exp Stream =
     , sexpValue  :: ExpM
     , sexpBody   :: ExpS
     }
-    -- | Recursive definition group
+    -- | Recursive definition group.
+    --   These functions are treated as local non-stream functions.
+    --   If they are, in fact, continuations/join points, the stream
+    --   optimizer will treat them as unknown function calls.
   | LetfunSE
     { sexpInfo :: ExpInfo
     , sexpDefs :: DefGroup (FDef Mem)
@@ -514,6 +517,9 @@ pprExpSPrec expression =
      LetSE _ pat rhs body ->
        hang (text "let" <+> pprPat pat <+> text "=") 6 (pprExp rhs) $$
        pprExpS body `hasPrec` stmtPrec
+     LetfunSE _ defs body ->
+       text "letfun" <+> pprFDefGroup defs $$
+       pprExpS body `hasPrec` stmtPrec
      CaseSE _ scr alts ->
        text "case" <+> pprExp scr $$
        text "of" <+> vcat (map pprAltS alts) `hasPrec` stmtPrec
@@ -835,6 +841,10 @@ interpretStreamSubExp expression =
     LetE inf pat rhs body -> do
       body' <- assumePatM pat $ interpretStreamSubExp body
       return $ LetSE inf pat rhs body'
+    LetfunE inf defs body -> do
+      ((), body') <-
+        assumeFDefGroup defs (return ()) $ interpretStreamSubExp body
+      return $ LetfunSE inf defs body'
     CaseE inf scr alts -> do
       alts' <- mapM interpretStreamAlt alts
       return $ CaseSE inf scr alts'
@@ -1029,6 +1039,8 @@ embedStreamExp expression =
        ExpM $ LamE inf (embedStreamFun f)
      LetSE inf b rhs body ->
        ExpM $ LetE inf b rhs (embedStreamExp body)
+     LetfunSE inf defs body ->
+       ExpM $ LetfunE inf defs (embedStreamExp body)
      CaseSE inf scr alts ->
        ExpM $ CaseE inf scr (map embedStreamAlt alts)
      ExceptSE inf stream_type element_type ->
@@ -1540,6 +1552,10 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
        body' <- sequentializeFold acc_ty a_ty acc_repr_var a_repr acc
                 combiner body
        return $ ExpM $ LetE inf pat rhs body'
+     LetfunSE inf defs body -> do
+       body' <- sequentializeFold acc_ty a_ty acc_repr_var a_repr acc
+                combiner body
+       return $ ExpM $ LetfunE inf defs body'
      CaseSE inf scr alts -> do
        alts' <- mapM (sequentializeFoldCaseAlternative
                       acc_ty a_ty acc_repr_var a_repr acc combiner) alts
