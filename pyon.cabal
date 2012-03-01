@@ -180,6 +180,7 @@ Executable pyon
     LowLevel.GenerateCUtils
     LowLevel.Intrinsics
     LowLevel.JoinPoints
+    LowLevel.NormalizeTail
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record

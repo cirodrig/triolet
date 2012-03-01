@@ -52,6 +52,7 @@ import qualified LowLevel.GenerateCXXHeader as LowLevel
 import qualified LowLevel.Inlining2
 import qualified LowLevel.JoinPoints as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
+import qualified LowLevel.NormalizeTail as LowLevel
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
@@ -384,7 +385,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
 
-  -- Several rounds of inlining and simplification
+  -- Several rounds of inlining and simplification.
+  -- Run 2 rounds, which is enough to inline most HOFs.
+  -- Then normalize tail calls to increase opportunities for inlining.
   let round m = do
         m <- LowLevel.convertJoinPoints m -- Label join points before inlining
         -- putStrLn ""
@@ -394,7 +397,10 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
         -- Take advantage of optimization opportunities exposed by inlining
         m <- LowLevel.commonSubexpressionElimination m
         return $ LowLevel.eliminateDeadCode m
-  ll_mod <- iterateM round 6 ll_mod
+
+  ll_mod <- iterateM round 2 ll_mod
+  ll_mod <- LowLevel.normalizeTailCalls ll_mod
+  ll_mod <- iterateM round 2 ll_mod
 
   -- Cleanup
   ll_mod <- return $ LowLevel.clearImportedFunctionDefinitions ll_mod
