@@ -148,23 +148,23 @@ renameGlobalData rn var =
 rnVar :: Renaming -> Var -> Var
 rnVar rn v = fromMaybe v $ IntMap.lookup (fromIdent $ varID v) rn
 
-rnVal :: Rn -> Val -> FreshVarM Val
+rnVal :: Rn -> Val -> Val
 rnVal rn value =
   case value
-  of VarV v      -> return $ VarV (rnVar (rnRenaming rn) v)
-     RecV rec vs -> RecV rec `liftM` rnVals rn vs
-     LitV l      -> return $ LitV l
+  of VarV v      -> VarV (rnVar (rnRenaming rn) v)
+     RecV rec vs -> RecV rec $ rnVals rn vs
+     LitV l      -> LitV l
 
-rnVals rn vs = mapM (rnVal rn) vs
+rnVals rn vs = map (rnVal rn) vs
 
 rnAtom :: Rn -> Atom -> FreshVarM Atom
 rnAtom rn atom =
   case atom
-  of ValA vs            -> ValA `liftM` rnVals rn vs
-     CallA conv op args -> CallA conv `liftM` rnVal rn op `ap` rnVals rn args
-     PrimA prim args    -> PrimA prim `liftM` rnVals rn args
-     PackA sr vs        -> PackA sr `liftM` rnVals rn vs
-     UnpackA sr v       -> UnpackA sr `liftM` rnVal rn v
+  of ValA vs            -> return $ ValA (rnVals rn vs)
+     CallA conv op args -> return $ CallA conv (rnVal rn op) (rnVals rn args)
+     PrimA prim args    -> return $ PrimA prim (rnVals rn args)
+     PackA sr vs        -> return $ PackA sr (rnVals rn vs)
+     UnpackA sr v       -> return $ UnpackA sr (rnVal rn v)
 
 rnStm :: Rn -> Stm -> FreshVarM Stm
 rnStm rn statement =
@@ -188,13 +188,13 @@ rnStm rn statement =
        stm' <- rnStm (setRenaming renaming rn) stm
        return $ LetrecE (Rec $ zipWith Def definienda definientia) stm'
      SwitchE scr alts -> do
-       scr' <- rnVal rn scr
+       let scr' = rnVal rn scr
        alts' <- mapM rename_alt alts
        return $ SwitchE scr' alts'
      ReturnE atom ->
        ReturnE `liftM` rnAtom rn atom
      ThrowE val ->
-       ThrowE `liftM` rnVal rn val
+       return $ ThrowE (rnVal rn val)
   where
     rename_alt (tag, stm) = do
       stm' <- rnStm rn stm
@@ -208,7 +208,7 @@ rnFun rn f = do
 
 -- | Rename the contents of a data definition.
 rnStaticData :: Rn -> StaticData -> FreshVarM StaticData
-rnStaticData rn (StaticData val) = liftM StaticData $ rnVal rn val
+rnStaticData rn (StaticData val) = return $ StaticData (rnVal rn val)
 
 -- | Rename variables in an import specification.
 --
@@ -292,7 +292,7 @@ rnTopLevel rn global_defs exports = do
 
 
 -- | Rename variables in a value.  Start with the given renaming.
-renameVal :: RnPolicy -> Renaming -> Val -> FreshVarM Val
+renameVal :: RnPolicy -> Renaming -> Val -> Val
 renameVal policy rn val = rnVal (policy, rn) val
 
 -- | Rename variables in a statement.  Start with the given renaming.

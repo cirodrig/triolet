@@ -405,6 +405,6 @@ renameInterface extern_variables iface = do
             ImportData _ Nothing ->
               return $ ImportData renamed_var Nothing
             ImportData _ (Just (StaticData val)) -> do
-              val' <- renameVal RenameEverything renaming val
+              let val' = renameVal RenameEverything renaming val
               return $ ImportData renamed_var (Just (StaticData val'))
       
