@@ -3,7 +3,14 @@ Methods for renaming variables in a module.
 -}
 
 module LowLevel.Rename
-       (RnPolicy(..),
+       (-- * Free variables
+        FreeVars, MkFreeVars,
+        HasScope(..),
+        computeFreeVars,
+        maskFreeVar, maskFreeVars,
+
+        -- * Renaming
+        RnPolicy(..),
         Renaming,
         lookupRenamedVar,
         mkRenaming,
@@ -23,7 +30,10 @@ import Prelude hiding(mapM)
 
 import Control.Monad hiding(mapM)
 import qualified Data.IntMap as IntMap
+import Data.List(foldl')
 import Data.Maybe
+import Data.Monoid
+import qualified Data.Set as Set
 import Data.Traversable
 
 import Common.Error
@@ -31,6 +41,74 @@ import Common.Identifier
 import LowLevel.FreshVar
 import LowLevel.Syntax
 import Export
+
+-------------------------------------------------------------------------------
+-- Free variables
+
+type FreeVars = Set.Set Var
+
+newtype MkFreeVars = MkFreeVars (Set.Set Var -> Set.Set Var)
+
+-- | 'MkFreeVars' is a monoid under composition.
+--   @x `mappend` y@ performs @x@, then @y@.
+instance Monoid MkFreeVars where
+  mempty = MkFreeVars id
+  MkFreeVars f1 `mappend` MkFreeVars f2 = MkFreeVars (f2 . f1)
+  mconcat ms = MkFreeVars $ \s -> foldl' (\s (MkFreeVars f) -> f s) s ms
+
+computeFreeVars :: MkFreeVars -> FreeVars
+computeFreeVars (MkFreeVars f) = f Set.empty
+
+putFreeVar :: Var -> MkFreeVars
+putFreeVar v = MkFreeVars (Set.insert v)
+
+maskFreeVar :: Var -> MkFreeVars -> MkFreeVars
+maskFreeVar v (MkFreeVars f) = MkFreeVars $ \s -> Set.delete v (f s)
+
+maskFreeVars :: [Var] -> MkFreeVars -> MkFreeVars
+maskFreeVars vs (MkFreeVars f) = MkFreeVars $ \s -> foldr Set.delete (f s) vs
+
+class HasScope a where
+  freeVars :: a -> MkFreeVars
+
+instance HasScope a => HasScope [a] where
+  freeVars xs = mconcat $ map freeVars xs
+
+instance HasScope Val where
+  freeVars (VarV v)    = putFreeVar v
+  freeVars (RecV _ vs) = freeVars vs
+  freeVars (LitV _)    = mempty
+
+instance HasScope Atom where
+  freeVars (ValA vs)      = freeVars vs
+  freeVars (CallA _ v vs) = freeVars (v:vs)
+  freeVars (PrimA _ vs)   = freeVars vs
+  freeVars (PackA _ vs)   = freeVars vs
+  freeVars (UnpackA _ v)  = freeVars v
+
+instance HasScope Stm where
+  freeVars (LetE params rhs body) =
+    freeVars rhs `mappend` maskFreeVars params (freeVars body)
+
+  freeVars (LetrecE (NonRec (Def v f)) body) =
+    freeVars f `mappend` maskFreeVar v (freeVars body)
+
+  freeVars (LetrecE (Rec defs) body) =
+    let vars = map definiendum defs
+        funs = map definiens defs
+    in maskFreeVars vars (freeVars funs `mappend` freeVars body)
+
+  freeVars (SwitchE scr alts) =
+    freeVars scr `mappend` mconcat [freeVars s | (_, s) <- alts]
+
+  freeVars (ReturnE atom) = freeVars atom
+
+  freeVars (ThrowE val) = freeVars val
+
+instance HasScope a => HasScope (FunBase a) where
+  freeVars f = maskFreeVars (funParams f) $ freeVars (funBody f)
+
+-------------------------------------------------------------------------------
 
 -- | A variable renaming
 type Renaming = IntMap.IntMap Var
