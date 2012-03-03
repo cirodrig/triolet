@@ -1570,8 +1570,13 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
     stored_int_type =
       varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_int)]
 
--- Turn a one-parameter stream function into a combining function for a fold
-sequentializeCombiningFunction acc_ty arg_ty acc_repr_var arg_repr combiner transformer = do
+-- Turn a one-parameter stream function into a combining function for a fold.
+--
+-- Creates (\acc x r. T [| t |] acc c r)
+sequentializeCombiningFunction :: Type -> Type -> Var -> ExpM -> ExpM -> ExpS
+                               -> MaybeT TypeEvalM ExpM
+sequentializeCombiningFunction
+    acc_ty arg_ty acc_repr_var arg_repr combiner transformer = do
   (t_value_var, t_stream) <- freshenUnaryStreamFunction transformer
 
   -- Create a function corresponding to the sequentialized transformer.
