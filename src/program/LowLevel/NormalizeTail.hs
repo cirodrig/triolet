@@ -35,7 +35,9 @@ where
 import Control.Monad.Reader
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
+import qualified Data.Set as Set
 import Data.IORef
+import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
@@ -79,14 +81,9 @@ pprTailCall (TailCall params returns cc target args) =
   in text "let" <+> binder <+> text "<- _" $$ body
 
 -- | Get the set of free variables in a tail call
-freeVars :: TailCall -> [Var]
-freeVars (TailCall params _ _ tgt args) =
-  List.nub (concatMap fvVal (tgt : args)) List.\\ params
-  where
-    fvVal :: Val -> [Var]
-    fvVal (VarV v)    = [v]
-    fvVal (RecV _ vs) = concatMap fvVal vs
-    fvVal (LitV _)    = []
+instance HasScope TailCall where
+  freeVars (TailCall params _ _ tgt args) =
+    maskFreeVars params $ freeVars (tgt:args)
 
 -- | Rename bound variables in a tail call
 freshenTailCall :: Supplies m (Ident Var) => TailCall -> m TailCall
@@ -272,20 +269,41 @@ scanGroup (NonRec (Def v f)) body = do
   (k, body') <- addCont v arity $ addLocals [v] $ scan body
 
   -- If f can be normalized, then normalize.
-  (f', body'') <-
+  let no_change = return (id, f, body')
+  (hoisted_context, f', body'') <-
     case k
-    of TC tail_call -> do
+    of TC tail_call@(TailCall {tcTarget = VarV call_target}) -> do
          unless (funConvention f == ClosureCall) $
             internalError "Attempted to normalize non-closure function"
 
-         (f', captured) <- normalizeReturn tail_call f
-         let body'' = normalizeCalls v captured body'
-         return (f', body'')
-       _ -> return (f, body')
+         -- Ensure that the target is in scope
+         hoist_result <- tryHoist call_target [v] body'
+         case hoist_result of
+           Can'tHoist     -> no_change
+           HoistOK        -> do (f', body'') <-
+                                  normalize_function tail_call v f body'
+                                return (id, f', body'')
+           Hoisted vs t b -> do (f', body'') <-
+                                  -- The hoisted variables are now in scope.
+                                  -- Add them to the in-scope set.
+                                  addLocals vs $
+                                  normalize_function tail_call v f b
+                                return (t, f', body'')
+       _ -> no_change
 
-  -- Do the body of f
+  -- Do the body of f.
   f'' <- scanFun f'
-  return $ LetrecE (NonRec (Def v f'')) body''
+  return $ hoisted_context $ LetrecE (NonRec (Def v f'')) body''
+  where
+    normalize_function tail_call v f body = do
+      -- Normalize return points in the function.
+      -- Identify captured variables and add parameters for them.
+      (f', captured) <- normalizeReturn tail_call f
+      -- Normalize calls to the function.  Add captured variables to each
+      -- call.
+      let body' = normalizeCalls v captured body
+      return (f', body')
+
 
 scanGroup (Rec defs) body = do
   let definienda = map definiendum defs
@@ -337,6 +355,65 @@ normalizeTailCalls mod =
     globals' <- runReaderT (unNT (scanGlobalGroups (moduleGlobals mod))) env
     return $ mod {moduleGlobals = globals'}
 
+-------------------------------------------------------------------------------
+-- Transformations applied during tail call normalization
+
+data HoistResult =
+    Can'tHoist                  -- ^ Unable to transform
+  | HoistOK                     -- ^ No transformation required
+  | Hoisted [Var] (Stm -> Stm) Stm 
+    -- ^ The definitions were successfully hoisted from a statement.
+    --   These are the variables whose definitions were hoisted, 
+    --   the hoisted context, and the new statment.
+
+-- | Try to put a variable's definition in scope.
+--   If it's already in scope, return 'HoistOK'.
+--   If it can't be brought into scope, return 'Can'tHoist'.
+--   If it can be hoisted out of the given statement, return 'Hoisted t s' 
+--   where 't' is the hoisted definition and 's' is the statement 
+--   sans hoisted definition.
+tryHoist :: Var                 -- ^ Variable to hoist
+         -> [Var]               -- ^ Variables that must not be
+                                --   depended on.  If the definition mentions
+                                --   these variables, hoisting fails.
+         -> Stm                 -- ^ Statement to hoist from
+         -> NT HoistResult
+tryHoist name local_vars stm = do
+  in_scope <- getInScope
+  -- If the name is already in scope, nothing has to be done
+  return $! if name `List.elem` in_scope
+            then HoistOK
+            else hoist id local_vars stm
+  where
+    -- Hoist the definition of 'name' out of 'stm'.
+    -- The code fragments that will not be moved are accumulated as 'context'.
+    hoist :: (Stm -> Stm) -> [Var] -> Stm -> HoistResult
+    hoist context local_vars stm =
+      case stm
+      of LetE params rhs body
+           | not $ name `List.elem` params ->
+               hoist_under (LetE params rhs) params body
+           -- We could try hoisting let-bound variables if params == [name],
+           -- but it's probably not worth the effort.
+
+         LetrecE group@(NonRec (Def v f)) body
+           | name == v ->
+               -- If the function mentions any local_vars,
+               -- then it cannot be hoisted.
+               let fv = computeFreeVars $ freeVars f
+               in if any (`Set.member` fv) local_vars
+                  then Can'tHoist
+                  else Hoisted [v] (LetrecE group) (context stm)
+
+         LetrecE group body ->
+           hoist_under (LetrecE group) (map definiendum $ groupMembers group) body
+
+         _ -> Can'tHoist
+      where
+        -- Extend the context and in-scope variables, and keep looking
+        hoist_under new_context new_params body =
+          hoist (context . new_context) (new_params ++ local_vars) body
+
 -- | Normalize function calls by converting them to tail calls.
 --
 --   Any expression of the form @let ... = F ARGS@
@@ -367,7 +444,7 @@ normalizeReturn tail_call f = do
   -- Free variables that are not in scope here are renamed, and they
   -- become new function parameters
   in_scope <- getInScope
-  let tc_fv = freeVars tail_call
+  let tc_fv = Set.toList $ computeFreeVars $ freeVars tail_call
       captured_fv = filter (`List.notElem` in_scope) tc_fv
   captured_params <- mapM newClonedVar captured_fv
   let TailCall tc_params tc_returns tc_cc tc_target tc_args =

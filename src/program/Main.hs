@@ -398,7 +398,7 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
         m <- LowLevel.commonSubexpressionElimination m
         return $ LowLevel.eliminateDeadCode m
 
-  ll_mod <- iterateM round 2 ll_mod
+  ll_mod <- iterateM round 3 ll_mod
   ll_mod <- LowLevel.normalizeTailCalls ll_mod
   ll_mod <- iterateM round 2 ll_mod
 
