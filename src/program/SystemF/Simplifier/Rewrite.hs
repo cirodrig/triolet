@@ -354,6 +354,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             --, (pyonBuiltin The_LinStream_zipWith3_array, rwZip3ArrayStream)
             --, (pyonBuiltin The_LinStream_zipWith4_array, rwZip4ArrayStream)
             , (pyonBuiltin The_defineIntIndex, rwDefineIntIndex)
+            , (pyonBuiltin The_MultiplicativeDict_float_fromInt, rwFloatFromInt)
             , (pyonBuiltin The_EqDict_int_ne, rwIntComparison (/=))
             , (pyonBuiltin The_OrdDict_int_lt, rwIntComparison (<))
             , (pyonBuiltin The_OrdDict_int_le, rwIntComparison (<=))
@@ -1260,6 +1261,16 @@ rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
   in return $! Just $! package
 
 rwDefineIntIndex _ _ _ = return Nothing
+
+-- | If converting an int constant to a float, evaluate it
+rwFloatFromInt :: RewriteRule
+rwFloatFromInt inf [] [integer_value@(ExpM (LitE _ lit))] =
+  let IntL m _ = lit
+      f = fromIntegral m
+      float_exp = ExpM $ LitE inf (FloatL f (VarT $ pyonBuiltin The_float))
+  in f `seq` return $ Just float_exp
+
+rwFloatFromInt _ _ _ = return Nothing
 
 -- | If comparing two integer literals, replace it with constant True or False
 rwIntComparison :: (Integer -> Integer -> Bool) -> RewriteRule
