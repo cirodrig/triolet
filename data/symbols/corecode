@@ -878,7 +878,7 @@ CartesianDict_dim2_loBound
   (dom : dim2)
   (ret : OutPtr (Maybe (index dim2)))
   -> IEffect (Maybe (index dim2))
-  attribute(inline) =
+  attribute(inline, inline_final) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
   case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
   case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
@@ -903,7 +903,7 @@ CartesianDict_dim2_hiBound
   (dom : dim2)
   (ret : OutPtr (Maybe (index dim2)))
   -> IEffect (Maybe (index dim2))
-  attribute(inline) =
+  attribute(inline, inline_final) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
   case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
   case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
@@ -995,7 +995,7 @@ CartesianDict_dim3_loBound
   (dom : dim3)
   (ret : OutPtr (Maybe (index dim3)))
   -> IEffect (Maybe (index dim3))
-  attribute(inline) =
+  attribute(inline, inline_final) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
   case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
   case iv_z of interval (lb_z : MaybeVal int) (ub_z : MaybeVal int).
@@ -1027,7 +1027,7 @@ CartesianDict_dim3_hiBound
   (dom : dim3)
   (ret : OutPtr (Maybe (index dim3)))
   -> IEffect (Maybe (index dim3))
-  attribute(inline) =
+  attribute(inline, inline_final) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
   case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
   case iv_z of interval (lb_z : MaybeVal int) (ub_z : MaybeVal int).

@@ -247,7 +247,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
     else return repr_mod
 
   -- Sequentialize remaining loops
-  repr_mod <- iterateM (highLevelOptimizations False SystemF.SequentialSimplifierPhase) 5 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations False SystemF.SequentialSimplifierPhase) 6 repr_mod
 
   putStrLn ""
   putStrLn "After Simplifying"
@@ -279,7 +279,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   -- Reconstruct demand information after flattening variables,
   -- so that the next optimization pass can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
-  repr_mod <- iterateM (highLevelOptimizations True SystemF.PostFinalSimplifierPhase) 4 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations True SystemF.PostFinalSimplifierPhase) 5 repr_mod
 
   putStrLn ""
   putStrLn "Optimized"
