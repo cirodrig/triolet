@@ -126,6 +126,14 @@ data Expression =
     , expDefinitions :: [FunctionDef]
     , expBody :: Expression
     }
+    -- | A static type assertion.
+    --   Verify the assertion (during type checking), then continue.
+  | TypeAssertE
+    { expAnnotation :: Ann
+    , expVar :: Variable
+    , expType :: HMType
+    , expBody :: Expression
+    }
   deriving(Typeable)
 
 data Function =

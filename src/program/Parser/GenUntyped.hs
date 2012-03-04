@@ -385,7 +385,14 @@ doStmt statement rest =
        es' <- mapM doExpr es
        body' <- rest
        return $ foldr make_if body' es'
-         
+
+     Require pos v ty -> do
+       -- Translate to a type assertion
+       v' <- lookupObject v
+       hmtype <- doType ty
+       body' <- rest
+       return $ U.TypeAssertE (U.Ann pos) v' hmtype body'
+
      If pos c t f (Just join_point) -> doIf pos c t f join_point rest
      If _   _ _ _ Nothing           -> internalError "doStmt"
      

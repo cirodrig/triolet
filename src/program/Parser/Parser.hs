@@ -702,6 +702,9 @@ singleStatement stmt =
          singleton . ExprStmt source_pos <$> expression ValueLevel e
        Py.Assert {Py.assert_exprs = es} ->
          singleton . Assert source_pos <$> traverse (expression ValueLevel) es
+       Py.Require {Py.require_name = v, Py.require_label = e} ->
+         singleton <$>
+         (Require source_pos <$> use ValueLevel v <*> expression TypeLevel e)
        Py.Conditional {Py.cond_guards = guards, Py.cond_else = els} ->
          foldr ifelse (suite els) guards
        Py.Assign {Py.assign_to = dsts, Py.assign_expr = src} -> 
@@ -915,7 +918,8 @@ definitionGroups fs =
                  return (fromNode, toNode, ())
 
 class MentionsVars a where
-    -- Get the set of variable IDs mentioned in the term.
+    -- Get the set of value variable IDs mentioned in the term.
+    -- Ignore type variables.
     -- We don't care whether the variable is in-scope or not.
     mentionedVars :: a -> Set Int
 
@@ -928,6 +932,7 @@ instance MentionsVars (Stmt Int) where
         of ExprStmt _ e   -> mentionedVars e
            Assign _ _ e   -> mentionedVars e
            Assert _ es    -> mentionedVars es
+           Require _ v e  -> Set.singleton (varID v)
            Return _ _ _ e -> mentionedVars e
            If _ e s1 s2 _ -> mentionedVars e `Set.union`
                              mentionedVars s1 `Set.union`

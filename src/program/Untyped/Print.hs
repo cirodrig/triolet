@@ -54,6 +54,7 @@ pprExpression exp =
      FunE {expFunction = f} -> pprFunction Nothing f
      LetE {} -> pprBlock exp
      LetrecE {} -> pprBlock exp
+     TypeAssertE {} -> pprBlock exp
 
 pprBlock :: Expression -> Doc
 pprBlock e = showBlock $ pprAsStatements e
@@ -69,6 +70,9 @@ pprBlock e = showBlock $ pprAsStatements e
          LetrecE {expDefinitions = defs, expBody = body} ->
            let defs_doc = showBlock $ map pprDefinition defs
            in (text "letrec" $$ nest 2 defs_doc) : pprAsStatements body
+         TypeAssertE {expVar = v, expType = t, expBody = body} ->
+           let prop_doc = pprVariable v <+> colon <+> text "(TYPE)"
+           in (text "require" <+> prop_doc) : pprAsStatements body
          _ -> [pprExpression expr]
 
 pprDefinition :: FunctionDef -> Doc

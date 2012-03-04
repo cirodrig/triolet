@@ -397,6 +397,10 @@ ssaStmt next_stmt statement =
      Assert pos es -> do
        es' <- mapM ssaExpr es
        fall_through $ Assert pos es'
+     Require pos x e -> do
+       x' <- useV x
+       e' <- ssaExpr e
+       fall_through $ Require pos x' e'
      If pos c t f _ -> do
        c' <- ssaExpr c
        (true_suite, false_suite, join) <- ifControl (ssaSuite t) (ssaSuite f)

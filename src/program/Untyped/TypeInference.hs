@@ -684,6 +684,14 @@ inferExpressionType' expression =
        inferDefGroup False defs $ \defs' -> do
          (body_exp, body_ty) <- inferExpressionType body
          return (mkLetrecE pos defs' body_exp, body_ty)
+
+     TypeAssertE {expVar = check_var, expType = t, expBody = body} -> do
+       -- Unify check_var type with t
+       (_, v_type) <- instantiateVariable pos check_var
+       co <- unifyInf False pos t v_type
+
+       -- Type assertion is removed from the appear in output
+       inferExpressionType body
   where
     pos = getSourcePos expression
 

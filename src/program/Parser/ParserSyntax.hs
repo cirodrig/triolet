@@ -113,6 +113,11 @@ data Stmt id =
     { stmtPos :: !SourcePos 
     , stmtExprs :: [Expr id]
     }
+  | Require 
+    { stmtPos :: !SourcePos 
+    , stmtVar :: (Var id)
+    , stmtExpr :: Expr id
+    }
   | If 
     { stmtPos :: SourcePos 
     , stmtCond :: Expr id
