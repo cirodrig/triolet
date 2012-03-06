@@ -415,6 +415,14 @@ builtinGlobals =
      Left $ PrimType PointerType)
 
     -- Physical representations of data types
+  , (PyonName module_list "repr_barray1",
+     Right [| pyonBuiltin SystemF.The_repr_barray1 |])
+  , (PyonName module_list "repr_barray2",
+     Right [| pyonBuiltin SystemF.The_repr_barray2 |])
+  , (PyonName module_list "repr_barray3",
+     Right [| pyonBuiltin SystemF.The_repr_barray3 |])
+  , (PyonName module_structures "repr_StoredBox",
+     Right [| SystemF.pyonBuiltin SystemF.The_repr_StoredBox |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.The_repr_Box |])
   , (PyonName module_structures "repr_Stream",

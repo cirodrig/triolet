@@ -420,6 +420,11 @@ procedure pyon_List_get_contents (pointer lst) -> pointer {
   lst @! PyonList.contents;
 };
 
+procedure pyon_List_get_length (pointer lst) -> uint {
+  FinIndInt {n} = lst @! PyonList.nelems;
+  n as uint;
+};
+
 procedure pyon_Array0_size (uint size, uint align) -> uint {
   sizeof PyonArray0(bytes(value size, value align));
 };

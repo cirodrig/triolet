@@ -104,8 +104,9 @@ mkTyFunction name kind cst sf_var instances = do
 mkShapeTyFun = do
   rec { (con, fam) <- mkTyFunction "shape" shape_kind []
                       (pyonBuiltin SystemF.The_shape)
-                      [list_instance, array1_instance, array2_instance,
-                       array3_instance,
+                      [list_instance,
+                       array1_instance, array2_instance, array3_instance,
+                       barray1_instance, barray2_instance, barray3_instance,
                        view_instance, iter_instance]
 
       ; let list_instance =
@@ -123,6 +124,18 @@ mkShapeTyFun = do
       ; let array3_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_array3)
+              (ConTy $ tiBuiltin the_con_dim3)
+      ; let barray1_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_barray1)
+              (ConTy $ tiBuiltin the_con_dim1)
+      ; let barray2_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_barray2)
+              (ConTy $ tiBuiltin the_con_dim2)
+      ; let barray3_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_barray3)
               (ConTy $ tiBuiltin the_con_dim3)
       ; sh <- newTyVar Star Nothing
       ; let view_instance =
@@ -359,6 +372,7 @@ mkTraversableClass = do
                   [iter, build]
                   [list_instance,
                    array1_instance, array2_instance, array3_instance,
+                   barray1_instance, barray2_instance, barray3_instance,
                    view_list_dim_instance,
                    view_dim0_instance,
                    view_dim1_instance,
@@ -401,6 +415,30 @@ mkTraversableClass = do
                   pyonBuiltin SystemF.The_TraversableDict_array1_traverse
                 , InstanceMethod $
                   pyonBuiltin SystemF.The_TraversableDict_array1_build]
+
+            barray3_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_barray3)
+                [ InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_barray3_traverse
+                , InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_barray3_build]
+
+            barray2_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_barray2)
+                [ InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_barray2_traverse
+                , InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_barray2_build]
+
+            barray1_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_barray1)
+                [ InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_barray1_traverse
+                , InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_barray1_build]
 
             view_list_dim_instance =
                 monomorphicInstance cls
@@ -596,7 +634,9 @@ mkIndexableClass = do
                   (pyonBuiltin SystemF.The_IndexableDict)
                   (pyonBuiltin SystemF.The_indexableDict)
                   [at, get_shape]
-                  [list_instance, array1_instance, array2_instance,
+                  [list_instance,
+                   array1_instance, array2_instance,
+                   barray1_instance, barray2_instance,
                    view_instance]
 
       ; at <- mkClassMethod cls 0 "at_point" at_scheme
@@ -616,6 +656,16 @@ mkIndexableClass = do
               (ConTy $ tiBuiltin the_con_array2)
               [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array2_at_point
               , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array2_get_shape]
+      ; let barray1_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_barray1)
+              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray1_at_point
+              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray1_get_shape]
+      ; let barray2_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_barray2)
+              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray2_at_point
+              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray2_get_shape]
       ; sh <- newTyVar Star Nothing
       ; let view_instance =
               polyInstance [sh] [ConTy sh `IsInst` tiBuiltin the_c_Shape] cls
@@ -1075,6 +1125,7 @@ mkPassableClass = do
                any_instance,
                list_instance,
                array1_instance, array2_instance, array3_instance,
+               barray1_instance, barray2_instance, barray3_instance,
                iter_instance,
                view_instance,
                tuple2_instance, tuple3_instance,
@@ -1144,6 +1195,21 @@ mkPassableClass = do
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_array3) @@ ConTy b)
           (pyonBuiltin SystemF.The_repr_array3)
+          []
+  ; let barray1_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_barray1) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_barray1)
+          []
+  ; let barray2_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_barray2) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_barray2)
+          []
+  ; let barray3_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_barray3) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_barray3)
           []
   ; let iter_instance =
           polyExplicitInstance [b, c] [] cls
@@ -1700,6 +1766,9 @@ initializeTIBuiltins = do
             , ("array1", Star :-> Star, [| pyonBuiltin SystemF.The_array1 |])
             , ("array2", Star :-> Star, [| pyonBuiltin SystemF.The_array2 |])
             , ("array3", Star :-> Star, [| pyonBuiltin SystemF.The_array3 |])
+            , ("barray1", Star :-> Star, [| pyonBuiltin SystemF.The_barray1 |])
+            , ("barray2", Star :-> Star, [| pyonBuiltin SystemF.The_barray2 |])
+            , ("barray3", Star :-> Star, [| pyonBuiltin SystemF.The_barray3 |])
             , ("view", Star :-> Star :-> Star, 
                [| pyonBuiltin SystemF.The_view |])
             , ("Any", Star, [| pyonBuiltin SystemF.The_Any |])

@@ -16,6 +16,9 @@ extern procedure pyon.internal.list.pyon_List_initialize "pyon_List_initialize"
 extern procedure pyon.internal.list.pyon_List_get_contents "pyon_List_get_contents"
   (pointer) -> pointer;
 
+extern procedure pyon.internal.list.pyon_List_get_length "pyon_List_get_length"
+  (pointer) -> uint;
+
 extern procedure pyon.internal.list.pyon_Array0_size "pyon_Array0_size"
   (uint, uint) -> uint;
 extern procedure pyon.internal.list.pyon_Array0_alignment "pyon_Array0_alignment"

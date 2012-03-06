@@ -44,6 +44,10 @@ namespace Pyon {
   class ValType {
   public:
     typedef ValKindTag kind;
+
+#if BEGIN_SIGNATURE
+    typedef _ type;
+#endif
   };
 
   /* An abstract base class for bare types.  Bare types encapsulate a
@@ -89,6 +93,21 @@ namespace Pyon {
 
   private:
     PyonBoxPtr const box_data;
+
+  public:
+    BoxType(PyonBoxPtr _box_data) : box_data(_box_data) {}
+    PyonBoxPtr getBoxData(void) const {return box_data;}
+
+#if BEGIN_SIGNATURE
+    struct initializer {
+      // The initializer should be a POD type.  It is passed by value
+      // to Incomplete<typeof(this)>::create.
+    };
+
+    // This function may be undefined if there is no reasonable default
+    // initializer value
+    static initializer defaultInitializer(void);
+#endif
   };
 
 }

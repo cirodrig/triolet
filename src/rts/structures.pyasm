@@ -43,6 +43,25 @@ data owned repr_Box = PassConv {
 
 // Exactly the same as 'repr_Box'.  It's a separate definition because
 // it has a different type in the Mem stage.
+data owned repr_StoredBox = PassConv {
+  ObjectHeader { repr_info },
+  sizeof owned,
+  alignof owned,
+#if WORD_SIZE == 4
+  copy4F,
+#elif WORD_SIZE == 8
+  copy8F,
+#else
+# error "Don't know how to copy Boxed values"
+#endif
+  Box_convert_to_boxed,
+  Box_convert_to_bare,
+  dummy_finalizer,
+  NOT_POINTERLESS
+};
+
+// Exactly the same as 'repr_Box'.  It's a separate definition because
+// it has a different type in the Mem stage.
 data owned repr_Stream = PassConv {
   ObjectHeader { repr_info },
   sizeof owned,

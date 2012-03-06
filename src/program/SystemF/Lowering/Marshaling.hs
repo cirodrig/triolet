@@ -29,7 +29,7 @@ import Export
 
 pyonType :: ExportDataType -> Type
 pyonType (ListET ty) = varApp (pyonBuiltin The_list) [pyonType ty]
-pyonType (ArrayET n ty) =
+pyonType (ArrayET n False ty) =
   let op = case n
            of 0 -> pyonBuiltin The_array0
               1 -> pyonBuiltin The_array1
@@ -108,7 +108,7 @@ marshalCParameter :: ExportDataType -> Lower ParameterMarshaler
 marshalCParameter ty =
   case ty
   of ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
-     ArrayET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
      PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET ->
@@ -124,7 +124,7 @@ demarshalCParameter :: ExportDataType -> Lower ParameterMarshaler
 demarshalCParameter ty =
   case ty
   of ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
-     ArrayET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
      PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
@@ -139,7 +139,7 @@ marshalCxxParameter ty =
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
      ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
-     ArrayET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
      TupleET _ -> passParameterWithType (LL.PrimType LL.PointerType)
 
 -- | Pass a parameter as a single variable.
@@ -225,7 +225,7 @@ marshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 marshalCReturn ty =
   case ty
   of ListET _ -> return_new_reference (LL.RecordType listRecord)
-     ArrayET 2 _ -> return_new_reference (LL.RecordType matrixRecord)
+     ArrayET 2 False _ -> return_new_reference (LL.RecordType matrixRecord)
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
@@ -263,7 +263,7 @@ marshalCxxReturn ty =
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passReturnWithType (LL.PrimType LL.pyonBoolType)
      ListET _ -> passReturnParameter
-     ArrayET _ _ -> passReturnParameter
+     ArrayET _ _ _ -> passReturnParameter
      TupleET _ -> passReturnParameter
 
 demarshalCReturn :: ExportDataType -> Lower ReturnMarshaler
@@ -272,7 +272,7 @@ demarshalCReturn ty =
   of ListET element_type ->
        let list_type = varApp (pyonBuiltin The_list) [pyonType element_type]
        in demarshal_reference list_type
-     ArrayET 2 element_type ->
+     ArrayET 2 False element_type ->
        let mat_type = varApp (pyonBuiltin The_array2) [pyonType element_type]
        in demarshal_reference mat_type
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
@@ -472,7 +472,7 @@ getCExportType tenv ty =
            of [arg] -> ListET (getCExportType tenv arg)
        | con `isPyonBuiltin` The_array2 ->
            case args
-           of [arg] -> ArrayET 2 (getCExportType tenv arg)
+           of [arg] -> ArrayET 2 False (getCExportType tenv arg)
      _ | FunT {} <- ty ->
        case getExportedFunctionSignature (getCExportType tenv) tenv ty
        of (param_types, return_type) -> FunctionET param_types return_type
@@ -506,13 +506,19 @@ getCxxExportType tenv ty =
        | con `isPyonBuiltin` The_list ->
            unary ListET args
        | con `isPyonBuiltin` The_array0 ->
-           unary (ArrayET 0) args
+           unary (ArrayET 0 False) args
        | con `isPyonBuiltin` The_array1 ->
-           unary (ArrayET 1) args
+           unary (ArrayET 1 False) args
        | con `isPyonBuiltin` The_array2 ->
-           unary (ArrayET 2) args
+           unary (ArrayET 2 False) args
        | con `isPyonBuiltin` The_array3 ->
-           unary (ArrayET 3) args
+           unary (ArrayET 3 False) args
+       | con `isPyonBuiltin` The_barray1 ->
+           unary (ArrayET 1 True) args
+       | con `isPyonBuiltin` The_barray2 ->
+           unary (ArrayET 2 True) args
+       | con `isPyonBuiltin` The_barray3 ->
+           unary (ArrayET 3 True) args
      _ -> unsupported
   where
     unary con [arg] = con (getCxxExportType tenv arg)

@@ -629,6 +629,24 @@ data array3 : bare -> bare
    Referenced (arr L (arr M (arr N a))));
 };
 
+-- A 1D boxed array.
+data barray1 : bare -> bare
+{
+  mk_barray1 (a : bare) () (array1 (StoredBox (BoxedType a)));
+};
+
+-- A 2D boxed array.
+data barray2 : bare -> bare
+{
+  mk_barray2 (a : bare) () (array2 (StoredBox (BoxedType a)));
+};
+
+-- A 3D boxed array.
+data barray3 : bare -> bare
+{
+  mk_barray3 (a : bare) () (array3 (StoredBox (BoxedType a)));
+};
+
 -- Convert the "size" fields of an array to an equivalent dim1.
 arrayDescToDim1 : (N : intindex) -> int -> int -> FIInt N -> dim1;
 
@@ -722,6 +740,9 @@ repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
 repr_array1 : (a : bare) -> Repr a -> Repr (array1 a);
 repr_array2 : (a : bare) -> Repr a -> Repr (array2 a);
 repr_array3 : (a : bare) -> Repr a -> Repr (array3 a);
+repr_barray1 : (a : bare) -> Repr (barray1 a);
+repr_barray2 : (a : bare) -> Repr (barray2 a);
+repr_barray3 : (a : bare) -> Repr (barray3 a);
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
 repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
 
@@ -740,6 +761,7 @@ repr_PyonTuple4 :
 
 -- Representation of any boxed object
 repr_Box : (a : box) -> Repr (BareType a);
+repr_StoredBox : (a : box) -> Repr (StoredBox a);
 
 repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
@@ -824,6 +846,24 @@ TraversableDict_array3_build :
 
 TraversableDict_array3_traverse :
   (a : bare) -> Repr a -> array3 a -> Stream dim3 a;
+
+TraversableDict_barray1_build :
+  (a : bare) -> Repr a -> Stream dim1 a -> Writer (barray1 a);
+
+TraversableDict_barray1_traverse :
+  (a : bare) -> Repr a -> barray1 a -> Stream dim1 a;
+
+TraversableDict_barray2_build :
+  (a : bare) -> Repr a -> Stream dim2 a -> Writer (barray2 a);
+
+TraversableDict_barray2_traverse :
+  (a : bare) -> Repr a -> barray2 a -> Stream dim2 a;
+
+TraversableDict_barray3_build :
+  (a : bare) -> Repr a -> Stream dim3 a -> Writer (barray3 a);
+
+TraversableDict_barray3_traverse :
+  (a : bare) -> Repr a -> barray3 a -> Stream dim3 a;
 
 ShapeDict_list_dim : ShapeDict list_dim;
 ShapeDict_dim0 : ShapeDict dim0;
@@ -1082,6 +1122,19 @@ IndexableDict_array2_at_point :
 
 IndexableDict_array2_get_shape :
   (a : bare) -> array2 a -> dim2;
+
+IndexableDict_barray1_at_point :
+  (a : bare) -> Repr a -> barray1 a -> Stored int -> Writer a;
+
+IndexableDict_barray1_get_shape :
+  (a : bare) -> barray1 a -> dim1;
+
+IndexableDict_barray2_at_point :
+  (a : bare) -> Repr a -> barray2 a -> PyonTuple2 (Stored int) (Stored int)
+  -> Writer a;
+
+IndexableDict_barray2_get_shape :
+  (a : bare) -> barray2 a -> dim2;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries

@@ -37,8 +37,10 @@ data ExportDataType =
   | ListET ExportDataType
 
     -- | A Pyon array.
-    --   The array dimensionality is given as a parameter.
-  | ArrayET !Int ExportDataType
+    --   The first parameter is the array dimensionality.
+    --   The second parameter is the boxing of array elements 
+    --   (True means boxed, False means unboxed)
+  | ArrayET !Int !Bool ExportDataType
 
     -- | A C array.  The array is passed as a pointer.  The array
     -- size is passed as an additional parameter.
@@ -65,9 +67,11 @@ instance Show ExportDataType where
        ListET ty ->
          showParen (prec >= 10) $ 
          showString "ListET (" . shows ty . showChar ')'
-       ArrayET n ty ->
+       ArrayET n b ty ->
          showParen (prec >= 10) $ 
-         showString "ArrayET " . shows n . showString " (" . shows ty . showChar ')'
+         showString "ArrayET " . shows n . showChar ' ' .
+         showString (if b then "boxed " else "unboxed ") .
+         showString " (" . shows ty . showChar ')'
        CSizeArrayET et ->
          showString "CSizeArrayET " . showsPrec 10 et
        FunctionET params ret ->

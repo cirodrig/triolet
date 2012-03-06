@@ -1,0 +1,10 @@
+
+def sum(xs):
+  return reduce(lambda x, y: x + y, 0, xs)
+
+def mm(M, N):
+  def dotprod(r, c): return sum(x * y for (x, y) in zip(r, c))
+
+  return [dotprod(r,c) for (r, c) in outerproduct(rows(M), cols(N))]
+
+export cplusplus mm : barray2(float) * barray2(float) -> barray2(float)

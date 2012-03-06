@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Boxed matrix multiplication",
+  pyonSources	 = ["matmul.pyon"],
+  llpyonSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
+  expectedResult = ShouldPrint "OK"
+}

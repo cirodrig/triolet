@@ -287,8 +287,15 @@ pyonToWrapperType(Pool* p, const PyonType* pyonType) {
     case PyonArrayTypeTag: {
       Type** typeList = malloc(sizeof(Type*));
       typeList[0] = pyonToWrapperType(p, pyonType->array.elem);
-      char *nameString = malloc(7*sizeof(char)); // 5 ("Array") + 1 (dimension digit) + 1 (null terminator) = 7
-      sprintf(nameString, "Array%d", pyonType->array.dimensionality);
+      // Allocate string
+      // 6 ("BArray") + 1 (dimension digit) + 1 (null terminator) = 8
+      char *nameString = malloc(8*sizeof(char));
+      if (pyonType->array.boxed) {
+        sprintf(nameString, "BArray%d", pyonType->array.dimensionality);
+      }
+      else {
+        sprintf(nameString, "Array%d", pyonType->array.dimensionality);
+      }
       TmplName* tmplName = TmplName_create(p, Name_create_dynamic(p, nameString), 1, typeList);
       return createTmplNameInNamespace (p, tmplName);
       break;

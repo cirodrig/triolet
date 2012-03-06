@@ -81,6 +81,7 @@ namespace Pyon {
   }
 
   /* Layout and member access of various data structures */
+# define PYON_OBJECT_HEADER_SIZE (sizeof(void *))
   extern "C" const PyonUInt pyon_List_size;
   extern "C" const PyonUInt pyon_List_alignment;
   extern "C" void
@@ -90,6 +91,8 @@ namespace Pyon {
                        PyonBarePtr ret);
   extern "C" PyonBarePtr
   pyon_List_get_contents(PyonBarePtr list) __attribute__((pure));
+  extern "C" PyonUInt
+  pyon_List_get_length(PyonBarePtr list) __attribute__((pure));
 
   extern "C" PyonUInt
   pyon_Array0_size(PyonUInt elt_size,

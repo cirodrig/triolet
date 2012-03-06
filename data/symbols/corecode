@@ -2039,6 +2039,122 @@ TraversableDict_array3_build
      ret)
   ret;
 
+
+TraversableDict_barray1_traverse
+  @(a : bare) (repr : Repr a) (ar : barray1 a)
+  -> view dim1 a attribute(inline) =
+  let type boxed_a = StoredBox (BoxedType a) in
+  case ar of mk_barray1 @a (ar2 : array1 boxed_a).
+  case ar2 of mk_array1 @boxed_a @(N : intindex)
+    (lo : int) (stride : int) (size : FIInt N)
+    (ayref : Referenced (arr N boxed_a)).
+  case ayref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+
+  let linear_map : LinearMap = linearMap stride lo in
+  let repr_box : Repr boxed_a = repr_StoredBox @(BoxedType a) in
+
+  view_generate @dim1 ShapeDict_dim1 @a repr
+  (arrayDescToDim1 @N lo stride size)
+  (\ (ix : Stored int) (ret : OutPtr a) -> IEffect a.
+    case ix of stored @int (ix_i : int).
+
+    let real_ix : int = invEvalLM ix_i linear_map in
+    case subscript @N @boxed_a repr_box ay real_ix of 
+      storedBox @(BoxedType a) (val : BoxedType a).
+    convertToBare @a repr val ret);
+
+
+TraversableDict_barray1_build
+  @(a : bare) (repr : Repr a) (s : view dim1 a) (ret : OutPtr (barray1 a))
+  -> IEffect (barray1 a) attribute(inline, inline_dimensionality) =
+  let type boxed_a = StoredBox (BoxedType a) in
+  let brepr : Repr boxed_a = repr_StoredBox @(BoxedType a) in
+  mk_barray1 @a
+  (build_dim1_array @boxed_a brepr
+   (view_map @dim1 ShapeDict_dim1 @a @boxed_a
+    repr brepr (\ (x : a) -> Writer boxed_a.
+                  storedBox @(BoxedType a)
+                  (convertToBoxed @a repr (copy @a repr x))) s))
+  ret;
+
+
+TraversableDict_barray2_traverse
+  @(a : bare) (repr : Repr a) (ar : barray2 a)
+  -> view dim2 a attribute(inline) =
+  let type boxed_a = StoredBox (BoxedType a) in
+  case ar of mk_barray2 @a (ar2 : array2 boxed_a).
+  case ar2 of
+    mk_array2 @boxed_a @(M N : intindex)
+    (lo_y : int) (stride_y : int) (size_y : FIInt M)
+    (lo_x : int) (stride_x : int) (size_x : FIInt N)
+    (ayref : Referenced (arr M (arr N boxed_a))).
+  case ayref of referenced @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
+
+  let linear_map_y : LinearMap = linearMap stride_y lo_y in
+  let linear_map_x : LinearMap = linearMap stride_x lo_x in
+  case size_x of fiInt @N (width : int).
+  let box_repr : Repr boxed_a = repr_StoredBox @(BoxedType a) in
+  let row_repr : Repr (arr N boxed_a) = repr_arr @N @boxed_a size_x box_repr in
+  let type Sint = Stored int in
+
+  view_generate @dim2 ShapeDict_dim2 @a repr
+  (mk_dim2 (arrayDescToDim1 @M lo_y stride_y size_y)
+           (arrayDescToDim1 @N lo_x stride_x size_x))
+  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> IEffect a.
+     case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
+     case ix_y of stored @int (ix_y_i : int).
+     case ix_x of stored @int (ix_x_i : int).
+     let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
+     let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
+     case subscript @N @boxed_a box_repr
+          (subscript @M @(arr N boxed_a) row_repr ay real_ix_y) real_ix_x of
+       storedBox @(BoxedType a) (val : BoxedType a).
+     convertToBare @a repr val ret);
+
+
+TraversableDict_barray2_build
+  @(a : bare) (repr : Repr a) (s : view dim2 a) (ret : OutPtr (barray2 a))
+  -> IEffect (barray2 a) attribute(inline, inline_dimensionality) =
+  
+  case s of mk_view @dim2 @a (dom : dim2) (f : index dim2 -> Writer a).
+  case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
+
+  -- Compute array parameters
+  dim1ToArrayDesc @(barray2 a) dom_y
+  (\ @(M : intindex)
+     (lb_y : int) (stride_y : int) (size_y : FIInt M) (ret : OutPtr (barray2 a))
+     -> IEffect (barray2 a).
+     dim1ToArrayDesc @(barray2 a) dom_x
+     (\ @(N : intindex)
+        (lb_x : int) (stride_x : int) (size_x : FIInt N) (ret : OutPtr (barray2 a))
+        -> IEffect (barray2 a).
+
+        let linear_map_y : LinearMap = linearMap stride_y lb_y in
+        let linear_map_x : LinearMap = linearMap stride_x lb_x in
+        let type boxed_a = StoredBox (BoxedType a) in
+        let type out_arr = arr M (arr N boxed_a) in
+        let type Sint = Stored int in
+        let box_repr : Repr boxed_a = repr_StoredBox @(BoxedType a) in
+
+        mk_barray2 @a
+        (mk_array2 @boxed_a @M @N lb_y stride_y size_y lb_x stride_x size_x
+         (referenced @out_arr
+          (arr2D_build @M @N @boxed_a box_repr size_y size_x
+           (\ (y : int) (x : int) (ret : OutPtr boxed_a) -> IEffect boxed_a.
+              let logical_y : int = evalLM y linear_map_y in
+              let logical_x : int = evalLM x linear_map_x in
+              case boxed @(PyonTuple2 Sint Sint)
+                   (pyonTuple2 @Sint @Sint
+                    (stored @int logical_y) (stored @int logical_x)) of
+                boxed @(PyonTuple2 Sint Sint) (ix : PyonTuple2 Sint Sint).
+
+              -- Evaluate the function and box its result
+              storedBox @(BoxedType a)
+                (convertToBoxed @a repr (f ix)) ret))))
+         ret)
+     ret)
+  ret;
+
 -------------------------------------------------------------------------------
 -- Shape dictionary methods
 
@@ -3177,6 +3293,82 @@ IndexableDict_array2_get_shape @(a : bare)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
              (lb_x : int) (stride_x : int) (size_x : FIInt N)
              (ayref : Referenced (arr M (arr N a))).
+  mk_dim2 (arrayDescToDim1 @M lb_y stride_y size_y)
+          (arrayDescToDim1 @N lb_x stride_x size_x);
+
+
+IndexableDict_barray1_at_point @(a : bare)
+  (repr : Repr a) (ay : barray1 a) (ix : Stored int) (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  let type boxed_a = StoredBox (BoxedType a) in
+  case ay of mk_barray1 @a (ay2 : array1 boxed_a).
+  case ay2 of mk_array1 @boxed_a @(N : intindex)
+             (lb : int) (stride : int) (size : FIInt N)
+             (ayref : Referenced (arr N boxed_a)).
+  case ayref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+
+  -- Compute real array index
+  case ix of stored @int (ix_i : int).
+  let real_index : int = (ix_i -# lb) //# stride in
+  case subscript @N @boxed_a (repr_StoredBox @(BoxedType a)) ay real_index
+    of storedBox @(BoxedType a) (val : BoxedType a).
+  convertToBare @a repr val ret;
+
+
+IndexableDict_barray1_get_shape @(a : bare)
+  (ay : barray1 a) -> dim1
+  attribute(inline) =
+  let type boxed_a = StoredBox (BoxedType a) in
+  case ay of mk_barray1 @a (ay2 : array1 boxed_a).
+  case ay2 of mk_array1 @boxed_a @(N : intindex)
+             (lb : int) (stride : int) (size : FIInt N)
+             (ayref : Referenced (arr N boxed_a)).
+  arrayDescToDim1 @N lb stride size;
+
+
+IndexableDict_barray2_at_point @(a : bare)
+  (repr : Repr a)
+  (ay : barray2 a)
+  (ix : PyonTuple2 (Stored int) (Stored int))
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  let type boxed_a = StoredBox (BoxedType a) in
+  case ay of mk_barray2 @a (ay2 : array2 boxed_a).
+  case ay2 of mk_array2 @boxed_a @(M N : intindex)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : Referenced (arr M (arr N boxed_a))).
+  case ayref of referenced @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
+  let row_repr : Repr (arr N boxed_a) =
+        repr_arr @N @boxed_a size_x (repr_StoredBox @(BoxedType a)) in
+
+  -- Compute real array indices
+  case ix of pyonTuple2 @(Stored int) @(Stored int)
+             (ix_y : Stored int) (ix_x : Stored int).
+  case ix_y of stored @int (ix_y_i : int).
+  let real_index_y : int = (ix_y_i -# lb_y) //# stride_y in
+  case ix_x of stored @int (ix_x_i : int).
+  let real_index_x : int = (ix_x_i -# lb_x) //# stride_x in
+
+  -- Copy the desired element
+  case subscript @N @boxed_a (repr_StoredBox @(BoxedType a))
+       (subscript @M @(arr N boxed_a)
+       row_repr ay real_index_y) real_index_x
+    of storedBox @(BoxedType a) (val : BoxedType a).
+  convertToBare @a repr val ret;
+
+
+IndexableDict_barray2_get_shape @(a : bare)
+  (ay : barray2 a) -> dim2
+  attribute(inline) =
+  let type boxed_a = StoredBox (BoxedType a) in 
+  case ay of mk_barray2 @a (ay2 : array2 boxed_a).
+  case ay2 of mk_array2 @boxed_a @(M N : intindex)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : Referenced (arr M (arr N boxed_a))).
   mk_dim2 (arrayDescToDim1 @M lb_y stride_y size_y)
           (arrayDescToDim1 @N lb_x stride_x size_x);
 

@@ -193,6 +193,9 @@ shapePureTF = shapeLike $ \op args ->
         | op `isPyonBuiltin` The_array1 -> return_dim1
         | op `isPyonBuiltin` The_array2 -> return_dim2
         | op `isPyonBuiltin` The_array3 -> return_dim3
+        | op `isPyonBuiltin` The_barray1 -> return_dim1
+        | op `isPyonBuiltin` The_barray2 -> return_dim2
+        | op `isPyonBuiltin` The_barray3 -> return_dim3
         | op `isPyonBuiltin` The_array ->
             case args
             of [dim, _] -> do
@@ -303,6 +306,9 @@ shapeMemTF = shapeLike $ \op args ->
         | op `isPyonBuiltin` The_array1 -> return_dim1
         | op `isPyonBuiltin` The_array2 -> return_dim2
         | op `isPyonBuiltin` The_array3 -> return_dim3
+        | op `isPyonBuiltin` The_barray1 -> return_dim1
+        | op `isPyonBuiltin` The_barray2 -> return_dim2
+        | op `isPyonBuiltin` The_barray3 -> return_dim3
         | op `isPyonBuiltin` The_array ->
             case args
             of [arg, _] -> return $ Just $ array_shape arg

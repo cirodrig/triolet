@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <pyon.h>
 #include <pyon/Base.h>
@@ -18,26 +19,24 @@
 namespace Pyon {
 
   /****************************************************************************/
+  /* Concept checks */
+
+  template<class T>
+  void ValType_concept(T x);
+
+  template<class T>
+  void BareType_concept(T x);
+
+  template<class T>
+  void BoxType_concept(T x);
+
+  /****************************************************************************/
   /* Wrappers for specific type constructors  */
 
   template<typename val_type> class Stored;
   template<typename bare_type> class Boxed;
+  template<typename box_type> class StuckRef;
   template<typename bare_type> class Incomplete;
-
-
-  /* A box for holding bare objects */
-  template<typename bare_type>
-  class Boxed : public BoxType {
-  public:
-    PyonBarePtr getContents(void) { NOT_IMPLEMENTED; }
-  };
-
-  template<typename val_type>
-  class Stored : public BareType {
-#if BEGIN_SIGNATURE
-    operator val_type(void);
-#endif
-  };
 
   /****************************************************************************/
   /* Kind conversions */
@@ -72,10 +71,46 @@ namespace Pyon {
     typedef Stored<pyon_type> type;
   };
 
-  /* The bare type corresponding to a boxed object is its unboxed form */
+  /* The bare type corresponding to a Boxed object is its unboxed form */
   template<typename bare_type>
   struct AsBareTypeWithTag<BoxKindTag, Boxed<bare_type> > {
     typedef bare_type type;
+  };
+
+  template<typename kind, typename pyon_type> struct AsBoxTypeWithTag;
+  template<typename pyon_type> struct AsBoxType;
+
+  /* Compute the boxed type corresponding to a Pyon type.  The type
+   * is computed by dispatching on the type's kind.
+   */
+  template<typename pyon_type>
+  struct AsBoxType {
+    typedef typename AsBoxTypeWithTag<typename pyon_type::kind,
+				        pyon_type>::type type;
+  };
+
+  /* This class is used by 'AsBoxType' */
+  template<typename kind, typename pyon_type>
+  struct AsBoxTypeWithTag {
+#if BEGIN_SIGNATURE
+    typedef _ type;
+#endif
+  };
+
+  template<typename pyon_type>
+  struct AsBoxTypeWithTag<BoxKindTag, pyon_type> {
+    typedef pyon_type type;
+  };
+
+  template<typename pyon_type>
+  struct AsBoxTypeWithTag<ValKindTag, pyon_type> {
+    typedef Boxed<Stored<pyon_type> > type;
+  };
+
+  /* The boxed type corresponding to any other object is its wrapped form */
+  template<typename bare_type>
+  struct AsBoxTypeWithTag<BareKindTag, bare_type> {
+    typedef Boxed<bare_type> type;
   };
 
   /****************************************************************************/
@@ -171,10 +206,44 @@ namespace Pyon {
     }
   };
 
+  template<typename boxed_type>
+  class IncompleteBoxedRef {
+  private:
+    PyonBoxPtr object;
+
+  public:
+    bool isEmpty(void) const {return object == NULL;}
+    bool isOwner(void) const {return object != NULL;}
+    bool isBorrowed(void) const {return false;}
+
+  public:
+    // Construct an empty incomplete reference
+    IncompleteBoxedRef(void) : object(NULL) {}
+
+    PyonBoxPtr getObject() { return object; }
+
+    void allocate(void) {
+      if (!isEmpty()) {
+        pyonError("Incomplete object is already referencing an object");
+      }
+      // Create boxed object and initialize header
+      object = pyon_alloc_boxed(boxed_type::getSize(), boxed_type::getAlignment());
+    }
+
+    boxed_type freeze(void) {
+      if (!isOwner()) {
+        pyonError("No incomplete object reference");
+      }
+      boxed_type ret(object);
+      object = NULL;
+      return ret;
+    }
+  };
+
   /* Abstract template of incomplete objects.  Only specializations
    * should be used.
    *
-   * Incomplete objects have three states.
+   * Incomplete bare objects have three states.
    *
    * 1. No object is referenced.
    *
@@ -192,6 +261,14 @@ namespace Pyon {
    * of type 2, and they are only valid as long as their parent reference is
    * valid.  For reasons of efficiency, no attempt is made to detect whether the
    * parent reference is valid.
+   *
+   * Incomplete boxed objects have two states.
+   *
+   * 1. No object is referenced.
+   *
+   * 2. A boxed object is referenced.
+   *
+   * For boxed objects, there is no state corresponding to state 3 above.
    */
   template<typename bare_type>
   class Incomplete {
@@ -263,30 +340,33 @@ namespace Pyon {
     template<typename T>
   class Array3;
   
+    template<typename T>
+  class BArray1;
+  
+    template<typename T>
+  class BArray2;
+
+    template<typename T>
+  class BArray3;
+
   /* Stored Classes: BareType versions of ValType classes (specializations of 
    * class Stored, extend class BareType ) */
 
+    template<typename T>
+  class Stored;
+
     template<>
   class Stored<NoneType>;
-
-    template<>
-  class Stored<Int>;
-
-    template<>
-  class Stored<Bool>;
-
-    template<>
-  class Stored<Float>;
 
   /* Incomplete BareType Objects (specializations of Incomplete, inherit from
    * IncompleteSingleRef) */
 
     template<typename T>
+  class Incomplete < StuckRef<T> >;
+
+    template<typename T>
   class Incomplete < Stored<T> >;
 
-    template<>
-  class Incomplete< Stored<NoneType> >;
-  
     template<typename T1, typename T2, typename T3, typename T4>
   class Incomplete< Tuple<T1,T2,T3,T4> >;
 
@@ -308,6 +388,19 @@ namespace Pyon {
     template<typename T>
   class Incomplete< Array3<T> >;
 
+    template<typename T>
+  class Incomplete< BArray1<T> >;
+
+    template<typename T>
+  class Incomplete< BArray2<T> >;
+
+    template<typename T>
+  class Incomplete< BArray3<T> >;
+
+  /* Incomplete BoxType Objects (specializations of Incomplete, inherit from
+   * IncompleteBoxedRef) */
+    template<typename T>
+  class Incomplete<Boxed<T> >;
 
 /******************************************************************************/
 /*              C++ Wrapper Classes that wrap value objects                   */
@@ -318,46 +411,123 @@ namespace Pyon {
   class NoneType : public ValType {
     public:
       typedef NoneType type;
+
+    NoneType(void) {}
+    NoneType(const NoneType &x) {}
+    operator Boxed<Stored<NoneType> >() const;
   };
 
   /* Implementation of the Int wrapper */
 
   class Int : public ValType {
     public:
-      typedef Int type;
+      typedef int32_t type;
       int32_t nativeElement;
 
       Int(int32_t i) { nativeElement = i; }
+      Int(const Stored<Int> &s);
       operator int32_t() { return nativeElement; }
+      operator Boxed<Stored<Int> >() const;
   };
 
   /* Implementation of the Bool wrapper */
 
   class Bool : public ValType {
     public:
-      typedef Bool type;
+      typedef char type;
       int nativeElement;
 
       Bool(char b) { nativeElement = b; }
+      Bool(const Stored<Bool> &s);
       operator int() { return nativeElement; }
+      operator Boxed<Stored<Bool> >() const;
   };
 
   /* Implementation of the Float wrapper */
 
   class Float : public ValType {
     public:
-      typedef Float type;
+      typedef float type;
       float nativeElement;
 
       Float(float f) { nativeElement = f; }
+      Float(const Stored<Float> &s);
       operator float() { return nativeElement; }
+      operator Boxed<Stored<Float> >() const;
   };
 
 
+/******************************************************************************/
+/*               C++ Wrapper Classes that wrap boxed objects                  */
+/******************************************************************************/
+
+  /* A reference to a boxed object.
+   *
+   * This reference type is _not_ removed by 'AsBare'.
+   */
+  template<typename T>
+  class StuckRef : public BareType {
+  private:
+    typedef typename AsBoxType<T>::type T_Box;
+  public:
+    typedef typename T_Box::initializer initializer;
+    static initializer defaultInitializer(void)
+    {return T_Box::defaultInitializer();}
+
+    StuckRef(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+
+    static unsigned int getSize(void) {return sizeof(PyonBoxPtr);}
+    static unsigned int getAlignment(void) {return __alignof__(PyonBoxPtr);}
+    static void copy(StuckRef<T> ref, Incomplete<StuckRef<T> >&incompleteRef)
+    {
+      incompleteRef = ref;
+    }
+    static bool isPOD(void) {return false;}
+
+    operator T_Box() {
+      return T_Box(*(PyonBoxPtr*)getBareData());
+    }
+  };
 
 /******************************************************************************/
 /*               C++ Wrapper Classes that wrap bare objects                   */
 /******************************************************************************/
+
+  /* A box for holding bare objects.
+   *
+   * It consists of a header pointer followed by aligned data.
+   */
+  template<typename T>
+  class Boxed : public BoxType {
+  private:
+    typedef typename AsBareType<T>::type T_Bare;
+  public:
+    typedef typename T_Bare::initializer initializer;
+
+  public:
+    Boxed(PyonBoxPtr p) : BoxType(p) {}
+    PyonBarePtr getContents(void) const
+    {
+      /* Compute size of header plus padding */
+      unsigned int contents_offset =
+        addPadding<T_Bare>(PYON_OBJECT_HEADER_SIZE);
+      return (PyonBarePtr)((char *)getBoxData() + contents_offset);
+    }
+
+    static unsigned int getSize(void)
+    { return allocateObject<T_Bare>(PYON_OBJECT_HEADER_SIZE); }
+
+    static unsigned int getAlignment(void)
+    {
+      unsigned int bare_align = T_Bare::getAlignment();
+      return (bare_align > PYON_OBJECT_HEADER_SIZE)
+        ? bare_align : PYON_OBJECT_HEADER_SIZE;
+    }
+    operator T() const {
+      return T(getContents());
+    }
+  };
+
 
 /* ----------------------- Tuple with 4 elements ---------------------------- */
 
@@ -431,15 +601,20 @@ namespace Pyon {
       }
       
       static void 
-      copy(Tuple<T1,T2,T3,T4> tuple, Incomplete< Tuple<T1,T2,T3,T4> > &incompleteTuple) { 
-          T1_Bare::copy(tuple.get<0>(), incompleteTuple.get<0>());
-          T2_Bare::copy(tuple.get<1>(), incompleteTuple.get<1>());
-          T3_Bare::copy(tuple.get<2>(), incompleteTuple.get<2>());
-          T4_Bare::copy(tuple.get<3>(), incompleteTuple.get<3>());
+      copy(Tuple<T1,T2,T3,T4> tuple, Incomplete< Tuple<T1,T2,T3,T4> > &incompleteTuple) {
+        Incomplete<T1_Bare> i1(incompleteTuple.get<0>());
+        T1_Bare::copy(tuple.get<0>(), i1);
+        Incomplete<T2_Bare> i2(incompleteTuple.get<1>());
+        T2_Bare::copy(tuple.get<1>(), i2);
+        Incomplete<T3_Bare> i3(incompleteTuple.get<2>());
+        T3_Bare::copy(tuple.get<2>(), i3);
+        Incomplete<T4_Bare> i4(incompleteTuple.get<3>());
+        T4_Bare::copy(tuple.get<3>(), i4);
       }
       
       static bool 
-      isPOD() { return T1::isPOD() && T2::isPOD() && T3::isPOD() && T4::isPOD(); }
+      isPOD() { return T1_Bare::isPOD() && T2_Bare::isPOD() &&
+                       T3_Bare::isPOD() && T4_Bare::isPOD(); }
 
       // Member Functions
         template<int index>
@@ -588,13 +763,16 @@ namespace Pyon {
       
       static void 
       copy(Tuple<T1,T2,T3> tuple, Incomplete< Tuple<T1,T2,T3> > &incompleteTuple) { 
-          T1_Bare::copy(tuple.get<0>(), incompleteTuple.get<0>());
-          T2_Bare::copy(tuple.get<1>(), incompleteTuple.get<1>());
-          T3_Bare::copy(tuple.get<2>(), incompleteTuple.get<2>());
+        Incomplete<T1_Bare> i1(incompleteTuple.get<0>());
+        T1_Bare::copy(tuple.get<0>(), i1);
+        Incomplete<T2_Bare> i2(incompleteTuple.get<1>());
+        T2_Bare::copy(tuple.get<1>(), i2);
+        Incomplete<T3_Bare> i3(incompleteTuple.get<2>());
+        T3_Bare::copy(tuple.get<2>(), i3);
       }
       
       static bool 
-      isPOD() { return T1::isPOD() && T2::isPOD() && T3::isPOD(); }
+      isPOD() { return T1_Bare::isPOD() && T2_Bare::isPOD() && T3_Bare::isPOD(); }
 
       // Member Functions
         template<int index>
@@ -714,12 +892,14 @@ namespace Pyon {
       
       static void 
       copy(Tuple<T1,T2> tuple, Incomplete< Tuple<T1,T2> > &incompleteTuple) { 
-          T1_Bare::copy(tuple.get<0>(), incompleteTuple.get<0>());
-          T2_Bare::copy(tuple.get<1>(), incompleteTuple.get<1>());
+        Incomplete<T1_Bare> i1(incompleteTuple.get<0>());
+        T1_Bare::copy(tuple.get<0>(), i1);
+        Incomplete<T2_Bare> i2(incompleteTuple.get<1>());
+        T2_Bare::copy(tuple.get<1>(), i2);
       }
       
       static bool 
-      isPOD() { return T1::isPOD() && T2::isPOD(); }
+      isPOD() { return T1_Bare::isPOD() && T2_Bare::isPOD(); }
 
       // Member Functions
         template<int index>
@@ -792,7 +972,18 @@ namespace Pyon {
       
       static void 
       copy(List<T> list, Incomplete< List<T> > &incompleteList) { 
-          incompleteList = Incomplete< List<T> >(list.getBareData());
+        if (!incompleteList.isEmpty()) {
+          pyonError("Attempted to write an already-initalized list\n");
+        }
+
+        /* Create the new list */
+        int length = pyon_List_get_length(list.getBareData());
+        incompleteList.create(length);
+
+        /* Copy list contents */
+        int i;
+        for (i = 0; i < length; i++)
+          incompleteList.at(i) = list.at(i);
       }
       
       static bool 
@@ -838,7 +1029,23 @@ namespace Pyon {
       
       static void 
       copy(Array1<T> array1, Incomplete< Array1<T> > &incompleteArray1) { 
-          incompleteArray1 = Incomplete< Array1<T> >(array1.getBareData());
+        if (!incompleteArray1.isEmpty()) {
+          pyonError("Attempted to write an already-initalized array\n");
+        }
+
+        /* Create the new array */
+        Array1Bounds bounds = pyon_Array1_get_bounds(array1.getBareData());
+        if (bounds.stride != 1) {
+          pyonError("Non-unit stride arrays are not implemented\n");
+        }
+        incompleteArray1.create(bounds.min, bounds.min + bounds.size);
+
+        /* Copy array contents */
+        int i;
+        for (i = 0; i < bounds.size; i++) {
+          int ix = bounds.min + i * bounds.stride;
+          incompleteArray1.at(i) = array1.at(i);
+        }
       }
       
       static bool 
@@ -858,6 +1065,78 @@ namespace Pyon {
         PyonBarePtr array1_contents = pyon_Array1_get_contents(getBareData());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return T_Bare(array1_contents + i * element_size);
+      }
+
+  };
+
+/* ------------------------------- BArray1 ---------------------------------- */
+
+  template<typename T>
+  class BArray1 : public BareType {
+    /* BArray1 has the same memory layout as Array1.  However, the array
+     * elements are pointers to boxed objects. */
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      struct initializer {
+        int min;
+        int end;
+        initializer(int _min, int _end) : min(_min), end(_end) {};
+      };
+      // no definition of defaultInitializer
+    public:
+      // Constructors
+      BArray1<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_Array1_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_Array1_alignment;
+      }
+      
+      static void 
+      copy(BArray1<T> array1, Incomplete< BArray1<T> > &incompleteArray1) {
+        if (!incompleteArray1.isEmpty()) {
+          pyonError("Attempted to write an already-initalized array\n");
+        }
+
+        /* Create the new array */
+        Array1Bounds bounds = pyon_Array1_get_bounds(array1.getBareData());
+        if (bounds.stride != 1) {
+          pyonError("Non-unit stride arrays are not implemented\n");
+        }
+        incompleteArray1.create(bounds.min, bounds.min + bounds.size);
+
+        /* Copy array contents, which is an array of pointers */
+        PyonBarePtr dst_array =
+          pyon_Array1_get_contents(incompleteArray1.getObject());
+        PyonBarePtr src_array =
+          pyon_Array1_get_contents(array1.getBareData());
+        memcpy(dst_array, src_array, bounds.size * sizeof(PyonBoxPtr));
+      }
+      
+      static bool 
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Box
+      at(int index) { 
+        Array1Bounds array1Bounds = pyon_Array1_get_bounds(getBareData());
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t displacement = index - array1Bounds.min;
+        int i = displacement / array1Bounds.stride;
+        if (displacement % array1Bounds.stride != 0)
+          pyonError("Array index out of bounds\n");
+
+        PyonBoxPtr *array1_contents =
+          (PyonBoxPtr *)pyon_Array1_get_contents(getBareData());
+        return T_Box(array1_contents[i]);
       }
 
   };
@@ -895,7 +1174,27 @@ namespace Pyon {
       
       static void 
       copy(Array2<T> array2, Incomplete< Array2<T> > &incompleteArray2) { 
-          incompleteArray2 = Incomplete< Array2<T> >(array2.getBareData());
+        if (!incompleteArray2.isEmpty()) {
+          pyonError("Attempted to write an already-initalized array\n");
+        }
+
+        /* Create the new array */
+        Array2Bounds bounds = pyon_Array2_get_bounds(array2.getBareData());
+        if (bounds.ystride != 1 || bounds.xstride != 1) {
+          pyonError("Non-unit stride arrays are not implemented\n");
+        }
+        incompleteArray2.create(bounds.ymin, bounds.ymin + bounds.ysize,
+                                bounds.xmin, bounds.xmin + bounds.xsize);
+
+        /* Copy array contents */
+        int j, i;
+        for (j = 0; j < bounds.ysize; j++) {
+          for (i = 0; i < bounds.xsize; i++) {
+            int ix_j = bounds.ymin + j * bounds.ystride;
+            int ix_i = bounds.xmin + i * bounds.xstride;
+            incompleteArray2.at(j, i) = array2.at(j, i);
+          }
+        }
       }
       
       static bool 
@@ -925,6 +1224,89 @@ namespace Pyon {
         return T_Bare(array2_contents + index * element_size);
       }
 
+  };
+
+
+/* ------------------------------- BArray2 ---------------------------------- */
+
+  template<typename T>
+  class BArray2 : public BareType {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      struct initializer {
+        int ymin;
+        int yend;
+        int xmin;
+        int xend;
+        initializer(int _ymin, int _yend, int _xmin, int _xend)
+          : ymin(_ymin), yend(_yend), xmin(_xmin), xend(_xend) {}
+      };
+      // no definition of defaultInitializer
+    public:
+      // Constructors
+      BArray2<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_Array2_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_Array2_alignment;
+      }
+      
+      static void 
+      copy(BArray2<T> array2, Incomplete< BArray2<T> > &incompleteArray2) { 
+        if (!incompleteArray2.isEmpty()) {
+          pyonError("Attempted to write an already-initalized array\n");
+        }
+
+        /* Create the new array */
+        Array2Bounds bounds = pyon_Array2_get_bounds(array2.getBareData());
+        if (bounds.ystride != 1 || bounds.xstride != 1) {
+          pyonError("Non-unit stride arrays are not implemented\n");
+        }
+        incompleteArray2.create(bounds.ymin, bounds.ymin + bounds.ysize,
+                                bounds.xmin, bounds.xmin + bounds.xsize);
+
+        /* Copy array contents.  It's an array of pointers. */
+        PyonBarePtr dst_array =
+          pyon_Array2_get_contents(incompleteArray2.getObject());
+        PyonBarePtr src_array =
+          pyon_Array2_get_contents(array2.getBareData());
+        memcpy(dst_array, src_array,
+               bounds.ysize * bounds.xsize * sizeof(PyonBoxPtr));
+      }
+      
+      static bool 
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Box
+      at(int rowIndex, int columnIndex) {
+        Array2Bounds array2Bounds = pyon_Array2_get_bounds(getBareData());
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array2Bounds.xmin;
+        int xi = x_displacement / array2Bounds.xstride;
+        if (x_displacement % array2Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array2Bounds.ymin;
+        int yi = y_displacement / array2Bounds.ystride;
+        if (y_displacement % array2Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array2Bounds.xsize;
+        int index = yi * row_n_members + xi;
+        PyonBoxPtr *array2_contents =
+          (PyonBoxPtr *)pyon_Array2_get_contents(getBareData());
+        return T_Box(array2_contents[index]);
+      }
   };
 
 /* ------------------------------- Array3 ----------------------------------- */
@@ -965,7 +1347,31 @@ namespace Pyon {
       
       static void
       copy(Array3<T> array3, Incomplete< Array3<T> > &incompleteArray3) { 
-          incompleteArray3 = Incomplete< Array3<T> >(array3.getBareData());
+        if (!incompleteArray3.isEmpty()) {
+          pyonError("Attempted to write an already-initalized array\n");
+        }
+
+        /* Create the new array */
+        Array3Bounds bounds = pyon_Array3_get_bounds(array3.getBareData());
+        if (bounds.zstride != 1 || bounds.ystride != 1 || bounds.xstride != 1) {
+          pyonError("Non-unit stride arrays are not implemented\n");
+        }
+        incompleteArray3.create(bounds.zmin, bounds.zmin + bounds.zsize,
+                                bounds.ymin, bounds.ymin + bounds.ysize,
+                                bounds.xmin, bounds.xmin + bounds.xsize);
+
+        /* Copy array contents */
+        int k, j, i;
+        for (k = 0; k < bounds.zsize; k++) {
+          for (j = 0; j < bounds.ysize; j++) {
+            for (i = 0; i < bounds.xsize; i++) {
+              int ix_k = bounds.zmin + k * bounds.zstride;
+              int ix_j = bounds.ymin + j * bounds.ystride;
+              int ix_i = bounds.xmin + i * bounds.xstride;
+              incompleteArray3.at(k, j, i) = array3.at(k, j, i);
+            }
+          }
+        }
       }
 
       static bool
@@ -1003,11 +1409,139 @@ namespace Pyon {
 
   };
 
+/* ------------------------------- BArray3 ---------------------------------- */
+
+  template<typename T>
+  class BArray3 : public BareType {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      struct initializer {
+        int zmin;
+        int zend;
+        int ymin;
+        int yend;
+        int xmin;
+        int xend;
+        initializer(int _zmin, int _zend,
+                    int _ymin, int _yend,
+                    int _xmin, int _xend)
+          : zmin(_zmin), zend(_zend), ymin(_ymin),
+            yend(_yend), xmin(_xmin), xend(_xend) {}
+      };
+      // no definition of defaultInitializer
+    public:
+      // Constructors
+      BArray3<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_Array3_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_Array3_alignment;
+      }
+      
+      static void
+      copy(BArray3<T> array3, Incomplete< BArray3<T> > &incompleteArray3) { 
+        if (!incompleteArray3.isEmpty()) {
+          pyonError("Attempted to write an already-initalized array\n");
+        }
+
+        /* Create the new array */
+        Array3Bounds bounds = pyon_Array3_get_bounds(array3.getBareData());
+        if (bounds.zstride != 1 || bounds.ystride != 1 || bounds.xstride != 1) {
+          pyonError("Non-unit stride arrays are not implemented\n");
+        }
+        incompleteArray3.create(bounds.zmin, bounds.zmin + bounds.zsize,
+                                bounds.ymin, bounds.ymin + bounds.ysize,
+                                bounds.xmin, bounds.xmin + bounds.xsize);
+
+        /* Copy array contents.  It's an array of pointers. */
+        PyonBarePtr dst_array =
+          pyon_Array3_get_contents(incompleteArray3.getObject());
+        PyonBarePtr src_array =
+          pyon_Array3_get_contents(array3.getBareData());
+        memcpy(dst_array, src_array,
+               bounds.zsize * bounds.ysize * bounds.xsize * sizeof(PyonBoxPtr));
+      }
+
+      static bool
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Box
+      at(int zIndex, int rowIndex, int columnIndex) {
+        Array3Bounds array3Bounds = pyon_Array3_get_bounds(getBareData());
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array3Bounds.xmin;
+        int xi = x_displacement / array3Bounds.xstride;
+        if (x_displacement % array3Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array3Bounds.ymin;
+        int yi = y_displacement / array3Bounds.ystride;
+        if (y_displacement % array3Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t z_displacement = zIndex - array3Bounds.zmin;
+        int zi = z_displacement / array3Bounds.zstride;
+        if (z_displacement % array3Bounds.zstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array3Bounds.xsize;
+        int32_t plane_n_members = row_n_members * array3Bounds.ysize;
+        int index = zi * plane_n_members + yi * row_n_members + xi;
+        PyonBoxPtr *array3_contents =
+          (PyonBoxPtr *)pyon_Array3_get_contents(getBareData());
+        return T_Box(array3_contents[index]);
+      }
+
+  };
 
 
 /******************************************************************************/
 /*          Stored Classes: BareType versions of ValType classes              */
 /******************************************************************************/
+
+    template<typename T>
+  class Stored : public BareType {
+    public:
+      struct initializer {}; // Class is empty
+      static initializer defaultInitializer(void) { return initializer(); }
+
+      // Constructors
+      Stored<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() __attribute__((const)) { return sizeof(typename T::type);}
+      
+      static unsigned int 
+      getAlignment() __attribute__((const)) {return __alignof__(typename T::type);}
+      
+      static inline void 
+      copy(Stored<T> i, Incomplete<Stored<T> >& incompleteI);
+      
+      static bool 
+      isPOD() __attribute__((const)) { return true; }
+
+      // Member Functions
+      operator T() const {
+        return T(*(typename T::type*) getBareData());
+      }
+
+      operator typename T::type() const {
+        return *(typename T::type *)getBareData();
+      }
+
+      operator Boxed<Stored<T> >() const;
+  };
 
   /* Implementation of Stored<NoneType> */
 
@@ -1039,104 +1573,35 @@ namespace Pyon {
       }
   };
 
-  /* Implementation of Stored<Int> */
-
-    template<>
-  class Stored<Int> : public BareType {
-    public:
-      struct initializer {}; // Class is empty
-      static initializer defaultInitializer(void) { return initializer(); }
-
-      // Constructors
-      Stored<Int>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
-      
-      // Static Member Functions
-      static unsigned int 
-      getSize() __attribute__((const)) { return sizeof(int32_t);}
-      
-      static unsigned int 
-      getAlignment() __attribute__((const)) {return sizeof(int32_t);}
-      
-      static inline void 
-      copy(Stored<Int> i, Incomplete< Stored<Int> >& incompleteI);
-      
-      static bool 
-      isPOD() __attribute__((const)) { return true; }
-
-      // Member Functions
-      operator Int() {
-        int32_t* nativePtr = (int32_t*) getBareData();
-        return Int(*nativePtr);
-      }
-  };
-
-  /* Implementation of Stored<Bool> */
-
-    template<>
-  class Stored<Bool> : public BareType {
-    public:
-      struct initializer {}; // Class is empty
-      static initializer defaultInitializer(void) { return initializer(); }
-
-      // Constructors
-      Stored<Bool>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
-      
-      // Static Member Functions
-      static unsigned int 
-      getSize() __attribute__((const)) { return sizeof(char);}
-      
-      static unsigned int 
-      getAlignment() __attribute__((const)) {return sizeof(char);}
-      
-      static inline void 
-      copy(Stored<Bool> b, Incomplete< Stored<Bool> >& incompleteB);
-      
-      static bool 
-      isPOD() __attribute__((const)) { return true; }
-
-      // Member Functions
-      operator Bool() {
-        char* nativePtr = (char*) getBareData();
-        return Bool(*nativePtr);
-      }
-
-  };
-
-  /* Implementation of Stored<Float> */
-  template<>
-  class Stored<Float> : public BareType {
-    public:
-      struct initializer {}; // Class is empty
-      static initializer defaultInitializer(void) { return initializer(); }
-
-      // Constructors
-      Stored<Float>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
-
-      // Static Member Functions
-      static unsigned int 
-      getSize() __attribute__((const)) { return sizeof(float);}
-      
-      static unsigned int 
-      getAlignment() __attribute__((const)) {return sizeof(float);}
-      
-      static inline void 
-      copy(Stored<Float> f, Incomplete< Stored<Float> >& incompleteF);
-      
-      static bool 
-      isPOD() __attribute__((const)) { return true; }
-
-      // Member Functions
-      operator Float() {
-        float* nativePtr = (float*) getBareData();
-        return Float(*nativePtr);
-      }
-
-  };
-
 
 /******************************************************************************/
 /*                      Incomplete BareType Objects                           */
 /******************************************************************************/
+
+  /* Implementation of Incomplete< StuckRef <T> > */
+    template<typename T>
+  class Incomplete<StuckRef<T> > : public IncompleteSingleRef<StuckRef<T> > {
+    public:
+      Incomplete < StuckRef<T> >(void)
+        : IncompleteSingleRef< StuckRef<T> >() {}
+      Incomplete < StuckRef<T> >(PyonBarePtr _s)
+        : IncompleteSingleRef< StuckRef<T> >(_s) {}
+      void initialize(const typename StuckRef<T>::initializer&) { }
+      void create(const typename StuckRef<T>::initializer& init)
+      { this->allocate(); initialize(init); }
+      void initialize() { initialize(StuckRef<T>::defaultInitializer()); }
+      void create() { create(StuckRef<T>::defaultInitializer()); }
+
+      /* There is no operator=(StuckRef<T>).
+       * Instead, StuckRef<T> is cast to T, which can be passed to the
+       * following operator. */
+      void operator=(T other) {
+        /* Copy a pointer */
+        PyonBoxPtr *data = (PyonBoxPtr *)this->getObject();
+        *data = other.getBoxData();
+      }
+  };
+
 
   /* Implementation of Incomplete< Stored <T> > */
   
@@ -1146,8 +1611,8 @@ namespace Pyon {
       Incomplete < Stored<T> >(void) : IncompleteSingleRef< Stored<T> >() {}
       Incomplete < Stored<T> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
       void initialize(const typename Stored<T>::initializer&) { }
-      void create(const typename Stored<T>::initializer&)
-      { this->allocate(); initialize(); }
+      void create(const typename Stored<T>::initializer& init)
+      { this->allocate(); initialize(init); }
       void initialize() { initialize(Stored<T>::defaultInitializer()); }
       void create() { create(Stored<T>::defaultInitializer()); }
       void operator=(const T& other) {
@@ -1164,8 +1629,8 @@ namespace Pyon {
       Incomplete < Stored<NoneType> >(void) : IncompleteSingleRef< Stored<NoneType> >() {}
       Incomplete < Stored<NoneType> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
       void initialize(const Stored<NoneType>::initializer&) { }
-      void create(const Stored<NoneType>::initializer&)
-      { this->allocate(); initialize(); }
+      void create(const Stored<NoneType>::initializer& init)
+      { this->allocate(); initialize(init); }
       void initialize() { initialize(Stored<NoneType>::defaultInitializer()); }
       void create() { create(Stored<NoneType>::defaultInitializer()); }
       void operator=(const NoneType& other) { }
@@ -1343,6 +1808,40 @@ namespace Pyon {
 
   };
 
+    template<typename T>
+  class Incomplete< BArray1<T> > : public IncompleteSingleRef< BArray1<T> > {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      // Constructors
+      Incomplete< BArray1<T> >(void) : IncompleteSingleRef< BArray1<T> >() { }
+      Incomplete< BArray1<T> >(PyonBarePtr _s) : IncompleteSingleRef< BArray1<T> >(_s) { }
+      
+      // Member Functions
+      void initialize(const typename BArray1<T>::initializer &init)
+      {
+        pyon_Array1_initialize(init.min, 1, init.end,
+                               sizeof(PyonBarePtr),
+                               __alignof__(PyonBarePtr),
+                               this->getObject());
+      }
+      void create(const typename BArray1<T>::initializer &init)
+      { this->allocate(); initialize(init); }
+      void initialize(int min, int end)
+      { initialize(typename BArray1<T>::initializer(min, end)); }
+      void create(int min, int end)
+      { create(typename BArray1<T>::initializer(min, end)); }
+
+      Incomplete<StuckRef<T_Box> > 
+      at(int index) {
+        int32_t min = pyon_Array1_get_bounds(this->getObject()).min;
+        PyonBoxPtr *array1_contents = (PyonBoxPtr *)pyon_Array1_get_contents(this->getObject());
+        
+        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&array1_contents[index - min]);
+      }
+
+  };
+
   /* Implementation of Incomplete< Array2<T> > */
 
     template<typename T>
@@ -1395,6 +1894,58 @@ namespace Pyon {
         return Incomplete<T_Bare>(array2_contents + index * element_size ); 
       }
 
+  };
+
+
+    template<typename T>
+  class Incomplete<BArray2<T> > : public IncompleteSingleRef<BArray2<T> > {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      // Constructors
+      Incomplete<BArray2<T> >(void) : IncompleteSingleRef<BArray2<T> >() { }
+      Incomplete<BArray2<T> >(PyonBarePtr _s) : IncompleteSingleRef<BArray2<T> >(_s) { }
+
+      // Member Functions
+      void initialize(const typename BArray2<T>::initializer &init)
+      {
+        pyon_Array2_initialize(init.ymin, 1, init.yend,
+                               init.xmin, 1, init.xend,
+                               sizeof(PyonBoxPtr),
+                               __alignof__(PyonBoxPtr),
+                               this->getObject());
+      }
+      void create(const typename BArray2<T>::initializer &init)
+      { this->allocate(); initialize(init); }
+
+      void initialize(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end)
+      { initialize(typename BArray2<T>::initializer(y_min, y_end, x_min, x_end)); }
+
+      void create(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end)
+      { create(typename BArray2<T>::initializer(y_min, y_end, x_min, x_end)); }
+
+      Incomplete<StuckRef<T_Box > >
+      at(int rowIndex, int columnIndex) { 
+        Array2Bounds array2Bounds = pyon_Array2_get_bounds(this->getObject());
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array2Bounds.xmin;
+        int xi = x_displacement / array2Bounds.xstride;
+        if (x_displacement % array2Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array2Bounds.ymin;
+        int yi = y_displacement / array2Bounds.ystride;
+        if (y_displacement % array2Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array2Bounds.xsize;
+        int index = yi * row_n_members + xi;
+        PyonBoxPtr *array2_contents =
+          (PyonBoxPtr *)pyon_Array2_get_contents(this->getObject());
+        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&array2_contents[index]); 
+      }
   };
 
   /* Implementation of Incomplete< Array3<T> > */
@@ -1466,6 +2017,103 @@ namespace Pyon {
 
   };
 
+
+    template<typename T>
+  class Incomplete<BArray3<T> > : public IncompleteSingleRef<BArray3<T> > {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      // Constructors
+      Incomplete<BArray3<T> >(void) : IncompleteSingleRef<BArray3<T> >() { }
+      Incomplete<BArray3<T> >(PyonBarePtr _s) : IncompleteSingleRef<BArray3<T> >(_s) { }
+
+      // Member Functions
+      void initialize(const typename BArray3<T>::initializer &init)
+      {
+        pyon_Array3_initialize(init.zmin, 1, init.zend,
+                               init.ymin, 1, init.yend,
+                               init.xmin, 1, init.xend,
+                               sizeof(PyonBoxPtr),
+                               __alignof__(PyonBoxPtr),
+                               this->getObject());
+      }
+      void create(const typename BArray3<T>::initializer &init)
+      { this->allocate(); initialize(init); }
+
+      void initialize(int32_t z_min, int32_t z_end, int32_t y_min,
+                      int32_t y_end, int32_t x_min, int32_t x_end)
+      {
+        initialize(typename BArray3<T>::initializer(z_min, z_end, y_min,
+                                                   y_end, x_min, x_end));
+      }
+
+      void create(int32_t z_min, int32_t z_end, int32_t y_min,
+                  int32_t y_end, int32_t x_min, int32_t x_end)
+      {
+        create(typename BArray3<T>::initializer(z_min, z_end, y_min,
+                                               y_end, x_min, x_end));
+      }
+
+      Incomplete<StuckRef<T_Box > >
+      at(int zIndex, int rowIndex, int columnIndex) { 
+        Array3Bounds array3Bounds = pyon_Array3_get_bounds(this->getObject());
+
+        // The real index in each dimension is (i - lower_bound) / stride.
+        // The remainder modulo the stride must be zero.
+        int32_t x_displacement = columnIndex - array3Bounds.xmin;
+        int xi = x_displacement / array3Bounds.xstride;
+        if (x_displacement % array3Bounds.xstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t y_displacement = rowIndex - array3Bounds.ymin;
+        int yi = y_displacement / array3Bounds.ystride;
+        if (y_displacement % array3Bounds.ystride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t z_displacement = zIndex - array3Bounds.zmin;
+        int zi = z_displacement / array3Bounds.zstride;
+        if (z_displacement % array3Bounds.zstride != 0)
+          pyonError("Array index out of bounds\n");
+
+        int32_t row_n_members = array3Bounds.xsize;
+        int32_t plane_n_members = row_n_members * array3Bounds.ysize;
+        int index = zi * plane_n_members + yi * row_n_members + xi;
+        PyonBoxPtr *contents =
+          (PyonBoxPtr *)pyon_Array3_get_contents(this->getObject());
+        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&contents[index]);
+      }
+  };
+
+  /* Implementation of Incomplete< Boxed<T> > */
+    template<typename T>
+  class Incomplete<Boxed<T> > : public IncompleteBoxedRef<Boxed<T> > {
+    private:
+      typedef typename AsBareType<T>::type T_Bare;
+
+    public:
+      Incomplete<Boxed<T> >(void) : IncompleteBoxedRef<Boxed<T> >() {}
+
+      void initialize(const typename Boxed<T>::initializer &init)
+      {
+        // Initialize the contents of this object
+        this->get().initialize(init);
+      }
+
+      void create(const typename Boxed<T>::initializer &init)
+      { this->allocate(); initialize(init); }
+
+      Incomplete<T_Bare>
+      get() {
+        /* Get a reference to the contents of this boxed object.
+         * Compute size of object header plus padding. */
+        unsigned int contents_offset =
+          addPadding<T_Bare>(PYON_OBJECT_HEADER_SIZE);
+        PyonBarePtr contents_ptr =
+          (PyonBarePtr)((char *)this->getObject() + contents_offset);
+        return Incomplete<T_Bare>(contents_ptr);
+      }
+  };
+
 /******************************************************************************/
 /*      Class methods that depend on T and Incomplete<T> are defined here     */
 /******************************************************************************/
@@ -1477,22 +2125,166 @@ namespace Pyon {
   { // Do nothing
   }
 
-  inline void 
-  Stored<Int>::copy(Stored<Int> i, Incomplete< Stored<Int> >& incompleteI)
+  template<typename T>
+  void 
+  Stored<T>::copy(Stored<T> i, Incomplete< Stored<T> >& incompleteI)
   {
-    incompleteI = Incomplete< Stored<Int> >(i.getBareData());
+    void (*concept_check)(T) = &ValType_concept;
+    incompleteI = (T)i;
   }
 
-  inline void 
-  Stored<Bool>::copy(Stored<Bool> b, Incomplete< Stored<Bool> >& incompleteB)
+  template<typename T>
+  Stored<T>::operator Boxed<Stored<T> >() const
   {
-    incompleteB = Incomplete<Stored<Bool> >(b.getBareData());
+    Incomplete<Boxed<Stored<T> > > i;
+    i.create();
+    i.get() = *this;
+    return i.freeze();
   }
 
-  inline void 
-  Stored<Float>::copy(Stored<Float> f, Incomplete< Stored<Float> >& incompleteF)
+  NoneType::operator Boxed<Stored<NoneType> >() const
   {
-    incompleteF = Incomplete< Stored<Float> >(f.getBareData());
+    Incomplete<Boxed<Stored<NoneType> > > i;
+    i.create(Stored<NoneType>::defaultInitializer());
+    return i.freeze();
+  }
+
+  Int::Int(const Stored<Int> &s)
+  {
+    nativeElement = (int32_t)s;
+  }
+
+  Int::operator Boxed<Stored<Int> >() const
+  {
+    Incomplete<Boxed<Stored<Int> > > i;
+    i.create(Stored<Int>::defaultInitializer());
+    i.get() = *this;
+    return i.freeze();
+  }
+
+  Bool::Bool(const Stored<Bool> &s)
+  {
+    nativeElement = (char)s;
+  }
+
+  Bool::operator Boxed<Stored<Bool> >() const
+  {
+    Incomplete<Boxed<Stored<Bool> > > i;
+    i.create(Stored<Bool>::defaultInitializer());
+    i.get() = *this;
+    return i.freeze();
+  }
+
+  Float::Float(const Stored<Float> &s)
+  {
+    nativeElement = (float)s;
+  }
+
+  Float::operator Boxed<Stored<Float> >() const
+  {
+    Incomplete<Boxed<Stored<Float> > > i;
+    i.create(Stored<Float>::defaultInitializer());
+    i.get() = *this;
+    return i.freeze();
+  }
+
+/******************************************************************************/
+/*      Concept checking                                                      */
+/******************************************************************************/
+
+  template<class T>
+  void ValType_concept(T x) {
+    /* T::kind == ValKindTag */
+    typename T::kind kind_tag2 = ValKindTag();
+
+    /* T::type is a POD type */
+    typename T::type initializer_value;
+
+    /* Casting between T and T::type is possible */
+    T cast_initializer_value(initializer_value);
+    initializer_value = cast_initializer_value;
+
+    /* Stored<T> and Incomplete<Stored<T> > are valid types */
+    BareType_concept(*(Stored<T> *)NULL);
+
+    /* It's possible to create, assign, and freeze an incomplete object */
+    Incomplete<Stored<T> > incomplete_t;
+    incomplete_t.create();
+    incomplete_t = initializer_value;
+    incomplete_t = cast_initializer_value;
+    Stored<T> stored_t = incomplete_t.freeze();
+
+    /* It's possible to assign a T from a Stored<T> */
+    initializer_value = stored_t;
+    cast_initializer_value = stored_t;
+  }
+
+  template<class T>
+  void BareType_concept(T x) {
+    /* T::kind == BareKindTag */
+    typename T::kind kind_tag2 = BareKindTag();
+
+    /* T::initializer exists and is POD */
+    typename T::initializer init = *(typename T::initializer *)NULL;
+
+    PyonBarePtr p = x.getBareData();
+
+    /* Incomplete<T> methods */
+    Incomplete<T> incomplete_t;
+    incomplete_t.allocate();
+    incomplete_t.initialize(init);
+    incomplete_t.create(init);
+    Incomplete<T> incomplete2(p);
+
+    /* Methods getSize, getAlignment, isPOD, copy */
+    unsigned int x1 = T::getSize();
+    unsigned int x2 = T::getAlignment();
+    bool b = T::isPOD();
+
+    T::copy(x, incomplete_t);
+  }
+
+  template<class T>
+  void BoxType_concept(T x) {
+    /* T::kind == BoxKindTag */
+    typename T::kind kind_tag2 = BoxKindTag();
+
+    /* T::initializer exists and is POD */
+    typename T::initializer init = *(typename T::initializer *)NULL;
+
+    PyonBoxPtr p = x.getBoxData();
+
+    /* Incomplete<T> methods */
+    Incomplete<T> incomplete_t;
+    incomplete_t.allocate();
+    incomplete_t.initialize(init);
+    incomplete_t.create(init);
+
+    /* Methods getSize, getAlignment */
+    unsigned int x1 = T::getSize();
+    unsigned int x2 = T::getAlignment();
+  }
+
+  /* This function performs compile-time correctness checks.
+   * It is not meant to be called. */
+  static void
+  Pyon_concept_checks(void) {
+    void (*f_NoneType)(NoneType) = &ValType_concept;
+    void (*f_Bool)(Bool)         = &ValType_concept;
+    void (*f_Int)(Int)           = &ValType_concept;
+    void (*f_Float)(Float)       = &ValType_concept;
+    void (*f_Boxed)(Boxed<Int>) = &BoxType_concept;
+    void (*f_StuckRef)(StuckRef<Boxed<Int> >) = &BareType_concept;
+    void (*f_Tuple2)(Tuple<Int,Int>)          = &BareType_concept;
+    void (*f_Tuple3)(Tuple<Int,Int,Int>)      = &BareType_concept;
+    void (*f_Tuple4)(Tuple<Int,Int,Int,Int>)  = &BareType_concept;
+    void (*f_List)(List<Int>)                 = &BareType_concept;
+    void (*f_Array1)(Array1<Int>)             = &BareType_concept;
+    void (*f_Array2)(Array2<Int>)             = &BareType_concept;
+    void (*f_Array3)(Array3<Int>)             = &BareType_concept;
+    void (*f_BArray1)(BArray1<Int>)           = &BareType_concept;
+    void (*f_BArray2)(BArray2<Int>)           = &BareType_concept;
+    void (*f_BArray3)(BArray3<Int>)           = &BareType_concept;
   }
 
 } // end namespace
