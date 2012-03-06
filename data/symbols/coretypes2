@@ -645,19 +645,19 @@ data array3 : bare -> bare
 -- A 1D boxed array.
 data barray1 : bare -> bare
 {
-  mk_barray1 (a : bare) () (array1 (StoredBox (BoxedType a)));
+  mk_barray1 (a : bare) () (array1 (StuckRef (BoxedType a)));
 };
 
 -- A 2D boxed array.
 data barray2 : bare -> bare
 {
-  mk_barray2 (a : bare) () (array2 (StoredBox (BoxedType a)));
+  mk_barray2 (a : bare) () (array2 (StuckRef (BoxedType a)));
 };
 
 -- A 3D boxed array.
 data barray3 : bare -> bare
 {
-  mk_barray3 (a : bare) () (array3 (StoredBox (BoxedType a)));
+  mk_barray3 (a : bare) () (array3 (StuckRef (BoxedType a)));
 };
 
 -- Convert the "size" fields of an array to an equivalent dim1.
