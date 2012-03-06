@@ -278,9 +278,12 @@ pyonToWrapperType(Pool* p, const PyonType* pyonType) {
       break;
     }
     case PyonListTypeTag: {
+      // Create either a "List" or "BList" type
+      const char *list_name = pyonType->list.boxed ? "BList" : "List";
       Type** typeList = malloc(sizeof(Type*));
       typeList[0] = pyonToWrapperType(p, pyonType->list.elem);
-      TmplName* tmplName = TmplName_create(p, Name_create_static(p, "List"), 1, typeList);
+      TmplName* tmplName =
+        TmplName_create(p, Name_create_static(p, list_name), 1, typeList);
       return createTmplNameInNamespace (p, tmplName);
       break;
     }

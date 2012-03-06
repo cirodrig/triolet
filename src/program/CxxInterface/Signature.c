@@ -48,10 +48,11 @@ PyonType_Tuple(int size)
 
 /* Create a list type.  Steals ownership of 'elem'. */
 const PyonType *
-PyonType_List(const PyonType *elem)
+PyonType_List(int boxed, const PyonType *elem)
 {
   PyonType *p = malloc(sizeof(PyonType));
   *p = (PyonType){.tag = PyonListTypeTag};
+  p->list.boxed = boxed;
   p->list.elem = elem;
   return p;
 }
@@ -85,7 +86,8 @@ PyonType_duplicate(const PyonType *p)
       for (i = 0; i < count; i++) t->tuple.elems[i] = elems[i];
       return t;
     }
-  case PyonListTypeTag: return PyonType_List(PyonType_duplicate(p->list.elem));
+  case PyonListTypeTag:
+    return PyonType_List(p->list.boxed, PyonType_duplicate(p->list.elem));
   case PyonArrayTypeTag:
     return PyonType_Array(p->array.dimensionality,
                           p->array.boxed,

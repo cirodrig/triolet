@@ -388,7 +388,7 @@ flattenExportedParam etype original_param = do
 
   let no_change' = no_change xparams
   case etype of
-    ListET _ -> no_change'
+    ListET _ _ -> no_change'
     TupleET _ -> no_change'
     ArrayET _ _ _ -> no_change'
     PyonIntET -> no_change'

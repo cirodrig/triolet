@@ -34,7 +34,9 @@ data ExportDataType =
     TupleET [ExportDataType]
 
     -- | A Pyon list.
-  | ListET ExportDataType
+    --   The boolean parameter is the boxing of array elements 
+    --   (True means boxed, False means unboxed)
+  | ListET !Bool ExportDataType
 
     -- | A Pyon array.
     --   The first parameter is the array dimensionality.
@@ -64,13 +66,14 @@ instance Show ExportDataType where
     of TupleET tys ->
          showParen (prec >= 10) $
          foldr (.) id $ intersperse (showChar ',') $ map shows tys
-       ListET ty ->
+       ListET b ty ->
          showParen (prec >= 10) $ 
-         showString "ListET (" . shows ty . showChar ')'
+         showString "ListET " . showBoxing b . showChar '(' .
+         shows ty . showChar ')'
        ArrayET n b ty ->
          showParen (prec >= 10) $ 
          showString "ArrayET " . shows n . showChar ' ' .
-         showString (if b then "boxed " else "unboxed ") .
+         showBoxing b .
          showString " (" . shows ty . showChar ')'
        CSizeArrayET et ->
          showString "CSizeArrayET " . showsPrec 10 et
@@ -90,6 +93,12 @@ instance Show ExportDataType where
        PyonComplexFloatET -> showString "PyonComplexFloatET"
        CIntET -> showString "CIntET"
        CFloatET -> showString "CFloatET"
+    where
+      showBoxing :: Bool -> ShowS
+      showBoxing False = showString "unboxed "
+      showboxing True = showString "boxed "
+
+
 
 -- | A language-specific exported function signature
 data ExportSig =

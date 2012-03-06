@@ -21,7 +21,7 @@ import LowLevel.GenerateCUtils
 exportParamDeclSpecs :: ExportDataType -> [DeclSpecs]
 exportParamDeclSpecs export_type =
   case export_type
-  of ListET _ -> [ptrDeclSpecs $ nameDeclSpecs "PyonList"]
+  of ListET False _ -> [ptrDeclSpecs $ nameDeclSpecs "PyonList"]
      ArrayET 2 False _ -> [ptrDeclSpecs $ nameDeclSpecs "PyonMatrix"]
      CSizeArrayET et ->
        case exportParamDeclSpecs et
@@ -41,7 +41,7 @@ exportParamDeclSpecs export_type =
 exportReturnDeclSpecs :: ExportDataType -> ([DeclSpecs], DeclSpecs)
 exportReturnDeclSpecs export_type =
   case export_type
-  of ListET _ -> ([], ptrDeclSpecs $ nameDeclSpecs "PyonList")
+  of ListET False _ -> ([], ptrDeclSpecs $ nameDeclSpecs "PyonList")
      ArrayET 2 False _ -> ([], ptrDeclSpecs $ nameDeclSpecs "PyonMatrix")
      CSizeArrayET et -> 
        case exportParamDeclSpecs et

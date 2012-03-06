@@ -23,6 +23,13 @@ data StoredBox : box -> bare
   storedBox (a : box) () (a);
 };
 
+-- A stuck reference is like a 'StoredBox' but doesn't get unwrapped
+-- by 'convertToBare'.
+data StuckRef : box -> bare
+{
+  stuckRef (a : box) () (a);
+};
+
 data Boxed : bare -> box
 {
   boxed (a : bare) () (a);
@@ -588,6 +595,12 @@ data list : bare -> bare
   (FIInt n, Referenced (arr n a));
 };
 
+-- A list of boxed objects
+data blist : bare -> bare
+{
+  make_blist (a : bare) () (list (StuckRef (BoxedType a)));
+};
+
 -- An array type, parameterized over its dimension.
 -- The array type contains its bounds.
 type array : bare -> bare -> bare;
@@ -740,6 +753,7 @@ repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
 repr_array1 : (a : bare) -> Repr a -> Repr (array1 a);
 repr_array2 : (a : bare) -> Repr a -> Repr (array2 a);
 repr_array3 : (a : bare) -> Repr a -> Repr (array3 a);
+repr_blist : (a : bare) -> Repr (blist a);
 repr_barray1 : (a : bare) -> Repr (barray1 a);
 repr_barray2 : (a : bare) -> Repr (barray2 a);
 repr_barray3 : (a : bare) -> Repr (barray3 a);
@@ -762,6 +776,7 @@ repr_PyonTuple4 :
 -- Representation of any boxed object
 repr_Box : (a : box) -> Repr (BareType a);
 repr_StoredBox : (a : box) -> Repr (StoredBox a);
+repr_StuckRef : (a : box) -> Repr (StuckRef a);
 
 repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
@@ -846,6 +861,12 @@ TraversableDict_array3_build :
 
 TraversableDict_array3_traverse :
   (a : bare) -> Repr a -> array3 a -> Stream dim3 a;
+
+TraversableDict_blist_build :
+  (a : bare) -> Repr a -> Stream list_dim a -> Writer (blist a);
+
+TraversableDict_blist_traverse :
+  (a : bare) -> Repr a -> blist a -> Stream list_dim a;
 
 TraversableDict_barray1_build :
   (a : bare) -> Repr a -> Stream dim1 a -> Writer (barray1 a);
@@ -1122,6 +1143,12 @@ IndexableDict_array2_at_point :
 
 IndexableDict_array2_get_shape :
   (a : bare) -> array2 a -> dim2;
+
+IndexableDict_blist_at_point :
+  (a : bare) -> Repr a -> blist a -> Stored int -> Writer a;
+
+IndexableDict_blist_get_shape :
+  (a : bare) -> blist a -> list_dim;
 
 IndexableDict_barray1_at_point :
   (a : bare) -> Repr a -> barray1 a -> Stored int -> Writer a;

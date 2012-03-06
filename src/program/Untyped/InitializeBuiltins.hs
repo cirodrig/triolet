@@ -104,7 +104,7 @@ mkTyFunction name kind cst sf_var instances = do
 mkShapeTyFun = do
   rec { (con, fam) <- mkTyFunction "shape" shape_kind []
                       (pyonBuiltin SystemF.The_shape)
-                      [list_instance,
+                      [list_instance, blist_instance,
                        array1_instance, array2_instance, array3_instance,
                        barray1_instance, barray2_instance, barray3_instance,
                        view_instance, iter_instance]
@@ -112,6 +112,10 @@ mkShapeTyFun = do
       ; let list_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_list)
+              (ConTy $ tiBuiltin the_con_list_dim)
+      ; let blist_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_blist)
               (ConTy $ tiBuiltin the_con_list_dim)
       ; let array1_instance =
               mkTyFamilyInstance [] [] (tfSignature fam)
@@ -370,7 +374,7 @@ mkTraversableClass = do
                   (pyonBuiltin SystemF.The_TraversableDict)
                   (pyonBuiltin SystemF.The_traversableDict)
                   [iter, build]
-                  [list_instance,
+                  [list_instance, blist_instance,
                    array1_instance, array2_instance, array3_instance,
                    barray1_instance, barray2_instance, barray3_instance,
                    view_list_dim_instance,
@@ -391,6 +395,14 @@ mkTraversableClass = do
                   pyonBuiltin SystemF.The_TraversableDict_list_traverse
                 , InstanceMethod $
                   pyonBuiltin SystemF.The_TraversableDict_list_build]
+
+            blist_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_blist)
+                [ InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_blist_traverse
+                , InstanceMethod $
+                  pyonBuiltin SystemF.The_TraversableDict_blist_build]
 
             array3_instance =
                 monomorphicInstance cls
@@ -634,7 +646,7 @@ mkIndexableClass = do
                   (pyonBuiltin SystemF.The_IndexableDict)
                   (pyonBuiltin SystemF.The_indexableDict)
                   [at, get_shape]
-                  [list_instance,
+                  [list_instance, blist_instance,
                    array1_instance, array2_instance,
                    barray1_instance, barray2_instance,
                    view_instance]
@@ -646,6 +658,11 @@ mkIndexableClass = do
               (ConTy $ tiBuiltin the_con_list)
               [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_list_at_point
               , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_list_get_shape]
+      ; let blist_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_blist)
+              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_blist_at_point
+              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_blist_get_shape]
       ; let array1_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_array1)
@@ -1123,7 +1140,7 @@ mkPassableClass = do
                list_dim_instance,
                dim1_instance, dim2_instance, dim3_instance,
                any_instance,
-               list_instance,
+               list_instance, blist_instance,
                array1_instance, array2_instance, array3_instance,
                barray1_instance, barray2_instance, barray3_instance,
                iter_instance,
@@ -1180,6 +1197,11 @@ mkPassableClass = do
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_list) @@ ConTy b)
           (pyonBuiltin SystemF.The_repr_list)
+          []
+  ; let blist_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_blist) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_blist)
           []
   ; let array1_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
@@ -1766,6 +1788,7 @@ initializeTIBuiltins = do
             , ("array1", Star :-> Star, [| pyonBuiltin SystemF.The_array1 |])
             , ("array2", Star :-> Star, [| pyonBuiltin SystemF.The_array2 |])
             , ("array3", Star :-> Star, [| pyonBuiltin SystemF.The_array3 |])
+            , ("blist", Star :-> Star, [| pyonBuiltin SystemF.The_blist |])
             , ("barray1", Star :-> Star, [| pyonBuiltin SystemF.The_barray1 |])
             , ("barray2", Star :-> Star, [| pyonBuiltin SystemF.The_barray2 |])
             , ("barray3", Star :-> Star, [| pyonBuiltin SystemF.The_barray3 |])

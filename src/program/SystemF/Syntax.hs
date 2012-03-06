@@ -668,6 +668,7 @@ isReprCon v =
            , pyonBuiltin The_repr_array1
            , pyonBuiltin The_repr_array2
            , pyonBuiltin The_repr_array3
+           , pyonBuiltin The_repr_blist
            , pyonBuiltin The_repr_barray1
            , pyonBuiltin The_repr_barray2
            , pyonBuiltin The_repr_barray3
@@ -677,5 +678,6 @@ isReprCon v =
            , pyonBuiltin The_repr_PyonTuple4
            , pyonBuiltin The_repr_Box
            , pyonBuiltin The_repr_Stream
+           , pyonBuiltin The_repr_StuckRef
            , pyonBuiltin The_repr_StoredBox
            ]

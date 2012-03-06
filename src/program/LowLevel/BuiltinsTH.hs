@@ -423,6 +423,8 @@ builtinGlobals =
      Right [| pyonBuiltin SystemF.The_repr_barray3 |])
   , (PyonName module_structures "repr_StoredBox",
      Right [| SystemF.pyonBuiltin SystemF.The_repr_StoredBox |])
+  , (PyonName module_structures "repr_StuckRef",
+     Right [| SystemF.pyonBuiltin SystemF.The_repr_StuckRef |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.The_repr_Box |])
   , (PyonName module_structures "repr_Stream",

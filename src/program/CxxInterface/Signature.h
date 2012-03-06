@@ -25,6 +25,7 @@ struct PyonType {
       const PyonType **elems;	/* Pointer to an array of owned 'PyonType' */
     } tuple;
     struct {
+      int boxed;                /* Boolean; whether array elements are boxed */
       const PyonType *elem;     /* Type of a list element */
     } list;
     struct {
@@ -41,7 +42,7 @@ const PyonType *PyonType_Float(void);
 const PyonType *PyonType_Bool(void);
 const PyonType *PyonType_NoneType(void);
 const PyonType *PyonType_Tuple(int size);
-const PyonType *PyonType_List(const PyonType *);
+const PyonType *PyonType_List(int, const PyonType *);
 const PyonType *PyonType_Array(int, int, const PyonType *);
 const PyonType *PyonType_duplicate(const PyonType *);
 

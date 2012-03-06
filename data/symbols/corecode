@@ -2040,6 +2040,49 @@ TraversableDict_array3_build
   ret;
 
 
+TraversableDict_blist_build @(a : bare)
+  (repr : Repr a) (s : Stream list_dim a) (ret : OutPtr (blist a))
+  -> IEffect (blist a) attribute(inline) =
+
+  let type boxed_a = StuckRef (BoxedType a) in
+  let repr_boxed : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  -- Wrap all sequence elements in boxes
+  let s2 : Stream list_dim boxed_a =
+        ShapeDict_list_dim_map @a @boxed_a repr (repr_StuckRef @(BoxedType a))
+        (\ (x : a) -> Writer boxed_a.
+           stuckRef @(BoxedType a) (convertToBoxed @a repr (copy @a repr x)))
+        s in 
+  case s2 of {
+    sequenceStream @boxed_a (sq : Sequence boxed_a).
+      make_blist @a (Sequence_build_list @boxed_a repr_boxed sq) ret
+  ; viewStream @boxed_a (vw : view list_dim boxed_a).
+      make_blist @a (build_list_dim_list @boxed_a repr_boxed vw) ret
+  };
+
+-- List traversal.
+-- Loop over all list indices and return the corresponding array element.
+TraversableDict_blist_traverse @(a : bare) (repr : Repr a) (ls : blist a)
+  -> Stream list_dim a attribute(inline) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  case ls of make_blist @a (ls2 : list boxed_a).
+  case ls2 of make_list @boxed_a @(N : intindex)
+                       (size : FIInt N) (aref : Referenced (arr N boxed_a)).
+  case aref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+  case size of fiInt @N (size_i : int).
+
+  let shp : list_dim = mk_list_dim (justVal @int size_i) in
+  let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+
+  viewStream @a
+  (view_generate @list_dim
+   ShapeDict_list_dim @a repr shp
+   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+     case si of stored @int (i : int).
+     case subscript @N @boxed_a repr_box ay i of
+       stuckRef @(BoxedType a) (val : BoxedType a).
+     convertToBare @a repr val ret));
+
+
 TraversableDict_barray1_traverse
   @(a : bare) (repr : Repr a) (ar : barray1 a)
   -> view dim1 a attribute(inline) =
