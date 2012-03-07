@@ -1630,7 +1630,7 @@ mkBArray1ScatterType =
   let sT = ConTy s
       iT = ConTy i
       int_type = ConTy $ tiBuiltin the_con_int
-  in ([passable sT, passable iT],
+  in ([passable iT, passable sT],
       functionType [ConTy $ tiBuiltin the_con_dim1,
                     ConTy (tiBuiltin the_con_Scatter) @@
                     (ConTy (tiBuiltin the_con_StuckRef) @@ sT) @@ iT]
