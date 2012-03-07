@@ -1240,6 +1240,32 @@ countingScatter_make_update (i : Stored NoneType) -> int -> int =
 countingScatter_make_init (dummy : NoneType) -> int = 0;
 
 
+boxedScatter @(a : box) @(b : bare) (repr : Repr b)
+  (f : b -> a -> a)
+  (g : a -> a -> a)
+  (init : a)
+  -> Scatter (StuckRef a) b =
+  mk_scatter @(StuckRef a) @b @(StuckRef a) @(a,)
+  (repr_StuckRef @a)
+  -- Initializer
+  (\ (init_f : NoneType -> (a,)) (p : OutPtr (StuckRef a)) -> EffTok.
+     case init_f None of (x : a,). toEffTok @(StuckRef a) (stuckRef @a x p))
+  -- Updater
+  (\ (modify : (a,) -> (a,)) (index : b) (eff_in : EffTok)
+     (p : OutPtr (StuckRef a)) -> EffTok.
+     boxedScatter_updater @a modify eff_in p)
+  (\ (x : StuckRef a) (y : StuckRef a) (ret : OutPtr (StuckRef a))
+     -> IEffect (StuckRef a).
+     case x of stuckRef @a (ux : a).
+     case y of stuckRef @a (uy : a).
+     stuckRef @a (g ux uy) ret)
+  (mutateInPlace @(StuckRef a) @(StuckRef a) (idBareCoercion @(StuckRef a)))
+  (\ (x : b) (old : (a,)) -> (a,).
+     case old of (uold : a,).
+     (f x uold,))
+  (\ (dummy : NoneType) -> (a,). (init,));
+
+
 comapScatterIndex @(r i1 i2 : bare)
   (repr_i1 : Repr i1)
   (repr_i2 : Repr i2)
@@ -1422,6 +1448,49 @@ array1Scatter @(e i : bare)
     boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
   case s_retval of storedBox @ret_type (retval : ret_type).
   retval;
+
+
+barray1Scatter @(a i : bare)
+  (repr_i : Repr i)
+  (repr_a : Repr a)
+  (dom : dim1)
+  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  -> Scatter (barray1 a) (PyonTuple2 (Stored int) i) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  let type i2 = PyonTuple2 (Stored int) i in
+
+  -- Use array1Scatter
+  case array1Scatter @boxed_a @i
+       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+    mk_scatter @(array1 boxed_a) @i2 @(s : bare) @(b : val)
+    (repr_s : Repr s)
+    (initializer : (NoneType -> b) -> OutPtr s -> EffTok)
+    (updater : (b -> b) -> i2 -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Writer s)
+    (finalizer : UpdateInPlaceFinalizer s (array1 boxed_a))
+    (make_updater : i2 -> b -> b)
+    (make_init : NoneType -> b).
+
+  -- Wrap with barray1
+  let repr_array_a : Repr (array1 boxed_a) =
+        repr_array1 @boxed_a (repr_StuckRef @(BoxedType a)) in
+
+  let barray_finalizer : UpdateInPlaceFinalizer s (barray1 a) =
+        case finalizer of {
+          mutateInPlace @s @(array1 boxed_a)
+          (co : coerce @bare s (array1 boxed_a)).
+            mutateAndCopy @s @(barray1 a)
+            (\ (x : s) -> Writer (barray1 a).
+               mk_barray1 @a
+               (copy @(array1 boxed_a) repr_array_a
+                (coerce @s @(array1 boxed_a) x)))
+        ; mutateAndCopy @s @(array1 boxed_a) (f : s -> Writer (array1 boxed_a)).
+            mutateAndCopy @s @(barray1 a)
+            (\ (x : s) -> Writer (barray1 a). mk_barray1 @a (f x))
+        } in
+
+  mk_scatter @(barray1 a) @i2 @s @b repr_s initializer updater combiner
+  barray_finalizer make_updater make_init;
 
 
 array2Scatter @(e i : bare)

@@ -1601,6 +1601,18 @@ mkCountingScatterType =
   in return $ monomorphic $
      ConTy (tiBuiltin the_con_Scatter) @@ int_type @@ none_type
 
+mkBoxedScatterType =
+  forallType [Star, Star] $ \[a, b] ->
+  let aT = ConTy a
+      bT = ConTy b
+      scatter_type = ConTy (tiBuiltin the_con_Scatter) @@
+                     (ConTy (tiBuiltin the_con_StuckRef) @@ aT) @@
+                     bT
+  in ([passable  bT],
+      functionType [functionType [bT, aT] aT,
+                    functionType [aT, aT] aT,
+                    aT] scatter_type)
+
 mkArray1ScatterType =
   forallType [Star, Star] $ \[s, i] ->
   let sT = ConTy s
@@ -1611,6 +1623,19 @@ mkArray1ScatterType =
                     ConTy (tiBuiltin the_con_Scatter) @@ sT @@ iT]
       (ConTy (tiBuiltin the_con_Scatter) @@
        (ConTy (tiBuiltin the_con_array1) @@ sT) @@
+       (TupleTy 2 @@ int_type @@ iT)))
+
+mkBArray1ScatterType =
+  forallType [Star, Star] $ \[s, i] ->
+  let sT = ConTy s
+      iT = ConTy i
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([passable sT, passable iT],
+      functionType [ConTy $ tiBuiltin the_con_dim1,
+                    ConTy (tiBuiltin the_con_Scatter) @@
+                    (ConTy (tiBuiltin the_con_StuckRef) @@ sT) @@ iT]
+      (ConTy (tiBuiltin the_con_Scatter) @@
+       (ConTy (tiBuiltin the_con_barray1) @@ sT) @@
        (TupleTy 2 @@ int_type @@ iT)))
 
 mkArray2ScatterType =
@@ -1782,6 +1807,7 @@ initializeTIBuiltins = do
             , ("Complex", Star :-> Star, [| pyonBuiltin SystemF.The_Complex |])
             , ("bool", Star, [| pyonBuiltin SystemF.The_bool |])
             , ("NoneType", Star, [| pyonBuiltin SystemF.The_NoneType |])
+            , ("StuckRef", Star :-> Star, [| pyonBuiltin SystemF.The_StuckRef |])
             , ("Maybe", Star :-> Star, [| pyonBuiltin SystemF.The_Maybe |])
             , ("MaybeVal", Star :-> Star, [| pyonBuiltin SystemF.The_MaybeVal |])
             , ("SliceObject", Star, [| pyonBuiltin SystemF.The_SliceObject |])
@@ -1950,8 +1976,14 @@ initializeTIBuiltins = do
               ("countingScatter", [| mkCountingScatterType |]
               , [| pyonBuiltin SystemF.The_countingScatter |]
               ),
+              ("boxedScatter", [| mkBoxedScatterType |]
+              , [| pyonBuiltin SystemF.The_boxedScatter |]
+              ),
               ("array1Scatter", [| mkArray1ScatterType |]
               , [| pyonBuiltin SystemF.The_array1Scatter |]
+              ),
+              ("barray1Scatter", [| mkBArray1ScatterType |]
+              , [| pyonBuiltin SystemF.The_barray1Scatter |]
               ),
               ("array2Scatter", [| mkArray2ScatterType |]
               , [| pyonBuiltin SystemF.The_array2Scatter |]

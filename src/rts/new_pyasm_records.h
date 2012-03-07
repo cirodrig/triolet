@@ -92,6 +92,11 @@ record complex(a) {
   const a imag;
 };
 
+// Unboxed 1-tuples
+record U1Tuple(a) {
+  a member;
+};
+
 // Pyon 2-tuples
 record PyonTuple2(a, b) {
   const a member1;

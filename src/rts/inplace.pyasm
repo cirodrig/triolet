@@ -50,3 +50,10 @@ function inline floatUpdateInPlace_updater (owned f, unit _, pointer ret) -> uni
   nil;
 };
 
+function inline boxedScatter_updater (owned f, unit _, pointer ret) -> unit
+{
+  U1Tuple(owned){old_val} = U1Tuple(owned) load ret;
+  U1Tuple(owned){new_val} = owned call f(old_val);
+  !ret = new_val;
+  nil;
+};

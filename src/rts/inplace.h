@@ -14,3 +14,5 @@ extern function pyon.internal.inplace.floatUpdateInPlace_initializer
 extern function pyon.internal.inplace.floatUpdateInPlace_updater
     (owned, unit, pointer) -> unit;
 
+extern function pyon.internal.inplace.boxedScatter_updater
+    (owned, unit, pointer) -> unit;

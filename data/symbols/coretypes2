@@ -483,6 +483,18 @@ countingScatter_updater : (int -> int)
 countingScatter_make_update : Stored NoneType -> int -> int;
 countingScatter_make_init : NoneType -> int;
 
+boxedScatter : (a : box) -> (b : bare) -> Repr b
+            -> (b -> a -> a)
+            -> (a -> a -> a)
+            -> a
+            -> Scatter (StuckRef a) b;
+
+boxedScatter_updater : (a : box)
+                    -> ((a,) -> (a,))
+                    -> EffTok
+                    -> OutPtr (StuckRef a)
+                    -> EffTok;
+
 arrScatter : (N : intindex)
                    -> (s i : bare)
                    -> Repr i
@@ -506,6 +518,13 @@ array1Scatter : (s i : bare)
                       -> dim1
                       -> Scatter s i
                       -> Scatter (array1 s) (PyonTuple2 (Stored int) i);
+
+barray1Scatter : (a i : bare)
+              -> Repr i
+              -> Repr a
+              -> dim1
+              -> Scatter (StuckRef (BoxedType a)) i
+              -> Scatter (barray1 a) (PyonTuple2 (Stored int) i);
 
 array2Scatter : (s i : bare)
                       -> Repr i

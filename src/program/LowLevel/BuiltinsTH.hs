@@ -272,6 +272,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_initializer) |])
   , (PyonName module_inplace "floatUpdateInPlace_updater",
      Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_updater) |])
+  , (PyonName module_inplace "boxedScatter_updater",
+     Right [| pyonBuiltin (SystemF.The_boxedScatter_updater) |])
   , (PyonName module_effects "seqEffTok",
      Right [| pyonBuiltin (SystemF.The_seqEffTok) |])
   , (PyonName module_structures "repr_arr",

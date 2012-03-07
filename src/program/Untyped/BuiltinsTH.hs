@@ -29,7 +29,7 @@ pyonSourceTypes =
 -- | Predefined data types not visible to the Pyon parser
 pyonOtherTypes :: [String]
 pyonOtherTypes =
-  ["SliceObject", "MaybeVal"]
+  ["SliceObject", "MaybeVal", "StuckRef"]
 
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]
@@ -75,9 +75,11 @@ pyonSourceGlobals =
   , "intSumScatter"
   , "floatSumScatter"
   , "countingScatter"
+  , "boxedScatter"
   , "array1Scatter"
   , "array2Scatter"
   , "array3Scatter"
+  , "barray1Scatter"
   , "scatter"
   , "__undefined__"
   , "__and__"
