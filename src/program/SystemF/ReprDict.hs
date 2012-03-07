@@ -284,6 +284,7 @@ createDictEnv = do
                                   bool_dict, float_dict, int_dict, efftok_dict,
                                   sliceobj_dict,
                                   list_dict, array1_dict, array2_dict,
+                                  blist_dict, barray1_dict, barray2_dict,
                                   complex_dict, array_dict,
                                   referenced_dict, maybe_dict,
                                   tuple2_dict, tuple3_dict, tuple4_dict,
