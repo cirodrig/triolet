@@ -74,6 +74,7 @@ pprDmd (Dmd m s) =
 
 pprSpecificity Used = text "U"
 pprSpecificity Inspected = text "I"
+pprSpecificity Copied = text "C"
 pprSpecificity (Decond mono_type spcs) = 
   let type_doc =
         case mono_type

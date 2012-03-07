@@ -97,11 +97,38 @@ instance Dataflow Multiplicity where
   joinSeq x Dead = x
   joinSeq _ _    = ManyUnsafe
 
+-- | Compare two specificities based /only/ on their head constructor. 
+--   The result is an approximation to the partial ordering.
+--   If @x `ltSpecificityConstructor` y@ is 'True', then @x < y@ in the
+--   partial ordering.  The converse is not necessarily true.
+{-# INLINE ltSpecificityConstructor #-}
+ltSpecificityConstructor :: Specificity -> Specificity -> Bool
+ltSpecificityConstructor Used       _         = False
+ltSpecificityConstructor _          Used      = True 
+ltSpecificityConstructor Copied     Inspected = True
+ltSpecificityConstructor (Decond{}) Inspected = True
+ltSpecificityConstructor _          Unused    = False
+ltSpecificityConstructor Unused     _         = True
+
+-- Remaining cases are 'Written', 'Read', which are bounded by the
+-- top and bottom of the lattice
+ltSpecificityConstructor _          _         = False
+
 instance Dataflow Specificity where
   bottom = Unused
 
-  joinPar Unused x = x
-  joinPar x Unused = x
+  -- If speicifities are equal, the result is unchanged
+  joinPar Used Used = Used
+  joinPar Unused Unused = Unused
+  joinPar Copied Copied = Copied
+  joinPar Inspected Inspected = Inspected
+
+  -- If one constructor is less than another, then take the greater of the two
+  joinPar x y | x `ltSpecificityConstructor` y = y
+              | y `ltSpecificityConstructor` x = x
+
+  -- The remaining cases are nontrivial.
+  -- Constructors are equal or incomparable.
   joinPar (Decond con1@(VarDeCon decon1 _ _) specs1)
           (Decond (VarDeCon decon2 _ _) specs2) =
     if decon1 == decon2
@@ -117,11 +144,12 @@ instance Dataflow Specificity where
   joinPar (Decond _ _) (Decond _ _) =
     -- This case indicates a type mismatch
     internalError "Specificity.join: Type error detected"
-  joinPar Inspected (Decond {}) = Inspected
-  joinPar (Decond {}) Inspected = Inspected
-  joinPar Inspected Inspected = Inspected
-  joinPar Used _ = Used
-  joinPar _ Used = Used
+
+  joinPar Copied (Decond {}) = Inspected
+  joinPar (Decond {}) Copied = Inspected
+
+  -- TODO: Written(..), Read(..)
+  joinPar _ _ = internalError "Specificity.join: Not implemented for these values"
   
   joinSeq = joinPar
 
@@ -139,6 +167,7 @@ showSpecificity (Decond mono_con spcs) =
            | null tys && null ty_args -> show c ++ ":"
            | otherwise -> "(" ++ show c ++  " ...):"
          TupleDeCon _ -> ""
+showSpecificity Copied = "C"
 showSpecificity Inspected = "I"
 showSpecificity Used = "U"
 
@@ -193,6 +222,7 @@ sameSpecificity Inspected Inspected = True
 sameSpecificity (Decond _ spcs1) (Decond _ spcs2) =
   and $ zipWith sameSpecificity spcs1 spcs2
 sameSpecificity (Written s1) (Written s2) = sameSpecificity s1 s2
+sameSpecificity Copied Copied = True
 
 sameSpecificity (Read m1) (Read m2) = 
   let HeapMap assocs = outerJoinHeapMap check_pair m1 m2

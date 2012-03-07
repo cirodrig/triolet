@@ -71,6 +71,16 @@ isTrivialExp (ExpM (VarE {})) = True
 isTrivialExp (ExpM (LitE {})) = True
 isTrivialExp _                = False
 
+-- | Return True if the expression is an application of the specical function
+--   'reify'.  This function turns an initializer into a value, and behaves
+--   in some respects like a data constructor.
+isReifyApp :: ExpM -> Bool
+isReifyApp e = case unpackVarAppM e
+               of Just (op, _, _) | op `isPyonBuiltin` The_reify -> True
+                  _ -> False
+
+isTrivialOrReifyExp e = isTrivialExp e || isReifyApp e
+
 -- | Get the type of a function containing a substituted expression
 functionTypeSM (FunSM (Fun {funTyParams = ty_params
                            , funParams = params
@@ -603,6 +613,15 @@ worthPreInlining tenv dmd ty expr =
   where
     is_function_type = case ty of {FunT {} -> True; _ -> False}
 
+-- | Decide whether to inline the bare expression /before/ simplifying it.
+--   TODO: We actually want to use different heuristics for copied versus
+--   case-inspected expressions.
+worthPreInliningBare :: TypeEnv -> Dmd -> ExpM -> Bool
+worthPreInliningBare tenv dmd expr =
+  case multiplicity dmd
+  of OnceSafe -> True
+     ManySafe -> inlckBareDataCon tenv dmd expr
+
 -- | A test performed to decide whether to inline an expression
 type InlineCheck = TypeEnv -> Dmd -> ExpM -> Bool
 
@@ -639,6 +658,20 @@ inlckConlike tenv dmd (ExpM (AppE _ (ExpM (VarE _ op)) _ args)) =
      _ -> False
 
 inlckConlike tenv dmd _ = False
+
+-- | Is the given expression (of kind 'bare') a data constructor application?
+--   The arguments must be trivial values (val or box fields) 
+--   or bare data constructor applications (bare fields).
+inlckBareDataCon :: InlineCheck
+inlckBareDataCon tenv dmd (ExpM (ConE _ (VarCon con _ _) args)) =
+  case lookupDataCon con tenv
+  of Just dcon ->
+       let field_kinds = dataConFieldKinds tenv dcon
+           check_field BareK arg = inlckBareDataCon tenv unknownDmd arg
+           check_field ValK  arg = inlckTrivial tenv unknownDmd arg
+           check_field BoxK  arg = inlckTrivial tenv unknownDmd arg
+       in and $ zipWith check_field field_kinds args
+     _ -> False
 
 -- | Create a substitution that pre-inlines the given list of variables
 preinlineSubst :: [(Var, ExpM)] -> Subst
@@ -806,7 +839,8 @@ flattenConFieldExps es = mergeList =<< mapM flatten_arg es
 
 -- | Flatten expressions that appear as parameters of a conlike function.
 --   All fields are floated and bound to a new variable, unless they are
---   already trivial expressions.
+--   already trivial expressions or applications of the
+--   special function 'reify'.
 flattenConlikeArgs :: [(ExpSM, Type, BaseKind)] -> Restructure [ExpM]
 flattenConlikeArgs es = mergeList =<< mapM flatten_arg es
   where
@@ -826,7 +860,7 @@ floatConField arg ty = do
   -- as reflecting how the variable may be used 
   -- in other locations after copy propagation.
   joinInContext arg' $ \flat_arg ->
-    if isTrivialExp flat_arg
+    if isTrivialOrReifyExp flat_arg
     then return $ unitContext flat_arg
     else asLetContext ty flat_arg
 
@@ -913,6 +947,8 @@ flattenCaseExp inf scr alts = do
     --   cancel it out.  Leave it in place in order to make sure that
     --   happens.
     --
+    -- an application of 'reify', treat it like a data constructor application.
+    --
     -- a multi-branch case expression, then the case-of-case transformation
     -- is applicable.  Leave in in place so that the case-of-case
     -- transformation will be performed.
@@ -921,9 +957,8 @@ flattenCaseExp inf scr alts = do
     -- float the newly created binding.
     let should_float =
           case fromExpM flattened_scr
-          of VarE {} -> False
-             LitE {} -> False
-             ConE {} -> False
+          of ConE {} -> False
+             _ | isTrivialOrReifyExp flattened_scr -> False
              _ | isUnfloatableCase flattened_scr -> False
              _ -> True
     ctx_floated_scr <-
@@ -1583,7 +1618,50 @@ rwCopyApp inf copy_op ty [repr] = do
   (repr', _) <- rwExp False repr
   return (appE inf copy_op [ty] [repr'], topCode) -}
 
-rwCopyApp inf [ty] args = debug $ do
+rwCopyApp inf [ty] args = debug $
+  -- Rewrite @copy _ _ (reify _ _ E)@ to @E@
+  case args
+  of (dict_arg : src : rest) -> do
+       let maybe_dst = case rest
+                       of []  -> Nothing
+                          [e] -> Just e
+                          _ -> wrong_number_of_arguments
+       src' <- freshenHead src
+       case src' of
+         AppE _ src_op _ [_, src_arg] -> do
+           src_op' <- freshenHead src_op
+           case src_op' of
+             VarE _ src_op_var
+               | src_op_var `isPyonBuiltin` The_reify ->
+                   -- Rewrite to src_arg.  Apply the argument from 'maybe_dst'
+                   -- if it exists.
+                   case maybe_dst
+                   of Nothing -> rwExp False src_arg
+                      Just e  -> do
+                        src_arg' <- applySubstitution src_arg
+                        e' <- applySubstitution e
+                        rwExp False $ deferEmptySubstitution $
+                                      appE' src_arg' [] [e']
+             _ -> rwCopyApp1 inf ty dict_arg src maybe_dst
+         _ -> rwCopyApp1 inf ty dict_arg src maybe_dst
+     _ -> wrong_number_of_arguments
+  where
+    debug m = m
+
+    {-debug m = do
+      x@(e, _) <- m
+      args' <- mapM applySubstitution args
+      traceShow (hang (text "rwCopyApp") 2 $
+             pprExp (appE inf copy_op [ty] args') $$ text "----" $$ pprExp e) $ return x
+    -}
+
+    copy_op = varE inf (pyonBuiltin The_copy)
+
+    wrong_number_of_arguments :: a
+    wrong_number_of_arguments =
+      internalError "rwCopyApp: Unexpected number of arguments"
+
+rwCopyApp1 inf ty repr src m_dst = do
   whnf_type <- reduceToWhnf ty
   case fromVarApp whnf_type of
     Just (op, [val_type]) | op `isPyonBuiltin` The_Stored ->
@@ -1630,21 +1708,7 @@ rwCopyApp inf [ty] args = debug $ do
 
       ifElseFuel create_initializer rebuild_copy_expr
   where
-    debug m = m
-    {-
-    debug m = do
-      x@(e, _) <- m
-      traceShow (hang (text "rwCopyApp") 2 $
-             pprExp (appE inf copy_op [ty] args) $$ text "----" $$ pprExp e) $ return x
-    -}
-
     copy_op = varE inf (pyonBuiltin The_copy)
-
-    (repr, src, m_dst) =
-      case args
-      of [repr, src] -> (repr, src, Nothing)
-         [repr, src, dst] -> (repr, src, Just dst)
-         _ -> internalError "rwCopyApp: Unexpected number of arguments"
 
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
 --
@@ -1866,7 +1930,7 @@ rwCase1 is_stream_arg tenv inf scrut alts
   | [alt@(AltSM (Alt {altCon = VarDeCon op _ _}))] <- alts,
     op `isPyonBuiltin` The_boxed = do
       let AltSM (Alt _ [binder] body) = alt
-      rwLetViaBoxed inf scrut binder (substAndRwExp is_stream_arg body)
+      rwLetViaBoxed tenv inf scrut binder (substAndRwExp is_stream_arg body)
 
 -- If this is a case of data constructor, we can unpack the case expression
 -- before processing the scrutinee.
@@ -1876,20 +1940,44 @@ rwCase1 is_stream_arg tenv inf scrut alts
 --
 -- Unpacking consumes fuel
 rwCase1 is_stream_arg tenv inf scrut alts
-  | ExpM (ConE {}) <- discardSubstitution scrut = do
+  | ExpM (ConE {}) <- discardSubstitution scrut = eliminate_case scrut
+  | otherwise = do
+      -- Check for an application of "reify _ _ E".
+      -- If present, the argument E must be a data constructor application.
+      scrut' <- freshenHead scrut
+      case scrut' of
+        AppE _ op _ [_, arg] -> do
+          op' <- freshenHead op
+          case op' of
+            VarE _ v | v `isPyonBuiltin` The_reify ->
+              -- Verify that argument is a data constructor application.
+              -- Only the simplifier puts a 'reify' expression here, and
+              -- it should only put in a data constructor.
+              case discardSubstitution arg of
+                ExpM (ConE {}) -> eliminate_case arg
+                _ -> internalError "rwCase: Unexpected 'reify' in argument"
+            _ -> not_case_of_constructor
+        _ -> not_case_of_constructor
+  where
+    not_case_of_constructor = rwCaseScrutinee is_stream_arg tenv inf scrut alts
+
+    -- This is a case of data constructor expression.  The case
+    -- expression and data constructor cancel out.
+    eliminate_case data_con_expr = do
       consumeFuel
 
       -- Rename the scrutinee and get constructor fields
-      ConE _ scrut_con scrut_args <- freshenHead scrut
+      ConE _ scrut_con scrut_args <- freshenHead data_con_expr
+
       let alt = findAlternative alts scrut_con
           field_kinds = conFieldKinds tenv scrut_con
           ex_types = conExTypes scrut_con
 
       -- Eliminate this case statement
       eliminateCaseWithExp is_stream_arg tenv field_kinds ex_types scrut_args alt
-  
+
 -- Simplify the scrutinee, then try to simplify the case statement.
-rwCase1 is_stream_arg tenv inf scrut alts = do
+rwCaseScrutinee is_stream_arg tenv inf scrut alts = do
   -- Simplify scrutinee
   (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp False scrut
 
@@ -1908,14 +1996,77 @@ rwCase1 is_stream_arg tenv inf scrut alts = do
     can't_deconstruct scrut' scrut_val =
       rwCase2 is_stream_arg inf alts scrut' scrut_val
 
-rwLetViaBoxed :: ExpInfo -> ExpSM -> PatSM 
+-- | Rewrite a case statement that stands for a let-expression.
+--   This code is similar to 'rwLet'.
+rwLetViaBoxed :: TypeEnv -> ExpInfo -> ExpSM -> PatSM 
               -> (Subst -> LR (ExpM, AbsCode))
                  -- ^ Computation that rewrites the body after
                  --   applying a substitution.  The substitution holds
                  --   inlining decisions that were made while
                  --   processing the binder part of the let expression.
               -> LR (ExpM, AbsCode)
-rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
+rwLetViaBoxed tenv inf scrut (PatSM pat) compute_body =
+  ifElseFuel rw_recursive_let try_pre_inline
+  where
+    -- Check if we should inline the constructed value _before_ rewriting it.
+    -- Should inline if the scrutinee is a data constructor application
+    -- @boxed t E@, the bound value has safe uses, and one of the following: 
+    --
+    -- * The bound value is inspected or deconstructed,
+    --   and E is a data constructor application.
+    --
+    -- * The bound value is copied.
+    --
+    -- The inlined expression will be @reify t repr_t E@.
+    try_pre_inline
+      -- The scrutinee must be used safely so that inlining 
+      -- doesn't duplicate work
+      | multiplicity scrut_demand == OnceSafe = do
+          subst_scr <- applySubstitution scrut
+          -- Scrutinee must be a data constructor application @boxed t E@.
+          -- We only need to check for a data constructor application; it's
+          -- already known that the data constructor is 'boxed'.
+          case subst_scr of
+            ExpM (ConE _ (VarCon _ [val_type] []) [subst_val]) 
+              --  It's only worth inlining if we can eliminate the inlined
+              --  code afterwards.  Either the specificity is
+              --  * 'Copied' (so we can eliminate 'copy'); or
+              --  * 'Inspected' or 'Decond {}' /and/ our expression is a
+              --    data constructor application, so we can use
+              --    case-of-constructor to eliminate the case statement.
+              | is_copied ||
+                is_deconstructed && is_con_app subst_val -> do
+                  -- Inline this value since it's used exactly once
+                  consumeFuel
+
+                  -- Create the expression @reify t repr_t $(subst_val)@
+                  subst_val' <- withReprDict val_type $ \val_repr ->
+                    return $ appE inf (varE' (pyonBuiltin The_reify))
+                             [val_type] [val_repr, subst_val]
+
+                  -- Simplify the body of the case statement
+                  compute_body (preinlineSubst1 (patMVar pat) subst_val')
+
+            _ -> rw_recursive_let   -- Cannot pre-inline
+      | otherwise = rw_recursive_let
+      where
+        scrut_demand = patMDmd pat
+
+        is_copied =
+          case specificity scrut_demand of {Copied -> True; _ -> False}
+
+        is_deconstructed =
+          case specificity scrut_demand
+          of Decond {} -> True
+             Inspected -> True
+             _ -> False
+
+        is_con_app (ExpM (ConE {})) = True
+        is_con_app _ = False
+
+    rw_recursive_let = rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body
+
+rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
   -- Rewrite the scrutinee
   (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp False scrut
       
@@ -2283,7 +2434,8 @@ caseInitializerBinding kind param initializer compute_body =
       let boxed_initializer =
             deferEmptySubstitution $
             conE defaultExpInfo constructor [initializer_exp]
-      rwLetViaBoxed defaultExpInfo boxed_initializer param' compute_body
+      tenv <- getTypeEnv
+      rwLetViaBoxed tenv defaultExpInfo boxed_initializer param' compute_body
     _ ->
       rwLet defaultExpInfo param' initializer compute_body
   where

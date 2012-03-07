@@ -13,6 +13,7 @@ module SystemF.IncrementalSubstitution
         freshenAlt,
         freshenEnt,
         discardSubstitution,
+        transformUnderSubstitution,
         applySubstitution,
         applySubstitutionFun,
         applySubstitutionAlt,
@@ -232,6 +233,13 @@ freshenEnt s (DataEnt c) = DataEnt `liftM` freshenConstant s c
 --   substitution and renaming.  In most cases, it's not a good idea.
 discardSubstitution :: ExpSM -> ExpM
 discardSubstitution (ExpSM _ e) = e
+
+-- | Apply a transformation to an expression without substituting in it. 
+--
+--   The transformation should ignore variable names and should not alter
+--   variable scopes; otherwise the results will be unpredictable.
+transformUnderSubstitution :: (ExpM -> ExpM) -> ExpSM -> ExpSM
+transformUnderSubstitution f (ExpSM subst e) = ExpSM subst (f e)
 
 applySubstitution :: EvalMonad m => ExpSM -> m ExpM
 applySubstitution (ExpSM s e) = substitute s e

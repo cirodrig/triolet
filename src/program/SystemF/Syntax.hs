@@ -123,10 +123,19 @@ data Multiplicity =
   deriving(Eq)
 
 -- | What part of a value is used.
+--   Specificities form a lattice with the following ordering.
+--
+-- >            Used                 > _
+-- >            Inspected            > {Copied, Decond _ _}
+-- >  x > y ==> Decond c (u++[x]++v) > Decond c (u++[y]++v)
+-- >            _                    > Unused
 data Specificity =
     Used              -- ^ Used in an unknown way.  This is the top value.
   | Inspected
-    -- ^ Deconstructed by a case statement or read by 'copy'.
+    -- ^ Deconstructed at an unknown constructor or copied by 'copy'.
+
+  | Copied
+    -- ^ Copied by 'copy'.
 
   | Decond !DeConInst [Specificity]
     -- ^ Deconstructed at a known constructor.

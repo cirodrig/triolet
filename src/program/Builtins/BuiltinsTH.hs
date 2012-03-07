@@ -672,6 +672,7 @@ pyonBuiltinVariableNames =
   , "copy"
   , "convertToBoxed"
   , "convertToBare"
+  , "reify"
   , "shapeIndexRepr"
   , "shapeSliceRepr"
     

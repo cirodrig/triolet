@@ -978,6 +978,7 @@ planFlattening mode ty spc = do
     Decond (TupleDeCon _) spcs -> id_decomp
 
     Inspected -> singleton_decomp
+    Copied    -> singleton_decomp
 
     Used -> 
       case eagerness mode

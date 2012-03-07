@@ -750,6 +750,10 @@ copy : (a : bare) -> Repr a -> a -> Writer a
 convertToBoxed : (a : bare) -> Repr a -> Writer a -> BoxedType a;
 convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
 
+-- This function is inserted by the simplifier to convert data constructor
+-- applications to values
+reify : (a : bare) -> Repr a -> Writer a -> a;
+
 repr_int : Repr (Stored int);
 repr_float : Repr (Stored float);
 repr_bool : Repr (Stored bool);

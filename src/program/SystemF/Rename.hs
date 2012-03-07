@@ -428,6 +428,7 @@ instance Renameable Specificity where
     case spc
     of Used              -> Set.empty
        Inspected         -> Set.empty
+       Copied            -> Set.empty
        Decond decon spcs -> deConFreeVariables decon $ freeVariables spcs
        Written spc       -> freeVariables spc
        Unused            -> Set.empty
@@ -448,6 +449,7 @@ instance Substitutable Specificity where
        -- Other terms don't mention variables
        Used -> return spc
        Inspected -> return spc
+       Copied -> return spc
        Unused -> return spc
 
 instance Renameable ConInst where
