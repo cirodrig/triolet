@@ -582,6 +582,8 @@ pyonBuiltinVariableNames =
   , "comapScatterIndex"
   , "arrScatter"
   , "barray1Scatter"
+  , "barray2Scatter"
+  , "barray3Scatter"
   , "array1Scatter"
   , "array2Scatter"
   , "array3Scatter"

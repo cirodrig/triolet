@@ -1630,6 +1630,49 @@ array2Scatter @(e i : bare)
   retval;
 
 
+barray2Scatter @(a i : bare)
+  (repr_i : Repr i)
+  (repr_a : Repr a)
+  (dom : dim2)
+  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  -> Scatter (barray2 a) (PyonTuple2 (index dim2) i) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  let type i2 = PyonTuple2 (index dim2) i in
+
+  -- Use array2Scatter
+  case array2Scatter @boxed_a @i
+       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+    mk_scatter @(array2 boxed_a) @i2 @(s : bare) @(b : val)
+    (repr_s : Repr s)
+    (initializer : (NoneType -> b) -> OutPtr s -> EffTok)
+    (updater : (b -> b) -> i2 -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Writer s)
+    (finalizer : UpdateInPlaceFinalizer s (array2 boxed_a))
+    (make_updater : i2 -> b -> b)
+    (make_init : NoneType -> b).
+
+  -- Wrap with barray2
+  let repr_array_a : Repr (array2 boxed_a) =
+        repr_array2 @boxed_a (repr_StuckRef @(BoxedType a)) in
+
+  let barray_finalizer : UpdateInPlaceFinalizer s (barray2 a) =
+        case finalizer of {
+          mutateInPlace @s @(array2 boxed_a)
+          (co : coerce @bare s (array2 boxed_a)).
+            mutateAndCopy @s @(barray2 a)
+            (\ (x : s) -> Writer (barray2 a).
+               mk_barray2 @a
+               (copy @(array2 boxed_a) repr_array_a
+                (coerce @s @(array2 boxed_a) x)))
+        ; mutateAndCopy @s @(array2 boxed_a) (f : s -> Writer (array2 boxed_a)).
+            mutateAndCopy @s @(barray2 a)
+            (\ (x : s) -> Writer (barray2 a). mk_barray2 @a (f x))
+        } in
+
+  mk_scatter @(barray2 a) @i2 @s @b repr_s initializer updater combiner
+  barray_finalizer make_updater make_init;
+
+
 array3Scatter @(e i : bare)
   (repr_i : Repr i)
   (repr_e : Repr e)
@@ -1791,6 +1834,49 @@ array3Scatter @(e i : bare)
     boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
   case s_retval of storedBox @ret_type (retval : ret_type).
   retval;
+
+
+barray3Scatter @(a i : bare)
+  (repr_i : Repr i)
+  (repr_a : Repr a)
+  (dom : dim3)
+  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  -> Scatter (barray3 a) (PyonTuple2 (index dim3) i) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  let type i2 = PyonTuple2 (index dim3) i in
+
+  -- Use array3Scatter
+  case array3Scatter @boxed_a @i
+       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+    mk_scatter @(array3 boxed_a) @i2 @(s : bare) @(b : val)
+    (repr_s : Repr s)
+    (initializer : (NoneType -> b) -> OutPtr s -> EffTok)
+    (updater : (b -> b) -> i2 -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Writer s)
+    (finalizer : UpdateInPlaceFinalizer s (array3 boxed_a))
+    (make_updater : i2 -> b -> b)
+    (make_init : NoneType -> b).
+
+  -- Wrap with barray3
+  let repr_array_a : Repr (array3 boxed_a) =
+        repr_array3 @boxed_a (repr_StuckRef @(BoxedType a)) in
+
+  let barray_finalizer : UpdateInPlaceFinalizer s (barray3 a) =
+        case finalizer of {
+          mutateInPlace @s @(array3 boxed_a)
+          (co : coerce @bare s (array3 boxed_a)).
+            mutateAndCopy @s @(barray3 a)
+            (\ (x : s) -> Writer (barray3 a).
+               mk_barray3 @a
+               (copy @(array3 boxed_a) repr_array_a
+                (coerce @s @(array3 boxed_a) x)))
+        ; mutateAndCopy @s @(array3 boxed_a) (f : s -> Writer (array3 boxed_a)).
+            mutateAndCopy @s @(barray3 a)
+            (\ (x : s) -> Writer (barray3 a). mk_barray3 @a (f x))
+        } in
+
+  mk_scatter @(barray3 a) @i2 @s @b repr_s initializer updater combiner
+  barray_finalizer make_updater make_init;
 
 
 -------------------------------------------------------------------------------

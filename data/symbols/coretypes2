@@ -533,12 +533,26 @@ array2Scatter : (s i : bare)
                       -> Scatter s i
                       -> Scatter (array2 s) (PyonTuple2 (index dim2) i);
 
+barray2Scatter : (a i : bare)
+              -> Repr i
+              -> Repr a
+              -> dim2
+              -> Scatter (StuckRef (BoxedType a)) i
+              -> Scatter (barray2 a) (PyonTuple2 (index dim2) i);
+
 array3Scatter : (s i : bare)
                       -> Repr i
                       -> Repr s
                       -> dim3
                       -> Scatter s i
                       -> Scatter (array3 s) (PyonTuple2 (index dim3) i);
+
+barray3Scatter : (a i : bare)
+              -> Repr i
+              -> Repr a
+              -> dim3
+              -> Scatter (StuckRef (BoxedType a)) i
+              -> Scatter (barray3 a) (PyonTuple2 (index dim3) i);
 
 -------------------------------------------------------------------------------
 -- Streams
