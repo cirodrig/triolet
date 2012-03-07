@@ -244,12 +244,21 @@ createDictEnv = do
     return $ DictEnv.pattern [v1, v2, v3, v4]
       (varApp (pyonBuiltin The_PyonTuple4) [VarT v1, VarT v2, VarT v3, VarT v4])
       (createDict_Tuple4 v1 v2 v3 v4)
+  blist_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin The_blist) [VarT arg],
+     createDict_blist arg)
   list_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_list) [VarT arg],
      createDict_list arg)
+  barray1_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin The_barray1) [VarT arg],
+     createDict_barray1 arg)
   array1_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_array1) [VarT arg],
      createDict_array1 arg)
+  barray2_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin The_barray2) [VarT arg],
+     createDict_barray2 arg)
   array2_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_array2) [VarT arg],
      createDict_array2 arg)
@@ -366,6 +375,13 @@ createDict_list param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_list)
 
+createDict_blist :: Var -> TypeSubst -> MkDict
+createDict_blist param_var subst = MkDict $
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_blist)
+
 createDict_array1 :: Var -> TypeSubst -> MkDict
 createDict_array1 param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
@@ -374,6 +390,13 @@ createDict_array1 param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_array1)
 
+createDict_barray1 :: Var -> TypeSubst -> MkDict
+createDict_barray1 param_var subst = MkDict $
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_barray1)
+
 createDict_array2 :: Var -> TypeSubst -> MkDict
 createDict_array2 param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
@@ -381,6 +404,13 @@ createDict_array2 param_var subst = MkDict $
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_array2)
+
+createDict_barray2 :: Var -> TypeSubst -> MkDict
+createDict_barray2 param_var subst = MkDict $
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_barray2)
 
 createDict_referenced :: Var -> TypeSubst -> MkDict
 createDict_referenced param_var subst = MkDict $
