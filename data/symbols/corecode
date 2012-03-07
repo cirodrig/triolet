@@ -3340,6 +3340,31 @@ IndexableDict_array2_get_shape @(a : bare)
           (arrayDescToDim1 @N lb_x stride_x size_x);
 
 
+IndexableDict_blist_at_point @(a : bare)
+  (repr : Repr a) (ls : blist a) (ix : Stored int) (ret : OutPtr a) -> IEffect a
+  attribute(inline) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  case ls of make_blist @a (ls2 : list boxed_a).
+  case ls2 of make_list @boxed_a @(N : intindex)
+             (n : FIInt N) (ayref : Referenced (arr N boxed_a)).
+  case ayref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+  let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  case ix of stored @int (ix_i : int).
+  case subscript @N @boxed_a repr_box ay ix_i of
+    stuckRef @(BoxedType a) (val : BoxedType a).
+  convertToBare @a repr val ret;
+
+
+IndexableDict_blist_get_shape @(a : bare) (ls : blist a) -> list_dim
+  attribute(inline) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  case ls of make_blist @a (ls2 : list boxed_a).
+  case ls2 of make_list @boxed_a @(N : intindex)
+              (n : FIInt N) (ayref : Referenced (arr N boxed_a)).
+  case n of fiInt @N (size : int).
+  mk_list_dim (justVal @int size);
+
+
 IndexableDict_barray1_at_point @(a : bare)
   (repr : Repr a) (ay : barray1 a) (ix : Stored int) (ret : OutPtr a)
   -> IEffect a
@@ -4429,6 +4454,36 @@ extend3D @(t : bare -> bare) @(a : bare)
      at_index @a repr container
      (coerce @(index dim3) @(index (shape t)) inbounds_ix)
      ret);
+
+
+boxedStencil2D @(t : bare -> bare) @(a b : bare)
+  (indexable : IndexableDict t)
+  (is_2d : coerce @box (shape t) dim2)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (output_dom : dim2)
+  (stencil_dom : dim2)
+  (gen_f : view dim2 a -> Writer b)
+  (input : t a)
+  (ret: OutPtr (barray2 b))
+  -> IEffect (barray2 b)
+  attribute(inline, inline_final) =
+
+  -- This function is defined in terms of stencil2D.
+  let type boxed_b = StuckRef (BoxedType b) in
+  let repr_boxed_b : Repr boxed_b = repr_StuckRef @(BoxedType b) in
+
+  mk_barray2 @b
+  (stencil2D @t @a @(StuckRef (BoxedType b))
+   indexable is_2d repr_a repr_boxed_b
+   output_dom stencil_dom
+   (\ (vw : view dim2 a) (ret : OutPtr boxed_b) -> IEffect boxed_b.
+
+      -- Call 'gen_f' and re-box the result
+      stuckRef @(BoxedType b)
+      (convertToBoxed @b repr_b (gen_f vw)) ret)
+   input)
+  ret;
 
 
 stencil2D @(t : bare -> bare) @(a b : bare)

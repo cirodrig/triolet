@@ -534,6 +534,7 @@ pyonBuiltinVariableNames =
   , "outerproduct"
   , "outerproductStream"
   , "transpose"
+  , "boxedStencil2D"
   , "stencil2D"
   , "viewStencil2D"
   , "stencil3D"

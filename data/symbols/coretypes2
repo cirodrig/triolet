@@ -2176,6 +2176,17 @@ transpose : (t : bare -> bare) -> (a : bare)
 	 -> Repr a
 	 -> t a -> view dim2 a;
 
+boxedStencil2D : (t : bare -> bare) -> (a b : bare)
+	 -> IndexableDict t
+	 -> coerce @box (shape t) dim2
+	 -> Repr a
+         -> Repr b
+	 -> dim2
+         -> dim2
+	 -> (view dim2 a -> Writer b)
+	 -> t a
+	 -> Writer (barray2 b);
+
 stencil2D : (t : bare -> bare) -> (a b : bare)
 	 -> IndexableDict t
 	 -> coerce @box (shape t) dim2

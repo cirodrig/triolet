@@ -65,6 +65,7 @@ pyonSourceGlobals =
   , "divideView"
   , "view2"
   , "stencil2D"
+  , "boxedStencil2D"
   , "extend2D"
   , "stencil3D"
   , "extend3D"

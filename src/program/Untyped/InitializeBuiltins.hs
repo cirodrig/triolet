@@ -1493,6 +1493,10 @@ mkView2Type =
 mkStencil2DType =
   mkStencilType (ConTy $ tiBuiltin the_con_dim2) (ConTy $ tiBuiltin the_con_array2)
 
+mkBoxedStencil2DType =
+  mkStencilType (ConTy $ tiBuiltin the_con_dim2)
+                (ConTy $ tiBuiltin the_con_barray2)
+
 mkStencil3DType =
   mkStencilType (ConTy $ tiBuiltin the_con_dim3) (ConTy $ tiBuiltin the_con_array3)
   
@@ -1897,6 +1901,9 @@ initializeTIBuiltins = do
               ),
               ("stencil2D", [| mkStencil2DType |]
               , [| pyonBuiltin SystemF.The_stencil2D |]
+              ),              
+              ("boxedStencil2D", [| mkBoxedStencil2DType |]
+              , [| pyonBuiltin SystemF.The_boxedStencil2D |]
               ),              
               ("extend2D", [| mkExtend2DType |]
               , [| pyonBuiltin SystemF.The_extend2D |]
