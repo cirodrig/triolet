@@ -330,6 +330,9 @@ namespace Pyon {
 
     template<typename T>
   class List;
+
+    template<typename T>
+  class BList;
   
     template<typename T>
   class Array1;
@@ -378,6 +381,9 @@ namespace Pyon {
 
     template<typename T>
   class Incomplete< List<T> >;
+
+    template<typename T>
+  class Incomplete< BList<T> >;
 
     template<typename T>
   class Incomplete< Array1<T> >;
@@ -996,6 +1002,64 @@ namespace Pyon {
         return T_Bare(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
       }
 
+  };
+
+
+/* -------------------------------- BList ----------------------------------- */
+
+  template<typename T>
+  class BList : public BareType {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      struct initializer {
+        int length;
+        initializer(int _length) : length(_length) {};
+      };
+      // no definition of defaultInitializer
+    public:
+      // Constructors
+      BList<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      
+      // Static Member Functions
+      static unsigned int 
+      getSize() {
+        return pyon_List_size;
+      }
+      
+      static unsigned int 
+      getAlignment() { 
+        return pyon_List_alignment;
+      }
+      
+      static void 
+      copy(BList<T> list, Incomplete<BList<T> > &incompleteList) { 
+        if (!incompleteList.isEmpty()) {
+          pyonError("Attempted to write an already-initalized list\n");
+        }
+
+        /* Create the new list */
+        int length = pyon_List_get_length(list.getBareData());
+        incompleteList.create(length);
+
+        /* Copy list contents.  It's an array of pointers. */
+        PyonBarePtr src_array =
+          pyon_List_get_contents(list.getBareData());
+        PyonBarePtr dst_array =
+          pyon_List_get_contents(incompleteList.getObject());
+        memcpy(dst_array, src_array, length * sizeof(PyonBoxPtr));
+      }
+
+      static bool 
+      isPOD() { return false; }
+
+      // Member Functions
+      T_Box
+      at(int index) { 
+        PyonBoxPtr *list_contents =
+          (PyonBoxPtr *)pyon_List_get_contents(getBareData());
+        return T_Box(list_contents[index]);
+      }
   };
 
 
@@ -1773,6 +1837,42 @@ namespace Pyon {
 
   };
 
+  /* Implementation of Incomplete< BList<T> > */
+
+    template<typename T>
+  class Incomplete<BList<T> > : public IncompleteSingleRef<BList<T> > {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
+    public:
+      // Constructors
+      Incomplete<BList<T> >(void)
+        : IncompleteSingleRef<BList<T> >() {}
+      Incomplete<BList<T> >(PyonBarePtr _s)
+        : IncompleteSingleRef<BList<T> >(_s) {}
+
+      // Member Functions
+      void initialize(const typename BList<T>::initializer& init) {
+        pyon_List_initialize(init.length,
+                             sizeof(PyonBoxPtr),
+                             __alignof__(PyonBoxPtr),
+                             this->getObject());
+      }
+      void create(const typename BList<T>::initializer& init)
+      { this->allocate(); initialize(init); }
+      void initialize(int length)
+      { initialize(typename BList<T>::initializer(length)); }
+      void create(int length)
+      { create(typename BList<T>::initializer(length)); }
+
+      Incomplete<StuckRef<T_Box> > 
+      at(int index) {
+        PyonBoxPtr *list_contents =
+          (PyonBoxPtr *)pyon_List_get_contents(this->getObject());
+        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&list_contents[index]);
+      }
+
+  };
+
   /* Implementation of Incomplete< Array1<T> > */
 
     template<typename T>
@@ -2282,6 +2382,7 @@ namespace Pyon {
     void (*f_Array1)(Array1<Int>)             = &BareType_concept;
     void (*f_Array2)(Array2<Int>)             = &BareType_concept;
     void (*f_Array3)(Array3<Int>)             = &BareType_concept;
+    void (*f_BList)(BList<Int>)               = &BareType_concept;
     void (*f_BArray1)(BArray1<Int>)           = &BareType_concept;
     void (*f_BArray2)(BArray2<Int>)           = &BareType_concept;
     void (*f_BArray3)(BArray3<Int>)           = &BareType_concept;
