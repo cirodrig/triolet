@@ -1134,6 +1134,7 @@ mkPassableClass = do
               (internalError "Class 'Repr' has no dictionary constructor")
               []
               [int_instance, float_instance, bool_instance, none_instance,
+               stuckref_instance,
                maybe_val_instance, maybe_instance,
                complex_instance, sliceobject_instance,
                scatter_instance,
@@ -1181,6 +1182,11 @@ mkPassableClass = do
         
   ; b <- newTyVar Star Nothing
   ; c <- newTyVar Star Nothing
+  ; let stuckref_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_StuckRef) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_StuckRef)
+          []
   ; let maybe_val_instance =
           -- We don't need a Repr instance for the contained type.  Since
           -- it's a value, it can be computed on demand.
