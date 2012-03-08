@@ -1619,56 +1619,62 @@ mkBoxedScatterType =
                     functionType [aT, aT] aT,
                     aT] scatter_type)
 
-mkArray1ScatterType =
+mkArrayScatterType dom_type arr_type index_type mk_elt_type =
   forallType [Star, Star] $ \[s, i] ->
   let sT = ConTy s
       iT = ConTy i
-      int_type = ConTy $ tiBuiltin the_con_int
-  in ([passable sT, passable iT],
-      functionType [ConTy $ tiBuiltin the_con_dim1,
-                    ConTy (tiBuiltin the_con_Scatter) @@ sT @@ iT]
+      scatter_elt_type =
+        ConTy (tiBuiltin the_con_Scatter) @@ mk_elt_type sT @@ iT
+  in ([passable iT, passable sT],
+      functionType [dom_type, scatter_elt_type]
       (ConTy (tiBuiltin the_con_Scatter) @@
-       (ConTy (tiBuiltin the_con_array1) @@ sT) @@
-       (TupleTy 2 @@ int_type @@ iT)))
+       (arr_type @@ sT) @@ (TupleTy 2 @@ index_type @@ iT)))
+
+mkArray1ScatterType =
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_dim1)
+  (ConTy $ tiBuiltin the_con_array1)
+  (ConTy $ tiBuiltin the_con_int)
+  id
 
 mkBArray1ScatterType =
-  forallType [Star, Star] $ \[s, i] ->
-  let sT = ConTy s
-      iT = ConTy i
-      int_type = ConTy $ tiBuiltin the_con_int
-  in ([passable iT, passable sT],
-      functionType [ConTy $ tiBuiltin the_con_dim1,
-                    ConTy (tiBuiltin the_con_Scatter) @@
-                    (ConTy (tiBuiltin the_con_StuckRef) @@ sT) @@ iT]
-      (ConTy (tiBuiltin the_con_Scatter) @@
-       (ConTy (tiBuiltin the_con_barray1) @@ sT) @@
-       (TupleTy 2 @@ int_type @@ iT)))
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_dim1)
+  (ConTy $ tiBuiltin the_con_barray1)
+  (ConTy $ tiBuiltin the_con_int)
+  (ConTy (tiBuiltin the_con_StuckRef) @@)
 
 mkArray2ScatterType =
-  forallType [Star, Star] $ \[s, i] ->
-  let sT = ConTy s
-      iT = ConTy i
-      int_type = ConTy $ tiBuiltin the_con_int
-      index_type = TupleTy 2 @@ int_type @@ int_type
-  in ([passable sT, passable iT],
-      functionType [ConTy $ tiBuiltin the_con_dim2,
-                    ConTy (tiBuiltin the_con_Scatter) @@ sT @@ iT]
-      (ConTy (tiBuiltin the_con_Scatter) @@
-       (ConTy (tiBuiltin the_con_array2) @@ sT) @@
-       (TupleTy 2 @@ index_type @@ iT)))
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_dim2)
+  (ConTy $ tiBuiltin the_con_array2)
+  (TupleTy 2 @@ int_type @@ int_type)
+  id
+  where int_type = ConTy $ tiBuiltin the_con_int
+
+mkBArray2ScatterType =
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_dim2)
+  (ConTy $ tiBuiltin the_con_barray2)
+  (TupleTy 2 @@ int_type @@ int_type)
+  (ConTy (tiBuiltin the_con_StuckRef) @@)
+  where int_type = ConTy $ tiBuiltin the_con_int
 
 mkArray3ScatterType =
-  forallType [Star, Star] $ \[s, i] ->
-  let sT = ConTy s
-      iT = ConTy i
-      int_type = ConTy $ tiBuiltin the_con_int
-      index_type = TupleTy 3 @@ int_type @@ int_type @@ int_type
-  in ([passable sT, passable iT],
-      functionType [ConTy $ tiBuiltin the_con_dim3,
-                    ConTy (tiBuiltin the_con_Scatter) @@ sT @@ iT]
-      (ConTy (tiBuiltin the_con_Scatter) @@
-       (ConTy (tiBuiltin the_con_array3) @@ sT) @@
-       (TupleTy 2 @@ index_type @@ iT)))
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_dim3)
+  (ConTy $ tiBuiltin the_con_array3)
+  (TupleTy 3 @@ int_type @@ int_type @@ int_type)
+  id
+  where int_type = ConTy $ tiBuiltin the_con_int
+
+mkBArray3ScatterType =
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_dim3)
+  (ConTy $ tiBuiltin the_con_barray3)
+  (TupleTy 3 @@ int_type @@ int_type @@ int_type)
+  (ConTy (tiBuiltin the_con_StuckRef) @@)
+  where int_type = ConTy $ tiBuiltin the_con_int
 
 mkScatterType =
   forallType [Star :-> Star, Star, Star] $ \[t, i, r] ->
@@ -1994,8 +2000,14 @@ initializeTIBuiltins = do
               ("array2Scatter", [| mkArray2ScatterType |]
               , [| pyonBuiltin SystemF.The_array2Scatter |]
               ),
+              ("barray2Scatter", [| mkBArray2ScatterType |]
+              , [| pyonBuiltin SystemF.The_barray2Scatter |]
+              ),
               ("array3Scatter", [| mkArray3ScatterType |]
               , [| pyonBuiltin SystemF.The_array3Scatter |]
+              ),
+              ("barray3Scatter", [| mkBArray3ScatterType |]
+              , [| pyonBuiltin SystemF.The_barray3Scatter |]
               ),
               ("scatter", [| mkScatterType |]
               , [| pyonBuiltin SystemF.The_fun_scatter |]

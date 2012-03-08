@@ -80,6 +80,8 @@ pyonSourceGlobals =
   , "array2Scatter"
   , "array3Scatter"
   , "barray1Scatter"
+  , "barray2Scatter"
+  , "barray3Scatter"
   , "scatter"
   , "__undefined__"
   , "__and__"
