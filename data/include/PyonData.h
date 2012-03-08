@@ -420,7 +420,7 @@ namespace Pyon {
 
     NoneType(void) {}
     NoneType(const NoneType &x) {}
-    operator Boxed<Stored<NoneType> >() const;
+    inline operator Boxed<Stored<NoneType> >() const;
   };
 
   /* Implementation of the Int wrapper */
@@ -433,7 +433,7 @@ namespace Pyon {
       Int(int32_t i) { nativeElement = i; }
       Int(const Stored<Int> &s);
       operator int32_t() { return nativeElement; }
-      operator Boxed<Stored<Int> >() const;
+      inline operator Boxed<Stored<Int> >() const;
   };
 
   /* Implementation of the Bool wrapper */
@@ -446,7 +446,7 @@ namespace Pyon {
       Bool(char b) { nativeElement = b; }
       Bool(const Stored<Bool> &s);
       operator int() { return nativeElement; }
-      operator Boxed<Stored<Bool> >() const;
+      inline operator Boxed<Stored<Bool> >() const;
   };
 
   /* Implementation of the Float wrapper */
@@ -459,7 +459,7 @@ namespace Pyon {
       Float(float f) { nativeElement = f; }
       Float(const Stored<Float> &s);
       operator float() { return nativeElement; }
-      operator Boxed<Stored<Float> >() const;
+      inline operator Boxed<Stored<Float> >() const;
   };
 
 
@@ -1604,7 +1604,7 @@ namespace Pyon {
         return *(typename T::type *)getBareData();
       }
 
-      operator Boxed<Stored<T> >() const;
+      inline operator Boxed<Stored<T> >() const;
   };
 
   /* Implementation of Stored<NoneType> */
@@ -2226,7 +2226,7 @@ namespace Pyon {
   }
 
   template<typename T>
-  void 
+  inline void 
   Stored<T>::copy(Stored<T> i, Incomplete< Stored<T> >& incompleteI)
   {
     void (*concept_check)(T) = &ValType_concept;
@@ -2234,6 +2234,7 @@ namespace Pyon {
   }
 
   template<typename T>
+  inline
   Stored<T>::operator Boxed<Stored<T> >() const
   {
     Incomplete<Boxed<Stored<T> > > i;
@@ -2242,6 +2243,7 @@ namespace Pyon {
     return i.freeze();
   }
 
+  inline
   NoneType::operator Boxed<Stored<NoneType> >() const
   {
     Incomplete<Boxed<Stored<NoneType> > > i;
@@ -2249,11 +2251,13 @@ namespace Pyon {
     return i.freeze();
   }
 
+  inline
   Int::Int(const Stored<Int> &s)
   {
     nativeElement = (int32_t)s;
   }
 
+  inline
   Int::operator Boxed<Stored<Int> >() const
   {
     Incomplete<Boxed<Stored<Int> > > i;
@@ -2262,11 +2266,13 @@ namespace Pyon {
     return i.freeze();
   }
 
+  inline
   Bool::Bool(const Stored<Bool> &s)
   {
     nativeElement = (char)s;
   }
 
+  inline
   Bool::operator Boxed<Stored<Bool> >() const
   {
     Incomplete<Boxed<Stored<Bool> > > i;
@@ -2275,11 +2281,13 @@ namespace Pyon {
     return i.freeze();
   }
 
+  inline
   Float::Float(const Stored<Float> &s)
   {
     nativeElement = (float)s;
   }
 
+  inline
   Float::operator Boxed<Stored<Float> >() const
   {
     Incomplete<Boxed<Stored<Float> > > i;
