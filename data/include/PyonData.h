@@ -273,7 +273,8 @@ namespace Pyon {
   template<typename bare_type>
   class Incomplete {
 
-    void create(const typename bare_type::initializer& i)
+    void create(const typename bare_type::initializer& i =
+                typename bare_type::initializer())
     {
       this->allocate();
       initialize(i);
@@ -430,7 +431,8 @@ namespace Pyon {
       typedef int32_t type;
       int32_t nativeElement;
 
-      Int(int32_t i) { nativeElement = i; }
+      Int() : nativeElement(0) {}
+      Int(int32_t i) : nativeElement(i) {}
       Int(const Stored<Int> &s);
       operator int32_t() { return nativeElement; }
       inline operator Boxed<Stored<Int> >() const;
@@ -443,7 +445,8 @@ namespace Pyon {
       typedef char type;
       int nativeElement;
 
-      Bool(char b) { nativeElement = b; }
+      Bool() : nativeElement(0) {}
+      Bool(char b) : nativeElement(b) {}
       Bool(const Stored<Bool> &s);
       operator int() { return nativeElement; }
       inline operator Boxed<Stored<Bool> >() const;
@@ -456,7 +459,8 @@ namespace Pyon {
       typedef float type;
       float nativeElement;
 
-      Float(float f) { nativeElement = f; }
+      Float() : nativeElement(0) {}
+      Float(float f) : nativeElement(f) {}
       Float(const Stored<Float> &s);
       operator float() { return nativeElement; }
       inline operator Boxed<Stored<Float> >() const;
@@ -476,9 +480,16 @@ namespace Pyon {
   private:
     typedef typename AsBoxType<T>::type T_Box;
   public:
-    typedef typename T_Box::initializer initializer;
-    static initializer defaultInitializer(void)
-    {return T_Box::defaultInitializer();}
+    struct initializer {
+    private:
+      /* A StuckRef is initialized by writing a boxed object into it */
+      T_Box value;
+    public:
+      initializer() {}
+      initializer(T_Box b) : value(b) {}
+      template<typename T2> friend class StuckRef;
+      template<typename T2> friend class Incomplete;
+    };
 
     StuckRef(PyonBarePtr _bare_data) : BareType(_bare_data) {}
 
@@ -568,18 +579,13 @@ namespace Pyon {
         typename T3_Bare::initializer init_3;
         typename T4_Bare::initializer init_4;
 
+        initializer() {}
         initializer(const typename T1_Bare::initializer& i1,
                     const typename T2_Bare::initializer& i2,
                     const typename T3_Bare::initializer& i3,
                     const typename T4_Bare::initializer& i4)
           : init_1(i1), init_2(i2), init_3(i3), init_4(i4) {}
       };
-      static initializer defaultInitializer(void) {
-        return initializer(T1_Bare::defaultInitializer(),
-                           T2_Bare::defaultInitializer(),
-                           T3_Bare::defaultInitializer(),
-                           T4_Bare::defaultInitializer());
-      }
     public:
       // Constructors
       Tuple<T1, T2, T3, T4>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
@@ -734,16 +740,12 @@ namespace Pyon {
         typename T2_Bare::initializer init_2;
         typename T3_Bare::initializer init_3;
 
+        initializer() {}
         initializer(const typename T1_Bare::initializer& i1,
                     const typename T2_Bare::initializer& i2,
                     const typename T3_Bare::initializer& i3)
           : init_1(i1), init_2(i2), init_3(i3) {}
       };
-      static initializer defaultInitializer(void) {
-        return initializer(T1_Bare::defaultInitializer(),
-                           T2_Bare::defaultInitializer(),
-                           T3_Bare::defaultInitializer());
-      }
     public:
       // Constructors
       Tuple<T1, T2, T3>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
@@ -869,14 +871,11 @@ namespace Pyon {
         typename T1_Bare::initializer init_1;
         typename T2_Bare::initializer init_2;
 
+        initializer() {}
         initializer(const typename T1_Bare::initializer& i1,
                     const typename T2_Bare::initializer& i2)
           : init_1(i1), init_2(i2) {}
       };
-      static initializer defaultInitializer(void) {
-        return initializer(T1_Bare::defaultInitializer(),
-                           T2_Bare::defaultInitializer());
-      }
     public:
       // Constructors
       Tuple<T1,T2>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
@@ -957,10 +956,15 @@ namespace Pyon {
       typedef typename AsBareType<T>::type T_Bare;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int length;
-        initializer(int _length) : length(_length) {};
+      public:
+        initializer() : is_dummy(true) {}
+        initializer(int _length) : is_dummy(false), length(_length) {}
+        template<typename T2> friend class List;
+        template<typename T2> friend class Incomplete;
       };
-      // no definition of defaultInitializer
     public:
       // Constructors
       List<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
@@ -1013,8 +1017,14 @@ namespace Pyon {
       typedef typename AsBoxType<T>::type T_Box;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int length;
-        initializer(int _length) : length(_length) {};
+      public:
+        initializer() : is_dummy(true) {}
+        initializer(int _length) : is_dummy(false), length(_length) {}
+        template<typename T2> friend class BList;
+        template<typename T2> friend class Incomplete;
       };
       // no definition of defaultInitializer
     public:
@@ -1071,11 +1081,17 @@ namespace Pyon {
       typedef typename AsBareType<T>::type T_Bare;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int min;
         int end;
-        initializer(int _min, int _end) : min(_min), end(_end) {};
+      public:
+        initializer() : is_dummy(true) {}
+        initializer(int _min, int _end)
+          : is_dummy(false), min(_min), end(_end) {}
+        template<typename T2> friend class Array1;
+        template<typename T2> friend class Incomplete;
       };
-      // no definition of defaultInitializer
     public:
       // Constructors
       Array1<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
@@ -1143,11 +1159,17 @@ namespace Pyon {
       typedef typename AsBoxType<T>::type T_Box;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int min;
         int end;
-        initializer(int _min, int _end) : min(_min), end(_end) {};
+      public:
+        initializer() : is_dummy(true) {}
+        initializer(int _min, int _end)
+          : is_dummy(false), min(_min), end(_end) {};
+        template<typename T2> friend class BArray1;
+        template<typename T2> friend class Incomplete;
       };
-      // no definition of defaultInitializer
     public:
       // Constructors
       BArray1<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
@@ -1213,14 +1235,19 @@ namespace Pyon {
       typedef typename AsBareType<T>::type T_Bare;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int ymin;
         int yend;
         int xmin;
         int xend;
+      public:
+        initializer() : is_dummy(true) {}
         initializer(int _ymin, int _yend, int _xmin, int _xend)
-          : ymin(_ymin), yend(_yend), xmin(_xmin), xend(_xend) {}
+          : is_dummy(false), ymin(_ymin), yend(_yend), xmin(_xmin), xend(_xend) {}
+        template<typename T2> friend class Array2;
+        template<typename T2> friend class Incomplete;
       };
-      // no definition of defaultInitializer
     public:
       // Constructors
       Array2<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
@@ -1299,12 +1326,18 @@ namespace Pyon {
       typedef typename AsBoxType<T>::type T_Box;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int ymin;
         int yend;
         int xmin;
         int xend;
+      public:
+        initializer() : is_dummy(true) {}
         initializer(int _ymin, int _yend, int _xmin, int _xend)
-          : ymin(_ymin), yend(_yend), xmin(_xmin), xend(_xend) {}
+          : is_dummy(false), ymin(_ymin), yend(_yend), xmin(_xmin), xend(_xend) {}
+        template<typename T2> friend class BArray2;
+        template<typename T2> friend class Incomplete;
       };
       // no definition of defaultInitializer
     public:
@@ -1381,19 +1414,25 @@ namespace Pyon {
       typedef typename AsBareType<T>::type T_Bare;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int zmin;
         int zend;
         int ymin;
         int yend;
         int xmin;
         int xend;
+      public:
+        initializer() : is_dummy(true) {}
         initializer(int _zmin, int _zend,
                     int _ymin, int _yend,
                     int _xmin, int _xend)
-          : zmin(_zmin), zend(_zend), ymin(_ymin),
+          : is_dummy(false),
+            zmin(_zmin), zend(_zend), ymin(_ymin),
             yend(_yend), xmin(_xmin), xend(_xend) {}
+        template<typename T2> friend class Array3;
+        template<typename T2> friend class Incomplete;
       };
-      // no definition of defaultInitializer
     public:
       // Constructors
       Array3<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
@@ -1481,17 +1520,24 @@ namespace Pyon {
       typedef typename AsBoxType<T>::type T_Box;
     public:
       struct initializer {
+      private:
+        bool is_dummy;
         int zmin;
         int zend;
         int ymin;
         int yend;
         int xmin;
         int xend;
+      public:
+        initializer() : is_dummy(true) {}
         initializer(int _zmin, int _zend,
                     int _ymin, int _yend,
                     int _xmin, int _xend)
-          : zmin(_zmin), zend(_zend), ymin(_ymin),
+          : is_dummy(false),
+            zmin(_zmin), zend(_zend), ymin(_ymin),
             yend(_yend), xmin(_xmin), xend(_xend) {}
+        template<typename T2> friend class BArray3;
+        template<typename T2> friend class Incomplete;
       };
       // no definition of defaultInitializer
     public:
@@ -1576,8 +1622,15 @@ namespace Pyon {
     template<typename T>
   class Stored : public BareType {
     public:
-      struct initializer {}; // Class is empty
-      static initializer defaultInitializer(void) { return initializer(); }
+      struct initializer {
+      private:
+        T value;
+      public:
+        initializer() {}
+        initializer(T v) : value(v) {}
+        template<typename T2> friend class Stored;
+        template<typename T2> friend class Incomplete;
+      };
 
       // Constructors
       Stored<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
@@ -1612,8 +1665,14 @@ namespace Pyon {
     template<>
   class Stored<NoneType> : public BareType {
     public:
-      struct initializer {}; // Class is empty
-      static initializer defaultInitializer(void) { return initializer(); }
+      struct initializer {
+      private:
+        NoneType value;
+      public:
+        initializer() {}
+        initializer(NoneType n) {}
+        template<typename T2> friend class Incomplete;
+      };
 
       // Constructors
       Stored<NoneType>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
@@ -1645,24 +1704,29 @@ namespace Pyon {
   /* Implementation of Incomplete< StuckRef <T> > */
     template<typename T>
   class Incomplete<StuckRef<T> > : public IncompleteSingleRef<StuckRef<T> > {
+    private:
+      typedef typename AsBoxType<T>::type T_Box;
     public:
       Incomplete < StuckRef<T> >(void)
         : IncompleteSingleRef< StuckRef<T> >() {}
       Incomplete < StuckRef<T> >(PyonBarePtr _s)
         : IncompleteSingleRef< StuckRef<T> >(_s) {}
-      void initialize(const typename StuckRef<T>::initializer&) { }
-      void create(const typename StuckRef<T>::initializer& init)
+      void initialize(const typename StuckRef<T>::initializer&init =
+                      typename StuckRef<T>::initializer())
+      {
+        /* Copy a pointer */
+        PyonBoxPtr *data = (PyonBoxPtr *)this->getObject();
+        *data = init.value.getBoxData();
+      }
+      void create(const typename StuckRef<T>::initializer&init =
+                      typename StuckRef<T>::initializer())
       { this->allocate(); initialize(init); }
-      void initialize() { initialize(StuckRef<T>::defaultInitializer()); }
-      void create() { create(StuckRef<T>::defaultInitializer()); }
 
       /* There is no operator=(StuckRef<T>).
        * Instead, StuckRef<T> is cast to T, which can be passed to the
        * following operator. */
-      void operator=(T other) {
-        /* Copy a pointer */
-        PyonBoxPtr *data = (PyonBoxPtr *)this->getObject();
-        *data = other.getBoxData();
+      void operator=(T_Box other) {
+        this->initialize(typename StuckRef<T>::initializer(other));
       }
   };
 
@@ -1670,36 +1734,57 @@ namespace Pyon {
   /* Implementation of Incomplete< Stored <T> > */
   
     template<typename T>
-  class Incomplete < Stored<T> > : public IncompleteSingleRef< Stored<T> > {
+  class Incomplete< Stored<T> > : public IncompleteSingleRef< Stored<T> > {
     public:
-      Incomplete < Stored<T> >(void) : IncompleteSingleRef< Stored<T> >() {}
-      Incomplete < Stored<T> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
-      void initialize(const typename Stored<T>::initializer&) { }
-      void create(const typename Stored<T>::initializer& init)
-      { this->allocate(); initialize(init); }
-      void initialize() { initialize(Stored<T>::defaultInitializer()); }
-      void create() { create(Stored<T>::defaultInitializer()); }
-      void operator=(const T& other) {
+      Incomplete< Stored<T> >(void) : IncompleteSingleRef< Stored<T> >() {}
+      Incomplete< Stored<T> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
+      void initialize(const typename Stored<T>::initializer &init =
+                      typename Stored<T>::initializer())
+      {
         typename T::type *data = (typename T::type *) this->getObject();
-        *data = other.nativeElement; 
+        *data = init.value.nativeElement; 
+      }
+      void create(const typename Stored<T>::initializer &init =
+                  typename Stored<T>::initializer())
+      { this->allocate(); initialize(init); }
+      void initialize(const T& other) {
+        this->initialize(typename Stored<T>::initializer(other));
+      }        
+      void create(const T& other) {
+        this->create(typename Stored<T>::initializer(other));
+      }        
+      void operator=(const T& other) {
+        this->initialize(typename Stored<T>::initializer(other));
       }
   };
 
   /* Implementation of Incomplete< Stored <NoneType> > */
   
     template<>
-  class Incomplete< Stored<NoneType> > : public IncompleteSingleRef< Stored<NoneType> > {
+  class Incomplete<Stored<NoneType> >
+      : public IncompleteSingleRef< Stored<NoneType> > {
     public:
-      Incomplete < Stored<NoneType> >(void) : IncompleteSingleRef< Stored<NoneType> >() {}
-      Incomplete < Stored<NoneType> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
-      void initialize(const Stored<NoneType>::initializer&) { }
-      void create(const Stored<NoneType>::initializer& init)
+      Incomplete< Stored<NoneType> >(void) : IncompleteSingleRef< Stored<NoneType> >() {}
+      Incomplete< Stored<NoneType> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
+      void initialize(const Stored<NoneType>::initializer &init =
+                      Stored<NoneType>::initializer())
+      {
+        // Do nothing
+      }
+      void create(const Stored<NoneType>::initializer &init =
+                  Stored<NoneType>::initializer())
       { this->allocate(); initialize(init); }
-      void initialize() { initialize(Stored<NoneType>::defaultInitializer()); }
-      void create() { create(Stored<NoneType>::defaultInitializer()); }
-      void operator=(const NoneType& other) { }
+      void initialize(const NoneType& other) {
+        this->initialize(Stored<NoneType>::initializer(other));
+      }        
+      void create(const NoneType& other) {
+        this->create(Stored<NoneType>::initializer(other));
+      }        
+      void operator=(const NoneType& other) {
+        this->initialize(Stored<NoneType>::initializer(other));
+      }
   };
-  
+
   /* Implementation of Incomplete< Tuple<T1,T2,T3,T4> > */
 
     template<typename T1, typename T2, typename T3, typename T4>
@@ -1709,26 +1794,24 @@ namespace Pyon {
       typedef typename AsBareType<T2>::type T2_Bare;
       typedef typename AsBareType<T3>::type T3_Bare;
       typedef typename AsBareType<T4>::type T4_Bare;
+      typedef Tuple<T1,T2,T3,T4> T;
     public:
       // Constructors
-      Incomplete< Tuple<T1,T2,T3,T4> >(void) : IncompleteSingleRef< Tuple<T1,T2,T3,T4> >() {}
-      Incomplete< Tuple<T1,T2,T3,T4> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2,T3,T4> >(_s) {}
-      
+      Incomplete<T>(void) : IncompleteSingleRef<T>() {}
+      Incomplete<T>(PyonBarePtr _s) : IncompleteSingleRef<T>(_s) {}
+
       // Member Functions
-      void initialize(const typename Tuple<T1,T2,T3,T4>::initializer& init)
+      void initialize(const typename T::initializer& init =
+                      typename T::initializer())
       {
         get<0>().initialize(init.init_1);
         get<1>().initialize(init.init_2);
         get<2>().initialize(init.init_3);
         get<3>().initialize(init.init_4);
       }
-      void create(const typename Tuple<T1,T2,T3,T4>::initializer& init)
-      {
-        this->allocate();
-        initialize(init);
-      }
-      void initialize() {initialize(Tuple<T1,T2,T3,T4>::defaultInitializer());}
-      void create() {create(Tuple<T1,T2,T3,T4>::defaultInitializer());}
+      void create(const typename T::initializer& init =
+                  typename T::initializer())
+      { this->allocate(); initialize(init); }
 
         template<int index>
       Incomplete<typename get_return_type<index, T1, T2, T3, T4>::type> 
@@ -1744,25 +1827,23 @@ namespace Pyon {
       typedef typename AsBareType<T1>::type T1_Bare;
       typedef typename AsBareType<T2>::type T2_Bare;
       typedef typename AsBareType<T3>::type T3_Bare;
+      typedef Tuple<T1,T2,T3> T;
     public:
       // Constructors
-      Incomplete< Tuple<T1,T2,T3> >(void) : IncompleteSingleRef< Tuple<T1,T2,T3> >() {}
-      Incomplete< Tuple<T1,T2,T3> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2,T3> >(_s) {}
+      Incomplete<T>(void) : IncompleteSingleRef<T>() {}
+      Incomplete<T>(PyonBarePtr _s) : IncompleteSingleRef<T>(_s) {}
       
       // Member Functions
-      void initialize(const typename Tuple<T1,T2,T3>::initializer& init)
+      void initialize(const typename T::initializer& init =
+                      typename T::initializer())
       {
         get<0>().initialize(init.init_1);
         get<1>().initialize(init.init_2);
         get<2>().initialize(init.init_3);
       }
-      void create(const typename Tuple<T1,T2,T3>::initializer& init)
-      {
-        this->allocate();
-        initialize(init);
-      }
-      void initialize() {initialize(Tuple<T1,T2,T3>::defaultInitializer());}
-      void create() {create(Tuple<T1,T2,T3>::defaultInitializer());}
+      void create(const typename T::initializer& init =
+                      typename T::initializer())
+      { this->allocate(); initialize(init); }
 
         template<int index>
       Incomplete<typename get_return_type<index, T1, T2, T3>::type> 
@@ -1777,24 +1858,24 @@ namespace Pyon {
     private:
       typedef typename AsBareType<T1>::type T1_Bare;
       typedef typename AsBareType<T2>::type T2_Bare;
+      typedef Tuple<T1,T2> T;
     public:
       // Constructors
-      Incomplete< Tuple<T1,T2> >(void) : IncompleteSingleRef< Tuple<T1,T2> >() {}
-      Incomplete< Tuple<T1,T2> >(PyonBarePtr _s) : IncompleteSingleRef< Tuple<T1,T2> >(_s) {}
+      Incomplete<T>(void) : IncompleteSingleRef<T>() {}
+      Incomplete<T>(PyonBarePtr _s) : IncompleteSingleRef<T>(_s) {}
       
       // Member Functions
-      void initialize(const typename Tuple<T1,T2>::initializer& init)
+      void initialize(const typename T::initializer& init =
+                      typename T::initializer())
       {
         get<0>().initialize(init.init_1);
         get<1>().initialize(init.init_2);
       }
-      void create(const typename Tuple<T1,T2>::initializer& init)
-      {
-        this->allocate();
-        initialize(init);
-      }
-      void initialize() {initialize(Tuple<T1,T2>::defaultInitializer());}
-      void create() {create(Tuple<T1,T2>::defaultInitializer());}
+
+      void create(const typename T::initializer& init =
+                      typename T::initializer())
+      { this->allocate(); initialize(init); }
+
 
         template<int index>
       Incomplete<typename get_return_type<index, T1, T2>::type> 
@@ -1816,14 +1897,19 @@ namespace Pyon {
         : IncompleteSingleRef< List<T> >(_s) {}
 
       // Member Functions
-      void initialize(const typename List<T>::initializer& init) {
-        pyon_List_initialize(init.length,
-                             T_Bare::getSize(),
-                             T_Bare::getAlignment(),
-                             this->getObject());
+      void initialize(const typename List<T>::initializer& init =
+                      typename List<T>::initializer()) {
+        if (!init.is_dummy) {
+          pyon_List_initialize(init.length,
+                               T_Bare::getSize(),
+                               T_Bare::getAlignment(),
+                               this->getObject());
+        }
       }
-      void create(const typename List<T>::initializer& init)
+      void create(const typename List<T>::initializer& init =
+                      typename List<T>::initializer())
       { this->allocate(); initialize(init); }
+
       void initialize(int length)
       { initialize(typename List<T>::initializer(length)); }
       void create(int length)
@@ -1851,13 +1937,16 @@ namespace Pyon {
         : IncompleteSingleRef<BList<T> >(_s) {}
 
       // Member Functions
-      void initialize(const typename BList<T>::initializer& init) {
-        pyon_List_initialize(init.length,
-                             sizeof(PyonBoxPtr),
-                             __alignof__(PyonBoxPtr),
-                             this->getObject());
+      void initialize(const typename BList<T>::initializer& init =
+                      typename BList<T>::initializer()) {
+        if(!init.is_dummy)
+          pyon_List_initialize(init.length,
+                               sizeof(PyonBoxPtr),
+                               __alignof__(PyonBoxPtr),
+                               this->getObject());
       }
-      void create(const typename BList<T>::initializer& init)
+      void create(const typename BList<T>::initializer& init =
+                  typename BList<T>::initializer())
       { this->allocate(); initialize(init); }
       void initialize(int length)
       { initialize(typename BList<T>::initializer(length)); }
@@ -1870,8 +1959,7 @@ namespace Pyon {
           (PyonBoxPtr *)pyon_List_get_contents(this->getObject());
         return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&list_contents[index]);
       }
-
-  };
+    };
 
   /* Implementation of Incomplete< Array1<T> > */
 
@@ -1885,15 +1973,20 @@ namespace Pyon {
       Incomplete< Array1<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array1<T> >(_s) { }
       
       // Member Functions
-      void initialize(const typename Array1<T>::initializer &init)
+      void initialize(const typename Array1<T>::initializer &init =
+                      typename Array1<T>::initializer())
       {
-        pyon_Array1_initialize(init.min, 1, init.end,
-                               T_Bare::getSize(),
-                               T_Bare::getAlignment(),
-                               this->getObject());
+        if (!init.is_dummy) {
+          pyon_Array1_initialize(init.min, 1, init.end,
+                                 T_Bare::getSize(),
+                                 T_Bare::getAlignment(),
+                                 this->getObject());
+        }
       }
-      void create(const typename Array1<T>::initializer &init)
+      void create(const typename Array1<T>::initializer &init =
+                  typename Array1<T>::initializer())
       { this->allocate(); initialize(init); }
+
       void initialize(int min, int end)
       { initialize(typename Array1<T>::initializer(min, end)); }
       void create(int min, int end)
@@ -1918,14 +2011,18 @@ namespace Pyon {
       Incomplete< BArray1<T> >(PyonBarePtr _s) : IncompleteSingleRef< BArray1<T> >(_s) { }
       
       // Member Functions
-      void initialize(const typename BArray1<T>::initializer &init)
+      void initialize(const typename BArray1<T>::initializer &init =
+                      typename BArray1<T>::initializer())
       {
-        pyon_Array1_initialize(init.min, 1, init.end,
-                               sizeof(PyonBarePtr),
-                               __alignof__(PyonBarePtr),
-                               this->getObject());
+        if (!init.is_dummy) {
+          pyon_Array1_initialize(init.min, 1, init.end,
+                                 sizeof(PyonBarePtr),
+                                 __alignof__(PyonBarePtr),
+                                 this->getObject());
+        }
       }
-      void create(const typename BArray1<T>::initializer &init)
+      void create(const typename BArray1<T>::initializer &init =
+                      typename BArray1<T>::initializer())
       { this->allocate(); initialize(init); }
       void initialize(int min, int end)
       { initialize(typename BArray1<T>::initializer(min, end)); }
@@ -1954,15 +2051,19 @@ namespace Pyon {
       Incomplete< Array2<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array2<T> >(_s) { }
       
       // Member Functions
-      void initialize(const typename Array2<T>::initializer &init)
+      void initialize(const typename Array2<T>::initializer &init =
+                      typename Array2<T>::initializer())
       {
-        pyon_Array2_initialize(init.ymin, 1, init.yend,
-                               init.xmin, 1, init.xend,
-                               T_Bare::getSize(),
-                               T_Bare::getAlignment(),
-                               this->getObject());
+        if (!init.is_dummy) {
+          pyon_Array2_initialize(init.ymin, 1, init.yend,
+                                 init.xmin, 1, init.xend,
+                                 T_Bare::getSize(),
+                                 T_Bare::getAlignment(),
+                                 this->getObject());
+        }
       }
-      void create(const typename Array2<T>::initializer &init)
+      void create(const typename Array2<T>::initializer &init =
+                  typename Array2<T>::initializer())
       { this->allocate(); initialize(init); }
 
       void initialize(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end)
@@ -2007,15 +2108,19 @@ namespace Pyon {
       Incomplete<BArray2<T> >(PyonBarePtr _s) : IncompleteSingleRef<BArray2<T> >(_s) { }
 
       // Member Functions
-      void initialize(const typename BArray2<T>::initializer &init)
+      void initialize(const typename BArray2<T>::initializer &init =
+                      typename BArray2<T>::initializer())
       {
-        pyon_Array2_initialize(init.ymin, 1, init.yend,
-                               init.xmin, 1, init.xend,
-                               sizeof(PyonBoxPtr),
-                               __alignof__(PyonBoxPtr),
-                               this->getObject());
+        if (!init.is_dummy) {
+          pyon_Array2_initialize(init.ymin, 1, init.yend,
+                                 init.xmin, 1, init.xend,
+                                 sizeof(PyonBoxPtr),
+                                 __alignof__(PyonBoxPtr),
+                                 this->getObject());
+        }
       }
-      void create(const typename BArray2<T>::initializer &init)
+      void create(const typename BArray2<T>::initializer &init =
+                  typename BArray2<T>::initializer())
       { this->allocate(); initialize(init); }
 
       void initialize(int32_t y_min, int32_t y_end, int32_t x_min, int32_t x_end)
@@ -2060,16 +2165,20 @@ namespace Pyon {
       Incomplete< Array3<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array3<T> >(_s) { }
       
       // Member Functions
-      void initialize(const typename Array3<T>::initializer &init)
+      void initialize(const typename Array3<T>::initializer &init =
+                      typename Array3<T>::initializer())
       {
-        pyon_Array3_initialize(init.zmin, 1, init.zend,
-                               init.ymin, 1, init.yend,
-                               init.xmin, 1, init.xend,
-                               T_Bare::getSize(),
-                               T_Bare::getAlignment(),
-                               this->getObject());
+        if (!init.is_dummy) {
+          pyon_Array3_initialize(init.zmin, 1, init.zend,
+                                 init.ymin, 1, init.yend,
+                                 init.xmin, 1, init.xend,
+                                 T_Bare::getSize(),
+                                 T_Bare::getAlignment(),
+                                 this->getObject());
+        }
       }
-      void create(const typename Array3<T>::initializer &init)
+      void create(const typename Array3<T>::initializer &init =
+                  typename Array3<T>::initializer())
       { this->allocate(); initialize(init); }
 
       void initialize(int32_t z_min, int32_t z_end, int32_t y_min,
@@ -2128,16 +2237,20 @@ namespace Pyon {
       Incomplete<BArray3<T> >(PyonBarePtr _s) : IncompleteSingleRef<BArray3<T> >(_s) { }
 
       // Member Functions
-      void initialize(const typename BArray3<T>::initializer &init)
+      void initialize(const typename BArray3<T>::initializer &init =
+                      typename BArray3<T>::initializer())
       {
-        pyon_Array3_initialize(init.zmin, 1, init.zend,
-                               init.ymin, 1, init.yend,
-                               init.xmin, 1, init.xend,
-                               sizeof(PyonBoxPtr),
-                               __alignof__(PyonBoxPtr),
-                               this->getObject());
+        if (!init.is_dummy) {
+          pyon_Array3_initialize(init.zmin, 1, init.zend,
+                                 init.ymin, 1, init.yend,
+                                 init.xmin, 1, init.xend,
+                                 sizeof(PyonBoxPtr),
+                                 __alignof__(PyonBoxPtr),
+                                 this->getObject());
+        }
       }
-      void create(const typename BArray3<T>::initializer &init)
+      void create(const typename BArray3<T>::initializer &init =
+                  typename BArray3<T>::initializer())
       { this->allocate(); initialize(init); }
 
       void initialize(int32_t z_min, int32_t z_end, int32_t y_min,
@@ -2193,14 +2306,15 @@ namespace Pyon {
     public:
       Incomplete<Boxed<T> >(void) : IncompleteBoxedRef<Boxed<T> >() {}
 
-      void initialize(const typename Boxed<T>::initializer &init)
+      void initialize(const typename Boxed<T>::initializer &init =
+                      typename Boxed<T>::initializer())
       {
         // Initialize the contents of this object
         this->get().initialize(init);
       }
-
-      void create(const typename Boxed<T>::initializer &init)
-      { this->allocate(); initialize(init); }
+      void create(const typename Boxed<T>::initializer &init =
+                  typename Boxed<T>::initializer())
+      { this->allocate(); this->initialize(init); }
 
       Incomplete<T_Bare>
       get() {
@@ -2247,7 +2361,7 @@ namespace Pyon {
   NoneType::operator Boxed<Stored<NoneType> >() const
   {
     Incomplete<Boxed<Stored<NoneType> > > i;
-    i.create(Stored<NoneType>::defaultInitializer());
+    i.create(Stored<NoneType>::initializer());
     return i.freeze();
   }
 
@@ -2261,7 +2375,7 @@ namespace Pyon {
   Int::operator Boxed<Stored<Int> >() const
   {
     Incomplete<Boxed<Stored<Int> > > i;
-    i.create(Stored<Int>::defaultInitializer());
+    i.create(Stored<Int>::initializer());
     i.get() = *this;
     return i.freeze();
   }
@@ -2276,7 +2390,7 @@ namespace Pyon {
   Bool::operator Boxed<Stored<Bool> >() const
   {
     Incomplete<Boxed<Stored<Bool> > > i;
-    i.create(Stored<Bool>::defaultInitializer());
+    i.create(Stored<Bool>::initializer());
     i.get() = *this;
     return i.freeze();
   }
@@ -2291,7 +2405,7 @@ namespace Pyon {
   Float::operator Boxed<Stored<Float> >() const
   {
     Incomplete<Boxed<Stored<Float> > > i;
-    i.create(Stored<Float>::defaultInitializer());
+    i.create(Stored<Float>::initializer());
     i.get() = *this;
     return i.freeze();
   }
