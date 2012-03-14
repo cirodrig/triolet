@@ -12,22 +12,20 @@ import procedure exit (int) -> ();
 #include "new_pyasm_records.h"
 
 function repr_Complex (owned repr_element) -> owned {
-  elt_size = repr_element @! PassConv.size;
-  elt_align = repr_element @! PassConv.align;
+  SA {elt_size, elt_align} = repr_element @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
   // FIXME: convert to bare / convert to boxed members
   () = () primcall exit (int -1);
 
-  repr = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+  repr = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
   // FIXME: Initialize object header
 
-  repr @! PassConv.size = sizeof elt_type;
-  repr @! PassConv.align = alignof elt_type;
-  repr @! PassConv.is_pointerless = repr_element @! PassConv.is_pointerless;
+  repr @! Repr.sizealign = SA {sizeof elt_type, alignof elt_type};
+  repr @! Repr.is_pointerless = repr_element @! Repr.is_pointerless;
 
-  copy_elt = repr_element @! PassConv.copy;
+  copy_elt = repr_element @! Repr.copy;
   letrec {
     function copy (pointer src, pointer dst) -> () {
       () = () call copy_elt (src @ cpx.real, dst @ cpx.real);
@@ -35,25 +33,15 @@ function repr_Complex (owned repr_element) -> owned {
       ();
     }
   };
-  repr @! PassConv.copy = copy;
+  repr @! Repr.copy = copy;
 
-  finalize_elt = repr_element @! PassConv.finalize;
-  letrec {
-    function finalize (pointer x) -> () {
-      () = () call finalize_elt (x @ cpx.real);
-      () = () call finalize_elt (x @ cpx.imag);
-      ();
-    }
-  };
-  repr @! PassConv.finalize = finalize;
   repr;
 };
 
 function AdditiveDict_Complex_add
   (owned repr_elt, owned additive_elt,
    pointer x, pointer y, pointer ret) -> () {
-  elt_size = repr_elt @! PassConv.size;
-  elt_align = repr_elt @! PassConv.align;
+  SA {elt_size, elt_align} = repr_elt @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
@@ -66,8 +54,7 @@ function AdditiveDict_Complex_add
 function AdditiveDict_Complex_sub
   (owned repr_elt, owned additive_elt,
    pointer x, pointer y, pointer ret) -> () {
-  elt_size = repr_elt @! PassConv.size;
-  elt_align = repr_elt @! PassConv.align;
+  SA {elt_size, elt_align} = repr_elt @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
@@ -80,8 +67,7 @@ function AdditiveDict_Complex_sub
 function AdditiveDict_Complex_negate
   (owned repr_elt, owned additive_elt,
    pointer x, pointer ret) -> () {
-  elt_size = repr_elt @! PassConv.size;
-  elt_align = repr_elt @! PassConv.align;
+  SA {elt_size, elt_align} = repr_elt @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
@@ -93,12 +79,11 @@ function AdditiveDict_Complex_negate
 
 function AdditiveDict_Complex_zero
   (owned repr_elt, owned additive_elt, pointer ret) -> () {
-  elt_size = repr_elt @! PassConv.size;
-  elt_align = repr_elt @! PassConv.align;
+  SA {elt_size, elt_align} = repr_elt @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
-  copy = repr_elt @! PassConv.copy;
+  copy = repr_elt @! Repr.copy;
   zero = additive_elt @ AdditiveDict(elt_type).zero;
   () = () call copy (zero, ret @ cpx.real);
   () = () call copy (zero, ret @ cpx.imag);
@@ -108,8 +93,7 @@ function AdditiveDict_Complex_zero
 function MultiplicativeDict_Complex_mul
   (owned repr_elt, owned multiplicative_elt,
    pointer x, pointer y, pointer ret) -> () {
-  elt_size = repr_elt @! PassConv.size;
-  elt_align = repr_elt @! PassConv.align;
+  SA {elt_size, elt_align} = repr_elt @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
@@ -121,21 +105,16 @@ function MultiplicativeDict_Complex_mul
   add = additive_elt @! AdditiveDict(elt_type).add;
   sub = additive_elt @! AdditiveDict(elt_type).subtract;
   mul = multiplicative_elt @! MultiplicativeDict(elt_type).mul;
-  finalize_elt = repr_elt @! PassConv.finalize;
 
   // Compute real part
   () = () call mul (x @ cpx.real, y @ cpx.real, tmp1);
   () = () call mul (x @ cpx.imag, y @ cpx.imag, tmp2);
   () = () call sub (tmp1, tmp2, ret @ cpx.real);
-  () = () call finalize_elt(tmp1);
-  () = () call finalize_elt(tmp2);
 
   // Compute imaginary part
   () = () call mul (x @ cpx.real, y @ cpx.imag, tmp1);
   () = () call mul (x @ cpx.imag, y @ cpx.real, tmp2);
   () = () call add (tmp1, tmp2, ret @ cpx.imag);
-  () = () call finalize_elt(tmp1);
-  () = () call finalize_elt(tmp2);
 
   // Clean up
   () = () primcall pyon_dealloc(tmp1);
@@ -145,8 +124,7 @@ function MultiplicativeDict_Complex_mul
 function MultiplicativeDict_Complex_fromInt
   (owned repr_elt, owned multiplicative_elt,
    int intval, pointer ret) -> () {
-  elt_size = repr_elt @! PassConv.size;
-  elt_align = repr_elt @! PassConv.align;
+  SA {elt_size, elt_align} = repr_elt @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
@@ -156,14 +134,13 @@ function MultiplicativeDict_Complex_fromInt
   zero = additive_elt @ AdditiveDict(elt_type).zero;
 
   () = () call fromint (intval, ret @ cpx.real);
-  () = () call (repr_elt @! PassConv.copy) (zero, ret @ cpx.imag);
+  () = () call (repr_elt @! Repr.copy) (zero, ret @ cpx.imag);
   ();
 };
 
 function MultiplicativeDict_Complex_one
   (owned repr_elt, owned multiplicative_elt, pointer ret) -> () {
-  elt_size = repr_elt @! PassConv.size;
-  elt_align = repr_elt @! PassConv.align;
+  SA {elt_size, elt_align} = repr_elt @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
@@ -171,7 +148,7 @@ function MultiplicativeDict_Complex_one
   one = multiplicative_elt @ MultiplicativeDict(elt_type).one;
   additive_elt = multiplicative_elt @! MultiplicativeDict(elt_type).additive;
   zero = multiplicative_elt @ AdditiveDict(elt_type).zero;
-  copy = repr_elt @! PassConv.copy;
+  copy = repr_elt @! Repr.copy;
 
   () = () call copy (one, ret @ cpx.real);
   () = () call copy (zero, ret @ cpx.imag);

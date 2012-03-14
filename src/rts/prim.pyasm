@@ -30,11 +30,11 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
 };
 
 function inline convertToBoxed (owned repr, owned writer) -> owned {
-  owned call (repr @! PassConv.convert_to_boxed) (writer);
+  owned call (repr @! Repr.convert_to_boxed) (writer);
 };
 
 function inline convertToBare (owned repr, owned src, pointer dst) -> () {
-  () call (repr @! PassConv.convert_to_bare) (src, dst);
+  () call (repr @! Repr.convert_to_bare) (src, dst);
 };
 
 // Since a partially applied instance of this function may be used to
@@ -205,16 +205,16 @@ function inline defineIntIndex (int n) -> SomeIndInt {
 // Get a pointer to an array element
 function inline subscript
  (owned repr, pointer base, int index) -> pointer {
-   typedef elt_type = bytes(value repr @! PassConv.size,
-                            value repr @! PassConv.align);
+   SA {repr_size, repr_align} = repr @! Repr.sizealign;
+   typedef elt_type = bytes(value repr_size, value repr_align);
    base @ const_array(value int 0, elt_type)[index];
 };
 
 // Get a pointer to an array element.  Exactly the same as 'subscript'.
 function inline subscript_out
  (owned repr, pointer base, int index) -> pointer {
-   typedef elt_type = bytes(value repr @! PassConv.size,
-                            value repr @! PassConv.align);
+   SA {repr_size, repr_align} = repr @! Repr.sizealign;
+   typedef elt_type = bytes(value repr_size, value repr_align);
    base @ const_array(value int 0, elt_type)[index];
 };
 
@@ -305,46 +305,6 @@ function inline doall (FinIndInt ix, owned f) -> () {
     () = () call f (n);
     n + int 1;
   };
-  ();
-};
-
-function inline for
-  (owned acc_repr, FinIndInt ix, pointer init, owned f, pointer ret) -> () {
-
-  FinIndInt{count} = ix;
-  // The for loop has an 'input' and an 'output' accumulator, and swaps
-  // between them.
-  acc_size = acc_repr @! PassConv.size;
-  acc_align = acc_repr @! PassConv.align;
-  acc_copy = acc_repr @! PassConv.copy;
-  acc_finalize = acc_repr @! PassConv.finalize;
-  typedef acc_type = bytes(value acc_size, value acc_align);
-  typedef acc_pair = Pair(acc_type);
-
-  // Setup
-  accs = pointer primcall allocate (acc_repr @! PassConv.is_pointerless,
-       	 	 	  	    sizeof acc_pair);
-  () = () call acc_copy (init, accs @ acc_pair.fst);
-
-  // Main loop.
-  // At start, old_acc holds accumulator, new_acc is uninitialized,
-  // reduce_tmp is uninitialized.
-  // At termination, old_acc holds final accumulator, new_acc is uninitialized,
-  // reduce_tmp is uninitialized.
-  (_, final_acc, clear_acc) =
-    while (int n = int 0,
-           pointer old_acc = accs @ acc_pair.fst,
-           pointer new_acc = accs @ acc_pair.snd)
-          (n < count) {
-    () = () call f (n, old_acc, new_acc);
-    () = () call acc_finalize (old_acc);
-    (n + int 1, new_acc, old_acc);
-  };
-  
-  // Cleanup
-  () = () call acc_copy (final_acc, ret);
-  () = () call acc_finalize (final_acc);
-  () = () primcall pyon_dealloc (accs);
   ();
 };
 

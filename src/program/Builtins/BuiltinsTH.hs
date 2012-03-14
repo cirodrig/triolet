@@ -84,6 +84,7 @@ pyonBuiltinTypeNames =
   , "trueP"
 
     -- Dictionary types
+  , "SA"
   , "Repr"
   , "TraversableDict"
   , "ShapeDict"
@@ -161,6 +162,7 @@ pyonBuiltinVariableNames =
   , "mk_scatter"
 
     -- Class constructors
+  , "sa"
   , "repr"
   , "traversableDict"
   , "shapeDict"

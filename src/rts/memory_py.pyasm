@@ -12,13 +12,6 @@ function deallocF (pointer p) -> () {
   ();
 };
 
-// A dummy finalizer function that does nothing.  This finalizer is useful
-// for objects that don't contain pointers.
-function dummy_finalizer (pointer p) -> () {
-  // Do nothing
-  ();
-};
-
 // Copy 1 byte
 function inline copy1F (pointer src, pointer dst) -> () {
   !dst = uint8 load src;
@@ -43,7 +36,7 @@ function inline copy8F (pointer src, pointer dst) -> () {
   ();
 };
 
-// Copy some bytes according to a PassConv object
-function inline copy (owned passconv, pointer src, pointer dst) -> () {
-  () call (passconv @! PassConv.copy) (src, dst);
+// Copy some bytes according to a Repr object
+function inline copy (owned repr, pointer src, pointer dst) -> () {
+  () call (repr @! Repr.copy) (src, dst);
 };

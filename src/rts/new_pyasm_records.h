@@ -15,15 +15,19 @@ record Obj(a) {
   const a payload;
 };
 
-// Objet layout information
-record PassConv {
+// Size and alignment of an object
+record SA {
+  const uint size;
+  const uint align;
+};
+
+// Object layout information
+record Repr {
   const ObjectHeader header;
-  const uint size;                    // Size in bytes
-  const uint align;                   // Alignment in bytes
+  const SA sizealign;          // Size and alignment in bytes
   const owned copy;                   // Duplicate a value
   const owned convert_to_boxed;	      // Convert a value to boxed type
   const owned convert_to_bare;	      // Convert a value to bare type
-  const owned finalize;               // Finalize a value
   const bool is_pointerless;	      // Is pointerless?
 };
 

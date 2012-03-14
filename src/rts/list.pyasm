@@ -15,19 +15,17 @@ import procedure exit "exit" (int) -> ();
 #include "new_pyasm_records.h"
 
 function repr_list (owned elem_repr) -> owned {
-  repr = pointer primcall pyon_alloc (sizeof PassConv);
+  repr = pointer primcall pyon_alloc (sizeof Repr);
 
   // FIXME: Initialize repr header
-  repr @! PassConv.size = sizeof PyonList;
-  repr @! PassConv.align = alignof PyonList;
-  repr @! PassConv.is_pointerless = NOT_POINTERLESS;
+  repr @! Repr.sizealign = SA {sizeof PyonList, alignof PyonList};
+  repr @! Repr.is_pointerless = NOT_POINTERLESS;
   copy_function = owned call list_copy (elem_repr);
-  repr @! PassConv.copy = copy_function;
-  repr @! PassConv.convert_to_boxed =
+  repr @! Repr.copy = copy_function;
+  repr @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof PyonList, alignof PyonList);
-  repr @! PassConv.convert_to_bare =
+  repr @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof PyonList, alignof PyonList, copy_function);
-  repr @! PassConv.finalize = owned call list_finalize (elem_repr);
   repr as owned;
 };
 
@@ -37,15 +35,14 @@ function list_copy (owned elem_repr, pointer src, pointer dst) -> () {
   FinIndInt {nelems} = nelems_ii;
 
   // Copy list elements
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  copy_elem = elem_repr @! PassConv.copy;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
+  copy_elem = elem_repr @! Repr.copy;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef src_contents_type = const_array(value nelems, elem_type);
   typedef dst_contents_type = array(value nelems, elem_type);
 
   src_contents = src @! PyonList.contents;
-  dst_contents = if (elem_repr @! PassConv.is_pointerless) {
+  dst_contents = if (elem_repr @! Repr.is_pointerless) {
     pointer primcall pyon_alloc_nopointers (sizeof dst_contents_type);
   } else {
     pointer primcall pyon_alloc (sizeof dst_contents_type);
@@ -60,34 +57,16 @@ function list_copy (owned elem_repr, pointer src, pointer dst) -> () {
   ();
 };
 
-function list_finalize (owned elem_repr, pointer list) -> () {
-  FinIndInt {nelems} = list @! PyonList.nelems;
-  contents = list @! PyonList.contents;
-
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  finalize_elem = elem_repr @! PassConv.finalize;
-  typedef elem_type = bytes(value elem_size, value elem_align);
-  typedef contents_type = array(value nelems, elem_type);
-
-  _ = while (int index = int 0) (index < nelems) {
-    () = () call finalize_elem (contents @ contents_type[index]);
-    index + int 1;
-  };
-  ();
-};
-
 // Create a list, leaving its elements uninitialized
 procedure list_create_uninitialized (owned elem_repr,
                                      int nelems,
                                      pointer list) -> () {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef array_type = array(value nelems, elem_type);
   
   list @! PyonList.nelems = FinIndInt {nelems};
-  list @! PyonList.contents = if (elem_repr @! PassConv.is_pointerless) {
+  list @! PyonList.contents = if (elem_repr @! Repr.is_pointerless) {
     pointer primcall pyon_alloc_nopointers (sizeof array_type);
   } else {
     pointer primcall pyon_alloc (sizeof array_type);
@@ -102,8 +81,7 @@ procedure list_create_uninitialized (owned elem_repr,
 // The old list contents are
 // copied to the new list; the new contents are uninitialized.
 procedure list_grow (pointer elem_repr, pointer list, int old_size) -> int {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
 
   typedef old_array_type = array(value old_size, elem_type);
@@ -111,7 +89,7 @@ procedure list_grow (pointer elem_repr, pointer list, int old_size) -> int {
   typedef new_array_type = array(value new_size, elem_type);
 
   old_contents = list @! PyonList.contents;
-  new_contents = if (elem_repr @! PassConv.is_pointerless) {
+  new_contents = if (elem_repr @! Repr.is_pointerless) {
     pointer primcall pyon_alloc_nopointers (sizeof new_array_type);
   } else {
     pointer primcall pyon_alloc (sizeof new_array_type);
@@ -143,8 +121,7 @@ function list_build
     (owned elem_repr, owned stream, pointer ret) -> () {
   typedef Stream = Obj(StreamData);
 
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef array_type = array(value int 0, elem_type);
 
@@ -174,7 +151,7 @@ function list_build
         // Copy this value to the destination.
         // The value was stored as a boxed object; convert it to a bare object.
         current_elem = (ret @! PyonList.contents) @ array_type[n_elems];
-        () = () call (elem_repr @! PassConv.convert_to_bare) (result_val, current_elem);
+        () = () call (elem_repr @! Repr.convert_to_bare) (result_val, current_elem);
 
         // Continue pulling
         () primcall pull_values (n_elems + int 1, new_list_size, next_state);
@@ -210,8 +187,7 @@ procedure pyon_list_to_array_POD (owned elem_repr,
                                   pointer list,
                                   pointer arr) -> () {
   FinIndInt {n_elems} = list @! PyonList.nelems;
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef array_type = array(value n_elems, elem_type);
 
@@ -229,8 +205,7 @@ procedure pyon_list_length (pointer list) -> int {
 
 // Allocate and return a copy of the POD list.
 procedure pyon_list_copy_POD (owned elem_repr, pointer in_list) -> pointer {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
   FinIndInt {nelems} = in_list @! PyonList.nelems;
   typedef array_type = array(value nelems, bytes(value elem_size, value elem_align));
 
@@ -253,19 +228,17 @@ procedure pyon_list_free_POD (pointer list) -> () {
 // Matrix functions
 
 function repr_array2 (owned elem_repr) -> owned {
-  repr = pointer primcall pyon_alloc (sizeof PassConv);
+  repr = pointer primcall pyon_alloc (sizeof Repr);
 
   // FIXME: initialize repr header
-  repr @! PassConv.size = sizeof PyonArray2;
-  repr @! PassConv.align = alignof PyonArray2;
-  repr @! PassConv.is_pointerless = NOT_POINTERLESS;
+  repr @! Repr.sizealign = SA {sizeof PyonArray2, alignof PyonArray2};
+  repr @! Repr.is_pointerless = NOT_POINTERLESS;
   copy_function = owned call matrix_copy (elem_repr);
-  repr @! PassConv.copy = copy_function;
-  repr @! PassConv.convert_to_boxed =
+  repr @! Repr.copy = copy_function;
+  repr @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof PyonArray2, alignof PyonArray2);
-  repr @! PassConv.convert_to_bare =
+  repr @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof PyonArray2, alignof PyonArray2, copy_function);
-  repr @! PassConv.finalize = owned call matrix_finalize (elem_repr);
   repr as owned;
 };
 
@@ -286,16 +259,15 @@ function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
   dst @! PyonArray2.size_x = FinIndInt {size_x};
 
   // Copy list elements
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  copy_elem = elem_repr @! PassConv.copy;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
+  copy_elem = elem_repr @! Repr.copy;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef src_contents_type =
     const_array (value size_y, const_array(value size_x, elem_type));
   typedef dst_contents_type =
     array(value size_y, array(value size_x, elem_type));
 
-  dst_contents = if (elem_repr @! PassConv.is_pointerless) {
+  dst_contents = if (elem_repr @! Repr.is_pointerless) {
     pointer primcall pyon_alloc_nopointers (sizeof dst_contents_type);
   } else {
     pointer primcall pyon_alloc (sizeof dst_contents_type);
@@ -306,27 +278,6 @@ function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
     _ = while (int xindex = int 0) (xindex < size_x) {
       () = () call copy_elem (src_contents @ src_contents_type[yindex][xindex],
                               dst_contents @ dst_contents_type[yindex][xindex]);
-      xindex + int 1;
-    };
-    yindex + int 1;
-  };
-  ();
-};
-
-function matrix_finalize (owned elem_repr, pointer matrix) -> () {
-  FinIndInt {size_y} = matrix @! PyonArray2.size_y;
-  FinIndInt {size_x} = matrix @! PyonArray2.size_x;
-  contents = matrix @! PyonArray2.contents;
-
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  finalize_elem = elem_repr @! PassConv.finalize;
-  typedef elem_type = bytes(value elem_size, value elem_align);
-  typedef contents_type = array(value size_y, array(value size_x, elem_type));
-
-  _ = while (int yindex = int 0) (yindex < size_y) {
-    _ = while (int xindex = int 0) (xindex < size_x) {
-      () = () call finalize_elem (contents @ contents_type[yindex][xindex]);
       xindex + int 1;
     };
     yindex + int 1;
@@ -358,8 +309,7 @@ procedure pyon_matrix_to_array_POD (owned elem_repr,
                                     pointer arr) -> () {
   FinIndInt {h} = mat @! PyonArray2.size_y;
   FinIndInt {w} = mat @! PyonArray2.size_x;
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef array_type = array(value h * w, elem_type);
 
@@ -372,8 +322,7 @@ procedure pyon_matrix_to_array_POD (owned elem_repr,
 
 // Allocate and return a copy of the POD matrix.
 procedure pyon_matrix_copy_POD (owned elem_repr, pointer in_mat) -> pointer {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
 
   ymin = in_mat @! PyonArray2.first_y;
   xmin = in_mat @! PyonArray2.first_x;

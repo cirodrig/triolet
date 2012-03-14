@@ -83,6 +83,12 @@ indexedIntDataRecord = constStaticRecord [RecordField finIndexedIntRecord]
 -- | A finite indexed int
 finIndexedIntRecord = constStaticRecord [PrimField nativeIntType]
 
+-- | A structure containing size and alignment fields
+sizeAlignRecord :: StaticRecord
+sizeAlignRecord = constStaticRecord
+                  [ PrimField nativeWordType -- Size
+                  , PrimField nativeWordType -- Alignment
+                  ]
 -- | A parameter passing convention consists of size, alignment, copy,
 -- and finalize functions, and a flag indicating whether the object is
 -- pointerless.
@@ -91,12 +97,10 @@ finIndexedIntRecord = constStaticRecord [PrimField nativeIntType]
 passConvRecord :: StaticRecord
 passConvRecord = constStaticRecord
                  [ RecordField objectHeaderRecord
-                 , PrimField nativeWordType -- Size
-                 , PrimField nativeWordType -- Alignment
+                 , RecordField sizeAlignRecord 
                  , PrimField OwnedType      -- Copy function
                  , PrimField OwnedType      -- Convert to boxed function
                  , PrimField OwnedType      -- Convert to bare function
-                 , PrimField OwnedType      -- Finalize function
                  , PrimField BoolType       -- Is pointerless?
                  ]
 

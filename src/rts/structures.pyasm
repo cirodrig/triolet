@@ -24,10 +24,9 @@ data pointer repr_info = InfoTableHeader {
   TAG_CON
 };
 
-data owned repr_Box = PassConv {
+data owned repr_Box = Repr {
   ObjectHeader { repr_info },
-  sizeof owned,
-  alignof owned,
+  SA {sizeof owned, alignof owned},
 #if WORD_SIZE == 4
   copy4F,
 #elif WORD_SIZE == 8
@@ -37,16 +36,14 @@ data owned repr_Box = PassConv {
 #endif
   Box_convert_to_boxed,
   Box_convert_to_bare,
-  dummy_finalizer,
   NOT_POINTERLESS
 };
 
 // Exactly the same as 'repr_Box'.  It's a separate definition because
 // it has a different type in the Mem stage.
-data owned repr_StoredBox = PassConv {
+data owned repr_StoredBox = Repr {
   ObjectHeader { repr_info },
-  sizeof owned,
-  alignof owned,
+  SA {sizeof owned, alignof owned},
 #if WORD_SIZE == 4
   copy4F,
 #elif WORD_SIZE == 8
@@ -56,16 +53,14 @@ data owned repr_StoredBox = PassConv {
 #endif
   Box_convert_to_boxed,
   Box_convert_to_bare,
-  dummy_finalizer,
   NOT_POINTERLESS
 };
 
 // Exactly the same as 'repr_Box'.  It's a separate definition because
 // it has a different type in the Mem stage.
-data owned repr_StuckRef = PassConv {
+data owned repr_StuckRef = Repr {
   ObjectHeader { repr_info },
-  sizeof owned,
-  alignof owned,
+  SA {sizeof owned, alignof owned},
 #if WORD_SIZE == 4
   copy4F,
 #elif WORD_SIZE == 8
@@ -75,16 +70,14 @@ data owned repr_StuckRef = PassConv {
 #endif
   Box_convert_to_boxed,
   Box_convert_to_bare,
-  dummy_finalizer,
   NOT_POINTERLESS
 };
 
 // Exactly the same as 'repr_Box'.  It's a separate definition because
 // it has a different type in the Mem stage.
-data owned repr_Stream = PassConv {
+data owned repr_Stream = Repr {
   ObjectHeader { repr_info },
-  sizeof owned,
-  alignof owned,
+  SA {sizeof owned, alignof owned},
 #if WORD_SIZE == 4
   copy4F,
 #elif WORD_SIZE == 8
@@ -94,7 +87,6 @@ data owned repr_Stream = PassConv {
 #endif
   Box_convert_to_boxed,
   Box_convert_to_bare,
-  dummy_finalizer,
   NOT_POINTERLESS
 };
 
@@ -113,37 +105,28 @@ function inline Box_convert_to_bare (owned src, pointer dst) -> () {
 
 // A referenced object is just a pointer to the object
 function inline repr_Referenced (owned elt_repr) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
-  ret @! PassConv.size = sizeof pointer;
-  ret @! PassConv.align = alignof pointer;
-  ret @! PassConv.is_pointerless = NOT_POINTERLESS;
+  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  ret @! Repr.sizealign = SA {sizeof pointer, alignof pointer};
+  ret @! Repr.is_pointerless = NOT_POINTERLESS;
 
   letrec {
     function copy (pointer src, pointer dst) -> () {
       // Allocate some new memory
-      new_obj = pointer primcall allocate (elt_repr @! PassConv.is_pointerless,
-                                           elt_repr @! PassConv.size);
+      new_obj = pointer primcall allocate (elt_repr @! Repr.is_pointerless,
+                                           elt_repr @! Repr.sizealign.size);
 
       // Copy into it
-      () = () call (elt_repr @! PassConv.copy) (pointer load src, new_obj);
+      () = () call (elt_repr @! Repr.copy) (pointer load src, new_obj);
       !dst = new_obj;
       ();
     }
   };
-  ret @! PassConv.copy = copy;
-  ret @! PassConv.convert_to_boxed =
+  ret @! Repr.copy = copy;
+  ret @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof pointer, alignof pointer);
-  ret @! PassConv.convert_to_bare =
+  ret @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof pointer, alignof pointer, copy);
 
-  letrec {
-    function finalize (pointer self) -> () {
-      contents = pointer load self;
-      () = () call (elt_repr @! PassConv.finalize) (contents);
-      () primcall pyon_dealloc (contents);
-    }
-  };
-  ret @! PassConv.finalize = finalize;
   ret;
 };
 
@@ -151,14 +134,12 @@ function inline repr_Referenced (owned elt_repr) -> owned {
 // The referenced object will never be accessed.  The reference does not
 // necessarily point to a valid address, depending on how the memory allocator
 // works.
-data owned repr_EmptyReference = PassConv {
+data owned repr_EmptyReference = Repr {
   ObjectHeader { repr_info },
-  word 0,
-  word 1,
+  SA {word 0, word 1},
   dummy_copy,
   make_Boxed_0,
   from_Boxed_0,
-  dummy_finalizer,
   IS_POINTERLESS
 };
 
@@ -170,16 +151,15 @@ function inline repr_arr
   (FinIndInt count, owned elt_repr) -> owned {
   FinIndInt {size} = count;
 
-  typedef elt_type = bytes(value elt_repr @! PassConv.size,
-                           value elt_repr @! PassConv.align);
+  SA {repr_size, repr_align} = elt_repr @! Repr.sizealign;
+  typedef elt_type = bytes(value repr_size, value repr_align);
   typedef array_type = const_array(value size, elt_type);
 
-  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
-  ret @! PassConv.size = sizeof array_type;
-  ret @! PassConv.align = alignof array_type;
-  ret @! PassConv.is_pointerless = elt_repr @! PassConv.is_pointerless;
+  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  ret @! Repr.sizealign = SA {sizeof array_type, alignof array_type};
+  ret @! Repr.is_pointerless = elt_repr @! Repr.is_pointerless;
 
-  elt_copy = elt_repr @! PassConv.copy;
+  elt_copy = elt_repr @! Repr.copy;
   letrec {
     function copy (pointer src, pointer dst) -> () {
       _ = while (int i = int 0) (i < size) {
@@ -189,105 +169,79 @@ function inline repr_arr
       ();
     }
   };
-  ret @! PassConv.copy = copy;
-  ret @! PassConv.convert_to_boxed =
+  ret @! Repr.copy = copy;
+  ret @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof array_type, alignof array_type);
-  ret @! PassConv.convert_to_bare =
+  ret @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof array_type, alignof array_type, copy);
-
-  elt_finalize = elt_repr @! PassConv.finalize;
-  letrec {
-    function finalize (pointer self) -> () {
-      _ = while (int i = int 0) (i < size) {
-        () = () call elt_finalize (self @ array_type[i]);
-        i + int 1;
-      };
-      ();
-    }
-  };
-  ret @! PassConv.finalize = finalize;
   ret;
 };
 
 // Parameter-passing convention dictionary of ints
-data owned repr_int = PassConv {
+data owned repr_int = Repr {
   ObjectHeader { repr_info },
-  sizeof int32,
-  alignof int32,
+  SA {sizeof int32, alignof int32},
   copy4F,
   make_Boxed_4,
   from_Boxed_4,
-  dummy_finalizer,
   IS_POINTERLESS
 };
 
 // Parameter-passing convention dictionary of floats
-data owned repr_float = PassConv {
+data owned repr_float = Repr {
   ObjectHeader { repr_info },
-  sizeof float,
-  alignof float,
+  SA {sizeof float, alignof float},
   copy4F,
   make_Boxed_4,
   from_Boxed_4,
-  dummy_finalizer,
   IS_POINTERLESS
 };
 
 // Parameter-passing convention dictionary of bool
-data owned repr_bool = PassConv {
+data owned repr_bool = Repr {
   ObjectHeader { repr_info },
-  sizeof bool,
-  alignof bool,
+  SA {sizeof bool, alignof bool},
   copy1F,
   make_Boxed_1,
   from_Boxed_1,
-  dummy_finalizer,
   IS_POINTERLESS
 };
 
 // Parameter-passing convention dictionary of EffTok,
 // which contains no data
-data owned repr_EffTok = PassConv {
+data owned repr_EffTok = Repr {
   ObjectHeader { repr_info },
-  word 0,
-  word 1,
+  SA {word 0, word 1},
   dummy_copy,
   make_Boxed_0,
   from_Boxed_0,
-  dummy_finalizer,
   IS_POINTERLESS
 };
 
 function copy_Repr (pointer src, pointer dst) -> () {
-  dst @! PassConv.size = src @! PassConv.size;
-  dst @! PassConv.align = src @! PassConv.align;
-  dst @! PassConv.copy = src @! PassConv.copy;
-  dst @! PassConv.convert_to_boxed = src @! PassConv.convert_to_boxed;
-  dst @! PassConv.convert_to_bare = src @! PassConv.convert_to_bare;
-  dst @! PassConv.finalize = src @! PassConv.finalize;
-  dst @! PassConv.is_pointerless = src @! PassConv.is_pointerless;
+  dst @! Repr.sizealign = src @! Repr.sizealign;
+  dst @! Repr.copy = src @! Repr.copy;
+  dst @! Repr.convert_to_boxed = src @! Repr.convert_to_boxed;
+  dst @! Repr.convert_to_bare = src @! Repr.convert_to_bare;
+  dst @! Repr.is_pointerless = src @! Repr.is_pointerless;
   ();
 };
 
 function inline repr_Maybe (owned repr_arg) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
 
-  typedef arg = bytes(value repr_arg @! PassConv.size,
-                      value repr_arg @! PassConv.align);
+  SA {arg_size, arg_align} = repr_arg @! Repr.sizealign;
+  typedef arg = bytes(value arg_size, value arg_align);
 
-  ret @! PassConv.size = sizeof Maybe(arg);
-  ret @! PassConv.align = alignof Maybe(arg);
-  ret @! PassConv.is_pointerless = repr_arg @! PassConv.is_pointerless;
-  copy = owned call copy_Maybe (repr_arg @! PassConv.copy,
+  ret @! Repr.sizealign = SA {sizeof Maybe(arg), alignof Maybe(arg)};
+  ret @! Repr.is_pointerless = repr_arg @! Repr.is_pointerless;
+  copy = owned call copy_Maybe (repr_arg @! Repr.copy,
                                 sizeof arg, alignof arg);
-  ret @! PassConv.copy = copy;
-  ret @! PassConv.convert_to_boxed =
+  ret @! Repr.copy = copy;
+  ret @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof Maybe(arg), alignof Maybe(arg));
-  ret @! PassConv.convert_to_bare =
+  ret @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof Maybe(arg), alignof Maybe(arg), copy);
-  ret @! PassConv.finalize =
-    owned call finalize_Maybe(repr_arg @! PassConv.finalize,
-                              sizeof arg, alignof arg);
   ret;
 };
 
@@ -304,44 +258,27 @@ function copy_Maybe (owned copy_arg, uint arg_size, uint arg_align,
   };
 };
 
-function finalize_Maybe (owned finalize_arg, uint arg_size, uint arg_align,
-                         pointer p) -> () {
-  typedef arg = bytes(value arg_size, value arg_align);
-  if (p @! Maybe(arg).isjust == uint8 0) {
-    // Nothing
-    ();
-  } else {
-    // Just
-    () call finalize_arg (p @ Maybe(arg).member);
-  };
-  
-};
-
 function inline repr_PyonTuple2 (owned repr1, owned repr2) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
-  size1 = repr1 @! PassConv.size;
-  align1 = repr1 @! PassConv.align;
-  size2 = repr2 @! PassConv.size;
-  align2 = repr2 @! PassConv.align;
+  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  SA {size1, align1} = repr1 @! Repr.sizealign;
+  SA {size2, align2} = repr2 @! Repr.sizealign;
   typedef tuple = PyonTuple2(bytes(value size1, value align1),
   	  	             bytes(value size2, value align2));
 
-  ret @! PassConv.size = sizeof tuple;
-  ret @! PassConv.align = alignof tuple;
-  ret @! PassConv.is_pointerless =
-    repr1 @! PassConv.is_pointerless &&
-    repr2 @! PassConv.is_pointerless;
+  ret @! Repr.sizealign = SA {sizeof tuple, alignof tuple};
+  ret @! Repr.is_pointerless =
+    repr1 @! Repr.is_pointerless &&
+    repr2 @! Repr.is_pointerless;
   copy = owned call copy_PyonTuple2
-    (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
+    (repr1 @! Repr.copy, repr2 @! Repr.copy,
      size1, align1, size2, align2);
-  ret @! PassConv.copy = copy;
+  ret @! Repr.copy = copy;
 
-  ret @! PassConv.convert_to_boxed =
+  ret @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof tuple, alignof tuple);
-  ret @! PassConv.convert_to_bare =
+  ret @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof tuple, alignof tuple, copy);
 
-  ret @! PassConv.finalize = dummy_finalizer;
   ret;
 };
 
@@ -354,34 +291,29 @@ function inline copy_PyonTuple2(owned copy1, owned copy2,
 };
 
 function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
-  size1 = repr1 @! PassConv.size;
-  align1 = repr1 @! PassConv.align;
-  size2 = repr2 @! PassConv.size;
-  align2 = repr2 @! PassConv.align;
-  size3 = repr3 @! PassConv.size;
-  align3 = repr3 @! PassConv.align;
+  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  SA {size1, align1} = repr1 @! Repr.sizealign;
+  SA {size2, align2} = repr2 @! Repr.sizealign;
+  SA {size3, align3} = repr3 @! Repr.sizealign;
   typedef tuple = PyonTuple3(bytes(value size1, value align1),
   	  	             bytes(value size2, value align2),
 			     bytes(value size3, value align3));
 
-  ret @! PassConv.size = sizeof tuple;
-  ret @! PassConv.align = alignof tuple;
-  ret @! PassConv.is_pointerless =
-    repr1 @! PassConv.is_pointerless &&
-    repr2 @! PassConv.is_pointerless &&
-    repr3 @! PassConv.is_pointerless;
+  ret @! Repr.sizealign = SA {sizeof tuple, alignof tuple};
+  ret @! Repr.is_pointerless =
+    repr1 @! Repr.is_pointerless &&
+    repr2 @! Repr.is_pointerless &&
+    repr3 @! Repr.is_pointerless;
   copy = owned call copy_PyonTuple3
-    (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
-     repr3 @! PassConv.copy,
+    (repr1 @! Repr.copy, repr2 @! Repr.copy,
+     repr3 @! Repr.copy,
      size1, align1, size2, align2, size3, align3);
-  ret @! PassConv.copy = copy;
-  ret @! PassConv.convert_to_boxed =
+  ret @! Repr.copy = copy;
+  ret @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof tuple, alignof tuple);
-  ret @! PassConv.convert_to_bare =
+  ret @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof tuple, alignof tuple, copy);
 
-  ret @! PassConv.finalize = dummy_finalizer;
   ret;
 };
 
@@ -399,37 +331,31 @@ function inline copy_PyonTuple3(owned copy1, owned copy2, owned copy3,
 
 function inline repr_PyonTuple4
     (owned repr1, owned repr2, owned repr3, owned repr4) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
-  size1 = repr1 @! PassConv.size;
-  align1 = repr1 @! PassConv.align;
-  size2 = repr2 @! PassConv.size;
-  align2 = repr2 @! PassConv.align;
-  size3 = repr3 @! PassConv.size;
-  align3 = repr3 @! PassConv.align;
-  size4 = repr4 @! PassConv.size;
-  align4 = repr4 @! PassConv.align;
+  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  SA {size1, align1} = repr1 @! Repr.sizealign;
+  SA {size2, align2} = repr2 @! Repr.sizealign;
+  SA {size3, align3} = repr3 @! Repr.sizealign;
+  SA {size4, align4} = repr4 @! Repr.sizealign;
   typedef tuple = PyonTuple4(bytes(value size1, value align1),
   	  	             bytes(value size2, value align2),
 			     bytes(value size3, value align3),
 			     bytes(value size4, value align4));
 
-  ret @! PassConv.size = sizeof tuple;
-  ret @! PassConv.align = alignof tuple;
-  ret @! PassConv.is_pointerless =
-    repr1 @! PassConv.is_pointerless &&
-    repr2 @! PassConv.is_pointerless &&
-    repr3 @! PassConv.is_pointerless &&
-    repr4 @! PassConv.is_pointerless;
+  ret @! Repr.sizealign = SA {sizeof tuple, alignof tuple};
+  ret @! Repr.is_pointerless =
+    repr1 @! Repr.is_pointerless &&
+    repr2 @! Repr.is_pointerless &&
+    repr3 @! Repr.is_pointerless &&
+    repr4 @! Repr.is_pointerless;
   copy = owned call copy_PyonTuple4
-    (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
-     repr3 @! PassConv.copy, repr4 @! PassConv.copy,
+    (repr1 @! Repr.copy, repr2 @! Repr.copy,
+     repr3 @! Repr.copy, repr4 @! Repr.copy,
      size1, align1, size2, align2, size3, align3, size4, align4);
-  ret @! PassConv.copy = copy;
-  ret @! PassConv.convert_to_boxed =
+  ret @! Repr.copy = copy;
+  ret @! Repr.convert_to_boxed =
     owned call make_Boxed (sizeof tuple, alignof tuple);
-  ret @! PassConv.convert_to_bare =
+  ret @! Repr.convert_to_bare =
     owned call from_Boxed (sizeof tuple, alignof tuple, copy);
-  ret @! PassConv.finalize = dummy_finalizer;
   ret;
 };
 
@@ -462,22 +388,17 @@ data owned OpaqueTraversableDict_list = TraversableDict {
 
 // Is this redundant with 'repr_Complex' in complex.pyasm?
 function inline complex_pass_conv (pointer repr, pointer ret) -> () {
-  size = repr @! PassConv.size;
-  align = repr @! PassConv.align;
+  SA {size, align} = repr @! Repr.sizealign;
   typedef cpx = complex(bytes(value size, value align));
 
-  ret @! PassConv.size = sizeof cpx;
-  ret @! PassConv.align = alignof cpx;
-  ret @! PassConv.is_pointerless = repr @! PassConv.is_pointerless;
-  copy =
-      owned call copy_complex (size, align, repr @! PassConv.copy);
-  ret @! PassConv.copy = copy;
-  ret @! PassConv.convert_to_boxed =
+  ret @! Repr.sizealign = SA {sizeof cpx, alignof cpx};
+  ret @! Repr.is_pointerless = repr @! Repr.is_pointerless;
+  copy = owned call copy_complex (size, align, repr @! Repr.copy);
+  ret @! Repr.copy = copy;
+  ret @! Repr.convert_to_boxed =
       owned call make_Boxed (sizeof cpx, alignof cpx);
-  ret @! PassConv.convert_to_bare =
+  ret @! Repr.convert_to_bare =
       owned call from_Boxed (sizeof cpx, alignof cpx, copy);
-  ret @! PassConv.finalize =
-      owned call finalize_complex (size, align, repr @! PassConv.finalize);
   ();
 };
 
@@ -488,42 +409,6 @@ function inline copy_complex
   () = () call copy_member (src @ cpx.imag, dst @ cpx.imag);
   ();
 };
-
-function finalize_complex
-  (uint size, uint align, owned finalize_member, pointer self) -> () {
-  // Not implemented
-  ();
-};
-
-#if 0
-// Construct an Additive dictionary
-function inline additiveDict
-  (pointer repr,
-   owned add, owned sub, owned negate, owned write_zero, pointer ret) -> () {
-  size = repr @! PassConv.size;
-  align = repr @! PassConv.align;
-  typedef dictionary = AdditiveDict(bytes(value size, value align));
-
-  ret @! dictionary.add = add;
-  ret @! dictionary.subtract = sub;
-  ret @! dictionary.negate = negate;
-  () call write_zero (ret @ dictionary.zero);
-};
-
-function multiplicativeDict
-  (pointer repr,
-   owned write_additive,
-   owned mul, owned from_int, owned write_one, pointer ret) -> () {
-  size = repr @! PassConv.size;
-  align = repr @! PassConv.align;
-  typedef dictionary = MultiplicativeDict(bytes(value size, value align));
-
-  () = () call write_additive (ret @ dictionary.additive);
-  ret @! dictionary.mul = mul;
-  ret @! dictionary.fromInt = from_int;
-  () call write_one (ret @ dictionary.one);
-};
-#endif
 
 function inline additiveDict_complex
   (pointer member_additive, pointer ret) -> ()
