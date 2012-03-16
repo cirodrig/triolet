@@ -163,8 +163,6 @@ builtinFunctions =
     -- memory_py.pyasm
     (PyonName module_memory_py "deallocF",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , (CName module_memory_py "dummy_finalizer",
-     Left $ closureFunctionType [PrimType PointerType] [])
   , (CName module_memory_py "copy1F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
@@ -313,8 +311,8 @@ builtinFunctions =
 
   , (PyonName module_prim "doall",
      Right [| pyonBuiltin (SystemF.The_doall) |])
-  , (PyonName module_prim "for",
-     Right [| pyonBuiltin (SystemF.The_for) |])
+  --, (PyonName module_prim "for",
+  --   Right [| pyonBuiltin (SystemF.The_for) |])
   , (PyonName module_prim "blocked_1d_reduce",
      Right [| pyonBuiltin (SystemF.The_blocked_1d_reduce) |])
   , (PyonName module_prim "blocked_2d_reduce",
@@ -357,24 +355,24 @@ builtinFunctions =
   , (PyonName module_prim "negate_float",
      Right [| pyonBuiltin (SystemF.The_AdditiveDict_float_negate) |])
     -- zero_float was replaced by a literal value
-  , (PyonName module_complex "AdditiveDict_Complex_add",
+  {-, (PyonName module_complex "AdditiveDict_Complex_add",
      Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_add) |])
   , (PyonName module_complex "AdditiveDict_Complex_sub",
      Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_sub) |])
   , (PyonName module_complex "AdditiveDict_Complex_negate",
      Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_negate) |])
   , (PyonName module_complex "AdditiveDict_Complex_zero",
-     Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_zero) |])
+     Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_zero) |])-}
     -- the_MultiplicativeDict_int_* are intrinsics
     -- the_MultiplicativeDict_float_mul is intrinsic
   , (PyonName module_prim "fromint_float",
      Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_float_fromInt) |])
-  , (PyonName module_complex "MultiplicativeDict_Complex_mul",
+  {-, (PyonName module_complex "MultiplicativeDict_Complex_mul",
      Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_Complex_mul) |])
   , (PyonName module_complex "MultiplicativeDict_Complex_fromInt",
      Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_Complex_fromInt) |])
   , (PyonName module_complex "MultiplicativeDict_Complex_one",
-     Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_Complex_one) |])
+     Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_Complex_one) |])-}
   , (PyonName module_prim "mod_int",
      Right [| pyonBuiltin SystemF.The_RemainderDict_int_mod |])
   , (PyonName module_prim "floordiv_int",

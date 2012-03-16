@@ -455,13 +455,11 @@ floatUpdateInPlace_updater : (float -> float) -> EffTok
                           -> EffTok;
 
 -- Helper functions for scatter reductions
-intUpdateInPlace_combiner : Stored int -> Stored int -> OutPtr (Stored int)
-                         -> IEffect (Stored int);
+intUpdateInPlace_combiner : Stored int -> Stored int -> Writer (Stored int);
 intUpdateInPlace_int_coercion : coerce @bare (Stored int) (Stored int);
 intUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored int) (Stored int);
 
-floatUpdateInPlace_combiner : Stored float -> Stored float -> OutPtr (Stored float)
-                           -> IEffect (Stored float);
+floatUpdateInPlace_combiner : Stored float -> Stored float -> Writer (Stored float);
 floatUpdateInPlace_float_coercion : coerce @bare (Stored float) (Stored float);
 floatUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored float) (Stored float);
 
@@ -1271,7 +1269,7 @@ AdditiveDict_PyonTuple2_zero : (a b : bare)
                             -> AdditiveDict b
                             -> Writer (PyonTuple2 a b);
 
-AdditiveDict_Complex_add :
+{-AdditiveDict_Complex_add :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
@@ -1295,7 +1293,7 @@ AdditiveDict_Complex_zero :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
- -> Writer (Complex a);
+ -> Writer (Complex a);-}
 
 
 MultiplicativeDict_int_mul : int -> int -> int;
@@ -1304,7 +1302,7 @@ MultiplicativeDict_int_fromInt : int -> int;
 MultiplicativeDict_float_mul : float -> float -> float;
 MultiplicativeDict_float_fromInt : int -> float;
 
-MultiplicativeDict_Complex_mul :
+{-MultiplicativeDict_Complex_mul :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
@@ -1321,7 +1319,7 @@ MultiplicativeDict_Complex_one :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
- -> Writer (Complex a);
+ -> Writer (Complex a);-}
 
 
 RemainderDict_int_floordiv : int -> int -> int;
@@ -1970,8 +1968,7 @@ primitive_list_dim_reduce : (a : bare)
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
   -> a
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 parallel_list_dim_reduce : (a : bare)
   -> Repr a
@@ -1979,24 +1976,21 @@ parallel_list_dim_reduce : (a : bare)
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
   -> a
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 primitive_list_dim_reduce1 : (a : bare)
   -> Repr a
   -> list_dim
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 parallel_list_dim_reduce1 : (a : bare)
   -> Repr a
   -> list_dim
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 primitive_list_dim_fold : (acc : bare)
   -> Repr acc
@@ -2011,8 +2005,7 @@ primitive_dim1_reduce : (a : bare)
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
   -> a
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 parallel_dim1_reduce : (a : bare)
   -> Repr a
@@ -2020,24 +2013,21 @@ parallel_dim1_reduce : (a : bare)
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
   -> a
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 primitive_dim1_reduce1 : (a : bare)
   -> Repr a
   -> dim1
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 parallel_dim1_reduce1 : (a : bare)
   -> Repr a
   -> dim1
   -> (Stored int -> Writer a)
   -> (a -> a -> Writer a)
-  -> OutPtr a
-  -> IEffect a;
+  -> Writer a;
 
 primitive_dim1_fold : (acc : bare)
   -> Repr acc

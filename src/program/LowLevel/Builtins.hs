@@ -43,7 +43,6 @@ module LowLevel.Builtins
         the_fun_repr_PyonTuple4,
         the_fun_negate_int,
         the_fun_negate_float,
-        the_fun_dummy_finalizer,
         the_fun_minus_ii,
         the_fun_min_ii,
         the_fun_copy1F,
