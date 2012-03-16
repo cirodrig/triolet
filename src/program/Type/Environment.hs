@@ -303,7 +303,6 @@ wiredInTypeEnv =
                (boxV, varTypeAssignment kindT),
                (bareV, varTypeAssignment kindT),
                (outV, varTypeAssignment kindT),
-               (sideeffectV, varTypeAssignment kindT),
                (writeV, varTypeAssignment kindT),
                (posInftyV, varTypeAssignment intindexT),
                (negInftyV, varTypeAssignment intindexT)]
@@ -657,8 +656,7 @@ specToMemDataConType dcon_type =
     type_param (v ::: t) = v ::: specToMemType t
 
 initializerType t =
-  FunT (varApp (pyonBuiltin The_OutPtr) [t])
-       (varApp (pyonBuiltin The_IEffect) [t])
+  varApp (pyonBuiltin The_OutPtr) [t] `FunT` VarT (pyonBuiltin The_Store)
 
 -------------------------------------------------------------------------------
 

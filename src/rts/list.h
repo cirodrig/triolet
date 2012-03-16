@@ -4,7 +4,7 @@ extern function pyon.internal.list.repr_list (owned) -> owned;
 extern function pyon.internal.list.repr_array2 (owned) -> owned;
 
 extern function pyon.internal.list.list_build
-  (owned, owned, pointer) -> ();
+  (owned, owned, pointer) -> unit;
 
 // Exported to C
 extern data pointer pyon.internal.list.pyon_List_size "pyon_List_size";

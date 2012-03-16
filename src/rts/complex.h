@@ -1,5 +1,5 @@
 
-extern function pyon.internal.complex.repr_Complex
+/*extern function pyon.internal.complex.repr_Complex
   (owned) -> owned;
 
 extern function pyon.internal.complex.AdditiveDict_Complex_add
@@ -19,4 +19,4 @@ extern function pyon.internal.complex.MultiplicativeDict_Complex_one
   (owned, owned, pointer) -> ();
 
 extern function pyon.internal.complex.FractionalDict_Complex_div
-  (owned, owned, pointer, pointer, pointer) -> ();
+(owned, owned, pointer, pointer, pointer) -> ();*/

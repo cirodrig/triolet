@@ -949,7 +949,7 @@ concretizeDataConApp (AbsData con fs) = do
     concretize_field BareK ty f = do
       -- Create and concretize an initializer value
       let init_type = varApp (pyonBuiltin The_OutPtr) [ty] `FunT`
-                      varApp (pyonBuiltin The_IEffect) [ty]
+                      VarT (pyonBuiltin The_Store)
       concretize' init_type =<< lift (initializerValue f ty)
 
     concretize_field BoxK ty f = concretize' ty f

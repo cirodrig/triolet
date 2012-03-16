@@ -13,30 +13,30 @@ function deallocF (pointer p) -> () {
 };
 
 // Copy 1 byte
-function inline copy1F (pointer src, pointer dst) -> () {
+function inline copy1F (pointer src, pointer dst) -> unit {
   !dst = uint8 load src;
-  ();
+  nil;
 };
 
 // Copy 2 bytes
-function inline copy2F (pointer src, pointer dst) -> () {
+function inline copy2F (pointer src, pointer dst) -> unit {
   !dst = uint16 load src;
-  ();
+  nil;
 };
 
 // Copy 4 bytes
-function inline copy4F (pointer src, pointer dst) -> () {
+function inline copy4F (pointer src, pointer dst) -> unit {
   !dst = uint32 load src;
-  ();
+  nil;
 };
 
 // Copy 8 bytes
-function inline copy8F (pointer src, pointer dst) -> () {
+function inline copy8F (pointer src, pointer dst) -> unit {
   !dst = uint64 load src;
-  ();
+  nil;
 };
 
 // Copy some bytes according to a Repr object
-function inline copy (owned repr, pointer src, pointer dst) -> () {
-  () call (repr @! Repr.copy) (src, dst);
+function inline copy (owned repr, pointer src, pointer dst) -> unit {
+  unit call (repr @! Repr.copy) (src, dst);
 };

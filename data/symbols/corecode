@@ -51,7 +51,7 @@ AdditiveDict_PyonTuple2_add @(a b : bare)
   (x : PyonTuple2 a b)
   (y : PyonTuple2 a b)
   (ret : OutPtr (PyonTuple2 a b))
-  -> IEffect (PyonTuple2 a b) =
+  -> Store =
 
   case additive_a of
     additiveDict @a
@@ -79,7 +79,7 @@ AdditiveDict_PyonTuple2_sub @(a b : bare)
   (x : PyonTuple2 a b)
   (y : PyonTuple2 a b)
   (ret : OutPtr (PyonTuple2 a b))
-  -> IEffect (PyonTuple2 a b) =
+  -> Store =
 
   case additive_a of
     additiveDict @a
@@ -106,7 +106,7 @@ AdditiveDict_PyonTuple2_negate @(a b : bare)
   (additive_b : AdditiveDict b)
   (x : PyonTuple2 a b)
   (ret : OutPtr (PyonTuple2 a b))
-  -> IEffect (PyonTuple2 a b) =
+  -> Store =
 
   case additive_a of
     additiveDict @a
@@ -130,7 +130,7 @@ AdditiveDict_PyonTuple2_zero @(a b : bare)
   (additive_a : AdditiveDict a)
   (additive_b : AdditiveDict b)
   (ret : OutPtr (PyonTuple2 a b))
-  -> IEffect (PyonTuple2 a b) =
+  -> Store =
 
   case additive_a of
     additiveDict @a
@@ -542,7 +542,7 @@ dim1ToArrayDesc @(a : bare)
   (shp : dim1)
   (k : (N : intindex) -> int -> int -> FIInt N -> Writer a)
   (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
+  -> Store attribute(inline) =
 
   case shp of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
@@ -556,10 +556,10 @@ dim1ToArrayDesc @(a : bare)
             someIInt @(N : intindex) (size : FIInt N).
           k @N lb_i stride size ret
       ; nothingVal @int.
-          except @(IEffect a)
+          except @Store
       }
   ; nothingVal @int.
-      except @(IEffect a)
+      except @Store
   };
 
 
@@ -743,7 +743,7 @@ CartesianDict_dim0_divideDomain
 CartesianDict_dim1_loBound
   (dom : dim1)
   (ret : OutPtr (Maybe (index dim1)))
-  -> IEffect (Maybe (index dim1))
+  -> Store
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
@@ -756,7 +756,7 @@ CartesianDict_dim1_loBound
 CartesianDict_dim1_hiBound
   (dom : dim1)
   (ret : OutPtr (Maybe (index dim1)))
-  -> IEffect (Maybe (index dim1))
+  -> Store
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
@@ -877,7 +877,7 @@ CartesianDict_dim1_divideDomain
 CartesianDict_dim2_loBound
   (dom : dim2)
   (ret : OutPtr (Maybe (index dim2)))
-  -> IEffect (Maybe (index dim2))
+  -> Store
   attribute(inline, inline_final) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
   case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
@@ -902,7 +902,7 @@ CartesianDict_dim2_loBound
 CartesianDict_dim2_hiBound
   (dom : dim2)
   (ret : OutPtr (Maybe (index dim2)))
-  -> IEffect (Maybe (index dim2))
+  -> Store
   attribute(inline, inline_final) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
   case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
@@ -994,7 +994,7 @@ CartesianDict_dim2_divideDomain
 CartesianDict_dim3_loBound
   (dom : dim3)
   (ret : OutPtr (Maybe (index dim3)))
-  -> IEffect (Maybe (index dim3))
+  -> Store
   attribute(inline, inline_final) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
   case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
@@ -1026,7 +1026,7 @@ CartesianDict_dim3_loBound
 CartesianDict_dim3_hiBound
   (dom : dim3)
   (ret : OutPtr (Maybe (index dim3)))
-  -> IEffect (Maybe (index dim3))
+  -> Store
   attribute(inline, inline_final) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
   case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
@@ -1143,7 +1143,7 @@ intUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored int) (Stored int) =
 
 intUpdateInPlace_combiner (x : Stored int) (y : Stored int)
   (ret : OutPtr (Stored int))
-  -> IEffect (Stored int) =
+  -> Store =
   case x of stored @int (ux : int).
   case y of stored @int (uy : int).
   stored @int (ux +# uy) ret;
@@ -1160,7 +1160,7 @@ floatUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored float) (Stored flo
 
 floatUpdateInPlace_combiner (x : Stored float) (y : Stored float)
   (ret : OutPtr (Stored float))
-  -> IEffect (Stored float) =
+  -> Store =
   case x of stored @float (ux : float).
   case y of stored @float (uy : float).
   stored @float (AdditiveDict_float_add ux uy) ret;
@@ -1255,7 +1255,7 @@ boxedScatter @(a : box) @(b : bare) (repr : Repr b)
      (p : OutPtr (StuckRef a)) -> EffTok.
      boxedScatter_updater @a modify eff_in p)
   (\ (x : StuckRef a) (y : StuckRef a) (ret : OutPtr (StuckRef a))
-     -> IEffect (StuckRef a).
+     -> Store.
      case x of stuckRef @a (ux : a).
      case y of stuckRef @a (uy : a).
      stuckRef @a (g ux uy) ret)
@@ -1329,7 +1329,7 @@ arrScatter @(N : intindex) @(e i : bare)
      -- Initialize all array elements
      toEffTok @(arr N s)
      (arr1D_build @N @s repr_s count
-      (\ (i : int) (ret : OutPtr s) -> IEffect s.
+      (\ (i : int) (ret : OutPtr s) -> Store.
          fromEffTok @s (initializer f ret)) p))
   (\ (f : a -> a) (index : i2) (in_tok : EffTok) (p : OutPtr (arr N s))
      -> EffTok.
@@ -1344,9 +1344,9 @@ arrScatter @(N : intindex) @(e i : bare)
           (subscript_out @N @s repr_s p u_arr_index))
 
   -- Combine arrays elementwise
-  (\ (x : arr N s) (y : arr N s) (ret : OutPtr (arr N s)) -> IEffect (arr N s).
+  (\ (x : arr N s) (y : arr N s) (ret : OutPtr (arr N s)) -> Store.
      arr1D_build @N @s repr_s count
-     (\ (i : int) (local_ret : OutPtr s) -> IEffect s.
+     (\ (i : int) (local_ret : OutPtr s) -> Store.
         combiner (subscript @N @s repr_s x i) (subscript @N @s repr_s y i)
         local_ret)
      ret)
@@ -1360,9 +1360,9 @@ arrScatter @(N : intindex) @(e i : bare)
    ; mutateAndCopy @s @e (f : s -> Writer e).
        mutateAndCopy @(arr N s) @(arr N e)
        (\ (accumulator : arr N s) (ret : OutPtr (arr N e))
-          -> IEffect (arr N e).
+          -> Store.
           arr1D_build @N @e repr_e count
-          (\ (i : int) (ret : OutPtr e) -> IEffect e.
+          (\ (i : int) (ret : OutPtr e) -> Store.
              f (subscript @N @s repr_s accumulator i) ret)
           ret)
    })
@@ -1388,7 +1388,7 @@ array1Scatter @(e i : bare)
        (dim1ToArrayDesc @(StoredBox ret_type) dom
         (\ @(N : intindex) (lb : int) (stride : int) (count : FIInt N)
            (ret : OutPtr (StoredBox ret_type))
-           -> IEffect (StoredBox ret_type).
+           -> Store.
 
            -- Create a plain array scatter reducer.
            case arrScatter @N @e @i repr_i repr_e count reduction_op of
@@ -1405,7 +1405,7 @@ array1Scatter @(e i : bare)
            let array_finalizer : UpdateInPlaceFinalizer s (array1 e) =
                  mutateAndCopy @s @(array1 e)
                  (\ (accumulator : s) (ret : OutPtr (array1 e))
-                    -> IEffect (array1 e).
+                    -> Store.
                     mk_array1 @e @N lb stride count
                     (referenced @(arr N e)
                      (case finalizer of {
@@ -1512,11 +1512,11 @@ array2Scatter @(e i : bare)
        (dim1ToArrayDesc @(StoredBox ret_type) dom_y
         (\ @(M : intindex) (lb_y : int) (stride_y : int) (count_y : FIInt M)
            (ret : OutPtr (StoredBox ret_type))
-           -> IEffect (StoredBox ret_type).
+           -> Store.
            dim1ToArrayDesc @(StoredBox ret_type) dom_x
            (\ @(N : intindex) (lb_x : int) (stride_x : int) (count_x : FIInt N)
               (ret : OutPtr (StoredBox ret_type))
-              -> IEffect (StoredBox ret_type).
+              -> Store.
 
               let type index_1d = PyonTuple2 (Stored int) i in
               let type index_2d = PyonTuple2 (Stored int) index_1d in
@@ -1544,7 +1544,7 @@ array2Scatter @(e i : bare)
               let arr_scatter_reduction : Scatter (arr M (arr N e)) i2 =
                    comapScatterIndex @(arr M (arr N e)) @index_2d @i2
                    repr_index repr_i2 repr_array
-                   (\ (index_in : i2) (ret : OutPtr index_2d) -> IEffect index_2d.
+                   (\ (index_in : i2) (ret : OutPtr index_2d) -> Store.
                       case index_in of
                         pyonTuple2 @(index dim2) @i
                         (yx : index dim2) (z : i).
@@ -1574,7 +1574,7 @@ array2Scatter @(e i : bare)
               let array_finalizer : UpdateInPlaceFinalizer s (array2 e) =
                     mutateAndCopy @s @(array2 e)
                     (\ (accumulator : s) (ret : OutPtr (array2 e))
-                       -> IEffect (array2 e).
+                       -> Store.
                        mk_array2 @e @M @N
                        lb_y stride_y count_y lb_x stride_x count_x
                        (referenced @(arr M (arr N e))
@@ -1692,15 +1692,15 @@ array3Scatter @(e i : bare)
        (dim1ToArrayDesc @(StoredBox ret_type) dom_z
         (\ @(L : intindex) (lb_z : int) (stride_z : int) (count_z : FIInt L)
            (ret : OutPtr (StoredBox ret_type))
-           -> IEffect (StoredBox ret_type).
+           -> Store.
            dim1ToArrayDesc @(StoredBox ret_type) dom_y
            (\ @(M : intindex) (lb_y : int) (stride_y : int) (count_y : FIInt M)
               (ret : OutPtr (StoredBox ret_type))
-              -> IEffect (StoredBox ret_type).
+              -> Store.
               dim1ToArrayDesc @(StoredBox ret_type) dom_x
               (\ @(N : intindex) (lb_x : int) (stride_x : int) (count_x : FIInt N)
                  (ret : OutPtr (StoredBox ret_type))
-                 -> IEffect (StoredBox ret_type).
+                 -> Store.
 
                  let type index_1d = PyonTuple2 (Stored int) i in
                  let type index_2d = PyonTuple2 (Stored int) index_1d in
@@ -1738,7 +1738,7 @@ array3Scatter @(e i : bare)
                  let arr_scatter_reduction : Scatter arr3d i3 =
                       comapScatterIndex @arr3d @index_3d @i3
                       repr_index repr_i3 repr_array
-                      (\ (index_in : i3) (ret : OutPtr index_3d) -> IEffect index_3d.
+                      (\ (index_in : i3) (ret : OutPtr index_3d) -> Store.
                          case index_in of
                            pyonTuple2 @(index dim3) @i
                            (zyx : index dim3) (val : i).
@@ -1771,7 +1771,7 @@ array3Scatter @(e i : bare)
                  let array_finalizer : UpdateInPlaceFinalizer s (array3 e) =
                        mutateAndCopy @s @(array3 e)
                        (\ (accumulator : s) (ret : OutPtr (array3 e))
-                          -> IEffect (array3 e).
+                          -> Store.
                           mk_array3 @e @L @M @N
                           lb_z stride_z count_z
                           lb_y stride_y count_y
@@ -1957,7 +1957,7 @@ TraversableDict_view_dim3_traverse
 
 TraversableDict_list_build @(a : bare)
   (repr : Repr a) (s : Stream list_dim a) (ret : OutPtr (list a))
-  -> IEffect (list a) attribute(inline) =
+  -> Store attribute(inline) =
   case s of {
     sequenceStream @a (sq : Sequence a).
       Sequence_build_list @a repr sq ret
@@ -1979,7 +1979,7 @@ TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
   viewStream @a
   (view_generate @list_dim
    ShapeDict_list_dim @a repr shp
-   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+   (\ (si : Stored int) (ret : OutPtr a) -> Store.
      case si of stored @int (i : int).
      copy @a repr (subscript @N @a repr ay i) ret));
 
@@ -1994,7 +1994,7 @@ TraversableDict_array0_traverse
 
 TraversableDict_array0_build
   @(a : bare) (repr : Repr a) (vw : view dim0 a) (ret : OutPtr (array0 a))
-  -> IEffect (array0 a) attribute(inline) =
+  -> Store attribute(inline) =
 
   case vw of mk_view @dim0 @a (dom : dim0) (f : Stored NoneType -> Writer a).
   case boxed @(Stored NoneType) (stored @NoneType None) of
@@ -2015,7 +2015,7 @@ TraversableDict_array1_traverse
 
   view_generate @dim1 ShapeDict_dim1 @a repr
   (arrayDescToDim1 @N lo stride size)
-  (\ (ix : Stored int) (ret : OutPtr a) -> IEffect a.
+  (\ (ix : Stored int) (ret : OutPtr a) -> Store.
     case ix of stored @int (ix_i : int).
 
     let real_ix : int = invEvalLM ix_i linear_map in
@@ -2024,7 +2024,7 @@ TraversableDict_array1_traverse
 
 TraversableDict_array1_build
   @(a : bare) (repr : Repr a) (s : view dim1 a) (ret : OutPtr (array1 a))
-  -> IEffect (array1 a) attribute(inline, inline_dimensionality) =
+  -> Store attribute(inline, inline_dimensionality) =
   build_dim1_array @a repr s ret;
 
 
@@ -2047,7 +2047,7 @@ TraversableDict_array2_traverse
   view_generate @dim2 ShapeDict_dim2 @a repr
   (mk_dim2 (arrayDescToDim1 @M lo_y stride_y size_y)
            (arrayDescToDim1 @N lo_x stride_x size_x))
-  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> IEffect a.
+  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> Store.
      case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
      case ix_y of stored @int (ix_y_i : int).
      case ix_x of stored @int (ix_x_i : int).
@@ -2061,7 +2061,7 @@ TraversableDict_array2_traverse
 
 TraversableDict_array2_build
   @(a : bare) (repr : Repr a) (s : view dim2 a) (ret : OutPtr (array2 a))
-  -> IEffect (array2 a) attribute(inline, inline_dimensionality) =
+  -> Store attribute(inline, inline_dimensionality) =
   
   case s of mk_view @dim2 @a (dom : dim2) (f : index dim2 -> Writer a).
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
@@ -2070,11 +2070,11 @@ TraversableDict_array2_build
   dim1ToArrayDesc @(array2 a) dom_y
   (\ @(M : intindex)
      (lb_y : int) (stride_y : int) (size_y : FIInt M) (ret : OutPtr (array2 a))
-     -> IEffect (array2 a).
+     -> Store.
      dim1ToArrayDesc @(array2 a) dom_x
      (\ @(N : intindex)
         (lb_x : int) (stride_x : int) (size_x : FIInt N) (ret : OutPtr (array2 a))
-        -> IEffect (array2 a).
+        -> Store.
 
         let linear_map_y : LinearMap = linearMap stride_y lb_y in
         let linear_map_x : LinearMap = linearMap stride_x lb_x in
@@ -2084,7 +2084,7 @@ TraversableDict_array2_build
         mk_array2 @a @M @N lb_y stride_y size_y lb_x stride_x size_x
         (referenced @out_arr
          (arr2D_build @M @N @a repr size_y size_x
-          (\ (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+          (\ (y : int) (x : int) (ret : OutPtr a) -> Store.
              let logical_y : int = evalLM y linear_map_y in
              let logical_x : int = evalLM x linear_map_x in
              case boxed @(PyonTuple2 Sint Sint)
@@ -2126,7 +2126,7 @@ TraversableDict_array3_traverse
   (mk_dim3 (arrayDescToDim1 @L lo_z stride_z size_z)
            (arrayDescToDim1 @M lo_y stride_y size_y)
            (arrayDescToDim1 @N lo_x stride_x size_x))
-  (\ (ix : PyonTuple3 Sint Sint Sint) (ret : OutPtr a) -> IEffect a.
+  (\ (ix : PyonTuple3 Sint Sint Sint) (ret : OutPtr a) -> Store.
      case ix of pyonTuple3 @Sint @Sint @Sint
                 (ix_z : Sint) (ix_y : Sint) (ix_x : Sint).
      case ix_z of stored @int (ix_z_i : int).
@@ -2146,7 +2146,7 @@ TraversableDict_array3_traverse
 
 TraversableDict_array3_build
   @(a : bare) (repr : Repr a) (s : view dim3 a) (ret : OutPtr (array3 a))
-  -> IEffect (array3 a) attribute(inline, inline_dimensionality) =
+  -> Store attribute(inline, inline_dimensionality) =
 
   case s of mk_view @dim3 @a (dom : dim3) (f : index dim3 -> Writer a).
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
@@ -2155,15 +2155,15 @@ TraversableDict_array3_build
   dim1ToArrayDesc @(array3 a) dom_z
   (\ @(L : intindex)
      (lb_z : int) (stride_z : int) (size_z : FIInt L) (ret : OutPtr (array3 a))
-     -> IEffect (array3 a).
+     -> Store.
      dim1ToArrayDesc @(array3 a) dom_y
      (\ @(M : intindex)
         (lb_y : int) (stride_y : int) (size_y : FIInt M) (ret : OutPtr (array3 a))
-        -> IEffect (array3 a).
+        -> Store.
         dim1ToArrayDesc @(array3 a) dom_x
         (\ @(N : intindex)
            (lb_x : int) (stride_x : int) (size_x : FIInt N) (ret : OutPtr (array3 a))
-           -> IEffect (array3 a).
+           -> Store.
 
            let linear_map_z : LinearMap = linearMap stride_z lb_z in
            let linear_map_y : LinearMap = linearMap stride_y lb_y in
@@ -2176,7 +2176,7 @@ TraversableDict_array3_build
                                  lb_x stride_x size_x
            (referenced @out_arr
             (arr3D_build @L @M @N @a repr size_z size_y size_x
-             (\ (z : int) (y : int) (x : int) (ret : OutPtr a) -> IEffect a.
+             (\ (z : int) (y : int) (x : int) (ret : OutPtr a) -> Store.
                 let logical_z : int = evalLM z linear_map_z in
                 let logical_y : int = evalLM y linear_map_y in
                 let logical_x : int = evalLM x linear_map_x in
@@ -2197,7 +2197,7 @@ TraversableDict_array3_build
 
 TraversableDict_blist_build @(a : bare)
   (repr : Repr a) (s : Stream list_dim a) (ret : OutPtr (blist a))
-  -> IEffect (blist a) attribute(inline) =
+  -> Store attribute(inline) =
 
   let type boxed_a = StuckRef (BoxedType a) in
   let repr_boxed : Repr boxed_a = repr_StuckRef @(BoxedType a) in
@@ -2231,7 +2231,7 @@ TraversableDict_blist_traverse @(a : bare) (repr : Repr a) (ls : blist a)
   viewStream @a
   (view_generate @list_dim
    ShapeDict_list_dim @a repr shp
-   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+   (\ (si : Stored int) (ret : OutPtr a) -> Store.
      case si of stored @int (i : int).
      case subscript @N @boxed_a repr_box ay i of
        stuckRef @(BoxedType a) (val : BoxedType a).
@@ -2253,7 +2253,7 @@ TraversableDict_barray1_traverse
 
   view_generate @dim1 ShapeDict_dim1 @a repr
   (arrayDescToDim1 @N lo stride size)
-  (\ (ix : Stored int) (ret : OutPtr a) -> IEffect a.
+  (\ (ix : Stored int) (ret : OutPtr a) -> Store.
     case ix of stored @int (ix_i : int).
 
     let real_ix : int = invEvalLM ix_i linear_map in
@@ -2264,7 +2264,7 @@ TraversableDict_barray1_traverse
 
 TraversableDict_barray1_build
   @(a : bare) (repr : Repr a) (s : view dim1 a) (ret : OutPtr (barray1 a))
-  -> IEffect (barray1 a) attribute(inline, inline_dimensionality) =
+  -> Store attribute(inline, inline_dimensionality) =
   let type boxed_a = StuckRef (BoxedType a) in
   let brepr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
   mk_barray1 @a
@@ -2298,7 +2298,7 @@ TraversableDict_barray2_traverse
   view_generate @dim2 ShapeDict_dim2 @a repr
   (mk_dim2 (arrayDescToDim1 @M lo_y stride_y size_y)
            (arrayDescToDim1 @N lo_x stride_x size_x))
-  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> IEffect a.
+  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> Store.
      case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
      case ix_y of stored @int (ix_y_i : int).
      case ix_x of stored @int (ix_x_i : int).
@@ -2312,7 +2312,7 @@ TraversableDict_barray2_traverse
 
 TraversableDict_barray2_build
   @(a : bare) (repr : Repr a) (s : view dim2 a) (ret : OutPtr (barray2 a))
-  -> IEffect (barray2 a) attribute(inline, inline_dimensionality) =
+  -> Store attribute(inline, inline_dimensionality) =
   
   case s of mk_view @dim2 @a (dom : dim2) (f : index dim2 -> Writer a).
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
@@ -2321,11 +2321,11 @@ TraversableDict_barray2_build
   dim1ToArrayDesc @(barray2 a) dom_y
   (\ @(M : intindex)
      (lb_y : int) (stride_y : int) (size_y : FIInt M) (ret : OutPtr (barray2 a))
-     -> IEffect (barray2 a).
+     -> Store.
      dim1ToArrayDesc @(barray2 a) dom_x
      (\ @(N : intindex)
         (lb_x : int) (stride_x : int) (size_x : FIInt N) (ret : OutPtr (barray2 a))
-        -> IEffect (barray2 a).
+        -> Store.
 
         let linear_map_y : LinearMap = linearMap stride_y lb_y in
         let linear_map_x : LinearMap = linearMap stride_x lb_x in
@@ -2338,7 +2338,7 @@ TraversableDict_barray2_build
         (mk_array2 @boxed_a @M @N lb_y stride_y size_y lb_x stride_x size_x
          (referenced @out_arr
           (arr2D_build @M @N @boxed_a box_repr size_y size_x
-           (\ (y : int) (x : int) (ret : OutPtr boxed_a) -> IEffect boxed_a.
+           (\ (y : int) (x : int) (ret : OutPtr boxed_a) -> Store.
               let logical_y : int = evalLM y linear_map_y in
               let logical_x : int = evalLM x linear_map_x in
               case boxed @(PyonTuple2 Sint Sint)
@@ -2734,7 +2734,7 @@ ShapeDict_list_dim_slice @(t : bare -> bare) @(a : bare)
 
   view_generate @list_dim
   ShapeDict_list_dim @a repr view_domain
-  (\ (i : Stored int) (ret : OutPtr a) -> IEffect a.
+  (\ (i : Stored int) (ret : OutPtr a) -> Store.
 
     -- Compute the index in the original object that holds the value at 'i'
     let source_index : int =
@@ -2891,7 +2891,7 @@ ShapeDict_dim1_slice @(t : bare -> bare) @(a : bare)
 
   view_generate @dim1
   ShapeDict_dim1 @a repr slice_dom
-  (\ (i : index dim1) (ret : OutPtr a) -> IEffect a.
+  (\ (i : index dim1) (ret : OutPtr a) -> Store.
     at_index @a repr container (coerce @(index dim1) @(index (shape t)) i) ret);
 
 
@@ -3015,7 +3015,7 @@ ShapeDict_dim2_flatten @(a : bare)
 
   viewStream @a
   (mk_view @list_dim @a flattened_size
-   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+   (\ (si : Stored int) (ret : OutPtr a) -> Store.
       -- Linearize the index
       case si of stored @int (i : int).
       case ShapeDict_dim2_flatten_helper2 i divisor
@@ -3101,7 +3101,7 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
 
   view_generate @dim2
   ShapeDict_dim2 @a repr slice_dom
-  (\ (i : index dim2) (ret : OutPtr a) -> IEffect a.
+  (\ (i : index dim2) (ret : OutPtr a) -> Store.
     at_index @a repr container (coerce @(index dim2) @(index (shape t)) i) ret);
 
 
@@ -3284,7 +3284,7 @@ ShapeDict_dim3_flatten @(a : bare)
 
   viewStream @a
   (mk_view @list_dim @a flattened_size
-   (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+   (\ (si : Stored int) (ret : OutPtr a) -> Store.
       -- Linearize the index
       case si of stored @int (i : int).
       case ShapeDict_dim3_flatten_helper2 i divisors
@@ -3379,7 +3379,7 @@ ShapeDict_dim3_slice @(t : bare -> bare) @(a : bare)
 
   view_generate @dim3
   ShapeDict_dim3 @a repr slice_dom
-  (\ (i : index dim3) (ret : OutPtr a) -> IEffect a.
+  (\ (i : index dim3) (ret : OutPtr a) -> Store.
     at_index @a repr container (coerce @(index dim3) @(index (shape t)) i) ret);
 
 
@@ -3387,7 +3387,7 @@ ShapeDict_dim3_slice @(t : bare -> bare) @(a : bare)
 -- Indexable dictionary functions
 
 IndexableDict_list_at_point @(a : bare)
-  (repr : Repr a) (ls : list a) (ix : Stored int) (ret : OutPtr a) -> IEffect a
+  (repr : Repr a) (ls : list a) (ix : Stored int) (ret : OutPtr a) -> Store
   attribute(inline) =
   case ls of make_list @a @(N : intindex)
              (n : FIInt N) (ayref : Referenced (arr N a)).
@@ -3421,7 +3421,7 @@ IndexableDict_view_get_shape @(sh : box) (dict : ShapeDict sh) ->
 
 IndexableDict_array0_at_point @(a : bare)
   (repr : Repr a) (ay : array0 a) (ix : Stored NoneType) (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
   case ay of mk_array0 @a (x : a). copy @a repr x ret;
 
@@ -3434,7 +3434,7 @@ IndexableDict_array0_get_shape @(a : bare)
 
 IndexableDict_array1_at_point @(a : bare)
   (repr : Repr a) (ay : array1 a) (ix : Stored int) (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
   case ay of mk_array1 @a @(N : intindex)
              (lb : int) (stride : int) (size : FIInt N)
@@ -3461,7 +3461,7 @@ IndexableDict_array2_at_point @(a : bare)
   (ay : array2 a)
   (ix : PyonTuple2 (Stored int) (Stored int))
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
   case ay of mk_array2 @a @(M N : intindex)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
@@ -3496,7 +3496,7 @@ IndexableDict_array2_get_shape @(a : bare)
 
 
 IndexableDict_blist_at_point @(a : bare)
-  (repr : Repr a) (ls : blist a) (ix : Stored int) (ret : OutPtr a) -> IEffect a
+  (repr : Repr a) (ls : blist a) (ix : Stored int) (ret : OutPtr a) -> Store
   attribute(inline) =
   let type boxed_a = StuckRef (BoxedType a) in
   case ls of make_blist @a (ls2 : list boxed_a).
@@ -3522,7 +3522,7 @@ IndexableDict_blist_get_shape @(a : bare) (ls : blist a) -> list_dim
 
 IndexableDict_barray1_at_point @(a : bare)
   (repr : Repr a) (ay : barray1 a) (ix : Stored int) (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
   let type boxed_a = StuckRef (BoxedType a) in
   case ay of mk_barray1 @a (ay2 : array1 boxed_a).
@@ -3555,7 +3555,7 @@ IndexableDict_barray2_at_point @(a : bare)
   (ay : barray2 a)
   (ix : PyonTuple2 (Stored int) (Stored int))
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
   let type boxed_a = StuckRef (BoxedType a) in
   case ay of mk_barray2 @a (ay2 : array2 boxed_a).
@@ -3606,7 +3606,7 @@ fun_reduce @(t : bare -> bare) @(a : bare)
   (init : a)
   (input : t a)
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline, inline_dimensionality) =
   let type sh = shape t in
 
@@ -3657,7 +3657,7 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
   (reducer : a -> a -> Writer a)
   (input : t a)
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline, inline_dimensionality) =
   let type sh = shape t in
 
@@ -3710,7 +3710,7 @@ fun_scatter @(t : bare -> bare) @(i r : bare)
   (op : Scatter r i)
   (src : t i)
   (ret : OutPtr r)
-  -> IEffect r
+  -> Store
   attribute(inline) =
 
   let type sh = shape t in
@@ -3761,7 +3761,7 @@ histogram @(sh : box)
   (hi_bound : int)
   (input : Stream sh (Stored int))
   (ret : OutPtr (array1 (Stored int)))
-  -> IEffect (array1 (Stored int))
+  -> Store
   attribute(inline) =
 
   let type Sint = Stored int in
@@ -3855,7 +3855,7 @@ fun_map @(t : bare -> bare)
         (transformer : a -> Writer b)
         (container : t a)
 	(ret : OutPtr (t b))
-        -> IEffect (t b)
+        -> Store
  	attribute(inline) =
   let type sh = shape t in
 
@@ -3947,7 +3947,7 @@ fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
 
   letfun
     transformer (x : a) (y : b) (ret : OutPtr (PyonTuple2 a b))
-    		-> IEffect (PyonTuple2 a b) =
+    		-> Store =
       pyonTuple2 @a @b (copy @a reprA x) (copy @b reprB y) ret
   in
 
@@ -4015,7 +4015,7 @@ fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
 
   letfun
     transformer (x : a) (y : b) (z : c) (ret : OutPtr (PyonTuple3 a b c))
-    		-> IEffect (PyonTuple3 a b c) =
+    		-> Store =
       pyonTuple3 @a @b @c (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) ret
   in
 
@@ -4093,7 +4093,7 @@ fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
 
   letfun
     transformer (x : a) (y : b) (z : c) (w : d) (ret : OutPtr (PyonTuple4 a b c d))
-    		-> IEffect (PyonTuple4 a b c d) =
+    		-> Store =
       pyonTuple4 @a @b @c @d (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) (copy @d reprD w) ret
   in
 
@@ -4123,7 +4123,7 @@ rows @(t : bare -> bare) @(a : bare)
     storedBox @(view dim1 a)
     (view_generate @dim1 ShapeDict_dim1
      @a repr shape_x
-     (\ (s_x : Stored int) (ret : OutPtr a) -> IEffect a.
+     (\ (s_x : Stored int) (ret : OutPtr a) -> Store.
        case boxed @(index dim2)
             (pyonTuple2 @(Stored int) @(Stored int)
              (copy @(Stored int) repr_int s_y)
@@ -4155,7 +4155,7 @@ cols @(t : bare -> bare) @(a : bare)
     storedBox @(view dim1 a)
     (view_generate @dim1
      ShapeDict_dim1 @a repr shape_y
-     (\ (s_y : Stored int) (ret : OutPtr a) -> IEffect a.
+     (\ (s_y : Stored int) (ret : OutPtr a) -> Store.
        case boxed @(index dim2)
             (pyonTuple2 @(Stored int) @(Stored int)
              (copy @(Stored int) repr_int s_y)
@@ -4212,7 +4212,7 @@ outerproductStream @(a b : bare)
   view_generate @dim2 ShapeDict_dim2 @out_type
   (repr_PyonTuple2 @a @b repr_a repr_b)
   (mk_dim2 domA domB)
-  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr out_type) -> IEffect out_type.
+  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr out_type) -> Store.
 
     -- Index each view with one component of the index
     case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
@@ -4229,7 +4229,7 @@ safeIndex @(t : bare -> bare) @(a : bare)
   (container : t a)
   (ix : index (shape t))
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
 
   let type sh = shape t in
@@ -4267,7 +4267,7 @@ safeIndex @(t : bare -> bare) @(a : bare)
   let container_shape : sh = get_shape @a container in
   if shape_member container_shape ix
   then at_index @a repr container ix ret
-  else except @(IEffect a);
+  else except @Store;
 
 
 safeSlice @(t : bare -> bare) @(a : bare)
@@ -4473,7 +4473,7 @@ extend2D @(t : bare -> bare) @(a : bare)
 
   mk_view @dim2 @a dom
   (\ (ix : PyonTuple2 (Stored int) (Stored int)) (ret : OutPtr a)
-     -> IEffect a.
+     -> Store.
      case ix of pyonTuple2 @(Stored int) @(Stored int)
                 (sy : Stored int) (sx : Stored int).
      case sy of stored @int (y : int).
@@ -4572,7 +4572,7 @@ extend3D @(t : bare -> bare) @(a : bare)
   let type Sint = Stored int in
   mk_view @dim3 @a dom
   (\ (ix : PyonTuple3 Sint Sint Sint) (ret : OutPtr a)
-     -> IEffect a.
+     -> Store.
      case ix of pyonTuple3 @Sint @Sint @Sint
                 (sz : Sint) (sy : Sint) (sx : Sint).
      case sz of stored @int (z : int).
@@ -4621,7 +4621,7 @@ boxedStencil2D @(t : bare -> bare) @(a b : bare)
   (gen_f : view dim2 a -> Writer b)
   (input : t a)
   (ret: OutPtr (barray2 b))
-  -> IEffect (barray2 b)
+  -> Store
   attribute(inline, inline_final) =
 
   -- This function is defined in terms of stencil2D.
@@ -4632,7 +4632,7 @@ boxedStencil2D @(t : bare -> bare) @(a b : bare)
   (stencil2D @t @a @(StuckRef (BoxedType b))
    indexable is_2d repr_a repr_boxed_b
    output_dom stencil_dom
-   (\ (vw : view dim2 a) (ret : OutPtr boxed_b) -> IEffect boxed_b.
+   (\ (vw : view dim2 a) (ret : OutPtr boxed_b) -> Store.
 
       -- Call 'gen_f' and re-box the result
       stuckRef @(BoxedType b)
@@ -4651,7 +4651,7 @@ stencil2D @(t : bare -> bare) @(a b : bare)
   (gen_f : view dim2 a -> Writer b)
   (input : t a)
   (ret: OutPtr (array2 b))
-  -> IEffect (array2 b)
+  -> Store
   attribute(inline, inline_final) =
 
   case indexable of
@@ -4684,31 +4684,31 @@ stencil2D @(t : bare -> bare) @(a b : bare)
   -- 1. any linear combination of output and stencil strides must be a
   -- multiple of the input stride.
   if gcd output_y_stride stencil_y_stride %# input_y_stride /=# 0
-  then except @(IEffect (array2 b)) else
+  then except @Store else
 
   if gcd output_x_stride stencil_x_stride %# input_x_stride /=# 0
-  then except @(IEffect (array2 b)) else
+  then except @Store else
 
   -- 2. The alignment of the output plus the alignment of the stencil must be
   --    equal to the alignment of the input, modulo the input stride.
   if (output_y_align +# stencil_y_align -# input_y_align) %# input_y_stride /=# 0
-  then except @(IEffect (array2 b)) else
+  then except @Store else
 
   if (output_x_align +# stencil_x_align -# input_x_align) %# input_x_stride /=# 0
-  then except @(IEffect (array2 b)) else
+  then except @Store else
 
   -- 3. The bounds of the output range plus the bounds of the stencil range
   --    must be within the bounds of the input range.
   if not (subsetInterval (convolveInterval output_y_iv stencil_y_iv) input_y_iv)
-  then except @(IEffect (array2 b)) else
+  then except @Store else
 
   if not (subsetInterval (convolveInterval output_x_iv stencil_x_iv) input_x_iv)
-  then except @(IEffect (array2 b)) else
+  then except @Store else
 
   -- Loop over all stencil indices
   let output_view : view dim2 b =
         view_generate @dim2 ShapeDict_dim2 @b repr_b output_dom
-        (\ (ix : index dim2) (ret : OutPtr b) -> IEffect b.
+        (\ (ix : index dim2) (ret : OutPtr b) -> Store.
            case ix of
              pyonTuple2 @(Stored int) @(Stored int)
              (ix_y : Stored int) (ix_x : Stored int).
@@ -4718,7 +4718,7 @@ stencil2D @(t : bare -> bare) @(a b : bare)
            -- Apply the generator function to a view of the input array
            gen_f
            (view_generate @dim2 ShapeDict_dim2 @a repr_a stencil_dom
-            (\ (s_ix : index dim2) (s_ret : OutPtr a) -> IEffect a.
+            (\ (s_ix : index dim2) (s_ret : OutPtr a) -> Store.
                case s_ix of
                  pyonTuple2 @(Stored int) @(Stored int)
                  (s_ix_y : Stored int) (s_ix_x : Stored int).
@@ -4747,7 +4747,7 @@ stencil3D @(t : bare -> bare) @(a b : bare)
   (gen_f : view dim3 a -> Writer b)
   (input : t a)
   (ret: OutPtr (array3 b))
-  -> IEffect (array3 b)
+  -> Store
   attribute(inline, inline_final) =
 
   case indexable of
@@ -4786,41 +4786,41 @@ stencil3D @(t : bare -> bare) @(a b : bare)
   -- 1. any linear combination of output and stencil strides must be a
   -- multiple of the input stride.
   if gcd output_z_stride stencil_z_stride %# input_z_stride /=# 0
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   if gcd output_y_stride stencil_y_stride %# input_y_stride /=# 0
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   if gcd output_x_stride stencil_x_stride %# input_x_stride /=# 0
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   -- 2. The alignment of the output plus the alignment of the stencil must be
   --    equal to the alignment of the input, modulo the input stride.
   if (output_z_align +# stencil_z_align -# input_z_align) %# input_z_stride /=# 0
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   if (output_y_align +# stencil_y_align -# input_y_align) %# input_y_stride /=# 0
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   if (output_x_align +# stencil_x_align -# input_x_align) %# input_x_stride /=# 0
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   -- 3. The bounds of the output range plus the bounds of the stencil range
   --    must be within the bounds of the input range.
   if not (subsetInterval (convolveInterval output_z_iv stencil_z_iv) input_z_iv)
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   if not (subsetInterval (convolveInterval output_y_iv stencil_y_iv) input_y_iv)
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   if not (subsetInterval (convolveInterval output_x_iv stencil_x_iv) input_x_iv)
-  then except @(IEffect (array3 b)) else
+  then except @Store else
 
   -- Loop over all stencil indices
   let type Sint = Stored int in
   let output_view : view dim3 b =
         view_generate @dim3 ShapeDict_dim3 @b repr_b output_dom
-        (\ (ix : index dim3) (ret : OutPtr b) -> IEffect b.
+        (\ (ix : index dim3) (ret : OutPtr b) -> Store.
            case ix of
              pyonTuple3 @Sint @Sint @Sint
              (ix_z : Sint) (ix_y : Sint) (ix_x : Sint).
@@ -4831,7 +4831,7 @@ stencil3D @(t : bare -> bare) @(a b : bare)
            -- Apply the generator function to a view of the input array
            gen_f
            (view_generate @dim3 ShapeDict_dim3 @a repr_a stencil_dom
-            (\ (s_ix : index dim3) (s_ret : OutPtr a) -> IEffect a.
+            (\ (s_ix : index dim3) (s_ret : OutPtr a) -> Store.
                case s_ix of
                  pyonTuple3 @Sint @Sint @Sint
                  (s_ix_z : Sint) (s_ix_y : Sint) (s_ix_x : Sint).
@@ -4917,7 +4917,7 @@ sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
   case size of fiInt @N (size_i : int).
   let dom : list_dim = mk_list_dim (justVal @int size_i) in
   view_generate @list_dim ShapeDict_list_dim @a repr dom
-  (\ (si : Stored int) (ret : OutPtr a) -> IEffect a.
+  (\ (si : Stored int) (ret : OutPtr a) -> Store.
      case si of stored @int (i : int).
      copy @a repr (subscript @N @a repr ay i) ret);
 
@@ -4933,7 +4933,7 @@ view_transform @(sh : box) @(a : bare)
   attribute(inline, inline_dimensionality) =
   case vw of mk_view @sh @a (dom : sh) (f : index sh -> Writer a).
   mk_view @sh @a (transform_domain dom)
-  (\ (i : index sh) (ret : OutPtr a) -> IEffect a.
+  (\ (i : index sh) (ret : OutPtr a) -> Store.
      case boxed @(index sh) (transform_index i) of
        boxed @(index sh) (i2 : index sh).
      f i2 ret);
@@ -4981,7 +4981,7 @@ displaceView @(t : bare -> bare) @(a : bare)
   -- Note that we transform from new index to old index by subtracting the
   -- displacement 
   view_generate @sh shape_dict @a repr (displaceDomain (get_shape @a c) disp)
-  (\ (i : ix) (ret : OutPtr a) -> IEffect a.
+  (\ (i : ix) (ret : OutPtr a) -> Store.
      case boxed @ix (sub i disp) of boxed @ix (i2 : ix).
      at_index @a repr c i2 ret);
 
@@ -5021,7 +5021,7 @@ multiplyView @(t : bare -> bare) @(a : bare)
   -- Note that we transform from new index to old index by dividing the
   -- scale factor 
   view_generate @sh shape_dict @a repr (multiplyDomain (get_shape @a c) scale)
-  (\ (i : ix) (ret : OutPtr a) -> IEffect a.
+  (\ (i : ix) (ret : OutPtr a) -> Store.
      case boxed @ix (divideIndex i scale) of boxed @ix (i2 : ix).
      at_index @a repr c i2 ret);
 
@@ -5062,7 +5062,7 @@ divideView @(t : bare -> bare) @(a : bare)
   -- scale factor.
   -- 'divideDomain' will throw an error if the scale factor is invalid.
   view_generate @sh shape_dict @a repr (divideDomain (get_shape @a c) scale)
-  (\ (i : ix) (ret : OutPtr a) -> IEffect a.
+  (\ (i : ix) (ret : OutPtr a) -> Store.
      case boxed @ix (multiplyIndex i scale) of boxed @ix (i2 : ix).
      at_index @a repr c i2 ret);
 
@@ -5087,7 +5087,7 @@ view_map @(sh : box) (shape_dict : ShapeDict sh)
 
     case s1 of mk_view @sh @a (d : sh) (f : index sh -> Writer a).
     mk_view @sh @b d
-    (\ (ix : index sh) (ret : OutPtr b) -> IEffect b.
+    (\ (ix : index sh) (ret : OutPtr b) -> Store.
        case boxed @a (f ix) of boxed @a (x : a).
        t x ret);
 
@@ -5136,7 +5136,7 @@ view_zipWith @(sh : box)
     case sb of mk_view @sh @b (dB : sh) (fB : index sh -> Writer b).
     let dC : sh = shape_intersect dA dB in
     mk_view @sh @c dC
-    (\ (ix : index sh) (ret : OutPtr c) -> IEffect c.
+    (\ (ix : index sh) (ret : OutPtr c) -> Store.
       case boxed @a (fA ix) of boxed @a (x : a).
       case boxed @b (fB ix) of boxed @b (y : b).
       t x y ret);
@@ -5189,7 +5189,7 @@ view_zipWith3 @(sh : box)
     case sc of mk_view @sh @c (dC : sh) (fC : index sh -> Writer c).
     let dD : sh = shape_intersect (shape_intersect dA dB) dC in
     mk_view @sh @d dD
-    (\ (ix : index sh) (ret : OutPtr d) -> IEffect d.
+    (\ (ix : index sh) (ret : OutPtr d) -> Store.
       case boxed @a (fA ix) of boxed @a (x : a).
       case boxed @b (fB ix) of boxed @b (y : b).
       case boxed @c (fC ix) of boxed @c (z : c).
@@ -5248,7 +5248,7 @@ view_zipWith4 @(sh : box)
     let dE : sh =
           shape_intersect (shape_intersect (shape_intersect dA dB) dC) dD in
     mk_view @sh @e dE
-    (\ (ix : index sh) (ret : OutPtr e) -> IEffect e.
+    (\ (ix : index sh) (ret : OutPtr e) -> Store.
       case boxed @a (fA ix) of boxed @a (x : a).
       case boxed @b (fB ix) of boxed @b (y : b).
       case boxed @c (fC ix) of boxed @c (z : c).
@@ -5490,7 +5490,7 @@ Sequence_zipWith4
 
 build_list_dim_list @(a : bare)
   (repr : Repr a) (vw : view list_dim a) (ret : OutPtr (list a))
-  -> IEffect (list a)
+  -> Store
   attribute(inline, inline_sequential) =
   case vw of
     mk_view @list_dim @a (dom : list_dim) (f : Stored int -> Writer a).
@@ -5502,7 +5502,7 @@ build_list_dim_list @(a : bare)
       make_list @a @N sz
       (referenced @(arr N a)
        (arr1D_build @N @a repr sz
-        (\ (i : int) (ret : OutPtr a) -> IEffect a.
+        (\ (i : int) (ret : OutPtr a) -> Store.
            case boxed @(Stored int) (stored @int i) of
              boxed @(Stored int) (s_i : Stored int).
            f s_i ret)))
@@ -5510,28 +5510,28 @@ build_list_dim_list @(a : bare)
 
   ; nothingVal @int.
       -- Infinte views can't be turned into lists
-      except @(IEffect (list a))
+      except @Store
   };
 
 
 build_dim1_array @(a : bare)
   (repr : Repr a) (vw : view dim1 a)
   (ret : OutPtr (array1 a))
-  -> IEffect (array1 a)
+  -> Store
   attribute(inline, inline_sequential) =
 
   case vw of mk_view @dim1 @a (dom : dim1) (f : Stored int -> Writer a).
   dim1ToArrayDesc @(array1 a) dom
   (\ @(N : intindex)
      (lb : int) (stride : int) (size : FIInt N) (ret : OutPtr (array1 a))
-     -> IEffect (array1 a).
+     -> Store.
 
      let linear_map : LinearMap = linearMap stride lb in
 
      mk_array1 @a @N lb stride size
      (referenced @(arr N a)
       (arr1D_build @N @a repr size
-       (\ (i : int) (ret : OutPtr a) -> IEffect a.
+       (\ (i : int) (ret : OutPtr a) -> Store.
            -- Compute the logical index corresponding to array index 'i'
            let logical_i : int = evalLM i linear_map in
            case boxed @(Stored int) (stored @int logical_i) of
@@ -5572,7 +5572,7 @@ scatter_list_dim @(i r : bare)
   (op : Scatter r i)
   (src : view list_dim i)
   (ret : OutPtr r)
-  -> IEffect r
+  -> Store
   attribute(inline, inline_sequential) =
 
   case op of
@@ -5586,7 +5586,7 @@ scatter_list_dim @(i r : bare)
     (make_init : NoneType -> a).
 
   letfun
-    use_finalizer (w : Writer s) (ret : OutPtr r) -> IEffect r =
+    use_finalizer (w : Writer s) (ret : OutPtr r) -> Store =
       case finalizer of {
         mutateInPlace @s @r (co : coerce @bare s r).
           (coerce @(Writer s) @(Writer r) w) ret
@@ -5598,7 +5598,7 @@ scatter_list_dim @(i r : bare)
 
   -- Perform the computation; copy to output if required
   use_finalizer
-  (\ (local_ret : OutPtr s) -> IEffect s.
+  (\ (local_ret : OutPtr s) -> Store.
    -- Initialize the output
    case boxed @(Stored EffTok)
         (stored @EffTok (initializer make_init local_ret)) of
@@ -5609,7 +5609,7 @@ scatter_list_dim @(i r : bare)
         (fold_list_dim @i @(Stored EffTok)
          repr_i repr_EffTok
          (\ (x : Stored EffTok) (y : i) (loop_ret : OutPtr (Stored EffTok))
-            -> IEffect (Stored EffTok).
+            -> Store.
             case x of stored @EffTok (x_u : EffTok).
             stored @EffTok (updater (make_updater y) y x_u local_ret) loop_ret)
          init_eff_tok
@@ -5629,14 +5629,14 @@ fold_list_dim @(a acc : bare)
   (init : acc)
   (vw : view list_dim a)
   (ret : OutPtr acc)
-  -> IEffect acc
+  -> Store
   attribute(inline, inline_dimensionality) =
 
   case vw of
     mk_view @list_dim @a (dom : list_dim) (g : index list_dim -> Writer a).
 
   primitive_list_dim_fold @acc repr_acc dom
-  (\ (ix : index list_dim) (x : acc) (ret : OutPtr acc) -> IEffect acc.
+  (\ (ix : index list_dim) (x : acc) (ret : OutPtr acc) -> Store.
      case boxed @a (g ix) of boxed @a (y : a).
      f x y ret)
   init
@@ -5720,7 +5720,7 @@ Sequence_reduce @(a : bare)
   (init : a)
   (sq : Sequence a)
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline, inline_final) =
   Sequence_fold @a @a repr repr f init sq ret;
 
@@ -5730,7 +5730,7 @@ Sequence_reduce1 @(a : bare)
   (f : a -> a -> Writer a)
   (sq : Sequence a)
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline, inline_final) =
   -- Use the stream's first element as the initial value
   case sq of
@@ -5744,7 +5744,7 @@ Sequence_reduce1 @(a : bare)
       Sequence_fold @a @a repr repr f u_init new_sequence ret;
 
     streamEmpty @st @a.
-      except @(IEffect a)
+      except @Store
   };
 
 
@@ -5754,7 +5754,7 @@ Sequence_scatter @(i r : bare)
   (op : Scatter r i)
   (src : Sequence i)
   (ret : OutPtr r)
-  -> IEffect r
+  -> Store
   attribute(inline, inline_sequential) =
 
   case op of
@@ -5768,7 +5768,7 @@ Sequence_scatter @(i r : bare)
     (make_init : NoneType -> a).
 
   letfun
-    use_finalizer (w : Writer s) (ret : OutPtr r) -> IEffect r =
+    use_finalizer (w : Writer s) (ret : OutPtr r) -> Store =
       case finalizer of {
         mutateInPlace @s @r (co : coerce @bare s r).
           (coerce @(Writer s) @(Writer r) w) ret
@@ -5779,7 +5779,7 @@ Sequence_scatter @(i r : bare)
       } in
 
   use_finalizer
-  (\ (local_ret : OutPtr s) -> IEffect s.
+  (\ (local_ret : OutPtr s) -> Store.
    -- Initialize the output
    case boxed @(Stored EffTok)
         (stored @EffTok (initializer make_init local_ret)) of
@@ -5789,7 +5789,7 @@ Sequence_scatter @(i r : bare)
             (Sequence_fold @i @(Stored EffTok)
              repr_i repr_EffTok
              (\ (x : Stored EffTok) (y : i) (loop_ret : OutPtr (Stored EffTok))
-                -> IEffect (Stored EffTok).
+                -> Store.
                 case x of stored @EffTok (x_u : EffTok).
                 stored @EffTok (updater (make_updater y) y x_u local_ret) loop_ret)
              init_eff_tok
@@ -5809,14 +5809,14 @@ Sequence_fold @(a acc : bare)
   (init : acc)
   (src : Sequence a)
   (ret : OutPtr acc)
-  -> IEffect acc
+  -> Store
   attribute(inline, inline_final) =
   case src of
     sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
 
   letfun
     go (state : st) (accumulator : BoxedType acc) (ret : OutPtr acc)
-      -> IEffect acc =
+      -> Store =
       case next state of {
 
         -- Obtain value from stream
@@ -5952,7 +5952,7 @@ Sequence_parallel_reduce @(a : bare)
   (init : a)
   (g : Stored int -> Sequence a)
   (ret : OutPtr a)
-  -> IEffect a =
+  -> Store =
   case dom of mk_list_dim (list_size : MaybeVal int).
   case list_size of {
     justVal @int (size : int).
@@ -5988,7 +5988,7 @@ Sequence_parallel_reduce @(a : bare)
       ret
 
   ; nothingVal @int.
-      except @(IEffect a)
+      except @Store
   };
 
 -------------------------------------------------------------------------------
@@ -5997,11 +5997,11 @@ Sequence_parallel_reduce @(a : bare)
 arr1D_build @(N : intindex) @(a : bare)
   (repr : Repr a) (size : FIInt N) (f : int -> Writer a)
   (arr_ptr : OutPtr (arr N a))
-  -> IEffect (arr N a)
+  -> Store
   attribute(inline) =
 
   doall @N @(arr N a) @a size
-  (\ (i : int) -> IEffect a.
+  (\ (i : int) -> Store.
      f i (subscript_out @N @a repr arr_ptr i));
 
 
@@ -6009,14 +6009,14 @@ arr2D_build @(M N : intindex) @(a : bare)
   (repr : Repr a)
   (size_y : FIInt M) (size_x : FIInt N) (f : int -> int -> Writer a)
   (arr_ptr : OutPtr (arr M (arr N a)))
-  -> IEffect (arr M (arr N a))
+  -> Store
   attribute(inline) =
 
   let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
   doall @M @(arr M (arr N a)) @(arr N a) size_y
-  (\ (y : int) -> IEffect (arr N a).
+  (\ (y : int) -> Store.
      doall @N @(arr N a) @a size_x
-     (\ (x : int) -> IEffect a.
+     (\ (x : int) -> Store.
         f y x
         (subscript_out @N @a repr
          (subscript_out @M @(arr N a) row_repr arr_ptr y) x)));
@@ -6029,18 +6029,18 @@ arr3D_build @(L M N : intindex) @(a : bare)
   (size_x : FIInt N)
   (f : int -> int -> int -> Writer a)
   (arr_ptr : OutPtr (arr L (arr M (arr N a))))
-  -> IEffect (arr L (arr M (arr N a)))
+  -> Store
   attribute(inline) =
 
   let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
   let plane_repr : Repr (arr M (arr N a)) =
         repr_arr @M @(arr N a) size_y row_repr in
   doall @L @(arr L (arr M (arr N a))) @(arr M (arr N a)) size_z
-  (\ (z : int) -> IEffect (arr M (arr N a)).
+  (\ (z : int) -> Store.
      doall @M @(arr M (arr N a)) @(arr N a) size_y
-     (\ (y : int) -> IEffect (arr N a).
+     (\ (y : int) -> Store.
         doall @N @(arr N a) @a size_x
-        (\ (x : int) -> IEffect a.
+        (\ (x : int) -> Store.
            f z y x
            (subscript_out @N @a repr
             (subscript_out @M @(arr N a) row_repr
@@ -6068,7 +6068,7 @@ primitive_list_dim_chain @(a : bare) (repr : Repr a)
                            justVal @int (sz2 : int). justVal @int (sz +# sz2)
                          ; nothingVal @int. nothingVal @int}) in
       mk_view @list_dim @a dom
-      (\ (ix : Stored int) (ret : OutPtr a) -> IEffect a.
+      (\ (ix : Stored int) (ret : OutPtr a) -> Store.
          -- Get a value from the first or the second view
          case ix of stored @int (i : int).
          if i <# sz
@@ -6090,7 +6090,7 @@ primitive_list_dim_reduce @(a : bare)
   (reducer : a -> a -> Writer a)
   (init : a)
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline, inline_final) =
   case dom of mk_list_dim (m_size : MaybeVal int).
   case m_size of {
@@ -6098,7 +6098,7 @@ primitive_list_dim_reduce @(a : bare)
       case defineIntIndex size of someIInt @(N : intindex) (sz : FIInt N).
 
       for @N @a repr sz init
-      (\ (i : int) (x : a) (loop_ret : OutPtr a) -> IEffect a.
+      (\ (i : int) (x : a) (loop_ret : OutPtr a) -> Store.
          case boxed @(Stored int) (stored @int i) of
            boxed @(Stored int) (s_i : Stored int).
          case boxed @a (generator s_i) of boxed @a (y : a).
@@ -6107,7 +6107,7 @@ primitive_list_dim_reduce @(a : bare)
 
   ; nothingVal @int.
       -- Can't evaluate on an infinite domain
-      except @(IEffect a)
+      except @Store
   };
 
 
@@ -6117,13 +6117,13 @@ primitive_list_dim_reduce1 @(a : bare)
   (generator : Stored int -> Writer a)
   (reducer : a -> a -> Writer a)
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline, inline_final) =
   case dom of mk_list_dim (m_size : MaybeVal int).
   case m_size of {
     justVal @int (size : int).
       -- Can't reduce on empty range
-      if size ==# 0 then except @(IEffect a) else
+      if size ==# 0 then except @Store else
 
       -- Evaluate at index 0 to get initial value
       case boxed @(Stored int) (stored @int 0) of
@@ -6136,7 +6136,7 @@ primitive_list_dim_reduce1 @(a : bare)
         someIInt @(N : intindex) (sz : FIInt N).
 
       for @N @a repr sz init
-      (\ (i : int) (x : a) (loop_ret : OutPtr a) -> IEffect a.
+      (\ (i : int) (x : a) (loop_ret : OutPtr a) -> Store.
          case boxed @(Stored int) (stored @int (i +# 1)) of
            boxed @(Stored int) (s_i : Stored int).
          case boxed @a (generator s_i) of boxed @a (y : a).
@@ -6145,7 +6145,7 @@ primitive_list_dim_reduce1 @(a : bare)
 
   ; nothingVal @int.
       -- Can't evaluate on an infinite domain
-      except @(IEffect a)
+      except @Store
   };
 
 
@@ -6155,7 +6155,7 @@ primitive_list_dim_fold @(acc : bare)
   (f : index list_dim -> acc -> Writer acc)
   (init : acc)
   (ret : OutPtr acc)
-  -> IEffect acc
+  -> Store
   attribute(inline) =
 
   case d of mk_list_dim (list_size : MaybeVal int).
@@ -6164,7 +6164,7 @@ primitive_list_dim_fold @(acc : bare)
       case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
       
       for @N @acc repr count init
-      (\ (i : int) (loop_acc : acc) (ret : OutPtr acc) -> IEffect acc.
+      (\ (i : int) (loop_acc : acc) (ret : OutPtr acc) -> Store.
          case boxed @(Stored int) (stored @int i) of
            boxed @(Stored int) (real_index : Stored int).
 
@@ -6173,7 +6173,7 @@ primitive_list_dim_fold @(acc : bare)
       ret
 
   ; nothingVal @int.
-      except @(IEffect acc)
+      except @Store
   };
 
 
@@ -6189,12 +6189,12 @@ primitive_dim1_reduce @(a : bare)
   dim1ToArrayDesc @a dom
   (\ @(N : intindex)
      (lb : int) (stride : int) (size : FIInt N) (ret : OutPtr a)
-     -> IEffect a.
+     -> Store.
 
      let linear_map : LinearMap = linearMap stride lb in
 
      for @N @a repr size init
-     (\ (i : int) (x : a) (loop_ret : OutPtr a) -> IEffect a.
+     (\ (i : int) (x : a) (loop_ret : OutPtr a) -> Store.
         let logical_i : int = evalLM i linear_map in
         case boxed @(Stored int) (stored @int logical_i) of
            boxed @(Stored int) (s_i : Stored int).
@@ -6215,10 +6215,10 @@ primitive_dim1_fold @(acc : bare)
   dim1ToArrayDesc @acc d
   (\ @(N : intindex)
      (lb : int) (stride : int) (count : FIInt N) (ret : OutPtr acc)
-     -> IEffect acc.
+     -> Store.
 
      for @N @acc repr count init
-     (\ (i : int) (loop_acc : acc) (ret : OutPtr acc) -> IEffect acc.
+     (\ (i : int) (loop_acc : acc) (ret : OutPtr acc) -> Store.
 
         -- Compute the real index in this loop iteration
         case boxed @(Stored int) (stored @int (lb +# i *# stride)) of
@@ -6238,7 +6238,7 @@ parallel_list_dim_reduce @(a : bare)
   (f : a -> a -> Writer a)
   (init : a)
   (ret : OutPtr a)
-  -> IEffect a =
+  -> Store =
 
   case dom of mk_list_dim (list_size : MaybeVal int).
   case list_size of {
@@ -6273,7 +6273,7 @@ parallel_list_dim_reduce @(a : bare)
       ret
 
   ; nothingVal @int.
-      except @(IEffect a)
+      except @Store
   };
 
 
@@ -6284,7 +6284,7 @@ parallel_dim1_reduce @(a : bare)
   (f : a -> a -> Writer a)
   (init : a)
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
 
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
@@ -6328,10 +6328,10 @@ parallel_dim1_reduce @(a : bare)
           ret
 
       ; nothingVal @int.
-          except @(IEffect a)
+          except @Store
       }
   ; nothingVal @int.
-      except @(IEffect a)
+      except @Store
   };
 
 
@@ -6341,7 +6341,7 @@ parallel_list_dim_reduce1 @(a : bare)
   (g : Stored int -> Writer a)
   (f : a -> a -> Writer a)
   (ret : OutPtr a)
-  -> IEffect a =
+  -> Store =
 
   let mrepr : Repr (Maybe a) = repr_Maybe @a repr in
   case dom of mk_list_dim (list_size : MaybeVal int).
@@ -6381,7 +6381,7 @@ parallel_list_dim_reduce1 @(a : bare)
             convertToBoxed @ma mrepr
             (just @a
              (for @subrange_N @a repr subrange_count subrange_acc
-              (\ (i : int) (x : a) (ret : OutPtr a) -> IEffect a.
+              (\ (i : int) (x : a) (ret : OutPtr a) -> Store.
                  -- Add the lower bound to get the real index
                  case boxed @(Stored int) (stored @int (i +# subrange_lb)) of
                    boxed @(Stored int) (real_index : Stored int).
@@ -6415,11 +6415,11 @@ parallel_list_dim_reduce1 @(a : bare)
         boxed @ma (m_result : Maybe a).
       case m_result of {
         just @a (result : a). copy @a repr result ret
-      ; nothing @a. except @(IEffect a)
+      ; nothing @a. except @Store
       }
 
   ; nothingVal @int.
-      except @(IEffect a)
+      except @Store
   };
 
 
@@ -6429,7 +6429,7 @@ parallel_list_dim_reduce1 @(a : bare)
 for @(N : intindex) @(acc : bare)
   (repr : Repr acc) (count : FIInt N) (init : acc)
   (f : int -> acc -> Writer acc) (ret : OutPtr acc)
-  -> IEffect acc
+  -> Store
   attribute(inline, inline_final) =
 
   -- Unpack the indexed int
@@ -6437,7 +6437,7 @@ for @(N : intindex) @(acc : bare)
 
   -- Main loop
   letfun
-    loop (i : int) (x : acc) (r : OutPtr acc) -> IEffect acc =
+    loop (i : int) (x : acc) (r : OutPtr acc) -> Store =
       if EqDict_int_eq i bound
       then copy @acc repr x r
       else case boxed @acc (f i x) of boxed @acc (y : acc).
@@ -6468,16 +6468,16 @@ for_box @(N : intindex) @(acc : box)
 
 parallel_doall @(N : intindex) @(a b : bare)
   (count : FIInt N)
-  (f : int -> IEffect b)
-  -> IEffect a
+  (f : int -> Store)
+  -> Store
   attribute(inline, inline_sequential) =
 
   letfun
     do_range @(M : intindex)
       (lb : int) (range_count : FIInt M)
-      -> IEffect b =
+      -> Store =
     doall @M @b @b range_count
-    (\ (range_i : int) -> IEffect b. f (range_i +# lb))
+    (\ (range_i : int) -> Store. f (range_i +# lb))
   in
   blocked_doall @N @a @b count do_range;
 
@@ -6557,10 +6557,10 @@ fun_isJust @(a : bare) (repr : Repr a) (x : Maybe a)
   
 
 fun_fromJust @(a : bare) (repr : Repr a) (x : Maybe a) (ret : OutPtr a)
-  -> IEffect a attribute(inline) =
+  -> Store attribute(inline) =
   case x of {
     just @a (value : a). copy @a repr value ret
-  ; nothing @a. except @(IEffect a)
+  ; nothing @a. except @Store
   };
 
 
@@ -6577,7 +6577,7 @@ safeIndex @(t : bare -> bare) @(a : bare)
   (container : t a)
   (ix : index (shape t))
   (ret : OutPtr a)
-  -> IEffect a
+  -> Store
   attribute(inline) =
 
   let type sh = shape t in

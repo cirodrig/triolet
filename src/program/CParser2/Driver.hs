@@ -29,7 +29,7 @@ import Globals
 
 predefinedVarDetails :: [(String, VarDetails)]
 predefinedVarDetails =
-  map mk_var_details (valV : boxV : bareV : outV : intindexV : sideeffectV :
+  map mk_var_details (valV : boxV : bareV : outV : intindexV :
                       writeV : propV :
                       posInftyV : negInftyV : allBuiltinVars)
   where

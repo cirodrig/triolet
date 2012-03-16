@@ -25,7 +25,7 @@ convertType ty
     op `isPyonBuiltin` The_Writer =
       let arg' = convertType arg
       in varApp (pyonBuiltin The_OutPtr) [arg'] `FunT`
-         varApp (pyonBuiltin The_IEffect) [arg']
+         VarT (pyonBuiltin The_Store)
 
   | otherwise =
       case ty

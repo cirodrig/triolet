@@ -2736,31 +2736,32 @@ rwFun :: FunSM -> LR (FunM, AbsCode)
 -- Freshen bound variables to avoid name shadowing, then rename 
 rwFun f = rwFun' f
 
-rwFun' (FunSM f) =
+rwFun' (FunSM f) = do
+  rtype <- reduceToWhnf $ funReturn f
   assumeTyPats ty_params $ assumePatterns params $ 
-  set_return_parameter $ do
-    body_result <- catchException $ rwExp False (funBody f)
+    set_return_parameter rtype $ do
+      body_result <- catchException $ rwExp False (funBody f)
     
-    -- If the function body raises an exception,
-    -- replace it with an exception statement
-    let (body', body_computation) =
-          case body_result
-          of Just (new_exp, value) ->
-               (new_exp, case codeValue value of {TopAV -> TopAC; _ -> ReturnAC value})
-             Nothing ->
-               (ExpM $ ExceptE defaultExpInfo return_type, ExceptAC)
-    let aval = funValue ty_params params body_computation
-        new_fun = FunM $ Fun (funInfo f) ty_params params' return_type body'
-    return (new_fun, aval)
+      -- If the function body raises an exception,
+      -- replace it with an exception statement
+      let (body', body_computation) =
+            case body_result
+            of Just (new_exp, value) ->
+                 (new_exp, case codeValue value
+                           of {TopAV -> TopAC; _ -> ReturnAC value})
+               Nothing ->
+                 (ExpM $ ExceptE defaultExpInfo rtype, ExceptAC)
+      let aval = funValue ty_params params body_computation
+          new_fun = FunM $ Fun (funInfo f) ty_params params' rtype body'
+      return (new_fun, aval)
   where
     ty_params = funTyParams f
     params = map fromPatSM $ funParams f
-    return_type = funReturn f
 
     -- If the function has a return parameter, record that fact.
     -- It has a return parameter if the function's type is
-    -- (... -> OutPtr a -> IEffect b) for some 'a' and 'b'.
-    set_return_parameter k 
+    -- (... -> OutPtr a -> Store) for some 'a'.
+    set_return_parameter rtype k 
       | null (funParams f) =
           -- No parameters
           setCurrentReturnParameter Nothing k
@@ -2768,8 +2769,11 @@ rwFun' (FunSM f) =
         tenv <- getTypeEnv
         let last_param = last params
             last_param_kind = toBaseKind $ typeKind tenv $ patMType last_param
-            return_kind = toBaseKind $ typeKind tenv return_type
-        if last_param_kind == OutK && return_kind == SideEffectK
+            returns_store =
+              case rtype
+              of VarT v -> v `isPyonBuiltin` The_Store
+                 _ -> False
+        if last_param_kind == OutK && returns_store
           then setCurrentReturnParameter (Just last_param) k
           else setCurrentReturnParameter Nothing k
 

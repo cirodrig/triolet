@@ -133,8 +133,7 @@ typeInferCon con@(VarCon op ty_args ex_types) = do
   return (con_field_types, con_result_type)
   where
     make_initializer BareK ty =
-      FunT (varApp (pyonBuiltin The_OutPtr) [ty]) 
-      (varApp (pyonBuiltin The_IEffect) [ty])
+      varApp (pyonBuiltin The_OutPtr) [ty] `FunT` VarT (pyonBuiltin The_Store)
     make_initializer _ ty = ty
 
 typeInferCon con@(TupleCon types) = do
@@ -293,7 +292,6 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
         case expected_scr_type
         of FunT {} -> True
            AppT (VarT v) _ | v `isPyonBuiltin` The_OutPtr -> True
-                           | v `isPyonBuiltin` The_IEffect -> True
            _ -> False
   when invalid_type $ internalError "typeCheckAlternative: Invalid pattern"
 
@@ -485,7 +483,7 @@ inferConAppType (VarCon op ty_args _) = do
       in return $!
          case dataTypeKind data_type
          of BareK -> varApp (pyonBuiltin The_OutPtr) [app_type] `FunT`
-                     varApp (pyonBuiltin The_IEffect) [app_type]
+                     VarT (pyonBuiltin The_Store)
             _ -> app_type
 
 inferConAppType (TupleCon ty_args) = do

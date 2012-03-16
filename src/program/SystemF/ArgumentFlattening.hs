@@ -74,6 +74,8 @@ fromOutPtrType t =
   of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr -> arg
      _ -> internalError "fromOutPtrType: Not an output pointer"
 
+storeType = VarT $ pyonBuiltin The_Store
+
 -- | Bind a variable to a value.
 --
 --   Creates either a let expression or a case-of-boxed expression, depending
@@ -1225,8 +1227,7 @@ planRetOriginalInterface (PlanRetValue fr) =
 
 planRetOriginalInterface (PlanRetWriter p fr) =
   -- The return type is an effect type
-  let ret_type = varApp (pyonBuiltin The_IEffect) [frType fr]
-  in ([p], ret_type)
+  ([p], storeType)
 
 -- | Get the flattened return parameter and return type
 --   of a return flattening plan.
@@ -1238,7 +1239,7 @@ planRetFlattenedInterface tenv (PlanRetValue fr) =
 planRetFlattenedInterface tenv (PlanRetWriter p fr) =
   case frDecomp fr
   of IdDecomp ->
-       ([p], varApp (pyonBuiltin The_IEffect) [frType fr])
+       ([p], storeType)
      DeadDecomp {} ->
        -- Dead return values aren't handled currently
        internalError "planRetFlattenedInterface"
@@ -1416,9 +1417,7 @@ mkWorkerFunction plan annotation worker_name original_body = do
         case flatReturn plan
         of PlanRetValue _ -> return original_body
            PlanRetWriter p fr ->
-             let original_ret_type =
-                   varApp (pyonBuiltin The_IEffect) [frType fr]
-             in lambdaAbstractReturn original_ret_type p original_body
+             lambdaAbstractReturn storeType p original_body
 
       -- Repack the return value
       flat_body <-

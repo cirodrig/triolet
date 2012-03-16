@@ -6,20 +6,20 @@ extern function pyon.internal.prim.convertToBoxed
   (owned, owned) -> owned;
 
 extern function pyon.internal.prim.convertToBare
-  (owned, owned, pointer) -> ();
+  (owned, owned, pointer) -> unit;
 
 extern function pyon.internal.prim.make_Boxed (uint, uint, owned) -> owned;
-extern function pyon.internal.prim.from_Boxed (uint, uint, owned, owned, pointer) -> ();
+extern function pyon.internal.prim.from_Boxed (uint, uint, owned, owned, pointer) -> unit;
 
 extern function pyon.internal.prim.make_Boxed_0 (owned) -> owned;
 extern function pyon.internal.prim.make_Boxed_1 (owned) -> owned;
 extern function pyon.internal.prim.make_Boxed_4 (owned) -> owned;
 
-extern function pyon.internal.prim.from_Boxed_0 (owned, pointer) -> ();
-extern function pyon.internal.prim.from_Boxed_1 (owned, pointer) -> ();
-extern function pyon.internal.prim.from_Boxed_4 (owned, pointer) -> ();
+extern function pyon.internal.prim.from_Boxed_0 (owned, pointer) -> unit;
+extern function pyon.internal.prim.from_Boxed_1 (owned, pointer) -> unit;
+extern function pyon.internal.prim.from_Boxed_4 (owned, pointer) -> unit;
 
-extern function pyon.internal.prim.storeBox (owned, pointer) -> ();
+extern function pyon.internal.prim.storeBox (owned, pointer) -> unit;
 extern function pyon.internal.prim.loadBox (pointer) -> owned;
 
 extern function pyon.internal.prim.ptrToBox (pointer) -> owned;
@@ -76,10 +76,10 @@ extern function pyon.internal.prim.gcd (int, int) -> int;
 extern function pyon.internal.prim.extgcd_x (int, int) -> int;
 
 extern function pyon.internal.prim.doall
-  (FinIndInt, owned) -> ();
+  (FinIndInt, owned) -> unit;
 
 extern function pyon.internal.prim.for
-  (owned, FinIndInt, pointer, owned, pointer) -> ();
+  (owned, FinIndInt, pointer, owned, pointer) -> unit;
 
 extern function pyon.internal.prim.blocked_1d_reduce
   (FinIndInt, owned, owned, owned) -> owned;
@@ -108,7 +108,7 @@ extern procedure pyon.internal.prim.blocked_reduce2_reduce
   "blocked_reduce2_reduce" (pointer, owned, owned) -> owned;
 
 extern function pyon.internal.prim.blocked_doall
-  (FinIndInt, owned) -> ();
+  (FinIndInt, owned) -> unit;
 
 // C implementation of blocked_doall
 import procedure pyon_C_blocked_doall
@@ -118,7 +118,7 @@ extern procedure pyon.internal.prim.blocked_doall_worker
   "blocked_doall_worker" (owned, int, int) -> ();
 
 extern function pyon.internal.prim.blocked_doall2
-  (FinIndInt, FinIndInt, owned) -> ();
+  (FinIndInt, FinIndInt, owned) -> unit;
 
 // C implementation of blocked_doall2
 import procedure pyon_C_blocked_doall2

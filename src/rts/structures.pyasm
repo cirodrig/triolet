@@ -93,14 +93,14 @@ data owned repr_Stream = Repr {
 // Argument writes a single pointer.  Load the result.
 function Box_convert_to_boxed (owned writer) -> owned {
   data owned result;
-  () = () call writer(result);
+  _ = unit call writer(result);
   owned load result;
 };
 
 // Write the object's address to the destination
-function inline Box_convert_to_bare (owned src, pointer dst) -> () {
+function inline Box_convert_to_bare (owned src, pointer dst) -> unit {
   !dst = src;
-  ();
+  nil;
 };
 
 // A referenced object is just a pointer to the object
@@ -110,15 +110,15 @@ function inline repr_Referenced (owned elt_repr) -> owned {
   ret @! Repr.is_pointerless = NOT_POINTERLESS;
 
   letrec {
-    function copy (pointer src, pointer dst) -> () {
+    function copy (pointer src, pointer dst) -> unit {
       // Allocate some new memory
       new_obj = pointer primcall allocate (elt_repr @! Repr.is_pointerless,
                                            elt_repr @! Repr.sizealign.size);
 
       // Copy into it
-      () = () call (elt_repr @! Repr.copy) (pointer load src, new_obj);
+      _ = unit call (elt_repr @! Repr.copy) (pointer load src, new_obj);
       !dst = new_obj;
-      ();
+      nil;
     }
   };
   ret @! Repr.copy = copy;
@@ -143,8 +143,8 @@ data owned repr_EmptyReference = Repr {
   IS_POINTERLESS
 };
 
-function inline dummy_copy (pointer src, pointer dst) -> () {
-  (); // Do nothing
+function inline dummy_copy (pointer src, pointer dst) -> unit {
+  nil; // Do nothing
 };
 
 function inline repr_arr
@@ -161,12 +161,12 @@ function inline repr_arr
 
   elt_copy = elt_repr @! Repr.copy;
   letrec {
-    function copy (pointer src, pointer dst) -> () {
+    function copy (pointer src, pointer dst) -> unit {
       _ = while (int i = int 0) (i < size) {
-        () = () call elt_copy (src @ array_type[i], dst @ array_type[i]);
+        _ = unit call elt_copy (src @ array_type[i], dst @ array_type[i]);
         i + int 1;
       };
-      ();
+      nil;
     }
   };
   ret @! Repr.copy = copy;
@@ -218,15 +218,6 @@ data owned repr_EffTok = Repr {
   IS_POINTERLESS
 };
 
-function copy_Repr (pointer src, pointer dst) -> () {
-  dst @! Repr.sizealign = src @! Repr.sizealign;
-  dst @! Repr.copy = src @! Repr.copy;
-  dst @! Repr.convert_to_boxed = src @! Repr.convert_to_boxed;
-  dst @! Repr.convert_to_bare = src @! Repr.convert_to_bare;
-  dst @! Repr.is_pointerless = src @! Repr.is_pointerless;
-  ();
-};
-
 function inline repr_Maybe (owned repr_arg) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
 
@@ -246,15 +237,15 @@ function inline repr_Maybe (owned repr_arg) -> owned {
 };
 
 function copy_Maybe (owned copy_arg, uint arg_size, uint arg_align,
-                     pointer src, pointer dst) -> () {
+                     pointer src, pointer dst) -> unit {
   typedef arg = bytes(value arg_size, value arg_align);
   if (src @! Maybe(arg).isjust == uint8 1) {
     // Nothing
     dst @! Maybe(arg).isjust = uint8 1;
-    ();
+    nil;
   } else {
     dst @! Maybe(arg).isjust = uint8 0;
-    () call copy_arg (src @ Maybe(arg).member, dst @ Maybe(arg).member);
+    unit call copy_arg (src @ Maybe(arg).member, dst @ Maybe(arg).member);
   };
 };
 
@@ -284,10 +275,10 @@ function inline repr_PyonTuple2 (owned repr1, owned repr2) -> owned {
 
 function inline copy_PyonTuple2(owned copy1, owned copy2,
                          uint size1, uint align1, uint size2, uint align2,
-                         pointer src, pointer dst) -> () {
+                         pointer src, pointer dst) -> unit {
   typedef tuple = PyonTuple2(bytes(value size1, value align1), bytes(value size2, value align2));
-  () = () call copy1 (src @ tuple.member1, dst @ tuple.member1);
-  () call copy2 (src @ tuple.member2, dst @ tuple.member2);
+  _ = unit call copy1 (src @ tuple.member1, dst @ tuple.member1);
+  unit call copy2 (src @ tuple.member2, dst @ tuple.member2);
 };
 
 function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned {
@@ -320,13 +311,13 @@ function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned
 function inline copy_PyonTuple3(owned copy1, owned copy2, owned copy3,
                          uint size1, uint align1, uint size2, uint align2,
 			 uint size3, uint align3,
-                         pointer src, pointer dst) -> () {
+                         pointer src, pointer dst) -> unit {
   typedef tuple = PyonTuple3(bytes(value size1, value align1),
   	  	  	     bytes(value size2, value align2),
   	  	  	     bytes(value size3, value align3));
-  () = () call copy1 (src @ tuple.member1, dst @ tuple.member1);
-  () = () call copy2 (src @ tuple.member2, dst @ tuple.member2);
-  () call copy3 (src @ tuple.member3, dst @ tuple.member3);
+  _ = unit call copy1 (src @ tuple.member1, dst @ tuple.member1);
+  _ = unit call copy2 (src @ tuple.member2, dst @ tuple.member2);
+  unit call copy3 (src @ tuple.member3, dst @ tuple.member3);
 };
 
 function inline repr_PyonTuple4
@@ -363,113 +354,22 @@ function inline copy_PyonTuple4(owned copy1, owned copy2, owned copy3,
                          owned copy4,
                          uint size1, uint align1, uint size2, uint align2,
 			 uint size3, uint align3, uint size4, uint align4,
-                         pointer src, pointer dst) -> () {
+                         pointer src, pointer dst) -> unit {
   typedef tuple = PyonTuple4(bytes(value size1, value align1),
   	  	  	     bytes(value size2, value align2),
   	  	  	     bytes(value size3, value align3),
   	  	  	     bytes(value size4, value align4));
-  () = () call copy1 (src @ tuple.member1, dst @ tuple.member1);
-  () = () call copy2 (src @ tuple.member2, dst @ tuple.member2);
-  () = () call copy3 (src @ tuple.member3, dst @ tuple.member3);
-  () call copy4 (src @ tuple.member4, dst @ tuple.member4);
+  _ = unit call copy1 (src @ tuple.member1, dst @ tuple.member1);
+  _ = unit call copy2 (src @ tuple.member2, dst @ tuple.member2);
+  _ = unit call copy3 (src @ tuple.member3, dst @ tuple.member3);
+  unit call copy4 (src @ tuple.member4, dst @ tuple.member4);
 };
 
-#if 0
-data pointer TraversableDict_info = InfoTableHeader {
-  TAG_CON
-};
-
-data owned OpaqueTraversableDict_list = TraversableDict {
-  ObjectHeader { TraversableDict_info },
-  list_traverse,
-  list_build
-};
-#endif
-
-// Is this redundant with 'repr_Complex' in complex.pyasm?
-function inline complex_pass_conv (pointer repr, pointer ret) -> () {
-  SA {size, align} = repr @! Repr.sizealign;
-  typedef cpx = complex(bytes(value size, value align));
-
-  ret @! Repr.sizealign = SA {sizeof cpx, alignof cpx};
-  ret @! Repr.is_pointerless = repr @! Repr.is_pointerless;
-  copy = owned call copy_complex (size, align, repr @! Repr.copy);
-  ret @! Repr.copy = copy;
-  ret @! Repr.convert_to_boxed =
-      owned call make_Boxed (sizeof cpx, alignof cpx);
-  ret @! Repr.convert_to_bare =
-      owned call from_Boxed (sizeof cpx, alignof cpx, copy);
-  ();
-};
-
-function inline copy_complex
-  (uint size, uint align, owned copy_member, pointer src, pointer dst) -> () {
-  typedef cpx = complex(bytes(value size, value align));
-  () = () call copy_member (src @ cpx.real, dst @ cpx.real);
-  () = () call copy_member (src @ cpx.imag, dst @ cpx.imag);
-  ();
-};
-
-function inline additiveDict_complex
-  (pointer member_additive, pointer ret) -> ()
-{
-  () primcall exit (int -1);
-  // FIXME
-/*
-  member_size = member_additive @! AdditiveDict(unit).repr.size;
-  member_align = member_additive @! AdditiveDict(unit).repr.align;
-  typedef member = bytes(value member_size, value member_align);
-  typedef member_dict = AdditiveDict(member);
-
-  member_copy = member_additive @! member_dict.repr.copy;
-  typedef cpx = complex(member);
-  typedef dictionary = AdditiveDict(cpx);
-
-  () = () call complex_pass_conv
-    (type, member_additive @ member_dict.repr, ret @ dictionary.repr);
-
-  ret @! dictionary.add =
-    owned call complex_add (member_size, member_align,
-                            member_additive @! member_dict.add);
-  ret @! dictionary.subtract =
-    owned call complex_sub (member_size, member_align,
-                            member_additive @! member_dict.subtract);
-  ret @! dictionary.negate =
-    owned call complex_negate (member_size, member_align,
-                               member_additive @! member_dict.negate);
-  () = () call member_copy (ret @ dictionary.zero.real,
-                            member_additive @ member_dict.zero);
-  () = () call member_copy (ret @ dictionary.zero.imag,
-                            member_additive @ member_dict.zero);
-  (); */
-};
-
-function inline makeComplex(float re, float im, pointer ret) -> () {
+function inline makeComplex(float re, float im, pointer ret) -> unit {
   typedef cfloa = complex (float);
   ret @! cfloa.real = re;
   ret @! cfloa.imag = im;
-  ();
-};
-
-function inline complex_add(uint size, uint align, owned member_add,
-                     pointer x, pointer y, pointer ret) -> () {
-  typedef cpx = complex(bytes(value size, value align));
-  () = () call member_add (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
-  () call member_add (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
-};
-
-function inline complex_sub(uint size, uint align, owned member_sub,
-                     pointer x, pointer y, pointer ret) -> () {
-  typedef cpx = complex(bytes(value size, value align));
-  () = () call member_sub (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
-  () call member_sub (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
-};
-
-function inline complex_negate(uint size, uint align, owned member_negate,
-                        pointer x, pointer ret) -> () {
-  typedef cpx = complex(bytes(value size, value align));
-  () = () call member_negate (x @ cpx.real, ret @ cpx.real);
-  () call member_negate (x @ cpx.imag, ret @ cpx.imag);
+  nil;
 };
 
 data pointer int_info = InfoTableHeader {

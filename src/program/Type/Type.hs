@@ -13,9 +13,9 @@ module Type.Type(module Type.Var,
                  fromForallFunType,
 
                  -- * Predefined types
-                 kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT,
+                 kindT, intindexT, valT, boxT, bareT, outT, writeT, propT,
                  posInftyT, negInftyT,
-                 kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, propV,
+                 kindV, intindexV, valV, boxV, bareV, outV, writeV, propV,
                  posInftyV, negInftyV,
                  firstAvailableVarID,
 
@@ -126,7 +126,7 @@ instance HasLevel Var => HasLevel Type where
   getLevel (CoT _)  = TypeLevel
   getLevel (UTupleT _) = TypeLevel
 
-kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT, posInftyT, negInftyT :: Type
+kindT, intindexT, valT, boxT, bareT, outT, writeT, propT, posInftyT, negInftyT :: Type
 kindT = VarT kindV
 intindexT = VarT intindexV
 valT = VarT valV
@@ -134,12 +134,11 @@ boxT = VarT boxV
 bareT = VarT bareV
 outT = VarT outV
 writeT = VarT writeV
-sideeffectT = VarT sideeffectV
 propT = VarT propV
 posInftyT = VarT posInftyV      -- Positive infinity
 negInftyT = VarT negInftyV
 
-kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, propV, posInftyV, negInftyV :: Var
+kindV, intindexV, valV, boxV, bareV, outV, writeV, propV, posInftyV, negInftyV :: Var
 
 kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
 intindexV = mkVar intindexVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
@@ -148,7 +147,6 @@ boxV = mkVar boxVarID (Just $ pyonLabel builtinModuleName "box") KindLevel
 bareV = mkVar bareVarID (Just $ pyonLabel builtinModuleName "bare") KindLevel
 outV = mkVar outVarID (Just $ pyonLabel builtinModuleName "out") KindLevel
 writeV = mkVar writeVarID (Just $ pyonLabel builtinModuleName "write") KindLevel
-sideeffectV = mkVar sideeffectVarID (Just $ pyonLabel builtinModuleName "sideeffect") KindLevel
 propV = mkVar propVarID (Just $ pyonLabel builtinModuleName "prop") KindLevel
 posInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
 negInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "neg_infty") TypeLevel
@@ -160,7 +158,6 @@ boxVarID = toIdent 4
 bareVarID = toIdent 5
 outVarID = toIdent 6
 writeVarID = toIdent 7
-sideeffectVarID = toIdent 8
 propVarID = toIdent 9
 posInftyVarID = toIdent 10
 negInftyVarID = toIdent 11
@@ -184,7 +181,6 @@ data BaseKind =
   | OutK
   | WriteK
   | IntIndexK
-  | SideEffectK
   | PropK
     deriving(Eq, Ord, Show)
 
@@ -198,7 +194,7 @@ toBaseKind (VarT kind_var) =
   where
     table = [(valV, ValK), (boxV, BoxK), (bareV, BareK), (outV, OutK),
              (writeV, WriteK),
-             (intindexV, IntIndexK), (sideeffectV, SideEffectK),
+             (intindexV, IntIndexK),
              (propV, PropK)]
 
 toBaseKind _ = internalError "toBaseKind: Unrecognized type"
@@ -212,7 +208,6 @@ fromBaseKind k =
      OutK -> outT
      WriteK -> writeT
      IntIndexK -> intindexT
-     SideEffectK -> sideeffectT
      PropK -> propT
 
 -------------------------------------------------------------------------------

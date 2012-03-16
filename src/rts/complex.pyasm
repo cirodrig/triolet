@@ -11,6 +11,7 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+#if 0
 function repr_Complex (owned repr_element) -> owned {
   SA {elt_size, elt_align} = repr_element @! Repr.sizealign;
   typedef elt_type = bytes(value elt_size, value elt_align);
@@ -161,3 +162,5 @@ function FractionalDict_Complex_div
   // Not implemented
   () primcall exit(int -1);
 };
+
+#endif

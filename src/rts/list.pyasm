@@ -29,7 +29,7 @@ function repr_list (owned elem_repr) -> owned {
   repr as owned;
 };
 
-function list_copy (owned elem_repr, pointer src, pointer dst) -> () {
+function list_copy (owned elem_repr, pointer src, pointer dst) -> unit {
   nelems_ii = src @! PyonList.nelems;
   dst @! PyonList.nelems = nelems_ii;
   FinIndInt {nelems} = nelems_ii;
@@ -50,11 +50,11 @@ function list_copy (owned elem_repr, pointer src, pointer dst) -> () {
   dst @! PyonList.contents = dst_contents;
 
   _ = while (int index = int 0) (index < nelems) {
-    () = () call copy_elem (src_contents @ src_contents_type[index],
-                            dst_contents @ dst_contents_type[index]);
+    _ = unit call copy_elem (src_contents @ src_contents_type[index],
+                             dst_contents @ dst_contents_type[index]);
     index + int 1;
   };
-  ();
+  nil;
 };
 
 // Create a list, leaving its elements uninitialized
@@ -118,7 +118,7 @@ function inline list_len (pointer p) -> int {
 
 // Create a list from a stream of unknown size
 function list_build
-    (owned elem_repr, owned stream, pointer ret) -> () {
+    (owned elem_repr, owned stream, pointer ret) -> unit {
   typedef Stream = Obj(StreamData);
 
   SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
@@ -135,7 +135,7 @@ function list_build
 
   // Populate the list contents (pull_values); then finish building the list.
   letrec {
-    procedure pull_values (int n_elems, int list_size, owned stream_state) -> () {
+    procedure pull_values (int n_elems, int list_size, owned stream_state) -> unit {
       // Make sure list can hold another element
       new_list_size = if (n_elems == list_size) {
         int primcall list_grow (elem_repr, ret, list_size);
@@ -151,23 +151,23 @@ function list_build
         // Copy this value to the destination.
         // The value was stored as a boxed object; convert it to a bare object.
         current_elem = (ret @! PyonList.contents) @ array_type[n_elems];
-        () = () call (elem_repr @! Repr.convert_to_bare) (result_val, current_elem);
+        _ = unit call (elem_repr @! Repr.convert_to_bare) (result_val, current_elem);
 
         // Continue pulling
-        () primcall pull_values (n_elems + int 1, new_list_size, next_state);
+        unit primcall pull_values (n_elems + int 1, new_list_size, next_state);
       } else {
         // Stream is depleted.  Finish constructing list.
-        () primcall finish (n_elems);
+        unit primcall finish (n_elems);
       };
     };
 
-    procedure finish (int n_elems) -> () {
+    procedure finish (int n_elems) -> unit {
       // Save the number of list elements that was created
       ret @! PyonList.nelems = FinIndInt {n_elems};
-      ();   
+      nil;
     }
   };
-  () primcall pull_values (int 0, list_size, stream_init_state);
+  unit primcall pull_values (int 0, list_size, stream_init_state);
 };
 
 // Allocate and construct a list, given a suitably initialized data array.
@@ -242,7 +242,7 @@ function repr_array2 (owned elem_repr) -> owned {
   repr as owned;
 };
 
-function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
+function matrix_copy (owned elem_repr, pointer src, pointer dst) -> unit {
   first_y = src @! PyonArray2.first_y;
   stride_y = src @! PyonArray2.stride_y;
   FinIndInt {size_y} = src @! PyonArray2.size_y;
@@ -276,13 +276,13 @@ function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
 
   _ = while (int yindex = int 0) (yindex < size_y) {
     _ = while (int xindex = int 0) (xindex < size_x) {
-      () = () call copy_elem (src_contents @ src_contents_type[yindex][xindex],
-                              dst_contents @ dst_contents_type[yindex][xindex]);
+      _ = unit call copy_elem (src_contents @ src_contents_type[yindex][xindex],
+                               dst_contents @ dst_contents_type[yindex][xindex]);
       xindex + int 1;
     };
     yindex + int 1;
   };
-  ();
+  nil;
 };
 
 // Allocate and construct a matrix, given a suitably initialized data array.

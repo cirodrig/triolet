@@ -45,8 +45,11 @@ data OutPtr : bare -> out
   attribute(abstract) {};
 
 -- A dummy value representing the effect of initializing an object
-data IEffect : bare -> sideeffect
-  attribute(abstract) {};
+data Store : val
+  attribute(abstract)
+{
+  store () () ();
+};
 
 -- Type functions to convert between representations
 type BoxedType : bare -> box;
@@ -387,12 +390,12 @@ emptyEffTok : EffTok;
 
 -- Translate to a side effect.
 -- This function is translated specially when converting from Core to LowLevel.
-toEffTok : (a : bare) -> IEffect a -> EffTok;
+toEffTok : (a : bare) -> Store -> EffTok;
 
 -- Perform two side-effecting operations in sequence.
 seqEffTok : EffTok -> EffTok -> EffTok;
 
-fromEffTok : (a : bare) -> EffTok -> IEffect a;
+fromEffTok : (a : bare) -> EffTok -> Store;
 
 -- The finalizer of an in-place update operation.
 -- A finalizer performs a one-time computation to convert the updatable
@@ -2364,8 +2367,8 @@ Sequence_array1_build : (a : bare)
 doall : (n : intindex)
      -> (a b : bare)
      -> FIInt n
-     -> (int -> IEffect b)
-     -> IEffect a;
+     -> (int -> Store)
+     -> Store;
 
 -- Sequential loop
 for : (n : intindex)
@@ -2383,8 +2386,8 @@ for_box : (n : intindex) -> (acc : box)
 parallel_doall : (n : intindex)
      -> (a b : bare)
      -> FIInt n
-     -> (int -> IEffect b)
-     -> IEffect a;
+     -> (int -> Store)
+     -> Store;
 
 parallel_dim1_reduce : (a : bare)
                     -> Repr a
@@ -2405,8 +2408,8 @@ parallel_doall2 : (M N : intindex)
      -> (a b : bare)
      -> FIInt M
      -> FIInt N
-     -> (int -> int -> IEffect b)
-     -> IEffect a;
+     -> (int -> int -> Store)
+     -> Store;
 
 -- Blocked parallel reduction, implemented in low-level.
 blocked_1d_reduce :
@@ -2436,8 +2439,8 @@ blocked_doall :
     (N : intindex)
  -> (a b : bare)
  -> FIInt N
- -> ((M : intindex) -> int -> FIInt M -> IEffect b)
- -> IEffect a;
+ -> ((M : intindex) -> int -> FIInt M -> Store)
+ -> Store;
 
 -- Blocked 2D parallel loop
 blocked_doall2 :
@@ -2445,5 +2448,5 @@ blocked_doall2 :
  -> (a b : bare)
  -> FIInt M
  -> FIInt N
- -> ((M N : intindex) -> int -> FIInt M -> int -> FIInt N -> IEffect b)
- -> IEffect a;
+ -> ((M N : intindex) -> int -> FIInt M -> int -> FIInt N -> Store)
+ -> Store;

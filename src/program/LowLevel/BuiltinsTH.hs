@@ -165,13 +165,13 @@ builtinFunctions =
      Left $ closureFunctionType [PrimType PointerType] [])
   , (CName module_memory_py "copy1F",
      Left $
-     closureFunctionType [PrimType PointerType, PrimType PointerType] [])
+     closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
   , (CName module_memory_py "copy2F",
      Left $
-     closureFunctionType [PrimType PointerType, PrimType PointerType] [])
+     closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
   , (CName module_memory_py "copy4F",
      Left $
-     closureFunctionType [PrimType PointerType, PrimType PointerType] [])
+     closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
 
     -- Functions translated from Core
   , (PyonName module_memory_py "copy",
@@ -274,6 +274,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_boxedScatter_updater) |])
   , (PyonName module_effects "seqEffTok",
      Right [| pyonBuiltin (SystemF.The_seqEffTok) |])
+  , (PyonName module_effects "toEffTok",
+     Right [| pyonBuiltin (SystemF.The_toEffTok) |])
   , (PyonName module_structures "repr_arr",
      Right [| SystemF.pyonBuiltin SystemF.The_repr_arr |])
   , (PyonName module_structures "repr_Referenced",

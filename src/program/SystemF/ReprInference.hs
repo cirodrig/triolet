@@ -43,19 +43,12 @@ import qualified SystemF.TypecheckMem as TypecheckMem
 import Globals
 import GlobalVar
 
--- Set to 'True' to print lots of debugging information
-debugVerbose = False
-
-whenDebug = when debugVerbose
-
-printWhenDebug = whenDebug . print
-
 -- | Check whether the @OutPtr@ or @IEffect@ constructors appear in a type.
 --   The constructors should never be seen.  This function is for debugging.
 checkForOutPtr :: Type -> Bool
 checkForOutPtr (VarT t)
   | t `isPyonBuiltin` The_OutPtr = True
-  | t `isPyonBuiltin` The_IEffect = True
+  | t `isPyonBuiltin` The_Store = True
   | otherwise = False
 checkForOutPtr (AppT op arg) =
   checkForOutPtr op || checkForOutPtr arg

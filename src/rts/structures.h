@@ -1,18 +1,9 @@
 
 extern function pyon.internal.structures.copy_PyonTuple2
-  (owned, owned, uint, uint, uint, uint, pointer, pointer) -> ();
-
-extern function pyon.internal.structures.copy_Repr
-  (pointer, pointer) -> ();
-
-extern function pyon.internal.structures.complex_pass_conv
-  (pointer, pointer) -> ();
-
-extern function pyon.internal.structures.additiveDict_complex
-  (pointer, pointer) -> ();
+  (owned, owned, uint, uint, uint, uint, pointer, pointer) -> unit;
 
 extern function pyon.internal.structures.makeComplex
-  (float, float, pointer) -> ();
+  (float, float, pointer) -> unit;
 
 extern function pyon.internal.structures.repr_Referenced
   (owned) -> owned;

@@ -17,3 +17,7 @@ module pyon.internal.effects;
 function inline seqEffTok (unit _, unit _) -> unit {
   nil;
 };
+
+function inline toEffTok (unit x) -> unit {
+  x;
+};

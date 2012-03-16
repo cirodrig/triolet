@@ -426,12 +426,14 @@ getFunctionInputsAndOutputs tenv ty =
          OutK  -> False
          _     -> internalError "getCExportSig: Unexpected type"
 
-    -- Decide whether the return type describes an output
+    -- Decide whether the return type describes an output.
+    -- Store objects represent a return by side effect.
     output_return t =
       case kind t
-      of ValK -> True
+      of ValK -> case t
+                 of VarT v | v `isPyonBuiltin` The_Store -> False
+                    _ -> True
          BoxK -> True
-         SideEffectK -> False
          _  -> internalError "getCExportSig: Unexpected type"
 
     get_param_input_type ty =

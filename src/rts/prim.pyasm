@@ -33,8 +33,8 @@ function inline convertToBoxed (owned repr, owned writer) -> owned {
   owned call (repr @! Repr.convert_to_boxed) (writer);
 };
 
-function inline convertToBare (owned repr, owned src, pointer dst) -> () {
-  () call (repr @! Repr.convert_to_bare) (src, dst);
+function inline convertToBare (owned repr, owned src, pointer dst) -> unit {
+  unit call (repr @! Repr.convert_to_bare) (src, dst);
 };
 
 // Since a partially applied instance of this function may be used to
@@ -48,25 +48,25 @@ function inline make_Boxed (uint size, uint align, owned writer) -> owned {
 
   // TODO: initialize object Header
   () = () primcall pyon_db_pointer (writer as pointer);
-  () = () call writer (p @ boxed_type.member);
+  _ = unit call writer (p @ boxed_type.member);
   p as owned;
 };
 
 // Since a partially applied instance of this function may be used to
 // initialize a Repr object, we pass the fields of the Repr instead of passing
 // the Repr.
-function inline from_Boxed (uint size, uint align, owned copy, owned boxed, pointer dst) -> () {
+function inline from_Boxed (uint size, uint align, owned copy, owned boxed, pointer dst) -> unit {
   typedef elt_type = bytes(value size, value align);
   typedef boxed_type = Boxed(elt_type);
 
-  () call (copy) (boxed @ boxed_type.member, dst);
+  unit call (copy) (boxed @ boxed_type.member, dst);
 };
 
 function inline make_Boxed_0 (owned writer) -> owned {
   p = pointer primcall pyon_alloc (sizeof Boxed(unit));
 
   // FIXME: initialize object header
-  () = () call writer (p @ Boxed(unit).member);
+  _ = unit call writer (p @ Boxed(unit).member);
   p as owned;
 };
 
@@ -74,7 +74,7 @@ function inline make_Boxed_1 (owned writer) -> owned {
   p = pointer primcall pyon_alloc (sizeof Boxed(bytes(value uint 1, value uint 1)));
 
   // FIXME: initialize object header
-  () = () call writer (p @ Boxed(unit).member);
+  _ = unit call writer (p @ Boxed(unit).member);
   p as owned;
 };
 
@@ -82,27 +82,27 @@ function inline make_Boxed_4 (owned writer) -> owned {
   p = pointer primcall pyon_alloc (sizeof Boxed(bytes(value uint 4, value uint 4)));
 
   // FIXME: initialize object header
-  () = () call writer (p @ Boxed(unit).member);
+  _ = unit call writer (p @ Boxed(unit).member);
   p as owned;
 };
 
-function inline from_Boxed_0 (owned src, pointer dst) -> () {
-  (); // Do nothing
+function inline from_Boxed_0 (owned src, pointer dst) -> unit {
+  nil; // Do nothing
 };
 
-function inline from_Boxed_1 (owned src, pointer dst) -> () {
+function inline from_Boxed_1 (owned src, pointer dst) -> unit {
   !dst = src @! Boxed(uint8).member;
-  ();
+  nil;
 };
 
-function inline from_Boxed_4 (owned src, pointer dst) -> () {
+function inline from_Boxed_4 (owned src, pointer dst) -> unit {
   !dst = src @! Boxed(uint32).member;
-  ();
+  nil;
 };
 
-function inline storeBox (owned arg, pointer dst) -> () {
+function inline storeBox (owned arg, pointer dst) -> unit {
   !dst = arg;
-  ();
+  nil;
 };
 
 function inline loadBox (pointer src) -> owned {
@@ -299,13 +299,13 @@ function extgcd_x (int x, int y) -> int {
   lastx;
 };
 
-function inline doall (FinIndInt ix, owned f) -> () {
+function inline doall (FinIndInt ix, owned f) -> unit {
   FinIndInt {count} = ix;
   _ = while (int n = int 0) (n < count) {
-    () = () call f (n);
+    _ = unit call f (n);
     n + int 1;
   };
-  ();
+  nil;
 };
 
 // A parallel reduction.  The iteration space is partitioned at run time
@@ -365,10 +365,11 @@ procedure blocked_reduce2_reduce (pointer dat, owned x, owned y) -> owned {
 };
 
 function inline blocked_doall
-  (FinIndInt size, owned worker) -> () {
+  (FinIndInt size, owned worker) -> unit {
   FinIndInt {count} = size;
 
-  () primcall pyon_C_blocked_doall (worker, count);
+  () = () primcall pyon_C_blocked_doall (worker, count);
+  nil;
 };
 
 procedure blocked_doall_worker (owned f, int start, int end) -> () {
@@ -376,12 +377,13 @@ procedure blocked_doall_worker (owned f, int start, int end) -> () {
 };
 
 function blocked_doall2
-  (FinIndInt size_y, FinIndInt size_x, owned worker) -> () {
+  (FinIndInt size_y, FinIndInt size_x, owned worker) -> unit {
 
   FinIndInt {count_y} = size_y;
   FinIndInt {count_x} = size_x;
 
-  () primcall pyon_C_blocked_doall2 (worker, count_y, count_x);
+  () = () primcall pyon_C_blocked_doall2 (worker, count_y, count_x);
+  nil;
 };
 
 procedure blocked_doall2_worker

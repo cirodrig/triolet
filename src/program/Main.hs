@@ -42,6 +42,7 @@ import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
+import qualified LowLevel.RemoveUnits as LowLevel
 import qualified LowLevel.CSE as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.DeadCode as LowLevel
@@ -389,12 +390,10 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   -- Run 2 rounds, which is enough to inline most HOFs.
   -- Then normalize tail calls to increase opportunities for inlining.
   let round m = do
-        m <- LowLevel.convertJoinPoints m -- Label join points before inlining
-        -- putStrLn ""
-        -- putStrLn "After simplifying"
-        -- print $ LowLevel.pprModule m
+        -- Label join points to help the inliner, then inline
+        m <- LowLevel.convertJoinPoints m
         m <- LowLevel.Inlining2.inlineModule m
-        -- Take advantage of optimization opportunities exposed by inlining
+        -- Exploit optimization opportunities exposed by inlining
         m <- LowLevel.commonSubexpressionElimination m
         return $ LowLevel.eliminateDeadCode m
 
@@ -422,7 +421,11 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   putStrLn "After closure conversion"
   print $ LowLevel.pprModule ll_mod
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
-  
+
+  -- After closure conversion, unit values are superfluous
+  -- remove them
+  ll_mod <- LowLevel.removeUnits ll_mod
+
   -- Second round of optimizations
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod

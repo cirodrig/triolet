@@ -181,7 +181,7 @@ mkAlt tenv con ty_args mk_body =
      _ -> internalError "mkAlt"
 
 outType t = varApp (pyonBuiltin The_OutPtr) [t]
-initEffectType t = varApp (pyonBuiltin The_IEffect) [t]
+initEffectType t = VarT (pyonBuiltin The_Store)
 storedType t = varApp (pyonBuiltin The_Stored) [t]
 
 writerType t = outType t `FunT` initEffectType t

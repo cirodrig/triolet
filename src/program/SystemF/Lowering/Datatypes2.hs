@@ -942,7 +942,6 @@ lowerType tenv ty =
      BoxK        -> return $ Just $ LL.PrimType LL.OwnedType
      BareK       -> return $ Just $ LL.PrimType LL.PointerType
      OutK        -> return $ Just $ LL.PrimType LL.PointerType
-     SideEffectK -> return Nothing
      _           -> internalError "lowerReturnType: Invalid representation"
 
 lowerTypeList :: TypeEnv -> [Type] -> Lower [LL.ValueType]
@@ -1016,10 +1015,10 @@ algMemIntro' (MemProd { memLayout = layout
   -- referenced memory.
   ret_param <- lift $ LL.newAnonymousVar (LL.PrimType LL.PointerType)
 
-  genLambda [LL.PrimType LL.PointerType] [] $ \[ret_param] -> do
+  genLambda [LL.PrimType LL.PointerType] [LL.PrimType LL.UnitType] $ \[ret_param] -> do
     -- Write fields
     writer (algInitializers fields fs) ret_param
-    return []
+    return [LL.LitV LL.UnitL]
 
 algValIntro vl con =
   case findMember ((con ==) . valConstructor) vl
@@ -1045,7 +1044,9 @@ algInitializers params fs
       zipWith mk_init params fs  
   where
     mk_init param (MemLayout _) =
-      WriteInit $ \p -> emitAtom0 $ LL.closureCallA param [p]
+      WriteInit $ \p -> do
+        emitAtom1 (LL.PrimType LL.UnitType) $ LL.closureCallA param [p]
+        return ()
     mk_init param (ValLayout _) =
       ValInit (return param)
 

@@ -278,14 +278,6 @@ getConType (VarCon op ty_args ex_types) = do
 --
 --   Type applications are erased, so if there are  with no arguments are 
 lowerApp :: Type -> ExpM -> [Type] -> [ExpM] -> GenLower RetVal
-lowerApp rt (ExpM (VarE _ op_var)) ty_args args
-  | op_var `isPyonBuiltin` The_toEffTok =
-    -- The function 'toEffTok' is handled specially because its argument
-    -- expression doesn't yield a value.
-    -- Run the argument, then return a unit value.
-    let [arg] = args
-    in do NoVal <- lowerExp arg
-          return $ RetVal (LL.LitV LL.UnitL)
 
 lowerApp rt (ExpM (VarE _ op_var)) ty_args args
   | Just mk_code <- LL.lowerIntrinsicOp op_var = do
