@@ -562,7 +562,8 @@ resolveTypeName nm = do
             TypeParameterEntry {} -> Nothing
     else Just $ "Not defined: '" ++ nm ++ "'"
   return $ case entry
-           of TypeEntry t -> pure t
+           of VarEntry {} -> error $ "Not a type: '" ++ nm ++ "'"
+              TypeEntry t -> pure t
               TypeParameterEntry tp -> fmap fromTypeArg $ pVar type_arity tp
 
 resolveTypeName0 :: RecordName Parsed -> NR (Type Typed)
