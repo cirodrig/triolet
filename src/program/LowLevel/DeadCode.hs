@@ -253,17 +253,28 @@ dceLet params rhs body = do
 --
 --   If the expression has the form @let x = A in x@, then eliminate the 
 --   variable binding and construct a return expression instead.
+--
+--   This also works if the expression has the form @let x = A in V@ for
+--   any value @V@, if @x@ and @V@ have unit type.
+
 rebuildLet params rhs body
   | ReturnE (ValA vals) <- body, match_params params vals =
       ReturnE rhs
   | otherwise = LetE params rhs body
   where
-    match_params (p:params) (VarV v:vals) =
-      p == v && match_params params vals
+    match_params (p:params) (v:vals) =
+      match_param p v && match_params params vals
     
     match_params [] [] = True
     
     match_params _ _ = False
+
+    -- Match is successful if the return value is just the parameter,
+    -- or if both things have unit type
+    match_param p (VarV v) | p == v = True
+    match_param p v        | varType p == PrimType UnitType &&
+                             valType v == PrimType UnitType = True
+    match_param _ _        = False
 
 dceLetrec defs body = make_letrec <$> dceLocalDefGroup defs (dceStm body)
   where
