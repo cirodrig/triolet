@@ -314,6 +314,11 @@ inlineCall' (!f, n_returns) args cont
   | n_args == n_params =
       inlineSaturatedCall f n_returns args cont
 
+  | funConvention f /= ClosureCall =
+      -- Funcction has wrong number of parameters, but it's a procedure
+      -- or join point.  This means an error happened earlier.
+      internalError "inlineCall: Procedure or join point called with wrong number of paramaters"
+
   | n_args > n_params = do
       -- Inline a saturated call.  The saturated call returns a function.
       -- Apply the remaining arguments to that function.
