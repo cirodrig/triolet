@@ -105,7 +105,7 @@ typeCheckType ty =
        -- Get type of application
        applied <- typeOfApp op_k arg_k
        case applied of
-         Nothing -> internalError "typeCheckType: Error in type application"
+         Nothing -> internalError ("typeCheckType: Error in type application:\n" ++ show (pprType ty))
          Just result_t -> return result_t
 
      FunT dom rng -> do
