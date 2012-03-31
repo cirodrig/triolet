@@ -278,8 +278,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_toEffTok) |])
   , (PyonName module_structures "repr_arr",
      Right [| SystemF.pyonBuiltin SystemF.The_repr_arr |])
-  , (PyonName module_structures "repr_Referenced",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_Referenced |])
+  --, (PyonName module_structures "repr_Referenced",
+    --Right [| SystemF.pyonBuiltin SystemF.The_repr_Referenced |])
   , (PyonName module_structures "repr_Maybe",
      Right [| SystemF.pyonBuiltin SystemF.The_repr_Maybe |])
   {-, (PyonName module_structures "complex_pass_conv",

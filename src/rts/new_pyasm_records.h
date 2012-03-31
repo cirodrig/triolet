@@ -194,9 +194,9 @@ record SliceObject {
  * list, but rather passed to functions that operate on the list.
  */
 record PyonList {
-  FinIndInt nelems;		// Number of elements in the list.
+  FinIndInt nelems;	// Number of elements in the list.
                                 // Actual allocated size may be larger.
-  pointer contents;		// Pointer to list contents
+  owned contents;		// Pointer to list contents
 };
 
 /* 0D arrays
@@ -204,7 +204,7 @@ record PyonList {
  * A 0-dimensional array contains just a single value.
  */
 record PyonArray0(a) {
-  a content;                    // The single value contained in the array
+  const a content;          // The single value contained in the array
 };
 
 /* 1D arrays
@@ -212,10 +212,10 @@ record PyonArray0(a) {
  * An array has a lower bound, stride, and size.
  */
 record PyonArray1 {
-  int first;
-  int stride;
-  FinIndInt size;
-  pointer contents;		// Pointer to matrix contents
+  const int first;
+  const int stride;
+  const FinIndInt size;
+  const owned contents;		// Pointer to matrix contents
 };
 
 /* 2D arrays
@@ -227,26 +227,26 @@ record PyonArray1 {
  * Array elements are consecutive in the X dimension.
  */
 record PyonArray2 {
-  int first_y;
-  int stride_y;
-  FinIndInt size_y;
-  int first_x;
-  int stride_x;
-  FinIndInt size_x;
-  pointer contents;		// Pointer to matrix contents
+  const int first_y;
+  const int stride_y;
+  const FinIndInt size_y;
+  const int first_x;
+  const int stride_x;
+  const FinIndInt size_x;
+  const owned contents;		// Pointer to matrix contents
 };
 
 record PyonArray3 {
-  int first_z;
-  int stride_z;
-  FinIndInt size_z;
-  int first_y;
-  int stride_y;
-  FinIndInt size_y;
-  int first_x;
-  int stride_x;
-  FinIndInt size_x;
-  pointer contents;		// Pointer to matrix contents
+  const int first_z;
+  const int stride_z;
+  const FinIndInt size_z;
+  const int first_y;
+  const int stride_y;
+  const FinIndInt size_y;
+  const int first_x;
+  const int stride_x;
+  const FinIndInt size_x;
+  const owned contents;		// Pointer to matrix contents
 };
 
 /* This data structure is used by 'blocked_reduce' to store data that's

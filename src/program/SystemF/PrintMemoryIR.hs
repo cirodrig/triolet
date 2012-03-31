@@ -15,6 +15,7 @@ module SystemF.PrintMemoryIR
         pprFunPrec,
         pprFDef,
         pprFDefGroup,
+        pprGDef,
         pprExport,
         pprModule,
         pprModuleFlags,

@@ -63,6 +63,7 @@ unLoc (L _ x) = x
 -- | Attribute annotations from the source code
 data Attribute =
     AbstractAttr                    -- ^ Data type is abstract
+  | NonalgebraicAttr                -- ^ Data type is not algebraic
   | ConlikeAttr                     -- ^ Function calls are cheap to reevaluate
   | InlineAttr                      -- ^ Definition should be aggressively
                                     --   inlined

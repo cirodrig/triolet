@@ -90,7 +90,9 @@ namespace Pyon {
                        PyonUInt elt_align,
                        PyonBarePtr ret);
   extern "C" PyonBarePtr
-  pyon_List_get_contents(PyonBarePtr list) __attribute__((pure));
+  pyon_List_get_contents(PyonBarePtr list,
+                         PyonUInt elt_size,
+                         PyonUInt elt_align) __attribute__((pure));
   extern "C" PyonUInt
   pyon_List_get_length(PyonBarePtr list) __attribute__((pure));
 
@@ -115,7 +117,9 @@ namespace Pyon {
                          PyonUInt elt_align,
                          PyonBarePtr ret);
   extern "C" PyonBarePtr
-  pyon_Array1_get_contents(PyonBarePtr array) __attribute__((pure));
+  pyon_Array1_get_contents(PyonBarePtr array,
+                           PyonUInt elt_size,
+                           PyonUInt elt_align) __attribute__((pure));
 
   struct Array1Bounds {
     int32_t min;
@@ -138,7 +142,9 @@ namespace Pyon {
                          PyonUInt elt_align,
                          PyonBarePtr ret);
   extern "C" PyonBarePtr
-  pyon_Array2_get_contents(PyonBarePtr array) __attribute__((pure));
+  pyon_Array2_get_contents(PyonBarePtr array,
+                           PyonUInt elt_size,
+                           PyonUInt elt_align) __attribute__((pure));
   
   struct Array2Bounds {
     int32_t ymin;
@@ -168,7 +174,9 @@ namespace Pyon {
                          PyonBarePtr ret);
 
   extern "C" PyonBarePtr
-  pyon_Array3_get_contents(PyonBarePtr array) __attribute__((pure));
+  pyon_Array3_get_contents(PyonBarePtr array,
+                           PyonUInt elt_size,
+                           PyonUInt elt_align) __attribute__((pure));
 
   struct Array3Bounds {
     int32_t zmin;

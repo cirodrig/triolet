@@ -113,7 +113,7 @@ load tenv ty val =
 -- >                        (p : Referenced (array n list_type)).
 -- >      case p
 -- >      of referenced ay. $(make_body n sz ay)
-caseOfList :: TypeEnv
+{-caseOfList :: TypeEnv
            -> RW ExpM           -- ^ List to inspect
            -> Type              -- ^ Type of list element
            -> (Var -> Var -> Var -> RW ExpM)
@@ -152,7 +152,7 @@ caseOfMatrix tenv scrutinee elt_type mk_body =
     -- Create the type (array m (array n elt_type))
     array_type size_y_index size_x_index =
       varApp (pyonBuiltin The_arr) [VarT size_y_index,
-                                    varApp (pyonBuiltin The_arr) [VarT size_x_index, elt_type]]
+                                    varApp (pyonBuiltin The_arr) [VarT size_x_index, elt_type]]-}
 
 caseOfTraversableDict :: TypeEnv
                       -> RW ExpM
@@ -221,7 +221,7 @@ caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
 -- | Create a list where each array element is a function of its index only
 --
 --   If no return pointer is given, a writer function is generated.
-defineList :: Type             -- Array element type
+{-defineList :: Type             -- Array element type
            -> Type             -- Array size type index
            -> RW ExpM    -- Array size
            -> RW ExpM    -- Array element representation
@@ -263,7 +263,7 @@ defineArray elt_type size_ix size elt_repr writer =
        in writer index_var out_expr)])
   where
     array_type =
-      varApp (pyonBuiltin The_arr) [size_ix, elt_type]
+      varApp (pyonBuiltin The_arr) [size_ix, elt_type] -}
 
 intType = VarT (pyonBuiltin The_int)
 storedIntType = storedType intType

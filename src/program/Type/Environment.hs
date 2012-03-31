@@ -38,6 +38,7 @@ module Type.Environment
         lookupDataConWithType,
         lookupTypeFunction,
         getAllDataConstructors,
+        getAllDataTypeConstructors,
         getAllTypes,
         pprTypeEnv,
         emptyTypeEnv,
@@ -208,9 +209,18 @@ data DataType =
     --   It is still permissible to optimize such expressions if they are
     --   already present in the code.
   , dataTypeIsAbstract :: !Bool
-    
+
+    -- | Whether the data type is algebraic.
+    --
+    --   Most data type are algebraic.  However, a few (int, float, array)
+    --   have a built-in, nonalgebraic definition.
+  , dataTypeIsAlgebraic :: !Bool
+
     -- | Data constructors of this data type
   , dataTypeDataConstructors :: [Var]
+
+    -- | This data type's type constructor
+  , dataTypeCon :: !Var
   }
 
 -- | Describes a data constructor.
@@ -234,8 +244,8 @@ data DataConType =
     -- and matched as parameters when deconstructing it.
   , dataConPatternArgs :: [Type]
 
-  , dataConCon :: Var           -- ^ This data constructor
-  , dataConTyCon :: Var         -- ^ The type inhabited by constructed values
+  , dataConCon :: !Var          -- ^ This data constructor
+  , dataConTyCon :: !Var        -- ^ The type inhabited by constructed values
   }
 
 -- | The type of a 'DataConType' value.
@@ -325,11 +335,11 @@ insertTypeWithProperties v t conlike (TypeEnv env) =
 
 -- | A description of a data type that will be added to a type environment.
 data DataTypeDescr =
-  DataTypeDescr Var Type [(Type, DataConType)] Bool
+  DataTypeDescr Var Type [(Type, DataConType)] !Bool !Bool
 
 insertDataType :: DataTypeDescr
                -> TypeEnvBase type_function -> TypeEnvBase type_function
-insertDataType (DataTypeDescr ty_con kind ctors abstract) (TypeEnv env) =
+insertDataType (DataTypeDescr ty_con kind ctors abstract algebraic) (TypeEnv env) =
   TypeEnv $ foldr insert env (ty_con_assignment : data_con_assignments)
   where
     insert (v, a) env = IntMap.insert (fromIdent $ varID v) a env
@@ -337,7 +347,7 @@ insertDataType (DataTypeDescr ty_con kind ctors abstract) (TypeEnv env) =
     data_con_assignments =
       [(dataConCon dtor, DataConTypeAssignment ty dtor)
       | (ty, dtor) <- ctors]
-    data_type = DataType (result_kind kind) abstract data_cons
+    data_type = DataType (result_kind kind) abstract algebraic data_cons ty_con
     ty_con_assignment = (ty_con, TyConTypeAssignment kind data_type)
     
     -- The kind of a fully applied instance of the data constructor
@@ -398,6 +408,13 @@ getAllDataConstructors :: TypeEnv -> IntMap.IntMap DataConType
 getAllDataConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env 
   where
     get_data_con (DataConTypeAssignment _ dcon) = Just dcon 
+    get_data_con _ = Nothing
+
+-- | Get all algebraic data type constructors in the type environment
+getAllDataTypeConstructors :: TypeEnv -> IntMap.IntMap (Type, DataType)
+getAllDataTypeConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env 
+  where
+    get_data_con (TyConTypeAssignment ty dtype) = Just (ty, dtype)
     get_data_con _ = Nothing
 
 -- | Get all types in the type environment

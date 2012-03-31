@@ -1002,7 +1002,9 @@ namespace Pyon {
       // Member Functions
       T_Bare 
       at(int index) { 
-        PyonBarePtr list_contents = pyon_List_get_contents(getBareData());
+        PyonBarePtr list_contents =
+          pyon_List_get_contents(getBareData(),
+                                 T_Bare::getSize(), T_Bare::getAlignment());
         return T_Bare(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
       }
 
@@ -1054,9 +1056,11 @@ namespace Pyon {
 
         /* Copy list contents.  It's an array of pointers. */
         PyonBarePtr src_array =
-          pyon_List_get_contents(list.getBareData());
+          pyon_List_get_contents(list.getBareData(),
+                                 sizeof(PyonBoxPtr), __alignof__(PyonBoxPtr));
         PyonBarePtr dst_array =
-          pyon_List_get_contents(incompleteList.getObject());
+          pyon_List_get_contents(incompleteList.getObject(),
+                                 sizeof(PyonBoxPtr), __alignof__(PyonBoxPtr));
         memcpy(dst_array, src_array, length * sizeof(PyonBoxPtr));
       }
 
@@ -1067,7 +1071,9 @@ namespace Pyon {
       T_Box
       at(int index) { 
         PyonBoxPtr *list_contents =
-          (PyonBoxPtr *)pyon_List_get_contents(getBareData());
+          (PyonBoxPtr *)pyon_List_get_contents(getBareData(),
+                                               sizeof(PyonBoxPtr),
+                                               __alignof__(PyonBoxPtr));
         return T_Box(list_contents[index]);
       }
   };
@@ -1142,7 +1148,9 @@ namespace Pyon {
         if (displacement % array1Bounds.stride != 0)
           pyonError("Array index out of bounds\n");
 
-        PyonBarePtr array1_contents = pyon_Array1_get_contents(getBareData());
+        PyonBarePtr array1_contents =
+          pyon_Array1_get_contents(getBareData(),
+                                   T_Bare::getSize(), T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return T_Bare(array1_contents + i * element_size);
       }
@@ -1200,9 +1208,13 @@ namespace Pyon {
 
         /* Copy array contents, which is an array of pointers */
         PyonBarePtr dst_array =
-          pyon_Array1_get_contents(incompleteArray1.getObject());
+          pyon_Array1_get_contents(incompleteArray1.getObject(),
+                                   sizeof(PyonBoxPtr),
+                                   __alignof__(PyonBoxPtr));
         PyonBarePtr src_array =
-          pyon_Array1_get_contents(array1.getBareData());
+          pyon_Array1_get_contents(array1.getBareData(),
+                                   sizeof(PyonBoxPtr),
+                                   __alignof__(PyonBoxPtr));
         memcpy(dst_array, src_array, bounds.size * sizeof(PyonBoxPtr));
       }
       
@@ -1221,7 +1233,9 @@ namespace Pyon {
           pyonError("Array index out of bounds\n");
 
         PyonBoxPtr *array1_contents =
-          (PyonBoxPtr *)pyon_Array1_get_contents(getBareData());
+          (PyonBoxPtr *)pyon_Array1_get_contents(getBareData(),
+                                                 sizeof(PyonBoxPtr),
+                                                 __alignof__(PyonBoxPtr));
         return T_Box(array1_contents[i]);
       }
 
@@ -1310,7 +1324,9 @@ namespace Pyon {
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        PyonBarePtr array2_contents = pyon_Array2_get_contents(getBareData());
+        PyonBarePtr array2_contents = pyon_Array2_get_contents(getBareData(),
+                                                               T_Bare::getSize(),
+                                                               T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return T_Bare(array2_contents + index * element_size);
       }
@@ -1371,9 +1387,13 @@ namespace Pyon {
 
         /* Copy array contents.  It's an array of pointers. */
         PyonBarePtr dst_array =
-          pyon_Array2_get_contents(incompleteArray2.getObject());
+          pyon_Array2_get_contents(incompleteArray2.getObject(),
+                                   sizeof(PyonBoxPtr),
+                                   __alignof__(PyonBoxPtr));
         PyonBarePtr src_array =
-          pyon_Array2_get_contents(array2.getBareData());
+          pyon_Array2_get_contents(array2.getBareData(),
+                                   sizeof(PyonBoxPtr),
+                                   __alignof__(PyonBoxPtr));
         memcpy(dst_array, src_array,
                bounds.ysize * bounds.xsize * sizeof(PyonBoxPtr));
       }
@@ -1401,7 +1421,9 @@ namespace Pyon {
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
         PyonBoxPtr *array2_contents =
-          (PyonBoxPtr *)pyon_Array2_get_contents(getBareData());
+          (PyonBoxPtr *)pyon_Array2_get_contents(getBareData(),
+                                                 sizeof(PyonBoxPtr),
+                                                 __alignof__(PyonBoxPtr));
         return T_Box(array2_contents[index]);
       }
   };
@@ -1505,7 +1527,10 @@ namespace Pyon {
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        PyonBarePtr array3_contents = pyon_Array3_get_contents(getBareData());
+        PyonBarePtr array3_contents =
+          pyon_Array3_get_contents(getBareData(),
+                                   T_Bare::getSize(),
+                                   T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return T_Bare(array3_contents + index * element_size);
       }
@@ -1572,9 +1597,13 @@ namespace Pyon {
 
         /* Copy array contents.  It's an array of pointers. */
         PyonBarePtr dst_array =
-          pyon_Array3_get_contents(incompleteArray3.getObject());
+          pyon_Array3_get_contents(incompleteArray3.getObject(),
+                                   sizeof(PyonBoxPtr),
+                                   __alignof__(PyonBoxPtr));
         PyonBarePtr src_array =
-          pyon_Array3_get_contents(array3.getBareData());
+          pyon_Array3_get_contents(array3.getBareData(),
+                                   sizeof(PyonBoxPtr),
+                                   __alignof__(PyonBoxPtr));
         memcpy(dst_array, src_array,
                bounds.zsize * bounds.ysize * bounds.xsize * sizeof(PyonBoxPtr));
       }
@@ -1608,7 +1637,9 @@ namespace Pyon {
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
         PyonBoxPtr *array3_contents =
-          (PyonBoxPtr *)pyon_Array3_get_contents(getBareData());
+          (PyonBoxPtr *)pyon_Array3_get_contents(getBareData(),
+                                                 sizeof(PyonBoxPtr),
+                                                 __alignof__(PyonBoxPtr));
         return T_Box(array3_contents[index]);
       }
 
@@ -1917,7 +1948,9 @@ namespace Pyon {
 
       Incomplete< T_Bare > 
       at(int index) { 
-        PyonBarePtr list_contents = pyon_List_get_contents(this->getObject());
+        PyonBarePtr list_contents = pyon_List_get_contents(this->getObject(),
+                                                           T_Bare::getSize(),
+                                                           T_Bare::getAlignment());
         return Incomplete<T_Bare>(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
       }
 
@@ -1956,7 +1989,9 @@ namespace Pyon {
       Incomplete<StuckRef<T_Box> > 
       at(int index) {
         PyonBoxPtr *list_contents =
-          (PyonBoxPtr *)pyon_List_get_contents(this->getObject());
+          (PyonBoxPtr *)pyon_List_get_contents(this->getObject(),
+                                               sizeof(PyonBoxPtr),
+                                               __alignof__(PyonBoxPtr));
         return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&list_contents[index]);
       }
     };
@@ -1995,7 +2030,10 @@ namespace Pyon {
       Incomplete< T_Bare > 
       at(int index) { 
         int32_t min = pyon_Array1_get_bounds(this->getObject()).min;
-        PyonBarePtr array1_contents = pyon_Array1_get_contents(this->getObject());
+        PyonBarePtr array1_contents =
+          pyon_Array1_get_contents(this->getObject(),
+                                   T_Bare::getSize(),
+                                   T_Bare::getAlignment());
         return Incomplete<T_Bare>(array1_contents + (index - min)*addPadding<T_Bare>(T_Bare::getSize()) ); 
       }
 
@@ -2032,7 +2070,10 @@ namespace Pyon {
       Incomplete<StuckRef<T_Box> > 
       at(int index) {
         int32_t min = pyon_Array1_get_bounds(this->getObject()).min;
-        PyonBoxPtr *array1_contents = (PyonBoxPtr *)pyon_Array1_get_contents(this->getObject());
+        PyonBoxPtr *array1_contents =
+          (PyonBoxPtr *)pyon_Array1_get_contents(this->getObject(),
+                                                 sizeof(PyonBoxPtr),
+                                                 __alignof(PyonBoxPtr));
         
         return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&array1_contents[index - min]);
       }
@@ -2090,7 +2131,10 @@ namespace Pyon {
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        PyonBarePtr array2_contents = pyon_Array2_get_contents(this->getObject());
+        PyonBarePtr array2_contents =
+          pyon_Array2_get_contents(this->getObject(),
+                                   T_Bare::getSize(),
+                                   T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return Incomplete<T_Bare>(array2_contents + index * element_size ); 
       }
@@ -2148,7 +2192,9 @@ namespace Pyon {
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
         PyonBoxPtr *array2_contents =
-          (PyonBoxPtr *)pyon_Array2_get_contents(this->getObject());
+          (PyonBoxPtr *)pyon_Array2_get_contents(this->getObject(),
+                                                 sizeof(PyonBoxPtr),
+                                                 __alignof__(PyonBoxPtr));
         return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&array2_contents[index]); 
       }
   };
@@ -2219,7 +2265,10 @@ namespace Pyon {
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        PyonBarePtr contents = pyon_Array3_get_contents(this->getObject());
+        PyonBarePtr contents =
+          pyon_Array3_get_contents(this->getObject(),
+                                   T_Bare::getSize(),
+                                   T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return Incomplete<T_Bare>(contents + index * element_size);
       }
@@ -2292,7 +2341,9 @@ namespace Pyon {
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
         PyonBoxPtr *contents =
-          (PyonBoxPtr *)pyon_Array3_get_contents(this->getObject());
+          (PyonBoxPtr *)pyon_Array3_get_contents(this->getObject(),
+                                                 sizeof(PyonBoxPtr),
+                                                 __alignof__(PyonBoxPtr));
         return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&contents[index]);
       }
   };

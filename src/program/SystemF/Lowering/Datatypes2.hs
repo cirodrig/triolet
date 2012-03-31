@@ -706,6 +706,7 @@ memRecordLayout mk_record = DynamicMemLayout $ do
   (recd, is_pointerless) <- mk_record
   return (LL.recordSize recd, LL.recordAlignment recd, is_pointerless)
 
+{-
 -- | The layout of an indirect reference.  The reference occupies one pointer
 --   worth of memory.  It points to a dynamically allocated data structure
 --   containing all its fields.  The data structure is big enough to hold 
@@ -737,7 +738,7 @@ referenceLayout layout =
       referent <- primLoadMutable (LL.PrimType LL.PointerType) src
 
       -- Get the referent
-      return [referent]
+      return [referent] -}
 
 -- | The layout of a polymorphic reference.  Its size and alignment are
 --   computed at run time.
@@ -1258,10 +1259,10 @@ getBoxedDataTypeLayout ty_args datacons = do
 getRefAlgLayout :: Type -> Lower AlgMemLayout
 getRefAlgLayout ty =
   case fromVarApp ty
-  of Just (op, [arg])
-       | op `isPyonBuiltin` The_Referenced -> do
+  of {-Just (op, [arg])
+        | op `isPyonBuiltin` The_Referenced -> do
            arg_layout <- getRefLayout =<< reduceToWhnf arg
-           return $ nonSumMemLayout $ referenceLayout arg_layout
+           return $ nonSumMemLayout $ referenceLayout arg_layout-}
      _ -> do
        tenv <- getTypeEnv
        case lookupDataTypeForLayout tenv ty of
@@ -1353,7 +1354,8 @@ getValLayout ty
            assume v k $ getValLayout ty''
          (CoT {}, [_, _]) ->
            -- Coercions are erased
-           return VErased
+           -- TODO: Convert coercions to unit values, instead
+           error "Coercion" -- $ return VErased
 
          _ -> internalError "getLayout: Head is not a type application"
   where
@@ -1364,9 +1366,9 @@ getRefLayout :: Type -> Lower MemLayout
 getRefLayout ty = do
   ty' <- Substitute.freshen ty
   case fromTypeApp ty' of
-     (VarT op, [arg])
+     {-(VarT op, [arg])
        | op `isPyonBuiltin` The_Referenced -> do
-           return IndirectMemLayout
+           return IndirectMemLayout-}
      (VarT op, [arg1, arg2])
        | op `isPyonBuiltin` The_arr -> do
            field_layout <- getRefLayout =<< reduceToWhnf arg2

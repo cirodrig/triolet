@@ -156,6 +156,7 @@ attr = do
   where
     attr_table =
       [("abstract", return AbstractAttr),
+       ("nonalgebraic", return NonalgebraicAttr),
        ("conlike", return ConlikeAttr),
        ("inline", return InlineAttr),
        ("inline_dimensionality", return InlineDimensionalityAttr),

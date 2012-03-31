@@ -35,14 +35,16 @@ data Boxed : bare -> box
   boxed (a : bare) () (a);
 };
 
-data Referenced : bare -> bare
+-- A stuck box is like a 'boxed' but doesn't get unwrapped
+-- by 'convertToBoxed'.
+data StuckBox : bare -> box
 {
-  referenced (a : bare) () (a);
+  stuckBox (a : bare) () (a);
 };
 
 -- A pointer used for initializing data
 data OutPtr : bare -> out
-  attribute(abstract) {};
+  attribute(abstract, nonalgebraic) {};
 
 -- A dummy value representing the effect of initializing an object
 data Store : val
@@ -66,8 +68,9 @@ data bool : val
   False () () ();
 };
 
-data int : val attribute(abstract) {};
-data float : val attribute(abstract) {};
+data int : val attribute(abstract, nonalgebraic) {};
+data uint : val attribute(abstract, nonalgebraic) {};
+data float : val attribute(abstract, nonalgebraic) {};
 
 data NoneType : val
 {
@@ -146,7 +149,7 @@ data Complex : bare -> bare
 };
 
 data arr : intindex -> bare -> bare
-  attribute(abstract)
+  attribute(abstract, nonalgebraic)
 {};
 
 
@@ -170,9 +173,14 @@ data PyonTuple4 : bare -> bare -> bare -> bare -> bare
 
 -- Dictionaries
 
-data SA : bare -> val
+data SizeAlign : bare -> val
 {
-  sa (a : bare) () (int, int);
+  sizeAlign (a : bare) () (uint, uint);
+};
+
+data SizeAlignVal : val -> val
+{
+  sizeAlignVal (a : val) () (uint, uint);
 };
 
 -- This data declaration is not precisely correct:
@@ -182,11 +190,12 @@ data Repr : bare -> box
   attribute(abstract)
 {
   repr (a : bare) ()
-  (SA a,                        -- Size and alignment
+  (SizeAlign a,                 -- Size and alignment
    a -> Writer a,		-- Copy
    Writer a -> BoxedType a,	-- Convert to boxed
    BoxedType a -> Writer a,     -- Convert to bare
-   bool);
+   bool);                       -- Pointerlessness
+                                -- (True if an 'a' definitely doesn't contain pointers)
 };
 
 data EqDict : bare -> box
@@ -630,7 +639,7 @@ data list : bare -> bare
 {
   make_list
   (a : bare) (n : intindex)
-  (FIInt n, Referenced (arr n a));
+  (FIInt n, StuckBox (arr n a));
 };
 
 -- A list of boxed objects
@@ -654,7 +663,7 @@ data array0 : bare -> bare
 data array1 : bare -> bare
 {
   mk_array1 (a : bare) (N : intindex)
-  (int, int, FIInt N, Referenced (arr N a));
+  (int, int, FIInt N, StuckBox (arr N a));
 };
 
 -- A 2D array.
@@ -664,7 +673,7 @@ data array2 : bare -> bare
 {
   mk_array2
   (a : bare) (M N : intindex)
-  (int, int, FIInt M, int, int, FIInt N, Referenced (arr M (arr N a)));
+  (int, int, FIInt M, int, int, FIInt N, StuckBox (arr M (arr N a)));
 };
 
 -- A 3D array.
@@ -677,7 +686,7 @@ data array3 : bare -> bare
   (int, int, FIInt L,
    int, int, FIInt M,
    int, int, FIInt N,
-   Referenced (arr L (arr M (arr N a))));
+   StuckBox (arr L (arr M (arr N a))));
 };
 
 -- A 1D boxed array.
@@ -769,6 +778,10 @@ copy : (a : bare) -> Repr a -> a -> Writer a
 convertToBoxed : (a : bare) -> Repr a -> Writer a -> BoxedType a;
 convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
 
+dynamicCopyError : (a : bare) -> a -> Writer a;
+copyArray : (N : intindex) -> (a : bare) -> Repr a -> IInt N -> arr N a
+         -> Writer (arr N a);
+
 -- This function is inserted by the simplifier to convert data constructor
 -- applications to values
 reify : (a : bare) -> Repr a -> Writer a -> a;
@@ -820,7 +833,7 @@ repr_Box : (a : box) -> Repr (BareType a);
 repr_StoredBox : (a : box) -> Repr (StoredBox a);
 repr_StuckRef : (a : box) -> Repr (StuckRef a);
 
-repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
+-- repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
 repr_view : (sh : box) -> (a : bare) -> Repr (BareType (view sh a));
 repr_Scatter : (a b : bare) -> Repr (BareType (Scatter a b));
@@ -834,6 +847,19 @@ repr_arr : (n : intindex) -> (e : bare)
         -> FIInt n -> Repr e -> Repr (arr n e);
 
 repr_EffTok : Repr (Stored EffTok);
+
+--getReprSizeAlignTuple : (a : bare) -> Repr a -> (uint, uint);
+--getSizeAlignValTuple : (a : val) -> SizeAlignVal a -> (uint, uint);
+
+--productSizeAlign : (uint, uint) -> (uint, uint) -> (uint, uint);
+--unionSizeAlign : (uint, uint) -> (uint, uint) -> (uint, uint);
+
+--toSizeAlignVal : (a : val) -> (uint, uint) -> SizeAlignVal a;
+--toSizeAlign : (a : bare) -> (uint, uint) -> SizeAlign a;
+
+sizealign_arr : (n : intindex) -> IInt n -> (uint, uint) -> (uint, uint);
+repr_arr_2 : (n : intindex) -> (a : bare)
+          -> IInt n -> Repr a -> Repr (arr n a);
 
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionaries
@@ -1237,6 +1263,11 @@ AdditiveDict_int_sub : int -> int -> int;
 AdditiveDict_int_negate : int -> int;
 AdditiveDict_int_zero : int;
 
+AdditiveDict_uint_add : uint -> uint -> uint;
+AdditiveDict_uint_sub : uint -> uint -> uint;
+AdditiveDict_uint_negate : uint -> uint;
+AdditiveDict_uint_zero : uint;
+
 AdditiveDict_float_add : float -> float -> float;
 AdditiveDict_float_sub : float -> float -> float;
 AdditiveDict_float_negate : float -> float;
@@ -1302,6 +1333,9 @@ AdditiveDict_Complex_zero :
 MultiplicativeDict_int_mul : int -> int -> int;
 MultiplicativeDict_int_fromInt : int -> int;
 
+MultiplicativeDict_uint_mul : uint -> uint -> uint;
+MultiplicativeDict_uint_fromInt : uint -> uint;
+
 MultiplicativeDict_float_mul : float -> float -> float;
 MultiplicativeDict_float_fromInt : int -> float;
 
@@ -1327,6 +1361,9 @@ MultiplicativeDict_Complex_one :
 
 RemainderDict_int_floordiv : int -> int -> int;
 RemainderDict_int_mod : int -> int -> int;
+
+RemainderDict_uint_floordiv : uint -> uint -> uint;
+RemainderDict_uint_mod : uint -> uint -> uint;
 
 RemainderDict_float_floordiv : float -> float -> int;
 RemainderDict_float_mod : float -> float -> float;

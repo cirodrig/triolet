@@ -122,8 +122,9 @@ pyonIntSize = S32
 pyonFloatSize :: Size
 pyonFloatSize = S32
 
-pyonIntType, pyonFloatType, pyonBoolType, pyonNoneType :: PrimType
+pyonIntType, pyonUintType, pyonFloatType, pyonBoolType, pyonNoneType :: PrimType
 pyonIntType = IntType Signed pyonIntSize
+pyonUintType = IntType Unsigned pyonIntSize
 pyonFloatType = FloatType pyonFloatSize
 pyonBoolType = BoolType
 pyonNoneType = UnitType

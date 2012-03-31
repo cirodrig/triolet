@@ -220,9 +220,9 @@ createDictEnv = do
   ord_dict <- createBoxedDictPattern (pyonBuiltin The_OrdDict) 1
   additive_dict <- createBoxedDictPattern (pyonBuiltin The_AdditiveDict) 1
   multiplicative_dict <- createBoxedDictPattern (pyonBuiltin The_MultiplicativeDict) 1
-  referenced_dict <- DictEnv.pattern1 $ \arg -> 
+  {-referenced_dict <- DictEnv.pattern1 $ \arg -> 
     (varApp (pyonBuiltin The_Referenced) [VarT arg],
-     createDict_referenced arg)
+     createDict_referenced arg)-}
   maybe_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_Maybe) [VarT arg],
      createDict_Maybe arg)
@@ -286,7 +286,7 @@ createDictEnv = do
                                   list_dict, array1_dict, array2_dict,
                                   blist_dict, barray1_dict, barray2_dict,
                                   complex_dict, array_dict,
-                                  referenced_dict, maybe_dict,
+                                  {-referenced_dict,-} maybe_dict,
                                   tuple2_dict, tuple3_dict, tuple4_dict,
                                   eq_dict, ord_dict,
                                   additive_dict, multiplicative_dict,
@@ -413,13 +413,13 @@ createDict_barray2 param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_barray2)
 
-createDict_referenced :: Var -> TypeSubst -> MkDict
+{-createDict_referenced :: Var -> TypeSubst -> MkDict
 createDict_referenced param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
   return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Referenced)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Referenced)-}
 
 createDict_Maybe :: Var -> TypeSubst -> MkDict
 createDict_Maybe param_var subst = MkDict $

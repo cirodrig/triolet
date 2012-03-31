@@ -2,6 +2,35 @@
 -------------------------------------------------------------------------------
 -- Repr dictionaries
 
+dynamicCopyError @(a : bare) (x : a) (ret : OutPtr a) -> Store
+  attribute(inline) =
+  except @Store;
+
+-- Copy an array.  Use a loop to copy individual array elements.
+copyArray @(N : intindex) @(a : bare)
+  (rep : Repr a) (size : IInt N) (src : arr N a) (ret : OutPtr (arr N a))
+  -> Store
+  attribute(inline) =
+  case rep of
+    repr @a
+    (sa : SizeAlign a)
+    (copy_a : a -> Writer a)
+    (to_boxed_a : Writer a -> BoxedType a)
+    (to_bare_a : BoxedType a -> Writer a)
+    (pointerless_a : bool).
+
+  case size of {
+    iInt @N (fsize : FIInt N).
+      -- Copy each item in a loop
+      doall @N @a @a fsize
+      (\ (i : int) -> Store.
+        copy_a
+        (subscript @N @a rep src i)
+        (subscript_out @N @a rep ret i))
+  ; iPosInfty @N. except @Store
+  ; iNegInfty @N. except @Store
+  };
+
 repr_index2 : Repr (PyonTuple2 (Stored int) (Stored int)) =
   repr_PyonTuple2 @(Stored int) @(Stored int) repr_int repr_int;
 
@@ -1407,7 +1436,7 @@ array1Scatter @(e i : bare)
                  (\ (accumulator : s) (ret : OutPtr (array1 e))
                     -> Store.
                     mk_array1 @e @N lb stride count
-                    (referenced @(arr N e)
+                    (stuckBox @(arr N e)
                      (case finalizer of {
                         mutateInPlace @s @(arr N e) (co : coerce @bare s (arr N e)).
                           copy @(arr N e) (repr_arr @N @e count repr_e)
@@ -1577,7 +1606,7 @@ array2Scatter @(e i : bare)
                        -> Store.
                        mk_array2 @e @M @N
                        lb_y stride_y count_y lb_x stride_x count_x
-                       (referenced @(arr M (arr N e))
+                       (stuckBox @(arr M (arr N e))
                         (case finalizer of {
                            mutateInPlace @s @(arr M (arr N e)) (co : coerce @bare s (arr M (arr N e))).
                              copy @(arr M (arr N e)) repr_array
@@ -1776,7 +1805,7 @@ array3Scatter @(e i : bare)
                           lb_z stride_z count_z
                           lb_y stride_y count_y
                           lb_x stride_x count_x
-                          (referenced @arr3d
+                          (stuckBox @arr3d
                            (case finalizer of {
                               mutateInPlace @s @arr3d (co : coerce @bare s arr3d).
                                 copy @arr3d repr_array
@@ -1970,8 +1999,8 @@ TraversableDict_list_build @(a : bare)
 TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
   -> Stream list_dim a attribute(inline) =
   case ls of make_list @a @(N : intindex)
-                       (size : FIInt N) (aref : Referenced (arr N a)).
-  case aref of referenced @(arr N a) (ay : arr N a).
+                       (size : FIInt N) (aref : StuckBox (arr N a)).
+  case aref of stuckBox @(arr N a) (ay : arr N a).
   case size of fiInt @N (size_i : int).
 
   let shp : list_dim = mk_list_dim (justVal @int size_i) in
@@ -2008,8 +2037,8 @@ TraversableDict_array1_traverse
   case ar of
     mk_array1 @a @(N : intindex)
     (lo : int) (stride : int) (size : FIInt N)
-    (ayref : Referenced (arr N a)).
-  case ayref of referenced @(arr N a) (ay : arr N a).
+    (ayref : StuckBox (arr N a)).
+  case ayref of stuckBox @(arr N a) (ay : arr N a).
   
   let linear_map : LinearMap = linearMap stride lo in
 
@@ -2035,8 +2064,8 @@ TraversableDict_array2_traverse
     mk_array2 @a @(M N : intindex)
     (lo_y : int) (stride_y : int) (size_y : FIInt M)
     (lo_x : int) (stride_x : int) (size_x : FIInt N)
-    (ayref : Referenced (arr M (arr N a))).
-  case ayref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
+    (ayref : StuckBox (arr M (arr N a))).
+  case ayref of stuckBox @(arr M (arr N a)) (ay : arr M (arr N a)).
 
   let linear_map_y : LinearMap = linearMap stride_y lo_y in
   let linear_map_x : LinearMap = linearMap stride_x lo_x in
@@ -2082,7 +2111,7 @@ TraversableDict_array2_build
         let type Sint = Stored int in
 
         mk_array2 @a @M @N lb_y stride_y size_y lb_x stride_x size_x
-        (referenced @out_arr
+        (stuckBox @out_arr
          (arr2D_build @M @N @a repr size_y size_x
           (\ (y : int) (x : int) (ret : OutPtr a) -> Store.
              let logical_y : int = evalLM y linear_map_y in
@@ -2107,10 +2136,10 @@ TraversableDict_array3_traverse
     (lo_z : int) (stride_z : int) (size_z : FIInt L)
     (lo_y : int) (stride_y : int) (size_y : FIInt M)
     (lo_x : int) (stride_x : int) (size_x : FIInt N)
-    (ayref : Referenced (arr L (arr M (arr N a)))).
+    (ayref : StuckBox (arr L (arr M (arr N a)))).
   let type arr3d = arr L (arr M (arr N a)) in
 
-  case ayref of referenced @arr3d (ay : arr3d).
+  case ayref of stuckBox @arr3d (ay : arr3d).
 
   let linear_map_z : LinearMap = linearMap stride_z lo_z in
   let linear_map_y : LinearMap = linearMap stride_y lo_y in
@@ -2174,7 +2203,7 @@ TraversableDict_array3_build
            mk_array3 @a @L @M @N lb_z stride_z size_z
                                  lb_y stride_y size_y
                                  lb_x stride_x size_x
-           (referenced @out_arr
+           (stuckBox @out_arr
             (arr3D_build @L @M @N @a repr size_z size_y size_x
              (\ (z : int) (y : int) (x : int) (ret : OutPtr a) -> Store.
                 let logical_z : int = evalLM z linear_map_z in
@@ -2221,8 +2250,8 @@ TraversableDict_blist_traverse @(a : bare) (repr : Repr a) (ls : blist a)
   let type boxed_a = StuckRef (BoxedType a) in
   case ls of make_blist @a (ls2 : list boxed_a).
   case ls2 of make_list @boxed_a @(N : intindex)
-                       (size : FIInt N) (aref : Referenced (arr N boxed_a)).
-  case aref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+                       (size : FIInt N) (aref : StuckBox (arr N boxed_a)).
+  case aref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
   case size of fiInt @N (size_i : int).
 
   let shp : list_dim = mk_list_dim (justVal @int size_i) in
@@ -2245,8 +2274,8 @@ TraversableDict_barray1_traverse
   case ar of mk_barray1 @a (ar2 : array1 boxed_a).
   case ar2 of mk_array1 @boxed_a @(N : intindex)
     (lo : int) (stride : int) (size : FIInt N)
-    (ayref : Referenced (arr N boxed_a)).
-  case ayref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+    (ayref : StuckBox (arr N boxed_a)).
+  case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
 
   let linear_map : LinearMap = linearMap stride lo in
   let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
@@ -2285,8 +2314,8 @@ TraversableDict_barray2_traverse
     mk_array2 @boxed_a @(M N : intindex)
     (lo_y : int) (stride_y : int) (size_y : FIInt M)
     (lo_x : int) (stride_x : int) (size_x : FIInt N)
-    (ayref : Referenced (arr M (arr N boxed_a))).
-  case ayref of referenced @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
+    (ayref : StuckBox (arr M (arr N boxed_a))).
+  case ayref of stuckBox @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
 
   let linear_map_y : LinearMap = linearMap stride_y lo_y in
   let linear_map_x : LinearMap = linearMap stride_x lo_x in
@@ -2336,7 +2365,7 @@ TraversableDict_barray2_build
 
         mk_barray2 @a
         (mk_array2 @boxed_a @M @N lb_y stride_y size_y lb_x stride_x size_x
-         (referenced @out_arr
+         (stuckBox @out_arr
           (arr2D_build @M @N @boxed_a box_repr size_y size_x
            (\ (y : int) (x : int) (ret : OutPtr boxed_a) -> Store.
               let logical_y : int = evalLM y linear_map_y in
@@ -3390,8 +3419,8 @@ IndexableDict_list_at_point @(a : bare)
   (repr : Repr a) (ls : list a) (ix : Stored int) (ret : OutPtr a) -> Store
   attribute(inline) =
   case ls of make_list @a @(N : intindex)
-             (n : FIInt N) (ayref : Referenced (arr N a)).
-  case ayref of referenced @(arr N a) (ay : arr N a).
+             (n : FIInt N) (ayref : StuckBox (arr N a)).
+  case ayref of stuckBox @(arr N a) (ay : arr N a).
   case ix of stored @int (ix_i : int).
   copy @a repr (subscript @N @a repr ay ix_i) ret;
 
@@ -3399,7 +3428,7 @@ IndexableDict_list_at_point @(a : bare)
 IndexableDict_list_get_shape @(a : bare) (ls : list a) -> list_dim
   attribute(inline) =
   case ls of make_list @a @(N : intindex)
-             (n : FIInt N) (ayref : Referenced (arr N a)).
+             (n : FIInt N) (ayref : StuckBox (arr N a)).
   case n of fiInt @N (size : int).
   mk_list_dim (justVal @int size);
 
@@ -3438,8 +3467,8 @@ IndexableDict_array1_at_point @(a : bare)
   attribute(inline) =
   case ay of mk_array1 @a @(N : intindex)
              (lb : int) (stride : int) (size : FIInt N)
-             (ayref : Referenced (arr N a)).
-  case ayref of referenced @(arr N a) (ay : arr N a).
+             (ayref : StuckBox (arr N a)).
+  case ayref of stuckBox @(arr N a) (ay : arr N a).
 
   -- Compute real array index
   case ix of stored @int (ix_i : int).
@@ -3452,7 +3481,7 @@ IndexableDict_array1_get_shape @(a : bare)
   attribute(inline) =
   case ay of mk_array1 @a @(N : intindex)
              (lb : int) (stride : int) (size : FIInt N)
-             (ayref : Referenced (arr N a)).
+             (ayref : StuckBox (arr N a)).
   arrayDescToDim1 @N lb stride size;
 
 
@@ -3466,8 +3495,8 @@ IndexableDict_array2_at_point @(a : bare)
   case ay of mk_array2 @a @(M N : intindex)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
              (lb_x : int) (stride_x : int) (size_x : FIInt N)
-             (ayref : Referenced (arr M (arr N a))).
-  case ayref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
+             (ayref : StuckBox (arr M (arr N a))).
+  case ayref of stuckBox @(arr M (arr N a)) (ay : arr M (arr N a)).
   let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
 
   -- Compute real array indices
@@ -3490,7 +3519,7 @@ IndexableDict_array2_get_shape @(a : bare)
   case ay of mk_array2 @a @(M N : intindex)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
              (lb_x : int) (stride_x : int) (size_x : FIInt N)
-             (ayref : Referenced (arr M (arr N a))).
+             (ayref : StuckBox (arr M (arr N a))).
   mk_dim2 (arrayDescToDim1 @M lb_y stride_y size_y)
           (arrayDescToDim1 @N lb_x stride_x size_x);
 
@@ -3501,8 +3530,8 @@ IndexableDict_blist_at_point @(a : bare)
   let type boxed_a = StuckRef (BoxedType a) in
   case ls of make_blist @a (ls2 : list boxed_a).
   case ls2 of make_list @boxed_a @(N : intindex)
-             (n : FIInt N) (ayref : Referenced (arr N boxed_a)).
-  case ayref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+             (n : FIInt N) (ayref : StuckBox (arr N boxed_a)).
+  case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
   let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
   case ix of stored @int (ix_i : int).
   case subscript @N @boxed_a repr_box ay ix_i of
@@ -3515,7 +3544,7 @@ IndexableDict_blist_get_shape @(a : bare) (ls : blist a) -> list_dim
   let type boxed_a = StuckRef (BoxedType a) in
   case ls of make_blist @a (ls2 : list boxed_a).
   case ls2 of make_list @boxed_a @(N : intindex)
-              (n : FIInt N) (ayref : Referenced (arr N boxed_a)).
+              (n : FIInt N) (ayref : StuckBox (arr N boxed_a)).
   case n of fiInt @N (size : int).
   mk_list_dim (justVal @int size);
 
@@ -3528,8 +3557,8 @@ IndexableDict_barray1_at_point @(a : bare)
   case ay of mk_barray1 @a (ay2 : array1 boxed_a).
   case ay2 of mk_array1 @boxed_a @(N : intindex)
              (lb : int) (stride : int) (size : FIInt N)
-             (ayref : Referenced (arr N boxed_a)).
-  case ayref of referenced @(arr N boxed_a) (ay : arr N boxed_a).
+             (ayref : StuckBox (arr N boxed_a)).
+  case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
 
   -- Compute real array index
   case ix of stored @int (ix_i : int).
@@ -3546,7 +3575,7 @@ IndexableDict_barray1_get_shape @(a : bare)
   case ay of mk_barray1 @a (ay2 : array1 boxed_a).
   case ay2 of mk_array1 @boxed_a @(N : intindex)
              (lb : int) (stride : int) (size : FIInt N)
-             (ayref : Referenced (arr N boxed_a)).
+             (ayref : StuckBox (arr N boxed_a)).
   arrayDescToDim1 @N lb stride size;
 
 
@@ -3562,8 +3591,8 @@ IndexableDict_barray2_at_point @(a : bare)
   case ay2 of mk_array2 @boxed_a @(M N : intindex)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
              (lb_x : int) (stride_x : int) (size_x : FIInt N)
-             (ayref : Referenced (arr M (arr N boxed_a))).
-  case ayref of referenced @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
+             (ayref : StuckBox (arr M (arr N boxed_a))).
+  case ayref of stuckBox @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
   let row_repr : Repr (arr N boxed_a) =
         repr_arr @N @boxed_a size_x (repr_StuckRef @(BoxedType a)) in
 
@@ -3591,7 +3620,7 @@ IndexableDict_barray2_get_shape @(a : bare)
   case ay2 of mk_array2 @boxed_a @(M N : intindex)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
              (lb_x : int) (stride_x : int) (size_x : FIInt N)
-             (ayref : Referenced (arr M (arr N boxed_a))).
+             (ayref : StuckBox (arr M (arr N boxed_a))).
   mk_dim2 (arrayDescToDim1 @M lb_y stride_y size_y)
           (arrayDescToDim1 @N lb_x stride_x size_x);
 
@@ -4911,8 +4940,8 @@ sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
 
   -- Then traverse the list
   case ls of make_list @a @(N : intindex)
-                       (size : FIInt N) (aref : Referenced (arr N a)).
-  case aref of referenced @(arr N a) (ay : arr N a).
+                       (size : FIInt N) (aref : StuckBox (arr N a)).
+  case aref of stuckBox @(arr N a) (ay : arr N a).
 
   case size of fiInt @N (size_i : int).
   let dom : list_dim = mk_list_dim (justVal @int size_i) in
@@ -5500,7 +5529,7 @@ build_list_dim_list @(a : bare)
       -- Finite view
       case defineIntIndex size of someIInt @(N : intindex) (sz : FIInt N).
       make_list @a @N sz
-      (referenced @(arr N a)
+      (stuckBox @(arr N a)
        (arr1D_build @N @a repr sz
         (\ (i : int) (ret : OutPtr a) -> Store.
            case boxed @(Stored int) (stored @int i) of
@@ -5529,7 +5558,7 @@ build_dim1_array @(a : bare)
      let linear_map : LinearMap = linearMap stride lb in
 
      mk_array1 @a @N lb stride size
-     (referenced @(arr N a)
+     (stuckBox @(arr N a)
       (arr1D_build @N @a repr size
        (\ (i : int) (ret : OutPtr a) -> Store.
            -- Compute the logical index corresponding to array index 'i'
@@ -7183,7 +7212,7 @@ histogram @(sh : box)
   let size : FIInt N = minus_fii @H @L hb lb in
 
   mk_array1 @(Stored int) @L @H lb hb 
-  (referenced @(arr N (Stored int))
+  (stuckBox @(arr N (Stored int))
    (histogramArray @N size lo_bound hi_bound
     (shape_flatten @(Stored int) repr_int input)))
   ret;
@@ -7409,9 +7438,9 @@ view1_list_build @(a : bare)
   view1ToDarr1 @a @(list a) vw
   (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a)
     -> Writer (list a).
-     make_list @a @N size (referenced @(arr N a) (arr1D_build @N @a repr size darr)))
+     make_list @a @N size (stuckBox @(arr N a) (arr1D_build @N @a repr size darr)))
   (\ (ret : OutPtr (list a)) -> IEffect (list a).
-    make_list @a @0 zero_fii (referenced @(arr 0 a) (\ (ret : OutPtr (arr 0 a)) -> IEffect (arr 0 a). fromEffTok @(arr 0 a) emptyEffTok)) ret)
+    make_list @a @0 zero_fii (stuckBox @(arr 0 a) (\ (ret : OutPtr (arr 0 a)) -> IEffect (arr 0 a). fromEffTok @(arr 0 a) emptyEffTok)) ret)
   ret;
 
 
@@ -7436,14 +7465,14 @@ view1_array1_build @(a : bare)
       in
 
       mk_array1 @a @lo @hi flo fhi
-      (referenced @(arr N a)
+      (stuckBox @(arr N a)
        (arr1D_build @N @a repr delta (mk_darr1 @N @a f2)))
       ret
 
   ; empty_view1 @a.
       let type N0 = minus_i 0 0 in
       mk_array1 @a @0 @0 zero_fii zero_fii
-      (referenced @(arr N0 a)
+      (stuckBox @(arr N0 a)
        (\ (ret : OutPtr (arr N0 a)) -> IEffect (arr N0 a).
           fromEffTok @(arr N0 a) emptyEffTok))
       ret
@@ -7963,7 +7992,7 @@ stencil2D @(t : bare -> bare) @(a b : bare)
 
     -- Create return value
     mk_array2 @b @0 @M @0 @N zero_fii inp_height zero_fii inp_width
-    (referenced @(arr (minus_i M 0) (arr (minus_i N 0) b))
+    (stuckBox @(arr (minus_i M 0) (arr (minus_i N 0) b))
      (if or (center_width <# 1) (center_height <# 1)
      then
        -- Input array2 is smaller than stencil.  Use one loop for the

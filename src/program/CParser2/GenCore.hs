@@ -151,9 +151,10 @@ translateDecl tenv (Decl name ent) =
      DataEnt ty data_cons attrs ->
        let kind = translateType tenv ty
            abstract = AbstractAttr `elem` attrs
+           algebraic = not $ NonalgebraicAttr `elem` attrs
            data_con_descrs =
              map (translateDataConDecl tenv core_name . unLoc) data_cons
-           descr = DataTypeDescr core_name kind data_con_descrs abstract
+           descr = DataTypeDescr core_name kind data_con_descrs abstract algebraic
        in insertDataType descr
   where
     core_name = toVar name

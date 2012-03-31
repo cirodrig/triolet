@@ -137,6 +137,7 @@ flattenFunctionType ft =
   (flattenValueTypeList $ ftParamTypes ft)
   (flattenValueTypeList $ ftReturnTypes ft)
 
+-- TODO: Flattening types is the identity function, don't do anything
 flattenType :: ValueType -> [PrimType]
 flattenType (PrimType pt) = [pt]
 flattenType (RecordType rt) = flattenRecordType rt

@@ -52,7 +52,8 @@ Executable pyon
     utf8-string
   Extensions:
     ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
-    EmptyDataDecls, TypeOperators, TypeFamilies, DeriveDataTypeable
+    EmptyDataDecls, TypeOperators, TypeFamilies, DeriveDataTypeable,
+    FlexibleInstances
   Ghc-Options: -auto
   Include-Dirs:
     src/program
@@ -109,6 +110,9 @@ Executable pyon
     SystemF.Build
     SystemF.Context
     SystemF.ConSpecialization
+    SystemF.Datatypes.TypeLayout
+    SystemF.Datatypes.ComputeLayout
+    SystemF.Datatypes.RuntimeLayout
     SystemF.Demand
     SystemF.DemandAnalysis
     SystemF.DeadCode
