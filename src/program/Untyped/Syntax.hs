@@ -86,6 +86,11 @@ data Expression =
     { expAnnotation :: Ann
     , expLit :: Lit
     }
+    -- | A list expression
+  | ListE
+    { expAnnotation :: Ann
+    , expElements :: [Expression]
+    }
     -- | An undefined value
   | UndefinedE
     { expAnnotation :: Ann

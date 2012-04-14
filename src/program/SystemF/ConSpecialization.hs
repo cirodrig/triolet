@@ -591,6 +591,8 @@ specializeExp expression =
      ExceptE {} -> return expression
      CoerceE inf t1 t2 body ->
        ExpM <$> (CoerceE inf t1 t2 <$> specializeExp body)
+     ArrayE inf ty body ->
+       ExpM <$> (ArrayE inf ty <$> mapM specializeExp body)
 
 specializeExps es = mapM specializeExp es
 

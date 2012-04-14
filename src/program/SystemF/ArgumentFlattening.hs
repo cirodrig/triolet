@@ -1550,6 +1550,9 @@ flattenInExp expression =
      CoerceE inf from_type to_type body -> do
        body' <- flattenInExp body
        return $ ExpM $ CoerceE inf from_type to_type body'
+     ArrayE inf ty es -> do
+       es' <- mapM flattenInExp es
+       return $ ExpM $ ArrayE inf ty es'
 
 flattenInAlt :: AltM -> AF AltM
 flattenInAlt (AltM alt) =

@@ -333,6 +333,7 @@ data TIExp =
   | LetfunTE !ExpInfo (DefGroup TIDef) TIExp
   | CaseTE !ExpInfo TIExp [TIAlt]
   | CoerceTE !ExpInfo TIType TIType TIExp 
+  | ArrayTE !ExpInfo TIType [TIExp]
     
     -- Placeholder expressoins
 

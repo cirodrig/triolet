@@ -549,6 +549,8 @@ expression lv expr =
          pure(Literal source_pos NoneLit)
        Py.Tuple {Py.tuple_exprs = es} -> 
          Tuple source_pos <$> traverse subexpression es
+       Py.List {Py.list_exprs = es} -> 
+         List source_pos <$> traverse subexpression es
        Py.Call {Py.call_fun = f, Py.call_args = xs} -> 
          Call source_pos <$> subexpression f <*> traverse (argument lv) xs
        Py.LetExpr { Py.let_target = ts
@@ -948,6 +950,7 @@ instance MentionsVars (Expr Int) where
         of Variable _ v -> Set.singleton (varID v)
            Literal _ _ -> Set.empty
            Tuple _ es -> mentionedVars es
+           List _ es -> mentionedVars es
            Unary _ _ e -> mentionedVars e
            Binary _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
            Subscript _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2

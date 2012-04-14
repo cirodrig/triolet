@@ -218,6 +218,7 @@ lowerExp expression =
      ExceptE _ ty -> lowerExcept ty
      -- Coercions are lowered to a no-op
      CoerceE _ _ _ e -> lowerExp e
+     ArrayE _ ty es -> lowerArray ty es
 
 lowerVar v =
   case LL.lowerIntrinsicOp v
@@ -358,6 +359,35 @@ lowerExcept return_type = do
       where
         to_value_type (LL.PrimField pt) = LL.PrimType pt
         to_value_type (LL.RecordField rt) = LL.RecordType rt
+
+lowerArray :: Type -> [ExpM] -> GenLower RetVal
+lowerArray ty es = do
+  -- Create an initializer function
+  val <- genLambda [LL.PrimType LL.PointerType] [LL.PrimType LL.UnitType] $ \[ret_param] -> do
+    -- Compute the size of one array element, including padding
+    elt_layout <- lift $ getLayout ty
+    (elt_size, elt_alignment) <- layoutSize elt_layout
+    
+    -- Add padding to size of array elements
+    i_size <- primCastZ (LL.PrimType LL.nativeIntType) elt_size
+    i_padded_size <- addRecordPadding i_size elt_alignment
+    padded_size <- primCastZ (LL.PrimType LL.nativeWordType) i_padded_size
+
+    -- Write the array
+    write_array_elements padded_size ret_param es
+  return $ RetVal val
+  where
+    -- Write all array elements to the appropriate offsets
+    write_array_elements size ptr (e:es) = do
+      -- Write e
+      RetVal f <- lowerExp e
+      emitAtom1 (LL.PrimType LL.PointerType) $ LL.closureCallA f [ptr]
+
+      -- Get pointer to next array element
+      ptr' <- primAddP ptr size
+      write_array_elements size ptr' es
+
+    write_array_elements _ _ [] = return [LL.LitV LL.UnitL]
 
 lowerFun :: FunM -> Lower LL.Fun
 lowerFun (FunM fun) =

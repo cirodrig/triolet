@@ -68,6 +68,8 @@ convertExp (ExpM expression) =
      CoerceE inf from_t to_t b ->
        ExpM $ CoerceE inf (convertType from_t) (convertType to_t)
        (convertExp b)
+     ArrayE inf ty es ->
+       ExpM $ ArrayE inf (convertType ty) (map convertExp es)
   where
     convert_constructor decon =
       case decon

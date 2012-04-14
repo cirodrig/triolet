@@ -639,6 +639,25 @@ inferExpressionType' expression =
            f_tys' = map convertHMType f_tys
            tuple_expr = mkConE pos tuple_con f_tys' [] f_exps
        return (tuple_expr, tupleType f_tys)
+     ListE {expElements = []} -> do
+       -- Empty list
+       -- Create a type variable to stand for the list contents
+       ltype <- liftIO $ newTyVar Star Nothing
+       requirePassable (ConTy ltype)
+
+       let list_type = ConTy (tiBuiltin the_con_list) `appTy` ConTy ltype
+       return (mkListE pos (convertHMType $ ConTy ltype) [], list_type)
+     ListE {expElements = fs} -> do
+       -- Infer element types
+       (first_exp : tail_exps, first_ty : tail_tys) <- inferExpressionTypes fs
+
+       -- All elements must have the same type.  Coerce list elements.
+       tail_exps' <- zipWithM (\e t -> unifyAndCoerceInf pos e first_ty t) tail_exps tail_tys
+
+       let -- Create the list expression
+           list_type = ConTy (tiBuiltin the_con_list) `appTy` first_ty
+           list_exp = mkListE pos (convertHMType first_ty) (first_exp : tail_exps')
+       return (list_exp, list_type)
      CallE {expOperator = op, expOperands = args} -> do
        (op_exp, op_ty) <- inferExpressionType op
        (arg_exps, arg_tys) <- inferExpressionTypes args

@@ -245,6 +245,10 @@ dmdExpWorker is_initializer spc expressionM@(ExpM expression) =
        dfType t2
        e' <- dmdExp spc e
        return $ ExpM $ CoerceE inf t1 t2 e'
+     ArrayE inf ty es -> do
+       dfType ty
+       es' <- mapM (dmdExp Used) es
+       return $ ExpM $ ArrayE inf ty es'
   where
     {- -- Debugging output, show what was demanded in this expression
     trace_dmd m = do

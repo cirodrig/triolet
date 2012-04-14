@@ -66,6 +66,7 @@ data Expr id =
   | Literal SourcePos Literal
     -- Python expressions
   | Tuple SourcePos [Expr id]
+  | List SourcePos [Expr id]
   | Unary SourcePos !Python.OpSpan (Expr id)
   | Binary SourcePos !Python.OpSpan (Expr id) (Expr id)
   | Subscript SourcePos (Expr id) [Expr id]

@@ -160,6 +160,9 @@ pprExpPrecFlags flags (ExpM expression) =
            b_doc = continue body ?+ appPrec
        in hang (text "coerce" <+> parens coercion_doc) letIndent b_doc
           `hasPrec` appPrec
+     ArrayE _ t es ->
+       let es_doc = punctuate comma [continue e ? outerPrec | e <- es]
+       in text "array" <+> pprTypePrec t ?+ appPrec <+> braces (fsep es_doc) `hasPrec` appPrec
   where
     continue e = pprExpPrecFlags flags e
 

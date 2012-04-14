@@ -150,6 +150,10 @@ edcExp expression@(ExpSF base_expression) =
        body' <- edcExp body
        return $ ExpSF $ CoerceE inf from_t to_t body'
 
+     ArrayE inf ty es -> do
+       es' <- mapM edcExp es
+       return $ ExpSF $ ArrayE inf ty es'
+
 -- | Dead code elimination for a case alternative
 edcAlt (AltSF alt) = do
   let con = altCon alt

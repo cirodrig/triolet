@@ -134,6 +134,9 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
        let coercion_doc = pprType from_t <+> text "=>" <+> pprType to_t
            b_doc = pprExpFlagsPrec flags precOuter b 
        in hang (text "coerce" <+> parens coercion_doc) 4 b_doc
+     ArrayE inf ty es ->
+       let es_doc = punctuate comma $ map (pprExpFlagsPrec flags precOuter) es
+       in text "array" <+> parens (pprType ty) <+> braces (fsep es_doc)
   where
     is_true (VarDeCon op _ _) = op `isPyonBuiltin` The_True
     is_true _ = False

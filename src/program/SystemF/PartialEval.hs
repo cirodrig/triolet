@@ -118,6 +118,7 @@ isSimpleExp expression =
      CaseE {} -> False
      ExceptE {} -> False
      CoerceE {} -> False
+     ArrayE {} -> False
 
 -- | Given a value and the pattern it is bound to, add the bound value(s)
 -- to the environment.  The caller should verify that the value has no
@@ -233,6 +234,10 @@ pevalExp expression =
      CoerceE inf from_t to_t body -> do
        body' <- pevalExp body
        return $ ExpSF $ CoerceE inf from_t to_t body'
+
+     ArrayE inf ty es -> do
+       es' <- mapM pevalExp es
+       return $ ExpSF $ ArrayE inf ty es'
   where
     return_lit inf l = return $ ExpSF $ LitE inf l
     int_type = VarT $ pyonBuiltin The_int

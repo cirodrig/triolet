@@ -517,6 +517,8 @@ cvtType mode (CoT (VarT k))
 cvtType mode (CoT _) =
   internalError "cvtType: Unexpected kind in coercion type"
 
+cvtType mode ty@(IntT n) = return (ty, intindexT)
+
 -- | Convert a System F type to its natural representation.
 --   Try to simplify the resulting type expression.
 cvtNormalizeNaturalType :: Type -> RI (Type, Kind)
@@ -872,6 +874,10 @@ type TypeArgument = (Type, Kind)
 --
 --   Application of some arguments may fail because the function has to 
 --   be coerced.  Those arguments will be returned unmodified.
+--
+--   TODO: Get rid of this data structure.
+--   We should just apply arguments and type arguments one by one, without
+--   jumping through hoops.
 data AppResult =
     -- | An application of a function or data constructor to arguments 
     FunAppResult
@@ -900,6 +906,7 @@ data AppResult =
   | VarConExpectingTypes
     { appliedConstructor     :: !Var
     , appliedTypeArgs        :: [Type]
+    , appliedUnivArity       :: !Int -- ^ Number of universal type arguments
     , appliedConstructorType :: !DataConType
     , appliedReturnType      :: Type
     }
@@ -915,9 +922,7 @@ appResult e ty = FunAppResult { appliedExpr           = mk_expr
 
 conAppResult :: Var -> DataConType -> Type -> AppResult
 conAppResult v data_type ty
-  | not $ null (dataConPatternExTypes data_type) =
-      internalError "conAppResult: Not implemented for existential types"
-  | null (dataConPatternParams data_type) =
+  | num_args == 0 =
       -- No type parameters required
       FunAppResult { appliedExpr = mk_expr
                   , appliedReturnType = ty
@@ -930,9 +935,15 @@ conAppResult v data_type ty
   | otherwise =
       VarConExpectingTypes { appliedConstructor = v
                            , appliedTypeArgs    = []
+                           , appliedUnivArity = univ_arity
                            , appliedConstructorType = data_type
                            , appliedReturnType = ty}
   where
+    univ_arity = length (dataConPatternParams data_type)
+
+    -- Number of type arguments expected by the constructor
+    num_args = length (dataConPatternExTypes data_type) + univ_arity
+
     -- Create a constructor term with no type arguments
     mk_expr [] = return $ conE defaultExpInfo (VarCon v [] []) []
     mk_expr _  = internalError "conAppResult: Wrong number of arguments"
@@ -1001,18 +1012,22 @@ resultOfTypeApp result_type type_arg (FunAppResult base_exp _ co _) =
         apply_type e =
           ExpM $ AppE defaultExpInfo e [type_arg] []
 
-resultOfTypeApp result_type type_arg (VarConExpectingTypes con ty_args data_con _) =
+resultOfTypeApp result_type type_arg (VarConExpectingTypes con ty_args univ_arity data_con _) =
   -- Does the result of type application have all type arguments?
   if 1 + length ty_args == num_ty_args
   then FunAppResult mk_expr result_type [] (Just num_fields)
-  else VarConExpectingTypes con ty_args' data_con result_type
+  else VarConExpectingTypes con ty_args' univ_arity data_con result_type
   where
-    num_ty_args = length (dataConPatternParams data_con)
+    num_ty_args = length (dataConPatternParams data_con) +
+                  length (dataConPatternExTypes data_con)
     num_fields = length (dataConPatternArgs data_con)
 
     ty_args' = ty_args ++ [type_arg]
 
-    mk_expr [] = return $ conE defaultExpInfo (VarCon con ty_args' []) []
+    mk_expr [] =
+      let u_args = take (length (dataConPatternParams data_con)) ty_args'
+          e_args = drop (length (dataConPatternParams data_con)) ty_args'
+      in return $ conE defaultExpInfo (VarCon con u_args e_args) []
     mk_expr _  = internalError "resultOfTypeApp: Wrong number of arguments"
 
 resultOfApp :: Type -> Coercion -> AppResult -> AppResult
@@ -1225,15 +1240,37 @@ reprExp expression =
        to_t' <- cvtCanonicalReturnType to_t
        return (ExpM $ CoerceE inf from_t' to_t' co_body, to_t')
 
+     ArrayE inf ty exps -> do
+       -- Convert the array element type to a bare type
+       elt_ty <- do (ty', k) <- cvtType CanonicalMode ty
+                    coerceType k bareT ty'
+
+       -- Create the initializer type
+       let write_elt_type = writeType elt_ty
+       exps' <- mapM (reprArrayElt write_elt_type) exps
+
+       -- Return an initializer type
+       let len = IntT (fromIntegral $ length exps)
+           ret_type = writeType $ varApp (pyonBuiltin The_arr) [len, elt_ty]
+       return (ExpM $ ArrayE inf elt_ty exps', ret_type)
+
+reprArrayElt elt_ty e = do
+  -- Convert array element
+  (e', t) <- reprExp e
+
+  -- Coerce the expression
+  coerceExpToReturnType t elt_ty e'
+
 reprCon inf op args = do
-  let VarCon con ty_args [] = op
+  let VarCon con ty_args ex_args = op
 
   -- Compute representations of arguments
   repr_ty_args <- mapM cvtNormalizeCanonicalType ty_args
+  repr_ex_args <- mapM cvtNormalizeCanonicalType ex_args
   args' <- mapM reprExp args
   
   -- Compute result type and coerce arguments
-  reprApplyCon con repr_ty_args args'
+  reprApplyCon con (repr_ty_args ++ repr_ex_args) args'
 
 reprApp inf op ty_args args = do
   (op', op_type) <- reprExp op

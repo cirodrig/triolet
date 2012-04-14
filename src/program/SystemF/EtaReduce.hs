@@ -50,6 +50,8 @@ etaExpandExp (ExpM expression) = ExpM <$>
        internalError "etaExpandExp: Not implemented for exception statements"
      CoerceE inf from_t to_t b ->
        CoerceE inf from_t to_t <$> etaExpandExp b
+     ArrayE inf ty es ->
+       ArrayE inf ty <$> mapM etaExpandExp es
   where
     expand_alt (AltM alt) = do
       body <- etaExpandExp $ altBody alt

@@ -229,6 +229,9 @@ doExpr expr =
      Tuple pos es -> do
        es' <- mapM doExpr es
        return $ U.TupleE (U.Ann pos) es'
+     List pos es -> do
+       es' <- mapM doExpr es
+       return $ U.ListE (U.Ann pos) es'
      Unary pos op e -> do
        e' <- doExpr e
        return $ callVariable pos (convertUnaryOperator op) [e']

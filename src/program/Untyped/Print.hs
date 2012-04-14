@@ -45,6 +45,8 @@ pprExpression exp =
      LiteralE {expLit = l} -> pprLit l
      UndefinedE {} -> text "__undefined__"
      TupleE {expFields = fs} -> showTuple $ map pprExpression fs
+     ListE {expElements = fs} -> brackets $ sep $ punctuate comma $
+                                  map pprExpression fs
      CallE {expOperator = op, expOperands = args} ->
        pprExpression op <> showTuple (map pprExpression args)
      IfE {expCondition = c, expIfTrue = t, expIfFalse = f} ->

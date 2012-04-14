@@ -110,6 +110,8 @@ typeInferExp (ExpSF expression) =
        CoerceE {expInfo = inf, expArgType = from_ty, expRetType = to_ty,
                 expBody = body} ->
          typeInferCoerceE inf from_ty to_ty body
+       ArrayE {expInfo = inf, expType = ty, expElements = es} ->
+         typeInferArrayE inf ty es
          
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM Type
@@ -308,6 +310,20 @@ typeInferCoerceE inf from_ty to_ty body = do
   checkType msg (getSourcePos inf) from_ty body_ty
 
   return to_ty
+
+typeInferArrayE inf ty es = do
+  typeCheckType ty
+
+  -- Infer each element type
+  tys <- mapM typeInferExp es
+
+  -- Elements must have the same type
+  let message = text "Expecting array element to have type " <+> pprType ty
+  forM_ tys $ \g_ty -> checkType message (getSourcePos inf) ty g_ty
+
+  -- Return an array type
+  let len = IntT $ fromIntegral $ length es
+  return $ varApp (pyonBuiltin The_arr) [len, ty]
 
 typeCheckEntity (FunEnt f) = void $ typeInferFun f
 

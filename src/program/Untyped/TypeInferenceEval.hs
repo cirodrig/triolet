@@ -102,6 +102,8 @@ evExp expression =
        ExpSF <$> (CaseE info <$> evExp scr <*> mapM (evAlt info) alts)
      U.CoerceTE info from_t to_t b ->
        ExpSF <$> (CoerceE info <$> evType from_t <*> evType to_t <*> evExp b)
+     U.ArrayTE info t es ->
+       ExpSF <$> (ArrayE info <$> evType t <*> mapM evExp es)
      U.RecVarPH {} -> getPlaceholderElaboration expression
      U.DictPH {} -> getPlaceholderElaboration expression
 

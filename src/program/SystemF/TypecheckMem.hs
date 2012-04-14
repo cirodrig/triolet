@@ -82,6 +82,8 @@ typeInferExp (ExpM expression) =
          return rt
        CoerceE inf from_t to_t body ->
          typeInferCoerceE inf from_t to_t body
+       ArrayE inf ty es ->
+         typeInferArray inf ty es
 
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM Type
@@ -352,7 +354,21 @@ typeInferCoerceE inf from_t to_t body = do
     (getSourcePos inf) from_t body_type
   
   return to_t
+
+typeInferArray inf ty es = do
+  e_tys <- mapM typeInferExp es
   
+  -- Expressions must have an initializer type
+  let init_type = 
+        varApp (pyonBuiltin The_OutPtr) [ty] `FunT` VarT (pyonBuiltin The_Store)
+  let message = text "Expecting array element to have type " <+> pprType init_type
+
+  forM_ e_tys $ \g_ty -> checkType message (getSourcePos inf) init_type g_ty
+
+  -- Return an array type
+  let len = IntT $ fromIntegral $ length es
+  return $ varApp (pyonBuiltin The_arr) [len, ty]
+
 checkConstant :: Constant Mem -> TCM ()
 checkConstant (Constant inf ty e) = do
   typeCheckType ty
@@ -432,6 +448,10 @@ inferExpType expression =
            return rt
          CoerceE {expRetType = rt} ->
            return rt
+         ArrayE _ ty es ->
+           let n_type = IntT $ fromIntegral $ length es
+               array_type = varApp (pyonBuiltin The_arr) [n_type, ty]
+           in return array_type
          _ ->
            typeInferExp expression
 

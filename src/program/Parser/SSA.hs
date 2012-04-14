@@ -285,6 +285,7 @@ ssaExpr expression =
   of Variable pos v    -> Variable pos <$> useV v
      Literal pos l     -> pure $ Literal pos l
      Tuple pos es      -> Tuple pos <$> traverse ssaExpr es 
+     List pos es       -> List pos <$> traverse ssaExpr es 
      Unary pos op x    -> Unary pos op <$> ssaExpr x
      Binary pos op x y -> Binary pos op <$> ssaExpr x <*> ssaExpr y
      Subscript pos x y -> Subscript pos <$> ssaExpr x <*> traverse ssaExpr y

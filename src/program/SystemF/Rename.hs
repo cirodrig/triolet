@@ -489,6 +489,8 @@ instance Renameable (Exp Mem) where
          ExceptE inf (rename rn rty)
        CoerceE inf t1 t2 e ->
          CoerceE inf (rename rn t1) (rename rn t2) (rename rn e)
+       ArrayE inf ty es ->
+         ArrayE inf (rename rn ty) (rename rn es)
 
   freeVariables (ExpM expression) =
     case expression
@@ -516,6 +518,8 @@ instance Renameable (Exp Mem) where
          freeVariables rty
        CoerceE _ t1 t2 e ->
          freeVariables t1 `Set.union` freeVariables t2 `Set.union` freeVariables e
+       ArrayE _ ty es ->
+         freeVariables ty `Set.union` freeVariables es
 
 instance Renameable (Alt Mem) where
   rename rn (AltM (Alt con params body)) =
@@ -603,6 +607,10 @@ instance Substitutable (Exp Mem) where
          t2' <- substitute (typeSubst s) t2
          e' <- substitute s e
          return $ ExpM $ CoerceE inf t1' t2' e'
+       ArrayE inf ty es -> do
+         ty' <- substitute (typeSubst s) ty
+         es' <- substitute s es
+         return $ ExpM $ ArrayE inf ty' es'
 
 instance Substitutable (Alt Mem) where
   type Substitution (Alt Mem) = Subst
@@ -663,6 +671,9 @@ checkForShadowingExpSet in_scope e =
        checkForShadowingSet in_scope t1 `seq`
        checkForShadowingSet in_scope t2 `seq`
        continue body
+     ArrayE _ ty es ->
+       checkForShadowingSet in_scope ty `seq`
+       continues es
   where
     continue e = checkForShadowingExpSet in_scope e
     continues es = foldr seq () $ map continue es

@@ -262,6 +262,9 @@ floatExp expression =
      CoerceE inf t1 t2 body -> do
        ctx_body <- floatExp body
        return $ mapContext (\e -> ExpM $ CoerceE inf t1 t2 e) ctx_body
+     ArrayE inf ty es -> do
+       ctx_es <- mergeList =<< mapM floatExp es
+       return $ mapContext (\es -> ExpM $ ArrayE inf ty es) ctx_es
 
 floatAppExp original_expression inf op ty_args args =
   case op

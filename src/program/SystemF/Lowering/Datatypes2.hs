@@ -34,6 +34,7 @@ module SystemF.Lowering.Datatypes2
         getAlgLayout,
 
         -- * Code generation
+        layoutSize,
         staticObject,
         algebraicIntro,
         algebraicElim)
@@ -297,6 +298,16 @@ data Layout = MemLayout !MemLayout | ValLayout !ValLayout
 isErasedLayout :: Layout -> Bool
 isErasedLayout (ValLayout VErased) = True
 isErasedLayout _ = False
+
+-- | Compute the size and alignment of the given layout.
+--   Returns native word values.
+layoutSize :: Layout -> GenLower (LL.Val, LL.Val)
+layoutSize (MemLayout ml) = do
+  (size, alignment, _) <- memDynamicObjectType ml
+  return (size, alignment)
+
+layoutSize (ValLayout vl) =
+  return (nativeWordV $ LL.sizeOf vl, nativeWordV $ LL.alignOf vl)
 
 discardStructure :: AlgLayout -> Layout
 discardStructure (AlgMemLayout ml) = MemLayout (discardMemStructure ml)

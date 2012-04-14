@@ -197,6 +197,10 @@ freshenHead (ExpSM s (ExpM expression)) = liftTypeEvalM $
          t2' <- substitute (typeSubst s) t2
          let e' = deferSubstitution s e
          return $ CoerceE inf t1' t2' e'
+       ArrayE inf ty es -> do
+         ty' <- substitute (typeSubst s) ty
+         let es' = map (deferSubstitution s) es
+         return $ ArrayE inf ty' es'
 
 freshenFun :: EvalMonad m => Subst -> FunM -> m FunSM
 freshenFun s (FunM fun) = liftTypeEvalM $

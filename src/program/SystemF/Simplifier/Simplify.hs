@@ -1302,6 +1302,8 @@ rwExp is_stream_arg expression =
         ExceptE _ _ -> propagateException
         CoerceE inf from_t to_t body ->
           rwCoerce is_stream_arg inf from_t to_t body
+        ArrayE inf ty es ->
+          rwArray inf ty es 
 
     debug _ _ = id
 
@@ -2730,6 +2732,13 @@ rwCoerce is_stream_arg inf from_t to_t body = do
     else do
       (body', _) <- rwExp False body
       return (ExpM $ CoerceE inf from_t to_t body', topCode)
+
+rwArray inf ty es = do
+  -- Rewrite all array elements
+  (es', _) <- mapAndUnzipM (rwExp False) es
+  
+  -- Rebuild the array expression
+  return (ExpM $ ArrayE inf ty es', topCode)
 
 rwFun :: FunSM -> LR (FunM, AbsCode)
 

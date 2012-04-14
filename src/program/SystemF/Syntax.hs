@@ -323,6 +323,17 @@ data BaseExp s =
     , expRetType :: Type        -- ^ Type of coerced result
     , expBody :: Exp s
     }
+    -- | An explicit array expression.
+    --   The array type is given explicitly because, if the array size is 0, 
+    --   we can't infer its type.
+    --
+    --   This constructs an expression of type @arr n a@ for the given
+    --   @a@, and @n@ determined by the number of array elements. 
+  | ArrayE
+    { expInfo :: ExpInfo
+    , expType :: Type
+    , expElements :: [Exp s]
+    }
 
 data BaseAlt s =
   Alt { altCon :: !DeConInst

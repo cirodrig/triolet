@@ -261,6 +261,36 @@ mkConE pos c ty_args ex_types fields =
   let con = TIConInst c ty_args ex_types
   in ConTE (mkExpInfo pos) con fields
 
+-- | Create the expression
+--   list @n @t (fiInt @n n) (stuckBox @(arr n t) (array @t e1 e2 ...))
+mkListE :: SourcePos -> TIType -> [TIExp] -> TIExp
+mkListE pos elt_type elts =
+  let inf = mkExpInfo pos
+      n = length elts
+
+      -- The list size as a type
+      size = delayType (Type.Type.IntT $ fromIntegral n)
+
+      -- The array type
+      array_type = DelayedType $ do
+        sf_elt_type <- case elt_type of DelayedType t -> t
+        return $ Type.Type.varApp (SystemF.pyonBuiltin SystemF.The_arr)
+          [Type.Type.IntT $ fromIntegral n, sf_elt_type]
+
+      -- Indexed integer 
+      integer = mkConE pos fiint_con [size] []
+                [LitTE inf (SystemF.IntL (fromIntegral n) sf_int_type)]
+      -- Array expression
+      array = ArrayTE inf elt_type elts
+      array_box = mkConE pos (SystemF.pyonBuiltin SystemF.The_stuckBox)
+                  [array_type] [] [array]
+  in mkConE pos (SystemF.pyonBuiltin SystemF.The_make_list) [elt_type] [size]
+     [integer, array_box]
+  where
+    sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_int)
+    fiint_con = SystemF.pyonBuiltin SystemF.The_fiInt
+
+
 mkLitE :: SourcePos -> Untyped.Lit -> TIExp
 mkLitE pos l =
   case l
