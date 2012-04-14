@@ -2462,6 +2462,42 @@ namespace Pyon {
   }
 
 /******************************************************************************/
+/*      Pre-built list marshaling functions                                   */
+/******************************************************************************/
+
+  static inline List<Int>
+  CreateIntList(int n, const int *values)
+  {
+    Incomplete<List<Int> > a;
+    a.create(n);
+    for (int i = 0; i < n; i++) a.at(i) = values[i];
+    return a.freeze();
+  }
+
+  static inline List<Float>
+  CreateFloatList(int n, const float *values)
+  {
+    Incomplete<List<Float> > a;
+    a.create(n);
+    for (int i = 0; i < n; i++) a.at(i) = values[i];
+    return a.freeze();
+  }
+
+  static inline void
+  FromIntList(int *values, List<Int> l)
+  {
+    int n = pyon_List_get_length(l.getBareData());
+    for (int i = 0; i < n; i++) values[i] = l.at(i);
+  }
+
+  static inline void
+  FromFloatList(float *values, List<Float> l)
+  {
+    int n = pyon_List_get_length(l.getBareData());
+    for (int i = 0; i < n; i++) values[i] = l.at(i);
+  }
+
+/******************************************************************************/
 /*      Concept checking                                                      */
 /******************************************************************************/
 
@@ -2564,4 +2600,3 @@ namespace Pyon {
 } // end namespace
 
 #endif
-
