@@ -3925,6 +3925,38 @@ fun_map @(t : bare -> bare)
   ret;
 
 
+fun_filter @(t : bare -> bare) @(a : bare)
+     (traversable : TraversableDict t)
+     (is_list : coerce @box (shape t) list_dim)
+     (repr : Repr a)
+     (predicate : a -> bool)
+     (input : t a)
+     (ret : OutPtr (t a))
+  -> Store attribute(inline) =
+  case traversable of
+    traversableDict @t
+    (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+    (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+
+  -- Traverse the input
+  let input_stream : Stream1 a =
+        coerce @(Stream (shape t) a) @(Stream1 a)
+        (traverse @a repr input) in
+
+  -- Guard.  For each stream element,
+  -- return the element if predicate evaluates to true.
+  -- Otherwise, return nothing.
+  let s : Stream1 a =
+        Stream1_bind @a @a repr repr input_stream
+        (\ (x : a) -> Stream1 a.
+           if predicate x
+           then sequenceStream @a (Sequence_return @a repr (copy @a repr x))
+           else sequenceStream @a (Sequence_empty @a repr)) in
+
+  -- Build the return value
+  build @a repr (coerce @(Stream1 a) @(Stream (shape t) a) s) ret;
+
+
 fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
         (traversable1 : TraversableDict t1)
         (traversable2 : TraversableDict t2)

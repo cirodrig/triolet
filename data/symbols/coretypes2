@@ -1894,6 +1894,15 @@ fun_map : (t : bare -> bare)
        -> t a
        -> Writer (t b);
 
+fun_filter : (t : bare -> bare)
+          -> (a : bare)
+          -> TraversableDict t
+          -> coerce @box (shape t) list_dim
+          -> Repr a
+          -> (a -> bool)
+          -> t a
+          -> Writer (t a);
+
 fun_zip : (t1 t2 : bare -> bare)
        -> (a b : bare)
        -> TraversableDict t1

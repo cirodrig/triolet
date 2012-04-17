@@ -44,6 +44,7 @@ pyonSourceGlobals =
   , "dim2"
   , "dim3"
   , "map"
+  , "filter"
   , "reduce"
   , "reduce1"
   , "zip"

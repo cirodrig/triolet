@@ -530,6 +530,7 @@ pyonBuiltinVariableNames =
   , "fun_isJust"
   , "fun_fromJust"
   , "fun_map"
+  , "fun_filter"
   , "fun_reduce"
   , "fun_reduce1"
   , "fun_scatter"

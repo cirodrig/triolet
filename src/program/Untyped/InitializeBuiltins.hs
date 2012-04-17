@@ -1335,6 +1335,16 @@ mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
       ],
       functionType [functionType [aT] bT, tT @@ aT] (tT @@ bT))
 
+mkFilterType = forallType [Star :-> Star, Star] $ \ [t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      bool = ConTy $ tiBuiltin the_con_bool
+  in ([ tT `IsInst` tiBuiltin the_c_Traversable
+      , shapeType tT `IsEqual` ConTy (tiBuiltin the_con_list_dim)
+      , passable aT
+      ],
+      functionType [functionType [aT] bool, tT @@ aT] (tT @@ aT))
+
 mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
@@ -1899,6 +1909,9 @@ initializeTIBuiltins = do
               ),
               ("map", [| mkMapType |]
               , [| pyonBuiltin SystemF.The_fun_map |]
+              ),
+              ("filter", [| mkFilterType |]
+              , [| pyonBuiltin SystemF.The_fun_filter |]
               ),
               ("reduce", [| mkReduceType |]
               , [| pyonBuiltin SystemF.The_fun_reduce |]
