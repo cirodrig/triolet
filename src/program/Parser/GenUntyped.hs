@@ -526,11 +526,14 @@ callVariable pos op args =
 convertUnaryOperator op = 
   case op
   of Python.Minus {} -> tiBuiltin the_v___negate__
+     Python.Not {} -> tiBuiltin the_v_not
      _ -> internalError "convertUnaryOperator: Unrecognized operator"
 
 convertBinaryOperator op =
   case op
-  of Python.Exponent {}          -> tiBuiltin the_v___power__
+  of Python.And {}               -> tiBuiltin the_v_and
+     Python.Or {}               -> tiBuiltin the_v_or
+     Python.Exponent {}          -> tiBuiltin the_v___power__
      Python.LessThan {}          -> tiBuiltin the_v___lt__
      Python.GreaterThan {}       -> tiBuiltin the_v___gt__
      Python.Equality {}          -> tiBuiltin the_v___eq__

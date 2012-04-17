@@ -87,6 +87,9 @@ pyonSourceGlobals =
   , "__and__"
   , "__or__"
   , "__xor__"
+  , "and"
+  , "or"
+  , "not"
   , "complex"
     -- Class methods
   , "__eq__"

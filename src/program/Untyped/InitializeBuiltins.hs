@@ -1781,6 +1781,14 @@ mkBinaryIntType =
   let int = ConTy (tiBuiltin the_con_int)
   in return $ monomorphic $ functionType [int, int] int
 
+mkBinaryBoolType =
+  let bool = ConTy (tiBuiltin the_con_bool)
+  in return $ monomorphic $ functionType [bool, bool] bool
+
+mkNotType =
+  let bool = ConTy (tiBuiltin the_con_bool)
+  in return $ monomorphic $ functionType [bool] bool
+
 mkGlobalVar name typ con = do
   scm <- typ
   let exp pos = VarTE (SystemF.mkExpInfo pos) con
@@ -2035,6 +2043,15 @@ initializeTIBuiltins = do
               ),
               ("__xor__", [| mkBinaryIntType |]
               , [| pyonBuiltin SystemF.The_oper_BITWISEXOR |]
+              ),
+              ("and", [| mkBinaryBoolType |]
+              , [| pyonBuiltin SystemF.The_and |]
+              ),
+              ("or", [| mkBinaryBoolType |]
+              , [| pyonBuiltin SystemF.The_or |]
+              ),
+              ("not", [| mkNotType |]
+              , [| pyonBuiltin SystemF.The_not |]
               )
             ]
           datacons =
