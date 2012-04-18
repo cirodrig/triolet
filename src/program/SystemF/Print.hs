@@ -164,7 +164,7 @@ pprAltFlags flags (AltSF (Alt con params body)) =
   in hang (pattern <> text ".") 2 body_doc
 
 -- UTF-8 for lowercase lambda
-lambda = text [toEnum 0xCE, toEnum 0xBB]
+lambda = text "lambda"
 
 -- Print the function parameters, as they would appear in a lambda expression
 -- or function definition.
