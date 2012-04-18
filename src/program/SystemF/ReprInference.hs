@@ -43,6 +43,13 @@ import qualified SystemF.TypecheckMem as TypecheckMem
 import Globals
 import GlobalVar
 
+-- Set to 'True' to print lots of debugging information
+debugVerbose = False
+
+whenDebug = when debugVerbose
+
+printWhenDebug = whenDebug . print
+
 -- | Check whether the @OutPtr@ or @IEffect@ constructors appear in a type.
 --   The constructors should never be seen.  This function is for debugging.
 checkForOutPtr :: Type -> Bool
@@ -523,7 +530,7 @@ cvtNormalizeNaturalType :: Type -> RI (Type, Kind)
 cvtNormalizeNaturalType t = do
   (t', k) <- cvtNaturalType t
   t'' <- normalize t'
-  liftIO $ print $ text "Convert NT" <+> (pprType t $$ pprType t'')
+  liftIO $ printWhenDebug $ text "Convert NT" <+> (pprType t $$ pprType t'')
   return (t'', k)
 
 -- | Convert a System F type to its canonical representation.
@@ -532,7 +539,7 @@ cvtNormalizeCanonicalType :: Type -> RI (Type, Kind)
 cvtNormalizeCanonicalType t = do
   (t', k) <- cvtCanonicalType t
   t'' <- normalize t'
-  liftIO $ print $ text "Convert CT" <+> (pprType t $$ pprType t'')
+  liftIO $ printWhenDebug $ text "Convert CT" <+> (pprType t $$ pprType t'')
   return (t'', k)
 
 -- | Convert a System F type to the preferred representation for a 
@@ -542,7 +549,7 @@ cvtNormalizeLocalType :: Type -> RI (Type, Kind)
 cvtNormalizeLocalType t = do
   (t', k) <- cvtLocalType t
   t'' <- normalize t'
-  liftIO $ print $ text "Convert LT" <+> (pprType t $$ pprType t'')
+  liftIO $ printWhenDebug $ text "Convert LT" <+> (pprType t $$ pprType t'')
   return (t'', k)
 
 -- | Convert a System F type to the preferred representation for a 
@@ -552,7 +559,7 @@ cvtNormalizeParamType :: Type -> RI (Type, Kind)
 cvtNormalizeParamType t = do
   (t', k) <- cvtParamType t
   t'' <- normalize t'
-  liftIO $ print $ text "Convert PT" <+> (pprType t $$ pprType t'')
+  liftIO $ printWhenDebug $ text "Convert PT" <+> (pprType t $$ pprType t'')
   return (t'', k)
 
 -- | Convert a System F type to the preferred representation for a 
@@ -562,7 +569,7 @@ cvtNormalizeReturnType :: Type -> RI (Type, Kind)
 cvtNormalizeReturnType t = do
   (t', k) <- cvtReturnType t
   t'' <- normalize t'
-  liftIO $ print $ text "Convert RT" <+> (pprType t $$ pprType t'')
+  liftIO $ printWhenDebug $ text "Convert RT" <+> (pprType t $$ pprType t'')
   return (t'', k)
 
 -------------------------------------------------------------------------------
@@ -764,7 +771,7 @@ coercion rewrites g_type e_type = do
     natural_e_type <- stripReprConversions whnf_e_type
     coerce_kind <- mostSpecificNaturalHeadKind natural_g_type natural_e_type
 
-    liftIO $ print $ text "Coerce " <+>
+    liftIO $ printWhenDebug $ text "Coerce " <+>
       (pprType g_type $$
        text "to" <+> pprType e_type $$
        text "via" <+> text (show coerce_kind) $$
