@@ -778,6 +778,8 @@ copy : (a : bare) -> Repr a -> a -> Writer a
 convertToBoxed : (a : bare) -> Repr a -> Writer a -> BoxedType a;
 convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
 
+reprSizeAlign : (a : bare) -> Repr a -> SizeAlign a;
+
 dynamicCopyError : (a : bare) -> a -> Writer a;
 copyArray : (N : intindex) -> (a : bare) -> Repr a -> IInt N -> arr N a
          -> Writer (arr N a);
@@ -2354,7 +2356,7 @@ generate : (n : intindex)
 
 subscript : (n : intindex)
          -> (a : bare)
-         -> Repr a
+         -> SizeAlign a
          -> arr n a
          -> int
          -> a
@@ -2363,7 +2365,7 @@ subscript : (n : intindex)
 -- Like subscript, but modifies an output pointer
 subscript_out : (n : intindex)
              -> (a : bare)
-             -> Repr a
+             -> SizeAlign a
              -> OutPtr (arr n a)
              -> int
              -> OutPtr a;

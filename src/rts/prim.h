@@ -52,10 +52,10 @@ extern function pyon.internal.prim.div_float (float, float) -> float;
 extern function pyon.internal.prim.defineIntIndex (int) -> SomeIndInt;
 
 extern function pyon.internal.prim.subscript
-  (owned, pointer, int) -> pointer;
+  (SA, pointer, int) -> pointer;
 
 extern function pyon.internal.prim.subscript_out
-  (owned, pointer, int) -> pointer;
+  (SA, pointer, int) -> pointer;
 
 extern function pyon.internal.prim.min_ii
   (IndInt, IndInt) -> IndInt;

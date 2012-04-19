@@ -204,16 +204,16 @@ function inline defineIntIndex (int n) -> SomeIndInt {
 
 // Get a pointer to an array element
 function inline subscript
- (owned repr, pointer base, int index) -> pointer {
-   SA {repr_size, repr_align} = repr @! Repr.sizealign;
+ (SA sizealign, pointer base, int index) -> pointer {
+   SA {repr_size, repr_align} = sizealign;
    typedef elt_type = bytes(value repr_size, value repr_align);
    base @ const_array(value int 0, elt_type)[index];
 };
 
 // Get a pointer to an array element.  Exactly the same as 'subscript'.
 function inline subscript_out
- (owned repr, pointer base, int index) -> pointer {
-   SA {repr_size, repr_align} = repr @! Repr.sizealign;
+ (SA sizealign, pointer base, int index) -> pointer {
+   SA {repr_size, repr_align} = sizealign;
    typedef elt_type = bytes(value repr_size, value repr_align);
    base @ const_array(value int 0, elt_type)[index];
 };

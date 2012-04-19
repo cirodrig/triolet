@@ -694,6 +694,7 @@ pyonBuiltinVariableNames =
   , "copy"
   , "convertToBoxed"
   , "convertToBare"
+  , "reprSizeAlign"
   , "dynamicCopyError"
   , "copyArray"
   , "reify"

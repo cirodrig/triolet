@@ -6,6 +6,20 @@ dynamicCopyError @(a : bare) (x : a) (ret : OutPtr a) -> Store
   attribute(inline) =
   except @Store;
 
+reprSizeAlign @(a : bare) (rep : Repr a) -> SizeAlign a
+  attribute(inline) =
+
+  case rep of
+    repr @a
+    (sa : SizeAlign a)
+    (copy_a : a -> Writer a)
+    (to_boxed_a : Writer a -> BoxedType a)
+    (to_bare_a : BoxedType a -> Writer a)
+    (pointerless_a : bool).
+
+  sa;
+
+
 -- Copy an array.  Use a loop to copy individual array elements.
 copyArray @(N : intindex) @(a : bare)
   (rep : Repr a) (size : IInt N) (src : arr N a) (ret : OutPtr (arr N a))
@@ -25,8 +39,8 @@ copyArray @(N : intindex) @(a : bare)
       doall @N @a @a fsize
       (\ (i : int) -> Store.
         copy_a
-        (subscript @N @a rep src i)
-        (subscript_out @N @a rep ret i))
+        (subscript @N @a sa src i)
+        (subscript_out @N @a sa ret i))
   ; iPosInfty @N. except @Store
   ; iNegInfty @N. except @Store
   };
@@ -1352,6 +1366,14 @@ arrScatter @(N : intindex) @(e i : bare)
 
   case count of fiInt @N (u_count : int).
 
+  case repr_s of
+    repr @s
+    (sa_s : SizeAlign s)
+    (copy_s : s -> Writer s)
+    (to_boxed_s : Writer s -> BoxedType s)
+    (to_bare_s : BoxedType s -> Writer s)
+    (pointerless_s : bool).
+
   mk_scatter @arr_t @i2 @(arr N s) @a
   (repr_arr @N @s count repr_s)
   (\ (f : NoneType -> a) (p : OutPtr (arr N s)) -> EffTok.
@@ -1370,13 +1392,13 @@ arrScatter @(N : intindex) @(e i : bare)
      if or (u_arr_index <# 0) (u_arr_index >=# u_count)
      then except @EffTok
      else updater f elt_index in_tok
-          (subscript_out @N @s repr_s p u_arr_index))
+          (subscript_out @N @s sa_s p u_arr_index))
 
   -- Combine arrays elementwise
   (\ (x : arr N s) (y : arr N s) (ret : OutPtr (arr N s)) -> Store.
      arr1D_build @N @s repr_s count
      (\ (i : int) (local_ret : OutPtr s) -> Store.
-        combiner (subscript @N @s repr_s x i) (subscript @N @s repr_s y i)
+        combiner (subscript @N @s sa_s x i) (subscript @N @s sa_s y i)
         local_ret)
      ret)
 
@@ -1392,7 +1414,7 @@ arrScatter @(N : intindex) @(e i : bare)
           -> Store.
           arr1D_build @N @e repr_e count
           (\ (i : int) (ret : OutPtr e) -> Store.
-             f (subscript @N @s repr_s accumulator i) ret)
+             f (subscript @N @s sa_s accumulator i) ret)
           ret)
    })
    (\ (index : i2) -> a -> a.
@@ -1996,7 +2018,7 @@ TraversableDict_list_build @(a : bare)
 
 -- List traversal.
 -- Loop over all list indices and return the corresponding array element.
-TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
+TraversableDict_list_traverse @(a : bare) (rep : Repr a) (ls : list a)
   -> Stream list_dim a attribute(inline) =
   case ls of make_list @a @(N : intindex)
                        (size : FIInt N) (aref : StuckBox (arr N a)).
@@ -2005,12 +2027,20 @@ TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
 
   let shp : list_dim = mk_list_dim (justVal @int size_i) in
 
+  case rep of
+    repr @a
+    (sa : SizeAlign a)
+    (copy_a : a -> Writer a)
+    (to_boxed_a : Writer a -> BoxedType a)
+    (to_bare_a : BoxedType a -> Writer a)
+    (pointerless_a : bool).
+
   viewStream @a
   (view_generate @list_dim
-   ShapeDict_list_dim @a repr shp
+   ShapeDict_list_dim @a rep shp
    (\ (si : Stored int) (ret : OutPtr a) -> Store.
      case si of stored @int (i : int).
-     copy @a repr (subscript @N @a repr ay i) ret));
+     copy @a rep (subscript @N @a sa ay i) ret));
 
 
 TraversableDict_array0_traverse
@@ -2032,7 +2062,7 @@ TraversableDict_array0_build
 
 
 TraversableDict_array1_traverse
-  @(a : bare) (repr : Repr a) (ar : array1 a)
+  @(a : bare) (rep : Repr a) (ar : array1 a)
   -> view dim1 a attribute(inline) =
   case ar of
     mk_array1 @a @(N : intindex)
@@ -2042,13 +2072,21 @@ TraversableDict_array1_traverse
   
   let linear_map : LinearMap = linearMap stride lo in
 
-  view_generate @dim1 ShapeDict_dim1 @a repr
+  case rep of
+    repr @a
+    (sa : SizeAlign a)
+    (copy_a : a -> Writer a)
+    (to_boxed_a : Writer a -> BoxedType a)
+    (to_bare_a : BoxedType a -> Writer a)
+    (pointerless_a : bool).
+
+  view_generate @dim1 ShapeDict_dim1 @a rep
   (arrayDescToDim1 @N lo stride size)
   (\ (ix : Stored int) (ret : OutPtr a) -> Store.
     case ix of stored @int (ix_i : int).
 
     let real_ix : int = invEvalLM ix_i linear_map in
-    copy @a repr (subscript @N @a repr ay real_ix) ret);
+    copy @a rep (subscript @N @a sa ay real_ix) ret);
 
 
 TraversableDict_array1_build
@@ -2058,7 +2096,7 @@ TraversableDict_array1_build
 
 
 TraversableDict_array2_traverse
-  @(a : bare) (repr : Repr a) (ar : array2 a)
+  @(a : bare) (rep : Repr a) (ar : array2 a)
   -> view dim2 a attribute(inline) =
   case ar of
     mk_array2 @a @(M N : intindex)
@@ -2070,10 +2108,10 @@ TraversableDict_array2_traverse
   let linear_map_y : LinearMap = linearMap stride_y lo_y in
   let linear_map_x : LinearMap = linearMap stride_x lo_x in
   case size_x of fiInt @N (width : int).
-  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x rep in
   let type Sint = Stored int in
 
-  view_generate @dim2 ShapeDict_dim2 @a repr
+  view_generate @dim2 ShapeDict_dim2 @a rep
   (mk_dim2 (arrayDescToDim1 @M lo_y stride_y size_y)
            (arrayDescToDim1 @N lo_x stride_x size_x))
   (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> Store.
@@ -2082,9 +2120,9 @@ TraversableDict_array2_traverse
      case ix_x of stored @int (ix_x_i : int).
      let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
      let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
-     copy @a repr 
-     (subscript @N @a repr
-      (subscript @M @(arr N a) row_repr ay real_ix_y) real_ix_x)
+     copy @a rep 
+     (subscript @N @a (reprSizeAlign @a rep)
+      (subscript @M @(arr N a) (reprSizeAlign @(arr N a) row_repr) ay real_ix_y) real_ix_x)
      ret);
 
 
@@ -2165,9 +2203,9 @@ TraversableDict_array3_traverse
      let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
      let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
      copy @a repr
-     (subscript @N @a repr
-      (subscript @M @(arr N a) row_repr
-       (subscript @L @(arr M (arr N a)) plane_repr ay real_ix_z)
+     (subscript @N @a (reprSizeAlign @a repr)
+      (subscript @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
+       (subscript @L @(arr M (arr N a)) (reprSizeAlign @(arr M (arr N a)) plane_repr) ay real_ix_z)
        real_ix_y)
       real_ix_x)
      ret);
@@ -2262,7 +2300,7 @@ TraversableDict_blist_traverse @(a : bare) (repr : Repr a) (ls : blist a)
    ShapeDict_list_dim @a repr shp
    (\ (si : Stored int) (ret : OutPtr a) -> Store.
      case si of stored @int (i : int).
-     case subscript @N @boxed_a repr_box ay i of
+     case subscript @N @boxed_a (reprSizeAlign @boxed_a repr_box) ay i of
        stuckRef @(BoxedType a) (val : BoxedType a).
      convertToBare @a repr val ret));
 
@@ -2286,7 +2324,7 @@ TraversableDict_barray1_traverse
     case ix of stored @int (ix_i : int).
 
     let real_ix : int = invEvalLM ix_i linear_map in
-    case subscript @N @boxed_a repr_box ay real_ix of 
+    case subscript @N @boxed_a (reprSizeAlign @boxed_a repr_box) ay real_ix of 
       stuckRef @(BoxedType a) (val : BoxedType a).
     convertToBare @a repr val ret);
 
@@ -2333,8 +2371,8 @@ TraversableDict_barray2_traverse
      case ix_x of stored @int (ix_x_i : int).
      let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
      let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
-     case subscript @N @boxed_a box_repr
-          (subscript @M @(arr N boxed_a) row_repr ay real_ix_y) real_ix_x of
+     case subscript @N @boxed_a (reprSizeAlign @boxed_a box_repr)
+          (subscript @M @(arr N boxed_a) (reprSizeAlign @(arr N boxed_a) row_repr) ay real_ix_y) real_ix_x of
        stuckRef @(BoxedType a) (val : BoxedType a).
      convertToBare @a repr val ret);
 
@@ -3422,7 +3460,7 @@ IndexableDict_list_at_point @(a : bare)
              (n : FIInt N) (ayref : StuckBox (arr N a)).
   case ayref of stuckBox @(arr N a) (ay : arr N a).
   case ix of stored @int (ix_i : int).
-  copy @a repr (subscript @N @a repr ay ix_i) ret;
+  copy @a repr (subscript @N @a (reprSizeAlign @a repr) ay ix_i) ret;
 
 
 IndexableDict_list_get_shape @(a : bare) (ls : list a) -> list_dim
@@ -3473,7 +3511,7 @@ IndexableDict_array1_at_point @(a : bare)
   -- Compute real array index
   case ix of stored @int (ix_i : int).
   let real_index : int = (ix_i -# lb) //# stride in
-  copy @a repr (subscript @N @a repr ay real_index) ret;
+  copy @a repr (subscript @N @a (reprSizeAlign @a repr) ay real_index) ret;
 
 
 IndexableDict_array1_get_shape @(a : bare)
@@ -3509,7 +3547,9 @@ IndexableDict_array2_at_point @(a : bare)
 
   -- Copy the desired element
   copy @a repr
-  (subscript @N @a repr (subscript @M @(arr N a) row_repr ay real_index_y)
+  (subscript @N @a (reprSizeAlign @a repr)
+   (subscript @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
+    ay real_index_y)
    real_index_x) ret;
 
 
@@ -3534,7 +3574,7 @@ IndexableDict_blist_at_point @(a : bare)
   case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
   let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
   case ix of stored @int (ix_i : int).
-  case subscript @N @boxed_a repr_box ay ix_i of
+  case subscript @N @boxed_a (reprSizeAlign @boxed_a repr_box) ay ix_i of
     stuckRef @(BoxedType a) (val : BoxedType a).
   convertToBare @a repr val ret;
 
@@ -3559,11 +3599,12 @@ IndexableDict_barray1_at_point @(a : bare)
              (lb : int) (stride : int) (size : FIInt N)
              (ayref : StuckBox (arr N boxed_a)).
   case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
 
   -- Compute real array index
   case ix of stored @int (ix_i : int).
   let real_index : int = (ix_i -# lb) //# stride in
-  case subscript @N @boxed_a (repr_StuckRef @(BoxedType a)) ay real_index
+  case subscript @N @boxed_a (reprSizeAlign @boxed_a boxed_repr) ay real_index
     of stuckRef @(BoxedType a) (val : BoxedType a).
   convertToBare @a repr val ret;
 
@@ -3593,8 +3634,9 @@ IndexableDict_barray2_at_point @(a : bare)
              (lb_x : int) (stride_x : int) (size_x : FIInt N)
              (ayref : StuckBox (arr M (arr N boxed_a))).
   case ayref of stuckBox @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
   let row_repr : Repr (arr N boxed_a) =
-        repr_arr @N @boxed_a size_x (repr_StuckRef @(BoxedType a)) in
+        repr_arr @N @boxed_a size_x boxed_repr in
 
   -- Compute real array indices
   case ix of pyonTuple2 @(Stored int) @(Stored int)
@@ -3605,9 +3647,9 @@ IndexableDict_barray2_at_point @(a : bare)
   let real_index_x : int = (ix_x_i -# lb_x) //# stride_x in
 
   -- Copy the desired element
-  case subscript @N @boxed_a (repr_StuckRef @(BoxedType a))
+  case subscript @N @boxed_a (reprSizeAlign @boxed_a boxed_repr)
        (subscript @M @(arr N boxed_a)
-       row_repr ay real_index_y) real_index_x
+       (reprSizeAlign @(arr N boxed_a) row_repr) ay real_index_y) real_index_x
     of stuckRef @(BoxedType a) (val : BoxedType a).
   convertToBare @a repr val ret;
 
@@ -4980,7 +5022,7 @@ sequenceToView @(a : bare) (repr : Repr a) (sq : Sequence a)
   view_generate @list_dim ShapeDict_list_dim @a repr dom
   (\ (si : Stored int) (ret : OutPtr a) -> Store.
      case si of stored @int (i : int).
-     copy @a repr (subscript @N @a repr ay i) ret);
+     copy @a repr (subscript @N @a (reprSizeAlign @a repr) ay i) ret);
 
 
 -- Given a mapping from old to new domains and from new to old indices,
@@ -6063,7 +6105,7 @@ arr1D_build @(N : intindex) @(a : bare)
 
   doall @N @(arr N a) @a size
   (\ (i : int) -> Store.
-     f i (subscript_out @N @a repr arr_ptr i));
+     f i (subscript_out @N @a (reprSizeAlign @a repr) arr_ptr i));
 
 
 arr2D_build @(M N : intindex) @(a : bare)
@@ -6079,8 +6121,9 @@ arr2D_build @(M N : intindex) @(a : bare)
      doall @N @(arr N a) @a size_x
      (\ (x : int) -> Store.
         f y x
-        (subscript_out @N @a repr
-         (subscript_out @M @(arr N a) row_repr arr_ptr y) x)));
+        (subscript_out @N @a (reprSizeAlign @a repr)
+         (subscript_out @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
+          arr_ptr y) x)));
 
 
 arr3D_build @(L M N : intindex) @(a : bare)
@@ -6103,9 +6146,10 @@ arr3D_build @(L M N : intindex) @(a : bare)
         doall @N @(arr N a) @a size_x
         (\ (x : int) -> Store.
            f z y x
-           (subscript_out @N @a repr
-            (subscript_out @M @(arr N a) row_repr
-             (subscript_out @L @(arr M (arr N a)) plane_repr arr_ptr z) y) x))));
+           (subscript_out @N @a (reprSizeAlign @a repr)
+            (subscript_out @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
+             (subscript_out @L @(arr M (arr N a)) (reprSizeAlign @(arr M (arr N a)) plane_repr)
+              arr_ptr z) y) x))));
 
 -------------------------------------------------------------------------------
 -- Domain loops (sequential)
@@ -6727,7 +6771,7 @@ arr1D_traverse @(N : intindex) @(a : bare)
   -> darr1 N a attribute(inline) =
   mk_darr1 @N @a
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
-     copy @a repr (subscript @N @a repr ay i) ret);
+     copy @a repr (subscript @N @a (reprSizeAlign @a repr) ay i) ret);
 
 arr1D_build @(N : intindex) @(a : bare)
   (repr : Repr a) (size : FIInt N)
@@ -6749,7 +6793,8 @@ arr2D_traverse @(M N : intindex) @(a : bare)
   mk_darr2 @M @N @a
   (\ (j : int) (i : int) (ret : OutPtr a) -> IEffect a.
      copy @a repr
-     (subscript @N @a repr (subscript @M @(arr N a) row_repr ay j) i)
+     (subscript @N @a (reprSizeAlign @a repr)
+      (subscript @M @(arr N a) (reprSizeAlign @(arr N a) row_repr) ay j) i)
      ret);
 
 arr2D_build @(M N : intindex) @(a : bare)
@@ -7416,7 +7461,8 @@ primitive_darr1_generate @(N : intindex) @(a : bare)
   -> IEffect (arr N a)
   attribute(inline, inline_sequential) =
   doall @N @(arr N a) @a size
-  (\ (i : int) -> IEffect a. f i (subscript_out @N @a repr ret i));
+  (\ (i : int) -> IEffect a.
+   f i (subscript_out @N @a (reprSizeAlign @a repr) ret i));
 
 
 darr1_reduce @(N : intindex) @(a : bare)
@@ -7636,7 +7682,9 @@ primitive_darr2_generate @(M N : intindex) @(a : bare)
   (\ (j : int) -> IEffect (arr N a).
      doall @N @(arr N a) @a width
      (\ (i : int) -> IEffect a.
-        f j i (subscript_out @N @a repr (subscript_out @M @(arr N a) row_repr ret j) i)));
+        f j i (subscript_out @N @a (reprSizeAlign @a repr)
+               (subscript_out @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
+                ret j) i)));
 
 -------------------------------------------------------------------------------
 -- Methods specifically for 1D streams
@@ -7994,9 +8042,9 @@ stencil2D @(t : bare -> bare) @(a b : bare)
                    (iInt @stencil_Nhi stencil_xend)
                    (getter y x) in
              -- Pass the array2 view to the stencil function
-             stencilfn mv (subscript_out @Nout @b repr_b
+             stencilfn mv (subscript_out @Nout @b (reprSizeAlign @b repr_b)
                            (subscript_out @Mout @(arr Nout b)
-                            row_repr ret y) x)))
+                            (reprSizeAlign @(arr Nout b) row_repr) ret y) x)))
     } in
 
     -- Bounds checking is needed around the edges of the array, but not in
@@ -8314,7 +8362,8 @@ parallel_darr1_generate @(N : intindex) @(a : bare)
   -> IEffect (arr N a)
   attribute(inline) =
   parallel_doall @N @(arr N a) @a size
-  (\ (i : int) -> IEffect a. f i (subscript_out @N @a repr ret i));
+  (\ (i : int) -> IEffect a.
+   f i (subscript_out @N @a (reprSizeAlign @a repr) ret i));
 
 
 parallel_darr1_reduce @(N : intindex) @(a : bare)
@@ -8437,7 +8486,9 @@ parallel_darr2_generate @(M N : intindex) @(a : bare)
   let row_repr : Repr (arr N a) = repr_arr @N @a width repr in
   parallel_doall2 @M @N @(arr M (arr N a)) @a height width
   (\ (j : int) (i : int) -> IEffect a.
-     f j i (subscript_out @N @a repr (subscript_out @M @(arr N a) row_repr ret j) i));
+     f j i (subscript_out @N @a (reprSizeAlign @a repr)
+            (subscript_out @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
+             ret j) i));
 
 
 parallel_doall2 @(M N : intindex) @(a b : bare)
