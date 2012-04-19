@@ -1164,6 +1164,7 @@ getValAlgLayout ty =
        of (VarT op, args)
             | op `isPyonBuiltin` The_bool  -> return boolLayout
             | op `isPyonBuiltin` The_int   -> not_algebraic
+            | op `isPyonBuiltin` The_uint  -> not_algebraic
             | op `isPyonBuiltin` The_float -> not_algebraic
             | op `isPyonBuiltin` The_Pf    -> return AVErased
             | otherwise -> do
@@ -1190,7 +1191,8 @@ getValDataTypeLayout :: InstantiatedDataType -> Lower AlgValLayout
 getValDataTypeLayout (tycon, ty_args, datacons)  
   | null datacons =
       -- Uninhabited type
-      internalError "getAlgLayout: Type is uninhabited"
+      internalError $
+      "getAlgLayout: Type is uninhabited: " ++ show (dataTypeCon tycon)
   | ValK <- dataTypeKind tycon =
       getValueDataTypeLayout ty_args datacons
   | BoxK <- dataTypeKind tycon =
@@ -1332,6 +1334,7 @@ getValLayout ty
          (VarT op, args)
            | op `isPyonBuiltin` The_bool  -> prim_layout LL.BoolType
            | op `isPyonBuiltin` The_int   -> prim_layout LL.pyonIntType
+           | op `isPyonBuiltin` The_uint  -> prim_layout LL.pyonUintType
            | op `isPyonBuiltin` The_float -> prim_layout LL.pyonFloatType
            | op `isPyonBuiltin` The_Pf    -> return VErased
            | otherwise -> do
