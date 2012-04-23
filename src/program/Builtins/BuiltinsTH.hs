@@ -54,7 +54,7 @@ pyonBuiltinTypeNames =
   , "Boxed"
   , "OutPtr"
   , "Store"
-  , "Writer"
+  , "Init"
   , "BoxedType"
   , "BareType"
     

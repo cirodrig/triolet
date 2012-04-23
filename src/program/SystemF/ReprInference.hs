@@ -425,7 +425,7 @@ sameKind _ _ = False
 -- * boxedType : bare -> box
 -- * bareType  : box  -> bare
 writeType, boxedType, bareType :: Type -> Type
-writeType t = varApp (pyonBuiltin The_Writer) [t]
+writeType t = varApp (pyonBuiltin The_Init) [t]
 boxedType t = varApp (pyonBuiltin The_BoxedType) [t]
 bareType t  = varApp (pyonBuiltin The_BareType) [t]
 

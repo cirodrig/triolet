@@ -96,7 +96,7 @@ translateDataConFieldArgument tenv lty =
      of Type.VarT kvar
           | kvar == Type.bareV ->
               -- Convert to writer
-              Type.varApp (pyonBuiltin The_Writer) [translated_type]
+              Type.varApp (pyonBuiltin The_Init) [translated_type]
           | otherwise -> translated_type
 
         -- Other terms should not occur 
@@ -120,7 +120,7 @@ translateDataConDecl tenv data_type_con decl =
          of Type.VarT kvar
               | kvar == Type.bareV ->
                   -- Convert to writer
-                  Type.varApp (pyonBuiltin The_Writer) [range_type]
+                  Type.varApp (pyonBuiltin The_Init) [range_type]
               | otherwise -> range_type
 
             -- Other terms should not occur 

@@ -58,7 +58,7 @@ type BoxedType : bare -> box;
 type BareType : box -> bare;
 
 -- Designates an initializer function for a bare object
-type Writer : bare -> write;
+type Init : bare -> write;
 
 -- Normal data types
 
@@ -191,9 +191,9 @@ data Repr : bare -> box
 {
   repr (a : bare) ()
   (SizeAlign a,                 -- Size and alignment
-   a -> Writer a,		-- Copy
-   Writer a -> BoxedType a,	-- Convert to boxed
-   BoxedType a -> Writer a,     -- Convert to bare
+   a -> Init a,		-- Copy
+   Init a -> BoxedType a,	-- Convert to boxed
+   BoxedType a -> Init a,     -- Convert to bare
    bool);                       -- Pointerlessness
                                 -- (True if an 'a' definitely doesn't contain pointers)
 };
@@ -216,9 +216,9 @@ data AdditiveDict : bare -> box
 {
   additiveDict
   (a : bare) ()
-  (a -> a -> Writer a,
-   a -> a -> Writer a,
-   a -> Writer a,
+  (a -> a -> Init a,
+   a -> a -> Init a,
+   a -> Init a,
    a);
 };
 
@@ -227,8 +227,8 @@ data MultiplicativeDict : bare -> box
   multiplicativeDict
   (a : bare) ()
   (AdditiveDict a,
-   a -> a -> Writer a,
-   int -> Writer a,
+   a -> a -> Init a,
+   int -> Init a,
    a);
 };
 
@@ -238,28 +238,28 @@ data RemainderDict : bare -> box
   (a : bare) ()
   (MultiplicativeDict a,
    a -> a -> int,
-   a -> a -> Writer a);
+   a -> a -> Init a);
 };
 
 data FractionalDict : bare -> box
 {
   fractionalDict
   (a : bare) ()
-  (MultiplicativeDict a, a -> a -> Writer a);
+  (MultiplicativeDict a, a -> a -> Init a);
 };
 
 data FloatingDict : bare -> box
 {
   floatingDict
   (a : bare) ()
-  (float -> Writer a,
-   a -> a -> Writer a,
-   a -> Writer a,
-   a -> Writer a,
-   a -> Writer a,
-   a -> Writer a,
-   a -> Writer a,
-   a -> Writer a,
+  (float -> Init a,
+   a -> a -> Init a,
+   a -> Init a,
+   a -> Init a,
+   a -> Init a,
+   a -> Init a,
+   a -> Init a,
+   a -> Init a,
    a);
 };
 
@@ -268,7 +268,7 @@ data VectorDict : bare -> box
   vectorDict
   (a : bare) ()
   (AdditiveDict a,
-   a -> float -> Writer a,
+   a -> float -> Init a,
    a -> float,
    a -> a -> float);
 };
@@ -292,15 +292,15 @@ data CartesianDict : box -> box
   (sh : box)
   ()
   (coerce @box (cartesianDomain (index sh)) sh,
-   sh -> Writer (Maybe (index sh)),
-   sh -> Writer (Maybe (index sh)),
-   sh -> Writer (index sh),
+   sh -> Init (Maybe (index sh)),
+   sh -> Init (Maybe (index sh)),
+   sh -> Init (index sh),
    index sh -> index sh -> sh,
    sh -> index sh -> sh,
    sh -> index sh -> sh,
    sh -> index sh -> sh,
-   index sh -> index sh -> Writer (index sh),
-   index sh -> index sh -> Writer (index sh),
+   index sh -> index sh -> Init (index sh),
+   index sh -> index sh -> Init (index sh),
    sh);
 };
 
@@ -308,7 +308,7 @@ data TraversableDict : (bare -> bare) -> box
 {
   traversableDict (t : bare -> bare) ()
   ((a : bare) -> Repr a -> t a -> Stream (shape t) a,
-   (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a));
+   (a : bare) -> Repr a -> Stream (shape t) a -> Init (t a));
 };
 
 -- Operations related to data domains and traversals over them.
@@ -330,25 +330,25 @@ data ShapeDict : box -> box
    (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a,
 
    -- Generate
-   (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> Stream sh a,
+   (a : bare) -> Repr a -> sh -> (index sh -> Init a) -> Stream sh a,
 
    -- Map and zips
    (a b : bare) ->
    Repr a -> Repr b ->
-   (a -> Writer b) -> Stream sh a -> Stream sh b,
+   (a -> Init b) -> Stream sh a -> Stream sh b,
 
    (a b c : bare) ->
    Repr a -> Repr b -> Repr c ->
-   (a -> b -> Writer c) -> Stream sh a -> Stream sh b -> Stream sh c,
+   (a -> b -> Init c) -> Stream sh a -> Stream sh b -> Stream sh c,
 
    (a b c d : bare) ->
    Repr a -> Repr b -> Repr c -> Repr d ->
-   (a -> b -> c -> Writer d) ->
+   (a -> b -> c -> Init d) ->
    Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d,
 
    (a b c d e : bare) ->
    Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-   (a -> b -> c -> d -> Writer e) ->
+   (a -> b -> c -> d -> Init e) ->
    Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e,
 
    -- Slice
@@ -365,7 +365,7 @@ data IndexableDict : (bare -> bare) -> box
 {
   indexableDict
   (t : bare -> bare) ()
-  ((a : bare) -> Repr a -> t a -> index (shape t) -> Writer a,
+  ((a : bare) -> Repr a -> t a -> index (shape t) -> Init a,
    (a : bare) -> t a -> shape t);
 };
 
@@ -417,7 +417,7 @@ data UpdateInPlaceFinalizer : bare -> bare -> box
   mutateInPlace (mutable immutable : bare) () (coerce @bare mutable immutable);
 
   -- Data should be mutated out-of-place, then written to the output
-  mutateAndCopy (mutable immutable : bare) () (mutable -> Writer immutable);
+  mutateAndCopy (mutable immutable : bare) () (mutable -> Init immutable);
 };
 
 -- A scatter-reduce operation.  Reductions are performed with a combination of
@@ -444,7 +444,7 @@ data Scatter : bare -> bare -> box
   (Repr s,
    (NoneType -> a) -> OutPtr s -> EffTok,       -- Initializer
    (a -> a) -> i -> EffTok -> OutPtr s -> EffTok, -- Updater
-   s -> s -> Writer s,                          -- Combining function
+   s -> s -> Init s,                          -- Combining function
    UpdateInPlaceFinalizer s r,                  -- Final value constructor
    i -> (a -> a),                               -- Update function
    NoneType -> a                                -- Initial value
@@ -467,11 +467,11 @@ floatUpdateInPlace_updater : (float -> float) -> EffTok
                           -> EffTok;
 
 -- Helper functions for scatter reductions
-intUpdateInPlace_combiner : Stored int -> Stored int -> Writer (Stored int);
+intUpdateInPlace_combiner : Stored int -> Stored int -> Init (Stored int);
 intUpdateInPlace_int_coercion : coerce @bare (Stored int) (Stored int);
 intUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored int) (Stored int);
 
-floatUpdateInPlace_combiner : Stored float -> Stored float -> Writer (Stored float);
+floatUpdateInPlace_combiner : Stored float -> Stored float -> Init (Stored float);
 floatUpdateInPlace_float_coercion : coerce @bare (Stored float) (Stored float);
 floatUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored float) (Stored float);
 
@@ -522,7 +522,7 @@ comapScatterIndex :
  -> Repr i1
  -> Repr i2
  -> Repr s
- -> (i2 -> Writer i1)
+ -> (i2 -> Init i1)
  -> Scatter s i1
  -> Scatter s i2;
 
@@ -629,7 +629,7 @@ data ChainState : box -> box -> box
 --  A view is a container represented by a function
 data view : box -> bare -> box
 {
-  mk_view (sh : box, a : bare) () (sh, index sh -> Writer a);
+  mk_view (sh : box, a : bare) () (sh, index sh -> Init a);
 };
 
 -------------------------------------------------------------------------------
@@ -713,8 +713,8 @@ arrayDescToDim1 : (N : intindex) -> int -> int -> FIInt N -> dim1;
 -- Convert a dim1 to the equivalent "size" fields of an array.
 dim1ToArrayDesc : (a : bare)
                -> dim1
-               -> ((N : intindex) -> int -> int -> FIInt N -> Writer a)
-               -> Writer a;
+               -> ((N : intindex) -> int -> int -> FIInt N -> Init a)
+               -> Init a;
 
 -------------------------------------------------------------------------------
 -- Shapes
@@ -773,20 +773,20 @@ shapeSliceRepr : (sh : box) -> ShapeDict sh -> Repr (slice sh);
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
-copy : (a : bare) -> Repr a -> a -> Writer a
+copy : (a : bare) -> Repr a -> a -> Init a
        attribute(conlike);
-convertToBoxed : (a : bare) -> Repr a -> Writer a -> BoxedType a;
-convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
+convertToBoxed : (a : bare) -> Repr a -> Init a -> BoxedType a;
+convertToBare : (a : bare) -> Repr a -> BoxedType a -> Init a;
 
 reprSizeAlign : (a : bare) -> Repr a -> SizeAlign a;
 
-dynamicCopyError : (a : bare) -> a -> Writer a;
+dynamicCopyError : (a : bare) -> a -> Init a;
 copyArray : (N : intindex) -> (a : bare) -> Repr a -> IInt N -> arr N a
-         -> Writer (arr N a);
+         -> Init (arr N a);
 
 -- This function is inserted by the simplifier to convert data constructor
 -- applications to values
-reify : (a : bare) -> Repr a -> Writer a -> a;
+reify : (a : bare) -> Repr a -> Init a -> a;
 
 repr_int : Repr (Stored int);
 repr_float : Repr (Stored float);
@@ -905,55 +905,55 @@ TraversableDict_view_dim3_traverse :
   (a : bare) -> Repr a -> view dim3 a -> Stream dim3 a;
 
 TraversableDict_list_build :
-  (a : bare) -> Repr a -> Stream list_dim a -> Writer (list a);
+  (a : bare) -> Repr a -> Stream list_dim a -> Init (list a);
 
 TraversableDict_list_traverse :
   (a : bare) -> Repr a -> list a -> Stream list_dim a;
 
 TraversableDict_array0_build :
-  (a : bare) -> Repr a -> Stream dim0 a -> Writer (array0 a);
+  (a : bare) -> Repr a -> Stream dim0 a -> Init (array0 a);
 
 TraversableDict_array0_traverse :
   (a : bare) -> Repr a -> array0 a -> Stream dim0 a;
 
 TraversableDict_array1_build :
-  (a : bare) -> Repr a -> Stream dim1 a -> Writer (array1 a);
+  (a : bare) -> Repr a -> Stream dim1 a -> Init (array1 a);
 
 TraversableDict_array1_traverse :
   (a : bare) -> Repr a -> array1 a -> Stream dim1 a;
 
 TraversableDict_array2_build :
-  (a : bare) -> Repr a -> Stream dim2 a -> Writer (array2 a);
+  (a : bare) -> Repr a -> Stream dim2 a -> Init (array2 a);
 
 TraversableDict_array2_traverse :
   (a : bare) -> Repr a -> array2 a -> Stream dim2 a;
 
 TraversableDict_array3_build :
-  (a : bare) -> Repr a -> Stream dim3 a -> Writer (array3 a);
+  (a : bare) -> Repr a -> Stream dim3 a -> Init (array3 a);
 
 TraversableDict_array3_traverse :
   (a : bare) -> Repr a -> array3 a -> Stream dim3 a;
 
 TraversableDict_blist_build :
-  (a : bare) -> Repr a -> Stream list_dim a -> Writer (blist a);
+  (a : bare) -> Repr a -> Stream list_dim a -> Init (blist a);
 
 TraversableDict_blist_traverse :
   (a : bare) -> Repr a -> blist a -> Stream list_dim a;
 
 TraversableDict_barray1_build :
-  (a : bare) -> Repr a -> Stream dim1 a -> Writer (barray1 a);
+  (a : bare) -> Repr a -> Stream dim1 a -> Init (barray1 a);
 
 TraversableDict_barray1_traverse :
   (a : bare) -> Repr a -> barray1 a -> Stream dim1 a;
 
 TraversableDict_barray2_build :
-  (a : bare) -> Repr a -> Stream dim2 a -> Writer (barray2 a);
+  (a : bare) -> Repr a -> Stream dim2 a -> Init (barray2 a);
 
 TraversableDict_barray2_traverse :
   (a : bare) -> Repr a -> barray2 a -> Stream dim2 a;
 
 TraversableDict_barray3_build :
-  (a : bare) -> Repr a -> Stream dim3 a -> Writer (barray3 a);
+  (a : bare) -> Repr a -> Stream dim3 a -> Init (barray3 a);
 
 TraversableDict_barray3_traverse :
   (a : bare) -> Repr a -> barray3 a -> Stream dim3 a;
@@ -971,7 +971,7 @@ ShapeDict_list_dim_intersect :
   list_dim -> list_dim -> list_dim;
 
 ShapeDict_list_dim_generate :
-  (a : bare) -> Repr a -> list_dim -> (index list_dim -> Writer a) ->
+  (a : bare) -> Repr a -> list_dim -> (index list_dim -> Init a) ->
   Stream list_dim a;
 
 ShapeDict_list_dim_flatten :
@@ -980,25 +980,25 @@ ShapeDict_list_dim_flatten :
 ShapeDict_list_dim_map :
   (a b : bare) ->
   Repr a -> Repr b ->
-  (a -> Writer b) ->
+  (a -> Init b) ->
   Stream list_dim a -> Stream list_dim b;
 
 ShapeDict_list_dim_zipWith :
   (a b c : bare) ->
   Repr a -> Repr b -> Repr c ->
-  (a -> b -> Writer c) ->
+  (a -> b -> Init c) ->
   Stream list_dim a -> Stream list_dim b -> Stream list_dim c;
 
 ShapeDict_list_dim_zipWith3 :
   (a b c d : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d ->
-  (a -> b -> c -> Writer d) ->
+  (a -> b -> c -> Init d) ->
   Stream list_dim a -> Stream list_dim b -> Stream list_dim c -> Stream list_dim d;
 
 ShapeDict_list_dim_zipWith4 :
   (a b c d e : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-  (a -> b -> c -> d -> Writer e) ->
+  (a -> b -> c -> d -> Init e) ->
   Stream list_dim a -> Stream list_dim b -> Stream list_dim c -> Stream list_dim d -> Stream list_dim e;
 
 ShapeDict_list_dim_slice :
@@ -1013,7 +1013,7 @@ ShapeDict_dim0_intersect :
   dim0 -> dim0 -> dim0;
 
 ShapeDict_dim0_generate :
-  (a : bare) -> Repr a -> dim0 -> (index dim0 -> Writer a) -> Stream dim0 a;
+  (a : bare) -> Repr a -> dim0 -> (index dim0 -> Init a) -> Stream dim0 a;
 
 ShapeDict_dim0_flatten :
   (a : bare) -> Repr a -> Stream dim0 a -> Stream list_dim a;
@@ -1021,25 +1021,25 @@ ShapeDict_dim0_flatten :
 ShapeDict_dim0_map :
   (a b : bare) ->
   Repr a -> Repr b ->
-  (a -> Writer b) ->
+  (a -> Init b) ->
   Stream dim0 a -> Stream dim0 b;
 
 ShapeDict_dim0_zipWith :
   (a b c : bare) ->
   Repr a -> Repr b -> Repr c ->
-  (a -> b -> Writer c) ->
+  (a -> b -> Init c) ->
   Stream dim0 a -> Stream dim0 b -> Stream dim0 c;
 
 ShapeDict_dim0_zipWith3 :
   (a b c d : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d ->
-  (a -> b -> c -> Writer d) ->
+  (a -> b -> c -> Init d) ->
   Stream dim0 a -> Stream dim0 b -> Stream dim0 c -> Stream dim0 d;
 
 ShapeDict_dim0_zipWith4 :
   (a b c d e : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-  (a -> b -> c -> d -> Writer e) ->
+  (a -> b -> c -> d -> Init e) ->
   Stream dim0 a -> Stream dim0 b -> Stream dim0 c -> Stream dim0 d -> Stream dim0 e;
 
 ShapeDict_dim0_slice :
@@ -1054,7 +1054,7 @@ ShapeDict_dim1_intersect :
   dim1 -> dim1 -> dim1;
 
 ShapeDict_dim1_generate :
-  (a : bare) -> Repr a -> dim1 -> (index dim1 -> Writer a) -> Stream dim1 a;
+  (a : bare) -> Repr a -> dim1 -> (index dim1 -> Init a) -> Stream dim1 a;
 
 ShapeDict_dim1_flatten :
   (a : bare) -> Repr a -> Stream dim1 a -> Stream list_dim a;
@@ -1062,25 +1062,25 @@ ShapeDict_dim1_flatten :
 ShapeDict_dim1_map :
   (a b : bare) ->
   Repr a -> Repr b ->
-  (a -> Writer b) ->
+  (a -> Init b) ->
   Stream dim1 a -> Stream dim1 b;
 
 ShapeDict_dim1_zipWith :
   (a b c : bare) ->
   Repr a -> Repr b -> Repr c ->
-  (a -> b -> Writer c) ->
+  (a -> b -> Init c) ->
   Stream dim1 a -> Stream dim1 b -> Stream dim1 c;
 
 ShapeDict_dim1_zipWith3 :
   (a b c d : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d ->
-  (a -> b -> c -> Writer d) ->
+  (a -> b -> c -> Init d) ->
   Stream dim1 a -> Stream dim1 b -> Stream dim1 c -> Stream dim1 d;
 
 ShapeDict_dim1_zipWith4 :
   (a b c d e : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-  (a -> b -> c -> d -> Writer e) ->
+  (a -> b -> c -> d -> Init e) ->
   Stream dim1 a -> Stream dim1 b -> Stream dim1 c -> Stream dim1 d -> Stream dim1 e;
 
 ShapeDict_dim1_slice :
@@ -1095,7 +1095,7 @@ ShapeDict_dim2_intersect :
   dim2 -> dim2 -> dim2;
 
 ShapeDict_dim2_generate :
-  (a : bare) -> Repr a -> dim2 -> (index dim2 -> Writer a) -> Stream dim2 a;
+  (a : bare) -> Repr a -> dim2 -> (index dim2 -> Init a) -> Stream dim2 a;
 
 ShapeDict_dim2_flatten_helper : Interval -> Interval -> int -> int
   -> (list_dim, MaybeVal int, int, int);
@@ -1108,25 +1108,25 @@ ShapeDict_dim2_flatten :
 ShapeDict_dim2_map :
   (a b : bare) ->
   Repr a -> Repr b ->
-  (a -> Writer b) ->
+  (a -> Init b) ->
   Stream dim2 a -> Stream dim2 b;
 
 ShapeDict_dim2_zipWith :
   (a b c : bare) ->
   Repr a -> Repr b -> Repr c ->
-  (a -> b -> Writer c) ->
+  (a -> b -> Init c) ->
   Stream dim2 a -> Stream dim2 b -> Stream dim2 c;
 
 ShapeDict_dim2_zipWith3 :
   (a b c d : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d ->
-  (a -> b -> c -> Writer d) ->
+  (a -> b -> c -> Init d) ->
   Stream dim2 a -> Stream dim2 b -> Stream dim2 c -> Stream dim2 d;
 
 ShapeDict_dim2_zipWith4 :
   (a b c d e : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-  (a -> b -> c -> d -> Writer e) ->
+  (a -> b -> c -> d -> Init e) ->
   Stream dim2 a -> Stream dim2 b -> Stream dim2 c -> Stream dim2 d -> Stream dim2 e;
 
 ShapeDict_dim2_slice :
@@ -1141,7 +1141,7 @@ ShapeDict_dim3_intersect :
   dim3 -> dim3 -> dim3;
 
 ShapeDict_dim3_generate :
-  (a : bare) -> Repr a -> dim3 -> (index dim3 -> Writer a) -> Stream dim3 a;
+  (a : bare) -> Repr a -> dim3 -> (index dim3 -> Init a) -> Stream dim3 a;
 
 ShapeDict_dim3_flatten_helper : Interval -> Interval -> Interval
   -> int -> int -> int
@@ -1156,25 +1156,25 @@ ShapeDict_dim3_flatten :
 ShapeDict_dim3_map :
   (a b : bare) ->
   Repr a -> Repr b ->
-  (a -> Writer b) ->
+  (a -> Init b) ->
   Stream dim3 a -> Stream dim3 b;
 
 ShapeDict_dim3_zipWith :
   (a b c : bare) ->
   Repr a -> Repr b -> Repr c ->
-  (a -> b -> Writer c) ->
+  (a -> b -> Init c) ->
   Stream dim3 a -> Stream dim3 b -> Stream dim3 c;
 
 ShapeDict_dim3_zipWith3 :
   (a b c d : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d ->
-  (a -> b -> c -> Writer d) ->
+  (a -> b -> c -> Init d) ->
   Stream dim3 a -> Stream dim3 b -> Stream dim3 c -> Stream dim3 d;
 
 ShapeDict_dim3_zipWith4 :
   (a b c d e : bare) ->
   Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-  (a -> b -> c -> d -> Writer e) ->
+  (a -> b -> c -> d -> Init e) ->
   Stream dim3 a -> Stream dim3 b -> Stream dim3 c -> Stream dim3 d -> Stream dim3 e;
 
 ShapeDict_dim3_slice :
@@ -1184,53 +1184,53 @@ ShapeDict_dim3_slice :
 
 
 IndexableDict_list_at_point :
-  (a : bare) -> Repr a -> list a -> Stored int -> Writer a;
+  (a : bare) -> Repr a -> list a -> Stored int -> Init a;
 
 IndexableDict_list_get_shape :
   (a : bare) -> list a -> list_dim;
 
 IndexableDict_view_at_point :
   (sh : box) -> ShapeDict sh ->
-  (a : bare) -> Repr a -> view sh a -> index sh -> Writer a;
+  (a : bare) -> Repr a -> view sh a -> index sh -> Init a;
 
 IndexableDict_view_get_shape :
   (sh : box) -> ShapeDict sh ->
   (a : bare) -> view sh a -> sh;
 
 IndexableDict_array0_at_point :
-  (a : bare) -> Repr a -> array0 a -> Stored NoneType -> Writer a;
+  (a : bare) -> Repr a -> array0 a -> Stored NoneType -> Init a;
 
 IndexableDict_array0_get_shape :
   (a : bare) -> array0 a -> dim0;
 
 IndexableDict_array1_at_point :
-  (a : bare) -> Repr a -> array1 a -> Stored int -> Writer a;
+  (a : bare) -> Repr a -> array1 a -> Stored int -> Init a;
 
 IndexableDict_array1_get_shape :
   (a : bare) -> array1 a -> dim1;
 
 IndexableDict_array2_at_point :
   (a : bare) -> Repr a -> array2 a -> PyonTuple2 (Stored int) (Stored int)
-  -> Writer a;
+  -> Init a;
 
 IndexableDict_array2_get_shape :
   (a : bare) -> array2 a -> dim2;
 
 IndexableDict_blist_at_point :
-  (a : bare) -> Repr a -> blist a -> Stored int -> Writer a;
+  (a : bare) -> Repr a -> blist a -> Stored int -> Init a;
 
 IndexableDict_blist_get_shape :
   (a : bare) -> blist a -> list_dim;
 
 IndexableDict_barray1_at_point :
-  (a : bare) -> Repr a -> barray1 a -> Stored int -> Writer a;
+  (a : bare) -> Repr a -> barray1 a -> Stored int -> Init a;
 
 IndexableDict_barray1_get_shape :
   (a : bare) -> barray1 a -> dim1;
 
 IndexableDict_barray2_at_point :
   (a : bare) -> Repr a -> barray2 a -> PyonTuple2 (Stored int) (Stored int)
-  -> Writer a;
+  -> Init a;
 
 IndexableDict_barray2_get_shape :
   (a : bare) -> barray2 a -> dim2;
@@ -1284,7 +1284,7 @@ AdditiveDict_PyonTuple2_add : (a b : bare)
                            -> AdditiveDict b
                            -> PyonTuple2 a b
                            -> PyonTuple2 a b
-                           -> Writer (PyonTuple2 a b);
+                           -> Init (PyonTuple2 a b);
 AdditiveDict_PyonTuple2_sub : (a b : bare)
                            -> Repr a
                            -> Repr b
@@ -1292,20 +1292,20 @@ AdditiveDict_PyonTuple2_sub : (a b : bare)
                            -> AdditiveDict b
                            -> PyonTuple2 a b
                            -> PyonTuple2 a b
-                           -> Writer (PyonTuple2 a b);
+                           -> Init (PyonTuple2 a b);
 AdditiveDict_PyonTuple2_negate : (a b : bare)
                               -> Repr a
                               -> Repr b
                               -> AdditiveDict a
                               -> AdditiveDict b
                               -> PyonTuple2 a b
-                              -> Writer (PyonTuple2 a b);
+                              -> Init (PyonTuple2 a b);
 AdditiveDict_PyonTuple2_zero : (a b : bare)
                             -> Repr a
                             -> Repr b
                             -> AdditiveDict a
                             -> AdditiveDict b
-                            -> Writer (PyonTuple2 a b);
+                            -> Init (PyonTuple2 a b);
 
 {-AdditiveDict_Complex_add :
     (a : bare)
@@ -1313,25 +1313,25 @@ AdditiveDict_PyonTuple2_zero : (a b : bare)
  -> AdditiveDict a
  -> Complex a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 AdditiveDict_Complex_sub :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
  -> Complex a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 AdditiveDict_Complex_negate :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 AdditiveDict_Complex_zero :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
- -> Writer (Complex a);-}
+ -> Init (Complex a);-}
 
 
 MultiplicativeDict_int_mul : int -> int -> int;
@@ -1349,18 +1349,18 @@ MultiplicativeDict_float_fromInt : int -> float;
  -> MultiplicativeDict a
  -> Complex a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 MultiplicativeDict_Complex_fromInt :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
  -> int
- -> Writer (Complex a);
+ -> Init (Complex a);
 MultiplicativeDict_Complex_one :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
- -> Writer (Complex a);-}
+ -> Init (Complex a);-}
 
 
 RemainderDict_int_floordiv : int -> int -> int;
@@ -1381,7 +1381,7 @@ FractionalDict_Complex_div :
  -> FractionalDict a
  -> Complex a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 
 
 FloatingDict_float_fromfloat : float -> float;
@@ -1401,7 +1401,7 @@ FloatingDict_Complex_fromfloat :
  -> FractionalDict a
  -> FloatingDict a
  -> float
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_power :
     (a : bare)
  -> Repr a
@@ -1410,7 +1410,7 @@ FloatingDict_Complex_power :
  -> FloatingDict a
  -> Complex a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_exp :
     (a : bare)
  -> Repr a
@@ -1418,7 +1418,7 @@ FloatingDict_Complex_exp :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_log :
     (a : bare)
  -> Repr a
@@ -1426,14 +1426,14 @@ FloatingDict_Complex_log :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_sqrt :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
  -> FractionalDict a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_sin :
     (a : bare)
  -> Repr a
@@ -1441,7 +1441,7 @@ FloatingDict_Complex_sin :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_cos :
     (a : bare)
  -> Repr a
@@ -1449,7 +1449,7 @@ FloatingDict_Complex_cos :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_tan :
     (a : bare)
  -> Repr a
@@ -1457,14 +1457,14 @@ FloatingDict_Complex_tan :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> Writer (Complex a);
+ -> Init (Complex a);
 FloatingDict_Complex_pi :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
  -> FractionalDict a
  -> FloatingDict a
- -> Writer (Complex a);
+ -> Init (Complex a);
 
 
 VectorDict_float_scale : float -> float -> float;
@@ -1477,7 +1477,7 @@ VectorDict_Complex_scale :
  -> VectorDict a
  -> Complex a
  -> float
- -> Writer (Complex a);
+ -> Init (Complex a);
 
 VectorDict_Complex_magnitude :
     (a : bare)
@@ -1495,11 +1495,11 @@ VectorDict_Complex_dot :
  -> float;
 
 CartesianDict_dim0_loBound :
-    dim0 -> Writer (Maybe (index dim0));
+    dim0 -> Init (Maybe (index dim0));
 CartesianDict_dim0_hiBound :
-    dim0 -> Writer (Maybe (index dim0));
+    dim0 -> Init (Maybe (index dim0));
 CartesianDict_dim0_stride :
-    dim0 -> Writer (index dim0);
+    dim0 -> Init (index dim0);
 CartesianDict_dim0_arrayRange :
     index dim0 -> index dim0 -> dim0;
 CartesianDict_dim0_displaceDomain :
@@ -1509,17 +1509,17 @@ CartesianDict_dim0_multiplyDomain :
 CartesianDict_dim0_divideDomain :
     dim0 -> index dim0 -> dim0;
 CartesianDict_dim0_multiplyIndex :
-    index dim0 -> index dim0 -> Writer (index dim0);
+    index dim0 -> index dim0 -> Init (index dim0);
 CartesianDict_dim0_divideIndex :
-    index dim0 -> index dim0 -> Writer (index dim0);
+    index dim0 -> index dim0 -> Init (index dim0);
 CartesianDict_dim0_unbounded :
     dim0;
 CartesianDict_dim1_loBound :
-    dim1 -> Writer (Maybe (index dim1));
+    dim1 -> Init (Maybe (index dim1));
 CartesianDict_dim1_hiBound :
-    dim1 -> Writer (Maybe (index dim1));
+    dim1 -> Init (Maybe (index dim1));
 CartesianDict_dim1_stride :
-    dim1 -> Writer (index dim1);
+    dim1 -> Init (index dim1);
 CartesianDict_dim1_arrayRange :
     index dim1 -> index dim1 -> dim1;
 CartesianDict_dim1_displaceDomain :
@@ -1529,17 +1529,17 @@ CartesianDict_dim1_multiplyDomain :
 CartesianDict_dim1_divideDomain :
     dim1 -> index dim1 -> dim1;
 CartesianDict_dim1_multiplyIndex :
-    index dim1 -> index dim1 -> Writer (index dim1);
+    index dim1 -> index dim1 -> Init (index dim1);
 CartesianDict_dim1_divideIndex :
-    index dim1 -> index dim1 -> Writer (index dim1);
+    index dim1 -> index dim1 -> Init (index dim1);
 CartesianDict_dim1_unbounded :
     dim1;
 CartesianDict_dim2_loBound :
-    dim2 -> Writer (Maybe (index dim2));
+    dim2 -> Init (Maybe (index dim2));
 CartesianDict_dim2_hiBound :
-    dim2 -> Writer (Maybe (index dim2));
+    dim2 -> Init (Maybe (index dim2));
 CartesianDict_dim2_stride :
-    dim2 -> Writer (index dim2);
+    dim2 -> Init (index dim2);
 CartesianDict_dim2_arrayRange :
     index dim2 -> index dim2 -> dim2;
 CartesianDict_dim2_displaceDomain :
@@ -1549,17 +1549,17 @@ CartesianDict_dim2_multiplyDomain :
 CartesianDict_dim2_divideDomain :
     dim2 -> index dim2 -> dim2;
 CartesianDict_dim2_multiplyIndex :
-    index dim2 -> index dim2 -> Writer (index dim2);
+    index dim2 -> index dim2 -> Init (index dim2);
 CartesianDict_dim2_divideIndex :
-    index dim2 -> index dim2 -> Writer (index dim2);
+    index dim2 -> index dim2 -> Init (index dim2);
 CartesianDict_dim2_unbounded :
     dim2;
 CartesianDict_dim3_loBound :
-    dim3 -> Writer (Maybe (index dim3));
+    dim3 -> Init (Maybe (index dim3));
 CartesianDict_dim3_hiBound :
-    dim3 -> Writer (Maybe (index dim3));
+    dim3 -> Init (Maybe (index dim3));
 CartesianDict_dim3_stride :
-    dim3 -> Writer (index dim3);
+    dim3 -> Init (index dim3);
 CartesianDict_dim3_arrayRange :
     index dim3 -> index dim3 -> dim3;
 CartesianDict_dim3_displaceDomain :
@@ -1569,9 +1569,9 @@ CartesianDict_dim3_multiplyDomain :
 CartesianDict_dim3_divideDomain :
     dim3 -> index dim3 -> dim3;
 CartesianDict_dim3_multiplyIndex :
-    index dim3 -> index dim3 -> Writer (index dim3);
+    index dim3 -> index dim3 -> Init (index dim3);
 CartesianDict_dim3_divideIndex :
-    index dim3 -> index dim3 -> Writer (index dim3);
+    index dim3 -> index dim3 -> Init (index dim3);
 CartesianDict_dim3_unbounded :
     dim3;
 
@@ -1720,7 +1720,7 @@ fun_list_dim : Maybe (Stored int) -> list_dim;
 fun_dim1 : Maybe (Stored int) -> Maybe (Stored int) -> int -> int -> dim1;
 
 make_sliceObject : bool -> int -> bool -> int -> bool -> bool -> int
-                -> Writer SliceObject;
+                -> Init SliceObject;
 
 -------------------------------------------------------------------------------
 -- Stream consumers
@@ -1728,68 +1728,68 @@ make_sliceObject : bool -> int -> bool -> int -> bool -> bool -> int
 build_list_dim_list : (a : bare)
                    -> Repr a
                    -> view list_dim a
-                   -> Writer (list a);
+                   -> Init (list a);
 
 build_dim1_array : (a : bare)
                 -> Repr a
                 -> view dim1 a
-                -> Writer (array1 a);
+                -> Init (array1 a);
 
 reduce_list_dim : (a : bare)
   -> Repr a
-  -> (a -> a -> Writer a)
+  -> (a -> a -> Init a)
   -> a
   -> view list_dim a
-  -> Writer a;
+  -> Init a;
 
 reduce1_list_dim : (a : bare)
   -> Repr a
-  -> (a -> a -> Writer a)
+  -> (a -> a -> Init a)
   -> view list_dim a
-  -> Writer a;
+  -> Init a;
 
 reduce_dim1 : (a : bare)
   -> Repr a
-  -> (a -> a -> Writer a)
+  -> (a -> a -> Init a)
   -> a
   -> view dim1 a
-  -> Writer a;
+  -> Init a;
 
 reduce1_dim1 : (a : bare)
   -> Repr a
-  -> (a -> a -> Writer a)
+  -> (a -> a -> Init a)
   -> view dim1 a
-  -> Writer a;
+  -> Init a;
 
 scatter_list_dim : (i r : bare)
   -> Repr i -> Repr r
   -> Scatter r i
   -> view list_dim i
-  -> Writer r;
+  -> Init r;
 
 fold_list_dim : (a acc : bare)
   -> Repr a
   -> Repr acc
-  -> (acc -> a -> Writer acc)
+  -> (acc -> a -> Init acc)
   -> acc
   -> view list_dim a
-  -> Writer acc;
+  -> Init acc;
 
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionary-like internal methods
 
 view_generate :
   (sh : box) -> ShapeDict sh ->
-  (a : bare) -> Repr a -> sh -> (index sh -> Writer a) -> view sh a;
+  (a : bare) -> Repr a -> sh -> (index sh -> Init a) -> view sh a;
 
 view_map :
   (sh : box) -> ShapeDict sh ->
-  (a b : bare) -> Repr a -> Repr b -> (a -> Writer b) -> view sh a -> view sh b;
+  (a b : bare) -> Repr a -> Repr b -> (a -> Init b) -> view sh a -> view sh b;
 
 view_zipWith :
   (sh : box) -> ShapeDict sh ->
   (a b c : bare) -> Repr a -> Repr b -> Repr c ->
-  (a -> b -> Writer c) ->
+  (a -> b -> Init c) ->
   view sh a ->
   view sh b ->
   view sh c;
@@ -1797,7 +1797,7 @@ view_zipWith :
 view_zipWith3 :
   (sh : box) -> ShapeDict sh ->
   (a b c d : bare) -> Repr a -> Repr b -> Repr c -> Repr d ->
-  (a -> b -> c -> Writer d) ->
+  (a -> b -> c -> Init d) ->
   view sh a ->
   view sh b ->
   view sh c ->
@@ -1806,7 +1806,7 @@ view_zipWith3 :
 view_zipWith4 :
   (sh : box) -> ShapeDict sh ->
   (a b c d e : bare) -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
-  (a -> b -> c -> d -> Writer e) ->
+  (a -> b -> c -> d -> Init e) ->
   view sh a ->
   view sh b ->
   view sh c ->
@@ -1816,20 +1816,20 @@ view_zipWith4 :
 Sequence_flatten : (a : bare) -> Repr a -> Sequence a -> Stream dim1 a;
 
 Sequence_generate : (a : bare)
-                 -> Repr a -> list_dim -> (index list_dim -> Writer a) -> Sequence a;
+                 -> Repr a -> list_dim -> (index list_dim -> Init a) -> Sequence a;
 
 Sequence_map : (a b : bare) -> Repr a -> Repr b
-	    -> (a -> Writer b) -> Sequence a -> Sequence b;
+	    -> (a -> Init b) -> Sequence a -> Sequence b;
 
 Sequence_zipWith : (a b c : bare) -> Repr a -> Repr b -> Repr c
-		-> (a -> b -> Writer c)
+		-> (a -> b -> Init c)
 		-> Sequence a
 		-> Sequence b
 		-> Sequence c;
 
 Sequence_zipWith3 : (a b c d : bare)
 		 -> Repr a -> Repr b -> Repr c -> Repr d
-		 -> (a -> b -> c -> Writer d)
+		 -> (a -> b -> c -> Init d)
 		 -> Sequence a
 		 -> Sequence b
 		 -> Sequence c
@@ -1837,7 +1837,7 @@ Sequence_zipWith3 : (a b c d : bare)
 
 Sequence_zipWith4 : (a b c d e : bare)
 		 -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e
-		 -> (a -> b -> c -> d -> Writer e)
+		 -> (a -> b -> c -> d -> Init e)
 		 -> Sequence a
 		 -> Sequence b
 		 -> Sequence c
@@ -1849,44 +1849,44 @@ Sequence_zipWith4 : (a b c d e : bare)
 
 --view1_fold : (a acc : bare)
 --          -> Repr a -> Repr acc
---          -> (acc -> a -> Writer acc) -> acc -> view list_dim a
---          -> Writer acc;
+--          -> (acc -> a -> Init acc) -> acc -> view list_dim a
+--          -> Init acc;
 
 Sequence_reduce : (a : bare)
 		-> Repr a
-		-> (a -> a -> Writer a)
+		-> (a -> a -> Init a)
 		-> a
 		-> Sequence a
-		-> Writer a;
+		-> Init a;
 
 Sequence_reduce1 : (a : bare)
 		 -> Repr a
-		 -> (a -> a -> Writer a)
+		 -> (a -> a -> Init a)
 		 -> Sequence a
-		 -> Writer a;
+		 -> Init a;
 
 Sequence_scatter : (i r : bare) -> Repr i -> Repr r
                 -> Scatter r i
                 -> Sequence i
-                -> Writer r;
+                -> Init r;
 
 Sequence_fold : (a acc : bare)
 	      -> Repr a
 	      -> Repr acc
-	      -> (acc -> a -> Writer acc)
+	      -> (acc -> a -> Init acc)
 	      -> acc
 	      -> Sequence a
-	      -> Writer acc;
+	      -> Init acc;
 
-Sequence_build_list : (a : bare) -> Repr a -> Sequence a -> Writer (list a);
+Sequence_build_list : (a : bare) -> Repr a -> Sequence a -> Init (list a);
 
 Sequence_parallel_reduce : (a : bare)
                         -> Repr a
                         -> list_dim
-                        -> (a -> a -> Writer a)
+                        -> (a -> a -> Init a)
                         -> a
                         -> (Stored int -> Sequence a)
-                        -> Writer a;
+                        -> Init a;
 
 -------------------------------------------------------------------------------
 -- High-level stream and container functions
@@ -1897,9 +1897,9 @@ fun_map : (t : bare -> bare)
        -> ShapeDict (shape t)
        -> Repr a
        -> Repr b
-       -> (a -> Writer b)
+       -> (a -> Init b)
        -> t a
-       -> Writer (t b);
+       -> Init (t b);
 
 fun_filter : (t : bare -> bare)
           -> (a : bare)
@@ -1908,7 +1908,7 @@ fun_filter : (t : bare -> bare)
           -> Repr a
           -> (a -> bool)
           -> t a
-          -> Writer (t a);
+          -> Init (t a);
 
 fun_zip : (t1 t2 : bare -> bare)
        -> (a b : bare)
@@ -1963,19 +1963,19 @@ fun_reduce : (t : bare -> bare)
           -> TraversableDict t
 	  -> ShapeDict (shape t)
           -> Repr a
-          -> (a -> a -> Writer a)
+          -> (a -> a -> Init a)
 	  -> a
           -> t a
-          -> Writer a;
+          -> Init a;
 
 fun_reduce1 : (t : bare -> bare)
            -> (a : bare)
            -> TraversableDict t
 	   -> ShapeDict (shape t)
            -> Repr a
-           -> (a -> a -> Writer a)
+           -> (a -> a -> Init a)
            -> t a
-           -> Writer a;
+           -> Init a;
 
 fun_indices : (sh : box) -> ShapeDict sh -> sh -> Stream sh (index sh);
 
@@ -2021,76 +2021,76 @@ primitive_list_dim_chain : (a : bare)
 primitive_list_dim_reduce : (a : bare)
   -> Repr a
   -> list_dim
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
   -> a
-  -> Writer a;
+  -> Init a;
 
 parallel_list_dim_reduce : (a : bare)
   -> Repr a
   -> list_dim
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
   -> a
-  -> Writer a;
+  -> Init a;
 
 primitive_list_dim_reduce1 : (a : bare)
   -> Repr a
   -> list_dim
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
-  -> Writer a;
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
+  -> Init a;
 
 parallel_list_dim_reduce1 : (a : bare)
   -> Repr a
   -> list_dim
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
-  -> Writer a;
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
+  -> Init a;
 
 primitive_list_dim_fold : (acc : bare)
   -> Repr acc
   -> list_dim
-  -> (index list_dim -> acc -> Writer acc)
+  -> (index list_dim -> acc -> Init acc)
   -> acc
-  -> Writer acc;
+  -> Init acc;
 
 primitive_dim1_reduce : (a : bare)
   -> Repr a
   -> dim1
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
   -> a
-  -> Writer a;
+  -> Init a;
 
 parallel_dim1_reduce : (a : bare)
   -> Repr a
   -> dim1
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
   -> a
-  -> Writer a;
+  -> Init a;
 
 primitive_dim1_reduce1 : (a : bare)
   -> Repr a
   -> dim1
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
-  -> Writer a;
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
+  -> Init a;
 
 parallel_dim1_reduce1 : (a : bare)
   -> Repr a
   -> dim1
-  -> (Stored int -> Writer a)
-  -> (a -> a -> Writer a)
-  -> Writer a;
+  -> (Stored int -> Init a)
+  -> (a -> a -> Init a)
+  -> Init a;
 
 primitive_dim1_fold : (acc : bare)
   -> Repr acc
   -> dim1
-  -> (index dim1 -> acc -> Writer acc)
+  -> (index dim1 -> acc -> Init acc)
   -> acc
-  -> Writer acc;
+  -> Init acc;
 
 
 -------------------------------------------------------------------------------
@@ -2106,22 +2106,22 @@ fromIndInt : (N : intindex) -> IInt N -> FIInt N;
 deadBox : (a : box) -> a;
 
 -- A dummy referenced object that is used as a placeholder for a dead value.
-deadRef : (a : bare) -> Writer a;
+deadRef : (a : bare) -> Init a;
 
 fun_isNothing : (a : bare) -> Repr a -> Maybe a -> bool;
 fun_isJust : (a : bare) -> Repr a -> Maybe a -> bool;
-fun_fromJust : (a : bare) -> Repr a -> Maybe a -> Writer a;
+fun_fromJust : (a : bare) -> Repr a -> Maybe a -> Init a;
 
 arr1D_build : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
-	   -> (int -> Writer a) -> Writer (arr N a);
+	   -> (int -> Init a) -> Init (arr N a);
 
 arr2D_build : (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
-	   -> (int -> int -> Writer a) -> Writer (arr M (arr N a));
+	   -> (int -> int -> Init a) -> Init (arr M (arr N a));
 
 arr3D_build : (L M N : intindex) -> (a : bare)
            -> Repr a -> FIInt L -> FIInt M -> FIInt N
-	   -> (int -> int -> int -> Writer a)
-           -> Writer (arr L (arr M (arr N a)));
+	   -> (int -> int -> int -> Init a)
+           -> Init (arr L (arr M (arr N a)));
 
 empty_list_dim_view : (a : bare) -> Repr a -> view list_dim a;
 
@@ -2130,7 +2130,7 @@ sequenceToView : (a : bare) -> Repr a -> Sequence a -> view list_dim a;
 view_transform : (sh : box) -> (a : bare)
               -> Repr a
               -> (sh -> sh)
-              -> (index sh -> Writer (index sh))
+              -> (index sh -> Init (index sh))
               -> view sh a
               -> view sh a;
 
@@ -2153,14 +2153,14 @@ fun_asArray2_Stream : (a b : bare)
 		   -> ((M N : intindex)
 		       -> IInt M -> IInt N
 		       -> Stream (arr_shape M (arr_shape N dim0))
-		       -> Writer b)
-		   -> Writer b;
+		       -> Init b)
+		   -> Init b;
 
 fun_map_Stream : (sh a b : bare)
 	      -> ShapeDict sh
        	      -> Repr a
        	      -> Repr b
-       	      -> (a -> Writer b)
+       	      -> (a -> Init b)
        	      -> Stream sh a
        	      -> Stream sh b;
 
@@ -2200,10 +2200,10 @@ count : Stream list_dim (Stored int);
 
 range : int -> Stream list_dim (Stored int);
 
-singletonIter : (a : bare) -> Repr a -> Writer a -> Stream list_dim a;
+singletonIter : (a : bare) -> Repr a -> Init a -> Stream list_dim a;
 
 -- Helper function for 'singletonIter'
-singleton_list_dim_view : (a : bare) -> Repr a -> Writer a -> view list_dim a;
+singleton_list_dim_view : (a : bare) -> Repr a -> Init a -> view list_dim a;
 
 chain : (a : bare) -> Repr a -> Stream list_dim a -> Stream list_dim a -> Stream list_dim a;
 
@@ -2214,7 +2214,7 @@ len : (t : bare -> bare) -> (a : bare)
 
 safeIndex : (t : bare -> bare) -> (a : bare)
          -> IndexableDict t -> ShapeDict (shape t) -> Repr a
-	 -> t a -> index (shape t) -> Writer a;
+	 -> t a -> index (shape t) -> Init a;
 
 safeSlice : (t : bare -> bare) -> (a : bare)
          -> IndexableDict t -> ShapeDict (shape t) -> Repr a
@@ -2270,9 +2270,9 @@ boxedStencil2D : (t : bare -> bare) -> (a b : bare)
          -> Repr b
 	 -> dim2
          -> dim2
-	 -> (view dim2 a -> Writer b)
+	 -> (view dim2 a -> Init b)
 	 -> t a
-	 -> Writer (barray2 b);
+	 -> Init (barray2 b);
 
 stencil2D : (t : bare -> bare) -> (a b : bare)
 	 -> IndexableDict t
@@ -2281,9 +2281,9 @@ stencil2D : (t : bare -> bare) -> (a b : bare)
          -> Repr b
 	 -> dim2
          -> dim2
-	 -> (view dim2 a -> Writer b)
+	 -> (view dim2 a -> Init b)
 	 -> t a
-	 -> Writer (array2 b);
+	 -> Init (array2 b);
 
 stencil3D : (t : bare -> bare) -> (a b : bare)
 	 -> IndexableDict t
@@ -2292,18 +2292,18 @@ stencil3D : (t : bare -> bare) -> (a b : bare)
          -> Repr b
 	 -> dim3
          -> dim3
-	 -> (view dim3 a -> Writer b)
+	 -> (view dim3 a -> Init b)
 	 -> t a
-	 -> Writer (array3 b);
+	 -> Init (array3 b);
 
 viewStencil2D : (a b : bare)
 	 -> Repr a
          -> Repr b
 	 -> dim2
          -> dim2
-	 -> (view dim2 a -> Writer b)
+	 -> (view dim2 a -> Init b)
 	 -> view dim2 a
-	 -> Writer (array2 b);
+	 -> Init (array2 b);
 
 extend2D : (t : bare -> bare) -> (a : bare)
         -> IndexableDict t
@@ -2320,7 +2320,7 @@ extend3D : (t : bare -> bare) -> (a : bare)
         -> view dim3 a;
 
 create_view2 : (a : bare) -> Repr a
-            -> index dim2 -> index dim2 -> (index dim2 -> Writer a) -> view dim2 a;
+            -> index dim2 -> index dim2 -> (index dim2 -> Init a) -> view dim2 a;
 
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)
@@ -2336,27 +2336,27 @@ fun_scatter : (t : bare -> bare)
            -> Repr r
            -> Scatter r i
            -> t i
-           -> Writer r;
+           -> Init r;
 
 histogram : (sh : box)
          -> ShapeDict sh
          -> int
          -> int
          -> Stream sh (Stored int)
-         -> Writer (array1 (Stored int));
+         -> Init (array1 (Stored int));
 
 histogramArray : (n : intindex)
               -> FIInt n
               -> int
               -> int
               -> Stream dim1 (Stored int)
-              -> Writer (arr n (Stored int));
+              -> Init (arr n (Stored int));
 
 generate : (n : intindex)
         -> (a : bare)
         -> IInt n
         -> Repr a
-        -> (int -> Writer a)
+        -> (int -> Init a)
         -> Sequence a;
 
 subscript : (n : intindex)
@@ -2379,13 +2379,13 @@ subscript_out : (n : intindex)
 -- Other rewritable functions
 
 Stream1_empty : (a : bare) -> Repr a -> Stream1 a;
-Stream1_return : (a : bare) -> Repr a -> Writer a -> Stream1 a;
+Stream1_return : (a : bare) -> Repr a -> Init a -> Stream1 a;
 Stream1_guard : (a : bare) -> Repr a -> bool -> Stream1 a -> Stream1 a;
 Stream1_bind : (a b : bare)
 	    -> Repr a -> Repr b -> Stream1 a -> (a -> Stream1 b) -> Stream1 b;
 
 Sequence_empty : (a : bare) -> Repr a -> Sequence a;
-Sequence_return : (a : bare) -> Repr a -> Writer a -> Sequence a;
+Sequence_return : (a : bare) -> Repr a -> Init a -> Sequence a;
 Sequence_chain : (a : bare) -> Repr a -> Sequence a -> Sequence a -> Sequence a;
 Sequence_guard : (a : bare) -> Repr a -> bool -> Sequence a -> Sequence a;
 Sequence_bind : (a b : bare)
@@ -2401,17 +2401,17 @@ Sequence_generate_bind : (a : bare)
 view_array1_build : (a : bare)
                  -> Repr a
                  -> view dim1 a
-                 -> Writer (array1 a);
+                 -> Init (array1 a);
 
 Sequence_list_build : (a : bare)
 		   -> Repr a
 		   -> Sequence a
-		   -> Writer (list a);
+		   -> Init (list a);
 
 Sequence_array1_build : (a : bare)
 		     -> Repr a
 		     -> Sequence a
-		     -> Writer (array1 a);
+		     -> Init (array1 a);
 
 -------------------------------------------------------------------------------
 -- Loops
@@ -2429,8 +2429,8 @@ for : (n : intindex)
    -> Repr acc
    -> FIInt n
    -> acc
-   -> (int -> acc -> Writer acc)
-   -> Writer acc;
+   -> (int -> acc -> Init acc)
+   -> Init acc;
 
 -- Sequential loop with boxed accumulator
 for_box : (n : intindex) -> (acc : box)
@@ -2445,17 +2445,17 @@ parallel_doall : (n : intindex)
 parallel_dim1_reduce : (a : bare)
                     -> Repr a
                     -> dim1
-                    -> (a -> a -> Writer a)
+                    -> (a -> a -> Init a)
                     -> a
-                    -> (dim1 -> Writer a)
-                    -> Writer a;
+                    -> (dim1 -> Init a)
+                    -> Init a;
 
 parallel_dim1_reduce1 : (a : bare)
                      -> Repr a
                      -> dim1
-                     -> (a -> a -> Writer a)
-                     -> (dim1 -> Writer a)
-                     -> Writer a;
+                     -> (a -> a -> Init a)
+                     -> (dim1 -> Init a)
+                     -> Init a;
 
 parallel_doall2 : (M N : intindex)
      -> (a b : bare)

@@ -16,13 +16,13 @@ convertKind (k1 `FunT` k2) =
   convertKind k1 `FunT` convertKind k2
 
 convertKind (VarT v)
-  | v == writeV = boxT          -- Writers become functions
-  | otherwise   = VarT v        -- Other kinds are unchanged
+  | v == initV = boxT          -- Initializers become functions
+  | otherwise  = VarT v        -- Other kinds are unchanged
 
 convertType :: Type -> Type
 convertType ty
   | Just (op, [arg]) <- fromVarApp ty,
-    op `isPyonBuiltin` The_Writer =
+    op `isPyonBuiltin` The_Init =
       let arg' = convertType arg
       in varApp (pyonBuiltin The_OutPtr) [arg'] `FunT`
          VarT (pyonBuiltin The_Store)

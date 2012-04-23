@@ -313,7 +313,7 @@ wiredInTypeEnv =
                (boxV, varTypeAssignment kindT),
                (bareV, varTypeAssignment kindT),
                (outV, varTypeAssignment kindT),
-               (writeV, varTypeAssignment kindT),
+               (initV, varTypeAssignment kindT),
                (posInftyV, varTypeAssignment intindexT),
                (negInftyV, varTypeAssignment intindexT)]
 
@@ -533,7 +533,7 @@ convertToMemDataConType (DataConType params eparams args range con ty_con) =
 isAdapterCon :: Var -> Bool
 isAdapterCon v = v `elem` adapters
   where
-    adapters = [pyonBuiltin The_Writer,
+    adapters = [pyonBuiltin The_Init,
                 pyonBuiltin The_Stored,
                 pyonBuiltin The_StoredBox,
                 pyonBuiltin The_Boxed,
@@ -642,8 +642,8 @@ specToMemTypeAssignment ass =
 specToMemType ty =
   case fromVarApp ty
   of Just (con, [arg])
-       -- Replace applications of 'Writer' by initializer functions.
-       | con `isPyonBuiltin` The_Writer ->
+       -- Replace applications of 'Init' by initializer functions.
+       | con `isPyonBuiltin` The_Init ->
            let mem_arg = specToMemType arg
            in initializerType mem_arg
        
