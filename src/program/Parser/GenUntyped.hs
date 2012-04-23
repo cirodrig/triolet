@@ -245,7 +245,7 @@ doExpr expr =
        doSlicing pos base slices
      ListComp pos iter -> do
        iter' <- doIterator iter
-       return $ callVariable pos (tiBuiltin the_v___build__) [iter']
+       return $ callVariable pos (tiBuiltin the_v_build) [iter']
      Generator pos iter -> do
        doIterator iter
      Call pos op args -> do
@@ -322,7 +322,7 @@ doSlice (ExprSlice e) = do
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do
   dom' <- doExpr dom
-  let iterator = callVariable pos (tiBuiltin the_v___iter__) [dom']
+  let iterator = callVariable pos (tiBuiltin the_v_iter) [dom']
   convertParameters params $ \[param'] ->
     case body
     of CompBody simple_body -> do

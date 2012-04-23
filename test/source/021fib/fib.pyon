@@ -4,7 +4,7 @@ def fib(n : int) -> int:
 	else: return fib(n-1) + fib(n-2)
 
 def fibs(count : int) -> list(int):
-	return __build__([fib(n) for n in range(count)])
+	return [fib(n) for n in range(count)]
 
 export ccall fibs : int -> list(int)
 

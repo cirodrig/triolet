@@ -383,8 +383,8 @@ mkTraversableClass = do
                    view_dim2_instance,
                    iter_instance]
 
-      ; iter <- mkClassMethod cls 0 "__iter__" iter_scheme
-      ; build <- mkClassMethod cls 1 "__build__" build_scheme
+      ; iter <- mkClassMethod cls 0 "iter" iter_scheme
+      ; build <- mkClassMethod cls 1 "build" build_scheme
   
       ; sh <- newTyVar Star Nothing
 
@@ -2098,7 +2098,7 @@ initializeTIBuiltins = do
           cls_members =
             [ ([| the_c_Eq |], ["__eq__", "__ne__"])
             , ([| the_c_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
-            , ([| the_c_Traversable |], ["__iter__", "__build__"])
+            , ([| the_c_Traversable |], ["iter", "build"])
             , ([| the_c_Shape |], ["member", "intersection",
                                    "flatten", "generate", "mapStream", 
                                    "zipWithStream", "zipWith3Stream",
