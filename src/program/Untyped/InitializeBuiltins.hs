@@ -1774,14 +1774,22 @@ mkNothingValType =
   forallType [Star] $ \[a] ->
   ([], ConTy (tiBuiltin the_con_MaybeVal) @@ ConTy a)
 
-mkSliceObjectType =
+mkMakeSliceObjectType =
+  return $ monomorphic $
+  functionType [bool, int, bool, int, bool, bool, int]
+  (ConTy (tiBuiltin the_con_SliceObject))
+  where
+    int = ConTy (tiBuiltin the_con_int)
+    bool = ConTy (tiBuiltin the_con_bool)
+
+{-mkSliceObjectType =
   return $ monomorphic $
   functionType [just_int, just_int, just_just_int]
   (ConTy (tiBuiltin the_con_SliceObject))
   where
     int_type = ConTy (tiBuiltin the_con_int)
     just_int = ConTy (tiBuiltin the_con_MaybeVal) @@ int_type
-    just_just_int = ConTy (tiBuiltin the_con_MaybeVal) @@ just_int
+    just_just_int = ConTy (tiBuiltin the_con_MaybeVal) @@ just_int-}
 
 mkBinaryOpType =
   forallType [Star] $ \[a] ->
@@ -2065,6 +2073,9 @@ initializeTIBuiltins = do
               ),
               ("not", [| mkNotType |]
               , [| pyonBuiltin SystemF.The_not |]
+              ),
+              ("make_sliceObject", [| mkMakeSliceObjectType |]
+              , [| pyonBuiltin SystemF.The_make_sliceObject |]
               )
             ]
           datacons =
@@ -2082,15 +2093,6 @@ initializeTIBuiltins = do
               ),
               ("Nothing", [| mkNothingType |]
               , [| pyonBuiltin SystemF.The_nothing |]
-              ),
-              ("justVal", [| mkJustValType |]
-              , [| pyonBuiltin SystemF.The_justVal |]
-              ),
-              ("nothingVal", [| mkNothingValType |]
-              , [| pyonBuiltin SystemF.The_nothingVal |]
-              ),
-              ("sliceObject", [| mkSliceObjectType |]
-              , [| pyonBuiltin SystemF.The_sliceObject |]
               )
             ]
           cls_members =

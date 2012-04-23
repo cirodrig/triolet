@@ -816,6 +816,8 @@ repr_barray2 : (a : bare) -> Repr (barray2 a);
 repr_barray3 : (a : bare) -> Repr (barray3 a);
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
 repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
+repr_MaybeVal_int : Repr (MaybeVal int);
+repr_MaybeVal_MaybeVal_int : Repr (MaybeVal (MaybeVal int));
 
 repr_PyonTuple2 :
     (a b : bare) -> Repr a -> Repr b -> Repr (PyonTuple2 a b);
@@ -1716,6 +1718,9 @@ unsafeMakeViewCoercion : (d : box)
 fun_list_dim : Maybe (Stored int) -> list_dim;
 
 fun_dim1 : Maybe (Stored int) -> Maybe (Stored int) -> int -> int -> dim1;
+
+make_sliceObject : bool -> int -> bool -> int -> bool -> bool -> int
+                -> Writer SliceObject;
 
 -------------------------------------------------------------------------------
 -- Stream consumers

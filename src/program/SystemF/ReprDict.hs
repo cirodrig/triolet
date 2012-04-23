@@ -204,13 +204,19 @@ withReprDict param_type k = do
 createDictEnv :: FreshVarM SingletonValueEnv
 createDictEnv = do
   let bool_dict =
-        valueDict (pyonBuiltin The_bool) (pyonBuiltin The_repr_bool)
+        valueDict (VarT $ pyonBuiltin The_bool) (pyonBuiltin The_repr_bool)
   let int_dict =
-        valueDict (pyonBuiltin The_int) (pyonBuiltin The_repr_int)
+        valueDict (VarT $ pyonBuiltin The_int) (pyonBuiltin The_repr_int)
+  let maybeint_dict =
+        valueDict (varApp (pyonBuiltin The_MaybeVal) [VarT $ pyonBuiltin The_int])
+        (pyonBuiltin The_repr_MaybeVal_int)
+  let maybemaybeint_dict =
+        valueDict (varApp (pyonBuiltin The_MaybeVal) [varApp (pyonBuiltin The_MaybeVal) [VarT $ pyonBuiltin The_int]])
+        (pyonBuiltin The_repr_MaybeVal_MaybeVal_int)
   let float_dict =
-        valueDict (pyonBuiltin The_float) (pyonBuiltin The_repr_float)
+        valueDict (VarT $ pyonBuiltin The_float) (pyonBuiltin The_repr_float)
   let efftok_dict =
-        valueDict (pyonBuiltin The_EffTok) (pyonBuiltin The_repr_EffTok)
+        valueDict (VarT $ pyonBuiltin The_EffTok) (pyonBuiltin The_repr_EffTok)
       sliceobj_dict =
         DictEnv.monoPattern (VarT $ pyonBuiltin The_SliceObject)
         (MkDict $ return $ ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_SliceObject))
@@ -282,6 +288,7 @@ createDictEnv = do
   let dict_env = DictEnv.DictEnv [repr_dict, storedBox_dict,
                                   stream_dict,
                                   bool_dict, float_dict, int_dict, efftok_dict,
+                                  maybeint_dict, maybemaybeint_dict,
                                   sliceobj_dict,
                                   list_dict, array1_dict, array2_dict,
                                   blist_dict, barray1_dict, barray2_dict,
@@ -311,11 +318,11 @@ getParamType v subst =
      Nothing -> internalError "getParamType"
 
 -- | Create a dictionary for a monomorphic value type.
-valueDict :: Var -> Var -> DictEnv.TypePattern MkDict
-valueDict value_var dict_var =
+valueDict :: Type -> Var -> DictEnv.TypePattern MkDict
+valueDict value dict_var =
   DictEnv.monoPattern pattern_type expr
   where
-    pattern_type = varApp (pyonBuiltin The_Stored) [VarT value_var]
+    pattern_type = varApp (pyonBuiltin The_Stored) [value]
     expr = MkDict $ return $ ExpM $ VarE defaultExpInfo dict_var
 
 createDict_Tuple2 :: Var -> Var -> TypeSubst -> MkDict

@@ -186,6 +186,8 @@ pyonBuiltinVariableNames =
   , "repr_int"
   , "repr_float"
   , "repr_MaybeVal"
+  , "repr_MaybeVal_int"
+  , "repr_MaybeVal_MaybeVal_int"
   , "repr_list_dim"
   , "repr_dim0"
   , "repr_dim1"
@@ -463,6 +465,7 @@ pyonBuiltinVariableNames =
   , "create_view2"
   , "fun_list_dim"
   , "fun_dim1"
+  , "make_sliceObject"
 
     -- Pseudo-dictionary methods inserted by optimizations
   , "arr1D_build"

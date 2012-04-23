@@ -6645,6 +6645,28 @@ fun_dim1 (lo_bound : Maybe (Stored int)) (hi_bound : Maybe (Stored int))
   mk_dim1 (trimInterval iv m) m;
 
 
+make_sliceObject
+  (has_lower : bool)
+  (lower : int)
+  (has_upper : bool)
+  (upper : int)
+  (has_has_stride : bool)
+  (has_stride : bool)
+  (stride : int)
+  (ret : OutPtr SliceObject)
+  -> Store
+  attribute(inline) =
+
+  sliceObject
+  (if has_lower then justVal @int lower else nothingVal @int)
+  (if has_upper then justVal @int upper else nothingVal @int)
+  (if has_has_stride
+   then justVal @(MaybeVal int)
+   (if has_stride then justVal @int stride else nothingVal @int)
+   else nothingVal @(MaybeVal int))
+  ret;
+
+
 fun_isNothing @(a : bare) (repr : Repr a) (x : Maybe a)
   -> bool attribute(inline) =
   case x of {

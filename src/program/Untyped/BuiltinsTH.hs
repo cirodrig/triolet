@@ -145,7 +145,7 @@ pyonOtherGlobals =
     "at_point",
     "displaceDomain", "multiplyDomain", "divideDomain",
     "multiplyIndex", "divideIndex",
-    "sliceObject", "justVal", "nothingVal"
+    "make_sliceObject"
   ]
 
 -- | All predefined class names

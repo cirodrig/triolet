@@ -224,7 +224,9 @@ applyTypeCoercion (TR rewrite_kind lhs rhs) ty_kind ty = do
   where
     try_apply = do
       eq <- compareTypes lhs ty
-      return $! if eq then (True, rhs) else (False, ty)
+      return $! if eq then trace_rewrite (True, rhs) else (False, ty)
+    trace_rewrite = id
+    -- trace_rewrite = traceShow (text "Rewrite" <+> pprType lhs <+> text "==>" <+> pprType rhs)
 
 -- | Apply any matching type coercion to a type.
 applyTypeCoercions :: [TypeRewrite] -> Type -> TypeEvalM (Bool, Type)
@@ -244,7 +246,8 @@ applyTypeCoercions rws ty = do
 applyTypeCoercionsRec :: [TypeRewrite] -> Type -> TypeEvalM (Bool, Type)
 applyTypeCoercionsRec rws ty = do
   -- Rewrite this expression
-  (progress, ty') <- applyTypeCoercions rws ty
+  whnf_ty <- reduceToWhnf ty
+  (progress, ty') <- applyTypeCoercions rws whnf_ty
   let no_change = return (progress, ty')
 
   -- Rewrite subexpressions
@@ -405,9 +408,10 @@ coerceType g_k e_k g_t =
            return g_t -- No need to coerce
        | otherwise -> do
            param <- newAnonymousVar TypeLevel
-           coerced_param <- coerceType e_dom g_dom (VarT param)
-           coerced_result <- coerceType g_rng e_rng $ AppT g_t coerced_param
-           return $ LamT (param ::: e_dom) coerced_result
+           assume param e_dom $ do
+             coerced_param <- coerceType e_dom g_dom (VarT param)
+             coerced_result <- coerceType g_rng e_rng $ AppT g_t coerced_param
+             return $ LamT (param ::: e_dom) coerced_result
      _ -> internalError $ "coerceType: Cannot coerce " ++ show (pprType g_k) ++ " to " ++ show (pprType e_k)
 
 sameKind (VarT k1) (VarT k2) = k1 == k2
@@ -1242,7 +1246,7 @@ reprExp expression =
 
      ArrayE inf ty exps -> do
        -- Convert the array element type to a bare type
-       elt_ty <- do (ty', k) <- cvtType CanonicalMode ty
+       elt_ty <- do (ty', k) <- cvtCanonicalType ty
                     coerceType k bareT ty'
 
        -- Create the initializer type

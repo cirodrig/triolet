@@ -289,25 +289,35 @@ doSlicing pos base slices = do
   return $ callVariable pos (tiBuiltin the_v_safeSlice) [base', slice_value]
 
 doSlice (SliceSlice pos l u s) = do
-  l' <- translate_maybe doExpr l
-  u' <- translate_maybe doExpr u
-  s' <- translate_maybe (translate_maybe doExpr) s
-  return $ callVariable pos (tiBuiltin the_v_sliceObject) [l', u', s']
+  (has_l, l') <- translate_maybe doExpr zero l
+  (has_u, u') <- translate_maybe doExpr zero u
+  (has_has_s, (has_s, s')) <-
+    translate_maybe (translate_maybe doExpr zero) (false, zero) s
+  return $ callVariable pos (tiBuiltin the_v_make_sliceObject)
+    [has_l, l', has_u, u', has_has_s, has_s, s']
   where
-    translate_maybe :: (a -> Cvt U.Expression) -> Maybe a -> Cvt U.Expression
-    translate_maybe do_just (Just x) = do
+    translate_maybe :: (a -> Cvt b) -> b -> Maybe a -> Cvt (U.Expression, b)
+    translate_maybe do_just _ (Just x) = do
       x' <- do_just x
-      return $ callVariable pos (tiBuiltin the_v_justVal) [x']
+      return (true, x')
     
-    translate_maybe _ Nothing =
-      return $ U.VariableE (U.Ann pos) (tiBuiltin the_v_nothingVal)
+    translate_maybe _ nothing Nothing =
+      return (false, nothing)
+
+    true = U.LiteralE (U.Ann pos) (U.BoolL True)
+    false = U.LiteralE (U.Ann pos) (U.BoolL False)
+    zero = U.LiteralE (U.Ann pos) (U.IntL 0)
 
 doSlice (ExprSlice e) = do
   e' <- doExpr e
-  let one = U.LiteralE (U.Ann noSourcePos) (U.IntL 1)
-      u = callVariable (noSourcePos) (tiBuiltin the_v___add__) [e', one]
-      stride = U.VariableE (U.Ann noSourcePos) (tiBuiltin the_v_nothingVal)
-  return $ callVariable noSourcePos (tiBuiltin the_v_sliceObject) [e', u, stride]
+  let u = callVariable (noSourcePos) (tiBuiltin the_v___add__) [e', one]
+  return $ callVariable noSourcePos (tiBuiltin the_v_make_sliceObject)
+    [true, e', true, u, false, false, zero]
+  where  
+    true = U.LiteralE (U.Ann noSourcePos) (U.BoolL True)
+    false = U.LiteralE (U.Ann noSourcePos) (U.BoolL False)
+    zero = U.LiteralE (U.Ann noSourcePos) (U.IntL 0)
+    one = U.LiteralE (U.Ann noSourcePos) (U.IntL 1)
 
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do

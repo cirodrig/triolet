@@ -207,6 +207,30 @@ data owned repr_bool = Repr {
   IS_POINTERLESS
 };
 
+// Parameter-passing convention dictionary of MaybeVal int
+data owned repr_MaybeVal_int = Repr {
+  ObjectHeader { repr_info },
+  SA {sizeof Maybe(int32), alignof Maybe(int32)},
+  copy_MaybeVal_int,
+  make_Boxed_MaybeVal,
+  from_Boxed_MaybeVal,
+  IS_POINTERLESS
+};
+
+function copy_MaybeVal_int (pointer src, pointer dst) -> unit {
+  !dst = Maybe(int32) load src;
+  nil;
+};
+
+function make_Boxed_MaybeVal (owned writer) -> owned {
+  owned call make_Boxed (sizeof Maybe(int32), alignof Maybe(int32), writer);
+};
+
+function from_Boxed_MaybeVal (owned boxed, pointer dst) -> unit {
+  unit call from_Boxed (sizeof Maybe(int32), alignof Maybe(int32),
+                        copy_MaybeVal_int, boxed, dst);
+};
+
 // Parameter-passing convention dictionary of EffTok,
 // which contains no data
 data owned repr_EffTok = Repr {
