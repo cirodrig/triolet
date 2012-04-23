@@ -41,7 +41,7 @@ data owned repr_Box = Repr {
 
 // Exactly the same as 'repr_Box'.  It's a separate definition because
 // it has a different type in the Mem stage.
-data owned repr_StoredBox = Repr {
+data owned repr_Ref = Repr {
   ObjectHeader { repr_info },
   SA {sizeof owned, alignof owned},
 #if WORD_SIZE == 4

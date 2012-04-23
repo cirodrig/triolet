@@ -699,5 +699,5 @@ isReprCon v =
            , pyonBuiltin The_repr_Box
            , pyonBuiltin The_repr_Stream
            , pyonBuiltin The_repr_StuckRef
-           , pyonBuiltin The_repr_StoredBox
+           , pyonBuiltin The_repr_Ref
            ]

@@ -48,7 +48,7 @@ pyonBuiltinTypeNames =
 
     -- Representation coercions
   , "Stored"
-  , "StoredBox"
+  , "Ref"
   , "StuckRef"
   , "StuckBox"
   , "Boxed"
@@ -123,7 +123,7 @@ pyonBuiltinVariableNames =
   , "justVal"
   , "nothingVal"
   , "stored"
-  , "storedBox"
+  , "ref"
   , "stuckRef"
   , "stuckBox"
   , "boxed"
@@ -209,7 +209,7 @@ pyonBuiltinVariableNames =
   , "repr_barray3"
   , "repr_NoneType"
   , "repr_Any"
-  , "repr_StoredBox"
+  , "repr_Ref"
   , "repr_StuckRef"
   , "repr_Box"
   , "repr_Stream"

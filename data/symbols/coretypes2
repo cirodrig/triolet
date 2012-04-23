@@ -18,12 +18,12 @@ data Stored : val -> bare
   stored (a : val) () (a);
 };
 
-data StoredBox : box -> bare
+data Ref : box -> bare
 {
-  storedBox (a : box) () (a);
+  ref (a : box) () (a);
 };
 
--- A stuck reference is like a 'StoredBox' but doesn't get unwrapped
+-- A stuck reference is like a 'Ref' but doesn't get unwrapped
 -- by 'convertToBare'.
 data StuckRef : box -> bare
 {
@@ -793,11 +793,11 @@ repr_float : Repr (Stored float);
 repr_bool : Repr (Stored bool);
 repr_NoneType : Repr (Stored NoneType);
 repr_SliceObject : Repr SliceObject;
-repr_list_dim : Repr (StoredBox list_dim);
-repr_dim0 : Repr (StoredBox dim0);
-repr_dim1 : Repr (StoredBox dim1);
-repr_dim2 : Repr (StoredBox dim2);
-repr_dim3 : Repr (StoredBox dim3);
+repr_list_dim : Repr (Ref list_dim);
+repr_dim0 : Repr (Ref dim0);
+repr_dim1 : Repr (Ref dim1);
+repr_dim2 : Repr (Ref dim2);
+repr_dim3 : Repr (Ref dim3);
 
 repr_index2 : Repr (PyonTuple2 (Stored int) (Stored int));
 repr_slice2 : Repr (PyonTuple2 SliceObject SliceObject);
@@ -834,10 +834,9 @@ repr_PyonTuple4 :
 
 -- Representation of any boxed object
 repr_Box : (a : box) -> Repr (BareType a);
-repr_StoredBox : (a : box) -> Repr (StoredBox a);
+repr_Ref : (a : box) -> Repr (Ref a);
 repr_StuckRef : (a : box) -> Repr (StuckRef a);
 
--- repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
 repr_view : (sh : box) -> (a : bare) -> Repr (BareType (view sh a));
 repr_Scatter : (a b : bare) -> Repr (BareType (Scatter a b));
@@ -2234,13 +2233,13 @@ rows : (t : bare -> bare) -> (a : bare)
     -> IndexableDict t
     -> coerce @box (shape t) dim2
     -> Repr a
-    -> t a -> view dim1 (StoredBox (view dim1 a));
+    -> t a -> view dim1 (Ref (view dim1 a));
 
 cols : (t : bare -> bare) -> (a : bare)
     -> IndexableDict t
     -> coerce @box (shape t) dim2
     -> Repr a
-    -> t a -> view dim1 (StoredBox (view dim1 a));
+    -> t a -> view dim1 (Ref (view dim1 a));
 
 outerproduct : (t u : bare -> bare) -> (a b : bare)
             -> TraversableDict t -> TraversableDict u

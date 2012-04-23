@@ -96,7 +96,7 @@ mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
 mkGlobalReprEnv = do
   -- All boxed objects use the same representation
   box_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin The_StoredBox) [VarT arg], mk_boxed_dict arg)
+    (varApp (pyonBuiltin The_Ref) [VarT arg], mk_boxed_dict arg)
 
   -- Value dictionaries
   let int_dict =

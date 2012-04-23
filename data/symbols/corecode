@@ -1435,10 +1435,10 @@ array1Scatter @(e i : bare)
   let type ret_type = Scatter (array1 e) i2 in
 
   -- Compute array size
-  case boxed @(StoredBox ret_type)
-       (dim1ToArrayDesc @(StoredBox ret_type) dom
+  case boxed @(Ref ret_type)
+       (dim1ToArrayDesc @(Ref ret_type) dom
         (\ @(N : intindex) (lb : int) (stride : int) (count : FIInt N)
-           (ret : OutPtr (StoredBox ret_type))
+           (ret : OutPtr (Ref ret_type))
            -> Store.
 
            -- Create a plain array scatter reducer.
@@ -1486,7 +1486,7 @@ array1Scatter @(e i : bare)
                updater f new_ix tok_in ret
            in
 
-           storedBox @ret_type
+           ref @ret_type
            (mk_scatter @(array1 e) @i2 @s @a
             repr_s
             initializer
@@ -1496,8 +1496,8 @@ array1Scatter @(e i : bare)
             make_updater
             make_init)
            ret)) of
-    boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
-  case s_retval of storedBox @ret_type (retval : ret_type).
+    boxed @(Ref ret_type) (s_retval : Ref ret_type).
+  case s_retval of ref @ret_type (retval : ret_type).
   retval;
 
 
@@ -1559,14 +1559,14 @@ array2Scatter @(e i : bare)
 
   -- Compute array size
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  case boxed @(StoredBox ret_type)
-       (dim1ToArrayDesc @(StoredBox ret_type) dom_y
+  case boxed @(Ref ret_type)
+       (dim1ToArrayDesc @(Ref ret_type) dom_y
         (\ @(M : intindex) (lb_y : int) (stride_y : int) (count_y : FIInt M)
-           (ret : OutPtr (StoredBox ret_type))
+           (ret : OutPtr (Ref ret_type))
            -> Store.
-           dim1ToArrayDesc @(StoredBox ret_type) dom_x
+           dim1ToArrayDesc @(Ref ret_type) dom_x
            (\ @(N : intindex) (lb_x : int) (stride_x : int) (count_x : FIInt N)
-              (ret : OutPtr (StoredBox ret_type))
+              (ret : OutPtr (Ref ret_type))
               -> Store.
 
               let type index_1d = PyonTuple2 (Stored int) i in
@@ -1665,7 +1665,7 @@ array2Scatter @(e i : bare)
                   updater f new_ix tok_in ret
               in
 
-              storedBox @ret_type
+              ref @ret_type
               (mk_scatter @(array2 e) @i2 @s @a
                repr_s
                initializer
@@ -1676,8 +1676,8 @@ array2Scatter @(e i : bare)
                make_init)
               ret)
            ret)) of
-    boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
-  case s_retval of storedBox @ret_type (retval : ret_type).
+    boxed @(Ref ret_type) (s_retval : Ref ret_type).
+  case s_retval of ref @ret_type (retval : ret_type).
   retval;
 
 
@@ -1739,18 +1739,18 @@ array3Scatter @(e i : bare)
 
   -- Compute array size
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  case boxed @(StoredBox ret_type)
-       (dim1ToArrayDesc @(StoredBox ret_type) dom_z
+  case boxed @(Ref ret_type)
+       (dim1ToArrayDesc @(Ref ret_type) dom_z
         (\ @(L : intindex) (lb_z : int) (stride_z : int) (count_z : FIInt L)
-           (ret : OutPtr (StoredBox ret_type))
+           (ret : OutPtr (Ref ret_type))
            -> Store.
-           dim1ToArrayDesc @(StoredBox ret_type) dom_y
+           dim1ToArrayDesc @(Ref ret_type) dom_y
            (\ @(M : intindex) (lb_y : int) (stride_y : int) (count_y : FIInt M)
-              (ret : OutPtr (StoredBox ret_type))
+              (ret : OutPtr (Ref ret_type))
               -> Store.
-              dim1ToArrayDesc @(StoredBox ret_type) dom_x
+              dim1ToArrayDesc @(Ref ret_type) dom_x
               (\ @(N : intindex) (lb_x : int) (stride_x : int) (count_x : FIInt N)
-                 (ret : OutPtr (StoredBox ret_type))
+                 (ret : OutPtr (Ref ret_type))
                  -> Store.
 
                  let type index_1d = PyonTuple2 (Stored int) i in
@@ -1870,7 +1870,7 @@ array3Scatter @(e i : bare)
                      updater f new_ix tok_in ret
                  in
 
-                 storedBox @ret_type
+                 ref @ret_type
                  (mk_scatter @(array3 e) @i3 @s @a
                   repr_s
                   initializer
@@ -1882,8 +1882,8 @@ array3Scatter @(e i : bare)
                  ret)
               ret)
             ret)) of
-    boxed @(StoredBox ret_type) (s_retval : StoredBox ret_type).
-  case s_retval of storedBox @ret_type (retval : ret_type).
+    boxed @(Ref ret_type) (s_retval : Ref ret_type).
+  case s_retval of ref @ret_type (retval : ret_type).
   retval;
 
 
@@ -3845,17 +3845,17 @@ histogram @(sh : box)
                  (linearMap 1 0))
         countingScatter in
 
-  let traversable : TraversableDict (\ (a : bare). StoredBox (Stream sh a)) =
-        traversableDict @(\ (a : bare). StoredBox (Stream sh a))
-        (\ @(a : bare) (repr : Repr a) (x : StoredBox (Stream sh a))
+  let traversable : TraversableDict (\ (a : bare). Ref (Stream sh a)) =
+        traversableDict @(\ (a : bare). Ref (Stream sh a))
+        (\ @(a : bare) (repr : Repr a) (x : Ref (Stream sh a))
            -> Stream sh a.
-           case x of storedBox @(Stream sh a) (ux : Stream sh a). ux)
+           case x of ref @(Stream sh a) (ux : Stream sh a). ux)
         (\ @(a : bare) (repr : Repr a) (x : Stream sh a)
-           -> Init (StoredBox (Stream sh a)).
-           storedBox @(Stream sh a) x) in
+           -> Init (Ref (Stream sh a)).
+           ref @(Stream sh a) x) in
 
-  case boxed @(BareType (Stream sh Sint)) (storedBox @(Stream sh Sint) input) of
-    boxed @(BareType (Stream sh Sint)) (b_input : StoredBox (Stream sh Sint)).
+  case boxed @(BareType (Stream sh Sint)) (ref @(Stream sh Sint) input) of
+    boxed @(BareType (Stream sh Sint)) (b_input : Ref (Stream sh Sint)).
 
   -- For each input value x, create a tuple (x, None)
   case boxed @(BareType (Stream sh (PyonTuple2 Sint SNone)))
@@ -4210,7 +4210,7 @@ rows @(t : bare -> bare) @(a : bare)
   (shape_is_dim2 : coerce @box (shape t) dim2)
   (repr : Repr a)
   (container : t a)
-  -> view dim1 (StoredBox (view dim1 a))
+  -> view dim1 (Ref (view dim1 a))
   attribute(inline) =
   case indexable of
     indexableDict @t
@@ -4220,10 +4220,10 @@ rows @(t : bare -> bare) @(a : bare)
     mk_dim2 (shape_y : dim1) (shape_x : dim1).
 
   view_generate @dim1
-  ShapeDict_dim1 @(StoredBox (view dim1 a))
+  ShapeDict_dim1 @(Ref (view dim1 a))
   (repr_Box @(view dim1 a)) shape_y
-  (\ (s_y : Stored int) -> Init (StoredBox (view dim1 a)).
-    storedBox @(view dim1 a)
+  (\ (s_y : Stored int) -> Init (Ref (view dim1 a)).
+    ref @(view dim1 a)
     (view_generate @dim1 ShapeDict_dim1
      @a repr shape_x
      (\ (s_x : Stored int) (ret : OutPtr a) -> Store.
@@ -4242,7 +4242,7 @@ cols @(t : bare -> bare) @(a : bare)
   (shape_is_dim2 : coerce @box (shape t) dim2)
   (repr : Repr a)
   (container : t a)
-  -> view dim1 (StoredBox (view dim1 a))
+  -> view dim1 (Ref (view dim1 a))
   attribute(inline) =
   case indexable of
     indexableDict @t
@@ -4252,10 +4252,10 @@ cols @(t : bare -> bare) @(a : bare)
     mk_dim2 (shape_y : dim1) (shape_x : dim1).
 
   view_generate @dim1
-  ShapeDict_dim1 @(StoredBox (view dim1 a))
+  ShapeDict_dim1 @(Ref (view dim1 a))
   (repr_Box @(view dim1 a)) shape_x
-  (\ (s_x : Stored int) -> Init (StoredBox (view dim1 a)).
-    storedBox @(view dim1 a)
+  (\ (s_x : Stored int) -> Init (Ref (view dim1 a)).
+    ref @(view dim1 a)
     (view_generate @dim1
      ShapeDict_dim1 @a repr shape_y
      (\ (s_y : Stored int) (ret : OutPtr a) -> Store.

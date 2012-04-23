@@ -274,9 +274,9 @@ createDictEnv = do
   array_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin The_arr) [VarT arg1, VarT arg2],
      createDict_array arg1 arg2)
-  storedBox_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin The_StoredBox) [VarT arg],
-     createDict_storedBox arg)
+  ref_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin The_Ref) [VarT arg],
+     createDict_ref arg)
   
   index_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_index) [VarT arg],
@@ -285,7 +285,7 @@ createDictEnv = do
     (varApp (pyonBuiltin The_slice) [VarT arg],
      createDict_slice arg)
 
-  let dict_env = DictEnv.DictEnv [repr_dict, storedBox_dict,
+  let dict_env = DictEnv.DictEnv [repr_dict, ref_dict,
                                   stream_dict,
                                   bool_dict, float_dict, int_dict, efftok_dict,
                                   maybeint_dict, maybemaybeint_dict,
@@ -420,14 +420,6 @@ createDict_barray2 param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_barray2)
 
-{-createDict_referenced :: Var -> TypeSubst -> MkDict
-createDict_referenced param_var subst = MkDict $
-  withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
-  where
-    param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Referenced)-}
-
 createDict_Maybe :: Var -> TypeSubst -> MkDict
 createDict_Maybe param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
@@ -458,12 +450,12 @@ createDict_array param_var1 param_var2 subst = MkDict $
     dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_arr)
 
-createDict_storedBox :: Var -> TypeSubst -> MkDict
-createDict_storedBox param_var subst = MkDict $ do
+createDict_ref :: Var -> TypeSubst -> MkDict
+createDict_ref param_var subst = MkDict $ do
   return $ ExpM $ AppE defaultExpInfo oper [param] []
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Box)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Ref)
 
 -- | Get the representation dictionary for a boxed data type.
 --   
@@ -476,7 +468,7 @@ createBoxedDictPattern con arity = do
     DictEnv.pattern param_vars (match_type param_vars) (create_dict param_vars)
   where
     match_type param_vars =
-      varApp (pyonBuiltin The_StoredBox) [varApp con (map VarT param_vars)]
+      varApp (pyonBuiltin The_Ref) [varApp con (map VarT param_vars)]
 
     -- Create a function call expression
     --

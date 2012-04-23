@@ -289,7 +289,7 @@ cartMemTF = typeFunction 1 $ \[index_type] -> do
 -- | Compute the shape of a data type in the memory type system
 shapeMemTF = shapeLike $ \op args ->
   case ()
-  of () | op `isPyonBuiltin` The_StoredBox ->
+  of () | op `isPyonBuiltin` The_Ref ->
           case args
           of [arg] ->
                case fromVarApp arg 
@@ -516,7 +516,7 @@ boxedMemTF = typeFunction 1 compute_boxed
       case fromVarApp arg
       of Just (op, args')
            | op `isPyonBuiltin` The_BareType ||
-             op `isPyonBuiltin` The_StoredBox ->
+             op `isPyonBuiltin` The_Ref ->
                -- BoxedType (BareType t)   =  t
                -- BoxedType (StoredBox t)  =  t
                case args'
@@ -579,6 +579,6 @@ bareMemTF = typeFunction 1 compute_bare
                  _ -> cannot_reduce
       where
         stored_type =
-          return $ varApp (pyonBuiltin The_StoredBox) [arg]
+          return $ varApp (pyonBuiltin The_Ref) [arg]
         cannot_reduce =
           return $ varApp (pyonBuiltin The_BareType) [arg]

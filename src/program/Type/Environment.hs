@@ -535,7 +535,7 @@ isAdapterCon v = v `elem` adapters
   where
     adapters = [pyonBuiltin The_Init,
                 pyonBuiltin The_Stored,
-                pyonBuiltin The_StoredBox,
+                pyonBuiltin The_Ref,
                 pyonBuiltin The_Boxed,
                 pyonBuiltin The_BoxedType,
                 pyonBuiltin The_BareType]

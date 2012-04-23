@@ -24,7 +24,7 @@ extern function pyon.internal.structures.repr_PyonTuple4
   (owned, owned, owned, owned) -> owned;
 
 extern data owned pyon.internal.structures.repr_EffTok;
-extern data owned pyon.internal.structures.repr_StoredBox;
+extern data owned pyon.internal.structures.repr_Ref;
 extern data owned pyon.internal.structures.repr_StuckRef;
 extern data owned pyon.internal.structures.repr_Box;
 extern data owned pyon.internal.structures.repr_Stream;

@@ -468,7 +468,7 @@ rwConvertToBare inf [bare_type] [repr, arg]
       whnf_type <- reduceToWhnf bare_type
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
-          | ty_op `isPyonBuiltin` The_StoredBox ->
+          | ty_op `isPyonBuiltin` The_Ref ->
               return $ Just $ construct_stored_box boxed_type
         _ -> do
           -- If the boxed type is "Boxed t", then
@@ -487,7 +487,7 @@ rwConvertToBare inf [bare_type] [repr, arg]
     --
     -- > storedBox boxed_type arg
     construct_stored_box boxed_type =
-      conE inf (VarCon (pyonBuiltin The_storedBox) [boxed_type] []) [arg]
+      conE inf (VarCon (pyonBuiltin The_ref) [boxed_type] []) [arg]
 
     -- Create the expression
     --
@@ -524,7 +524,7 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
       whnf_type <- reduceToWhnf bare_type
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
-          | ty_op `isPyonBuiltin` The_StoredBox ->
+          | ty_op `isPyonBuiltin` The_Ref ->
               fmap Just $ deconstruct_stored_box boxed_type
         _ -> do
           -- If the boxed type is "Boxed t", then construct the value
@@ -545,7 +545,7 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
       localE bare_type (return arg)
         (\arg_val ->
           caseE (mkVarE arg_val) 
-          [mkAlt tenv (pyonBuiltin The_storedBox)
+          [mkAlt tenv (pyonBuiltin The_ref)
            [boxed_type]
            (\ [] [boxed_ref] -> mkVarE boxed_ref)])
     
@@ -561,7 +561,7 @@ rwStencil2D inf [container_type, t1, t2]
   -- Is the input argument's type @view dim2 t1@?
   container_type' <- reduceToWhnf $ AppT container_type t1
   case fromVarApp container_type' of
-    Just (op, [stored_arg]) | op `isPyonBuiltin` The_StoredBox -> do
+    Just (op, [stored_arg]) | op `isPyonBuiltin` The_Ref -> do
       arg' <- reduceToWhnf stored_arg
       case fromVarApp arg' of
         Just (op, [shape_arg, _]) | op `isPyonBuiltin` The_view -> do
@@ -570,7 +570,7 @@ rwStencil2D inf [container_type, t1, t2]
           tenv <- getTypeEnv
           liftM Just $
             caseE (return inp)
-            [mkAlt tenv (pyonBuiltin The_storedBox) [stored_arg]
+            [mkAlt tenv (pyonBuiltin The_ref) [stored_arg]
              (\ [] [view_dom] ->
                return $
                appE inf (varE inf (pyonBuiltin The_viewStencil2D))

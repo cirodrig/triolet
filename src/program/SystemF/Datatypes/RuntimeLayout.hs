@@ -611,7 +611,7 @@ algebraicRepr BareK ty _ = traceShow (text "algebraicRepr" <+> pprType ty) $ do
 
   -- Create conversion methods.  'StoredBox' has a special conversion method.
   (to_boxed, from_boxed) <-
-    if (data_con `isPyonBuiltin` The_StoredBox)
+    if (data_con `isPyonBuiltin` The_Ref)
     then conversionMethods_StoredBox ty_args
     else conversionMethods ty copy
 
@@ -647,7 +647,7 @@ conversionMethods ty copy = do
 -- | Create the code for converting a 'StoredBox' between
 --   boxed and bare types.
 conversionMethods_StoredBox [arg_ty] = do
-  let bare_type = varApp (pyonBuiltin The_StoredBox) [arg_ty]
+  let bare_type = varApp (pyonBuiltin The_Ref) [arg_ty]
       ret_type = varApp (pyonBuiltin The_OutPtr) [bare_type]
       writer_type = ret_type `FunT` VarT (pyonBuiltin The_Store)
   -- Convert from @StoredBox t@ to @t@
@@ -656,7 +656,7 @@ conversionMethods_StoredBox [arg_ty] = do
     lamE $ mkFun [] (\ [] -> return ([arg_ty, ret_type],
                                      VarT (pyonBuiltin The_Store)))
     (\ [] [x, r] ->
-        let con = VarCon (pyonBuiltin The_storedBox) [arg_ty] []
+        let con = VarCon (pyonBuiltin The_ref) [arg_ty] []
         in return $ ExpM $ ConE defaultExpInfo con [varE' x, varE' r])
   to_boxed <-
     lamE $ mkFun [] (\ [] -> return ([writer_type], arg_ty))
@@ -665,7 +665,7 @@ conversionMethods_StoredBox [arg_ty] = do
       [mkAlt tenv (pyonBuiltin The_stuckBox) [bare_type]
        (\ [] [x] ->
          caseE (mkVarE x)
-         [mkAlt tenv (pyonBuiltin The_storedBox) [arg_ty]
+         [mkAlt tenv (pyonBuiltin The_ref) [arg_ty]
           (\ [] [y] -> mkVarE y)])])
   return (to_boxed, from_boxed)
 
