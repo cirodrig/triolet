@@ -43,7 +43,14 @@ import qualified SystemF.TypecheckMem as TypecheckMem
 import Globals
 import GlobalVar
 
--- | Check whether the @OutPtr@ or @IEffect@ constructors appear in a type.
+-- Set to 'True' to print lots of debugging information
+debugVerbose = False
+
+whenDebug = when debugVerbose
+
+printWhenDebug = whenDebug . print
+
+-- | Check whether the @OutPtr@ or @Store@ constructors appear in a type.
 --   The constructors should never be seen.  This function is for debugging.
 checkForOutPtr :: Type -> Bool
 checkForOutPtr (VarT t)
