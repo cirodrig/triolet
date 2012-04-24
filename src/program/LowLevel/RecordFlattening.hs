@@ -392,6 +392,7 @@ flattenExportedParam etype original_param = do
     ListET _ _ -> no_change'
     TupleET _ -> no_change'
     ArrayET _ _ _ -> no_change'
+    PyonNoneET -> no_change'
     PyonIntET -> no_change'
     PyonFloatET -> no_change'
     PyonComplexFloatET ->

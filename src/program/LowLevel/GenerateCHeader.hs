@@ -29,6 +29,7 @@ exportParamDeclSpecs export_type =
           _ ->
             -- Cannot make an array of something that isn't one parameter
             internalError "exportParamDeclSpecs"
+     PyonNoneET -> []           -- NoneType parameters are removed
      PyonIntET -> [nameDeclSpecs "PyonInt"]
      PyonFloatET -> [nameDeclSpecs "PyonFloat"]
      PyonComplexFloatET -> [nameDeclSpecs "PyonComplexFloat"]
@@ -49,6 +50,7 @@ exportReturnDeclSpecs export_type =
           _ ->
             -- Cannot make an array of something that isn't one parameter
             internalError "exportReturnDeclSpecs"
+     PyonNoneET -> ([], voidDeclSpecs)
      PyonIntET -> ([], nameDeclSpecs "PyonInt")
      PyonFloatET -> ([], nameDeclSpecs "PyonFloat")
      PyonComplexFloatET -> ([], nameDeclSpecs "PyonComplexFloat")

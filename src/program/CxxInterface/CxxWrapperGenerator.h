@@ -21,7 +21,7 @@ Type* pyonToWrapperReturnDeclarationType(Pool* p, const PyonType* pyonType);
 Type* pyonToWrapperType(Pool* p, const PyonType* pyonType);
 TypeKindTag pyonTypeKind(const PyonType *pyonType);
 
-void populateWrappedParameterList(Pool* p, Declaration** parameterList, const PyonTypes* pyonParameterTypes);
+int populateWrappedParameterList(Pool* p, Declaration** parameterList, const PyonTypes* pyonParameterTypes);
 void populateArgumentList(Pool* p, Expression** argumentList, Declaration** wrappedParameterList, int parameterCount);
 
 Name* newVariableName(Pool* p);

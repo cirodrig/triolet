@@ -37,6 +37,7 @@ pyonType (ArrayET n False ty) =
               2 -> pyonBuiltin The_array2
               3 -> pyonBuiltin The_array3
   in varApp op [pyonType ty]
+pyonType PyonNoneET = VarT (pyonBuiltin The_NoneType)
 pyonType PyonIntET = VarT (pyonBuiltin The_int)
 pyonType PyonFloatET = VarT (pyonBuiltin The_float)
 pyonType PyonBoolET = VarT (pyonBuiltin The_bool)
@@ -110,6 +111,7 @@ marshalCParameter ty =
   case ty
   of ListET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
      ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     PyonNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET ->
@@ -126,6 +128,7 @@ demarshalCParameter ty =
   case ty
   of ListET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
      ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     PyonNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
@@ -136,7 +139,8 @@ demarshalCParameter ty =
 marshalCxxParameter :: ExportDataType -> Lower ParameterMarshaler
 marshalCxxParameter ty =
   case ty
-  of PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
+  of PyonNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
+     PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
      ListET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
@@ -227,6 +231,7 @@ marshalCReturn ty =
   case ty
   of ListET _ _ -> return_new_reference (LL.RecordType listRecord)
      ArrayET 2 False _ -> return_new_reference (LL.RecordType matrixRecord)
+     PyonNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
@@ -260,7 +265,8 @@ marshalCReturn ty =
 marshalCxxReturn :: ExportDataType -> Lower ReturnMarshaler
 marshalCxxReturn ty =
   case ty
-  of PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
+  of PyonNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
+     PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passReturnWithType (LL.PrimType LL.pyonBoolType)
      ListET _ _ -> passReturnParameter
@@ -276,6 +282,7 @@ demarshalCReturn ty =
      ArrayET 2 False element_type ->
        let mat_type = varApp (pyonBuiltin The_array2) [pyonType element_type]
        in demarshal_reference mat_type
+     PyonNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
@@ -460,6 +467,7 @@ getCExportType :: TypeEnv -> Type -> ExportDataType
 getCExportType tenv ty =
   case fromVarApp ty
   of Just (con, args)
+       | con `isPyonBuiltin` The_NoneType -> PyonNoneET
        | con `isPyonBuiltin` The_int -> PyonIntET
        | con `isPyonBuiltin` The_float -> PyonFloatET
        | con `isPyonBuiltin` The_bool -> PyonBoolET
@@ -491,6 +499,7 @@ getCxxExportType tenv ty =
            -- Look through 'Stored' constructors.  Exported types are always 
            -- in their natural reprsentation, so we can ignore them.
            case args of [arg] -> getCxxExportType tenv arg
+       | con `isPyonBuiltin` The_NoneType -> PyonNoneET
        | con `isPyonBuiltin` The_int -> PyonIntET
        | con `isPyonBuiltin` The_float -> PyonFloatET
        | con `isPyonBuiltin` The_bool -> PyonBoolET

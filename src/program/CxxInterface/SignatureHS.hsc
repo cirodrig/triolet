@@ -28,6 +28,7 @@ foreign import ccall "PyonType_List" pyonType_List :: CInt -> Ptr ExportDataType
 foreign import ccall "PyonType_Array" pyonType_Array :: CInt -> CInt -> Ptr ExportDataType -> IO (Ptr ExportDataType)
 
 sendExportDataType :: ExportDataType -> IO (Ptr ExportDataType)
+sendExportDataType PyonNoneET = pyonType_NoneType
 sendExportDataType PyonIntET = pyonType_Int
 sendExportDataType PyonFloatET = pyonType_Float
 sendExportDataType PyonBoolET = pyonType_Bool

@@ -53,6 +53,7 @@ data ExportDataType =
   | FunctionET [ExportDataType] ExportDataType
 
     -- Plain old data types
+  | PyonNoneET                  -- ^ Pyon NoneType type
   | PyonIntET                   -- ^ Pyon int type
   | PyonFloatET                 -- ^ Pyon float type
   | PyonBoolET                  -- ^ Pyon boolean type
@@ -87,6 +88,7 @@ instance Show ExportDataType where
             show_params .
             showString ") -> " .
             shows ret
+       PyonNoneET -> showString "PyonNoneET"
        PyonIntET -> showString "PyonIntET"
        PyonFloatET -> showString "PyonFloatET"
        PyonBoolET -> showString "PyonBoolET"
