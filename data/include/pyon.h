@@ -23,11 +23,6 @@ typedef struct {
   void *captured;
 } PyonClosure;
 
-typedef struct {
-  PyonFloat real;
-  PyonFloat imag;
-} PyonComplexFloat;
-
 /* Pyon data structure interfaces */
 #include "pyon_list.h"
 #include "pyon_matrix.h"

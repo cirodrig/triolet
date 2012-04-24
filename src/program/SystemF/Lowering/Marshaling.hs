@@ -114,8 +114,6 @@ marshalCParameter ty =
      PyonNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
-     PyonComplexFloatET ->
-       passParameterWithType (LL.RecordType complex_float_type)
      PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
      FunctionET args ret -> marshalParameterFunctionFromC args ret
   where
@@ -234,7 +232,6 @@ marshalCReturn ty =
      PyonNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
-     PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
      PyonBoolET -> passReturnWithType (LL.PrimType LL.pyonBoolType)
   where
     complex_float_type = complexRecord (LL.PrimField LL.pyonFloatType)
@@ -285,7 +282,6 @@ demarshalCReturn ty =
      PyonNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
-     PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
      PyonBoolET -> passReturnWithType (LL.PrimType LL.pyonBoolType)
   where
     complex_float_type = complexRecord (LL.PrimField LL.pyonFloatType)
@@ -471,13 +467,6 @@ getCExportType tenv ty =
        | con `isPyonBuiltin` The_int -> PyonIntET
        | con `isPyonBuiltin` The_float -> PyonFloatET
        | con `isPyonBuiltin` The_bool -> PyonBoolET
-       | con `isPyonBuiltin` The_complex ->
-           case args
-           of [arg] ->
-                case fromVarApp arg
-                of Just (con, _)
-                     | con `isPyonBuiltin` The_float -> PyonComplexFloatET
-                   _ -> unsupported
        | con `isPyonBuiltin` The_list ->
            case args
            of [arg] -> ListET False (getCExportType tenv arg)

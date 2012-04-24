@@ -32,7 +32,6 @@ exportParamDeclSpecs export_type =
      PyonNoneET -> []           -- NoneType parameters are removed
      PyonIntET -> [nameDeclSpecs "PyonInt"]
      PyonFloatET -> [nameDeclSpecs "PyonFloat"]
-     PyonComplexFloatET -> [nameDeclSpecs "PyonComplexFloat"]
      PyonBoolET -> [nameDeclSpecs "PyonBool"]
      FunctionET _ _ -> [nameDeclSpecs "PyonClosure"]
 
@@ -53,7 +52,6 @@ exportReturnDeclSpecs export_type =
      PyonNoneET -> ([], voidDeclSpecs)
      PyonIntET -> ([], nameDeclSpecs "PyonInt")
      PyonFloatET -> ([], nameDeclSpecs "PyonFloat")
-     PyonComplexFloatET -> ([], nameDeclSpecs "PyonComplexFloat")
      PyonBoolET -> ([], nameDeclSpecs "PyonBool")
      FunctionET _ _ -> ([], nameDeclSpecs "PyonClosure")
 

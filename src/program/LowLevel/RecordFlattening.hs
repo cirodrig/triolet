@@ -395,8 +395,6 @@ flattenExportedParam etype original_param = do
     PyonNoneET -> no_change'
     PyonIntET -> no_change'
     PyonFloatET -> no_change'
-    PyonComplexFloatET ->
-      unpack_record (complexRecord $ PrimField $ pyonFloatType) xparams
     PyonBoolET -> no_change'
     FunctionET _ _ -> unpack_record cClosureRecord xparams
   where

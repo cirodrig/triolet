@@ -57,7 +57,6 @@ data ExportDataType =
   | PyonIntET                   -- ^ Pyon int type
   | PyonFloatET                 -- ^ Pyon float type
   | PyonBoolET                  -- ^ Pyon boolean type
-  | PyonComplexFloatET          -- ^ Pyon complex float type
   | CIntET                      -- ^ C int type
   | CFloatET                    -- ^ C float type
 
@@ -92,7 +91,6 @@ instance Show ExportDataType where
        PyonIntET -> showString "PyonIntET"
        PyonFloatET -> showString "PyonFloatET"
        PyonBoolET -> showString "PyonBoolET"
-       PyonComplexFloatET -> showString "PyonComplexFloatET"
        CIntET -> showString "CIntET"
        CFloatET -> showString "CFloatET"
     where
