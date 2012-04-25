@@ -751,7 +751,7 @@ CartesianDict_dim0_stride
   stored @NoneType None;
 
 
-CartesianDict_dim0_arrayRange
+CartesianDict_dim0_arrayDomain
   (lo : index dim0)
   (hi : index dim0)
   -> dim0
@@ -818,7 +818,7 @@ CartesianDict_dim1_stride
   stored @int stride;
   
 
-CartesianDict_dim1_arrayRange
+CartesianDict_dim1_arrayDomain
   (lo : index dim1)
   (hi : index dim1)
   -> dim1
@@ -977,7 +977,7 @@ CartesianDict_dim2_stride
   (CartesianDict_dim1_stride dom_x);
 
 
-CartesianDict_dim2_arrayRange
+CartesianDict_dim2_arrayDomain
   (lo : index dim2)
   (hi : index dim2)
   -> dim2
@@ -1109,7 +1109,7 @@ CartesianDict_dim3_stride
   (CartesianDict_dim1_stride dom_x);
 
 
-CartesianDict_dim3_arrayRange
+CartesianDict_dim3_arrayDomain
   (lo : index dim3)
   (hi : index dim3)
   -> dim3
@@ -1211,7 +1211,7 @@ floatUpdateInPlace_combiner (x : Stored float) (y : Stored float)
 
 intSumScatter : Scatter (Stored int) (Stored int) =
   let type Sint = Stored int in
-  mk_scatter @Sint @Sint @Sint @int
+  mk_scatter @Sint @Sint @Sint @(NoneType -> int) @(int -> int)
   repr_int
   intUpdateInPlace_initializer
   intSumScatter_updater
@@ -1236,7 +1236,7 @@ intSumScatter_make_init (dummy : NoneType) -> int = 0;
 
 floatSumScatter : Scatter (Stored float) (Stored float) =
   let type Sfloat = Stored float in
-  mk_scatter @Sfloat @Sfloat @Sfloat @float
+  mk_scatter @Sfloat @Sfloat @Sfloat @(NoneType -> float) @(float -> float)
   repr_float
   floatUpdateInPlace_initializer
   floatSumScatter_updater
@@ -1261,7 +1261,8 @@ floatSumScatter_make_init (dummy : NoneType) -> float = 0.0;
 
 countingScatter : Scatter (Stored int) (Stored NoneType) =
 
-  mk_scatter @(Stored int) @(Stored NoneType) @(Stored int) @int
+  mk_scatter @(Stored int) @(Stored NoneType) @(Stored int)
+             @(NoneType -> int) @(int -> int)
   repr_int
   intUpdateInPlace_initializer
   countingScatter_updater
@@ -1288,13 +1289,13 @@ boxedScatter @(a : box) @(b : bare) (repr : Repr b)
   (g : a -> a -> a)
   (init : a)
   -> Scatter (StuckRef a) b =
-  mk_scatter @(StuckRef a) @b @(StuckRef a) @(a,)
+  mk_scatter @(StuckRef a) @b @(StuckRef a) @(NoneType -> a) @(a -> a)
   (repr_StuckRef @a)
   -- Initializer
-  (\ (init_f : NoneType -> (a,)) (p : OutPtr (StuckRef a)) -> EffTok.
-     case init_f None of (x : a,). toEffTok @(StuckRef a) (stuckRef @a x p))
+  (\ (init_f : NoneType -> a) (p : OutPtr (StuckRef a)) -> EffTok.
+     toEffTok @(StuckRef a) (stuckRef @a (init_f None) p))
   -- Updater
-  (\ (modify : (a,) -> (a,)) (index : b) (eff_in : EffTok)
+  (\ (modify : a -> a) (index : b) (eff_in : EffTok)
      (p : OutPtr (StuckRef a)) -> EffTok.
      boxedScatter_updater @a modify eff_in p)
   (\ (x : StuckRef a) (y : StuckRef a) (ret : OutPtr (StuckRef a))
@@ -1303,10 +1304,106 @@ boxedScatter @(a : box) @(b : bare) (repr : Repr b)
      case y of stuckRef @a (uy : a).
      stuckRef @a (g ux uy) ret)
   (mutateInPlace @(StuckRef a) @(StuckRef a) (idBareCoercion @(StuckRef a)))
-  (\ (x : b) (old : (a,)) -> (a,).
-     case old of (uold : a,).
-     (f x uold,))
-  (\ (dummy : NoneType) -> (a,). (init,));
+  (\ (x : b) (old : a) -> a. f x old)
+  (\ (dummy : NoneType) -> a. init);
+
+
+appendScatter @(a : bare) (rep : Repr a)
+  -> Scatter (list a) a =
+  mk_scatter @(list a) @a @(append_list a)
+             @(NoneType -> NoneType)
+             @(OutPtr a -> Store)
+  (repr_append_list @a rep)
+  (appendScatter_initializer @a (reprSizeAlign @a rep))
+  (appendScatter_updater @a rep)
+  (appendScatter_concatenate @a rep)
+  (mutateAndCopy @(append_list a) @(list a)
+   (\ (x : append_list a) (ret : OutPtr (list a)) -> Store.
+
+      -- Create a copy of the list that contains no unused array elements.
+
+      -- Inspect the old value
+      case x of
+        make_append_list @a @(M : intindex)
+        (ls_count : FIInt M) (real_length : int) (ls_data : StuckBox (arr M a)).
+      case ls_data of stuckBox @(arr M a) (ls_arr : arr M a).
+
+      -- Construct the new list; copy from the old list
+      case defineIntIndex real_length of
+        someIInt @(N : intindex) (count : FIInt N).
+      make_list @a @N count
+      (stuckBox @(arr N a)
+       (\ (ret : OutPtr (arr N a)) -> Store.
+          doall @N @a @a count
+          (\ (i : int) -> Store.
+             copy @a rep
+             (subscript @M @a (reprSizeAlign @a rep) ls_arr i)
+             (subscript_out @N @a (reprSizeAlign @a rep) ret i))))
+      ret))
+  (copy @a rep)
+  (\ (dummy : NoneType) -> NoneType. dummy);
+
+
+appendScatter_updater @(a : bare)
+  (rep : Repr a)
+  (writer : OutPtr a -> Store)
+  (arg : a)
+  (tok_in : EffTok)
+  (update_list : OutPtr (append_list a))
+  -> EffTok =
+  appendScatter_update_real @a rep writer tok_in update_list;
+
+
+appendScatter_concatenate @(a : bare)
+  (rep : Repr a)
+  (l1 : append_list a)
+  (l2 : append_list a)
+  (ret : OutPtr (append_list a))
+  -> Store =
+
+  case l1 of
+    make_append_list @a @(N : intindex)
+    (s1 : FIInt N) (n1 : int) (data1 : StuckBox (arr N a)).
+  case data1 of stuckBox @(arr N a) (arr1 : arr N a).
+  case l2 of
+    make_append_list @a @(M : intindex)
+    (s2 : FIInt M) (n2 : int) (data2 : StuckBox (arr M a)).
+  case data2 of stuckBox @(arr M a) (arr2 : arr M a).
+
+  -- Concatenate both lists
+  -- TODO: This function may be called repeatedly, but we shouldn't copy
+  -- more than once.  Avoid excess copying by building a cord, then
+  -- flattening the cord later.
+  case defineIntIndex n1 of someIInt @(Np : intindex) (count1 : FIInt Np).
+  case defineIntIndex n2 of someIInt @(Mp : intindex) (count2 : FIInt Mp).
+
+  case defineIntIndex (n1 +# n2) of someIInt @(P : intindex) (s3 : FIInt P).
+  case s3 of fiInt @P (n3 : int).
+
+  let sizealign : SizeAlign a = reprSizeAlign @a rep in
+
+  make_append_list @a @P s3 n3
+  (stuckBox @(arr P a)
+   (\ (ret : OutPtr (arr P a)) -> Store.
+
+      -- Copy data from l1 and l2 into the output
+      fromEffTok @(arr P a)
+      (seqEffTok
+       (toEffTok @(arr P a)
+        (doall @Np @a @a count1
+         (\ (i : int) -> Store.
+            -- Copy l1 into the beginning of the list
+            copy @a rep
+            (subscript @N @a sizealign arr1 i)
+            (subscript_out @P @a sizealign ret i))))
+       (toEffTok @(arr P a)
+        (doall @Mp @a @a count2
+         (\ (i : int) -> Store.
+            -- Copy l2 into the end of the list
+            copy @a rep
+            (subscript @N @a sizealign arr1 i)
+            (subscript_out @P @a sizealign ret (i +# n1))))))))
+  ret;
 
 
 comapScatterIndex @(r i1 i2 : bare)
@@ -1319,27 +1416,27 @@ comapScatterIndex @(r i1 i2 : bare)
   attribute(inline, inline_final) =
 
   case sr of
-    mk_scatter @r @i1 @(s : bare) @(a : val)
+    mk_scatter @r @i1 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
-    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
-    (updater : (a -> a) -> i1 -> EffTok -> OutPtr s -> EffTok)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i1 -> EffTok -> OutPtr s -> EffTok)
     (combiner : s -> s -> Init s)
     (finalizer : UpdateInPlaceFinalizer s r)
-    (update_f : i1 -> a -> a)
-    (init_f : NoneType -> a).
+    (update_f : i1 -> updF)
+    (init_f : iniF).
 
   letfun
-    updater2 (f : a -> a) (index : i2) (tok_in : EffTok) (out_ptr : OutPtr s)
+    updater2 (f : updF) (index : i2) (tok_in : EffTok) (out_ptr : OutPtr s)
       -> EffTok =
       case boxed @i1 (transform index) of boxed @i1 (index1 : i1).
       updater f index1 tok_in out_ptr in
 
   letfun
-    update_f2 (index : i2) -> a -> a =
+    update_f2 (index : i2) -> updF =
       case boxed @i1 (transform index) of boxed @i1 (index1 : i1).
       update_f index1 in
 
-  mk_scatter @r @i2 @s @a repr_s initializer
+  mk_scatter @r @i2 @s @iniF @updF repr_s initializer
   updater2 combiner finalizer update_f2 init_f;
 
 
@@ -1352,14 +1449,14 @@ arrScatter @(N : intindex) @(e i : bare)
   attribute(inline, inline_final) =
 
   case reduction_op of
-    mk_scatter @e @i @(s : bare) @(a : val)
+    mk_scatter @e @i @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
-    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
-    (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
     (combiner : s -> s -> Init s)
     (finalizer : UpdateInPlaceFinalizer s e)
-    (update_f : i -> a -> a)
-    (init_f : NoneType -> a).
+    (update_f : i -> updF)
+    (init_f : iniF).
 
   let type arr_t = arr N e in
   let type i2 = PyonTuple2 (Stored int) i in
@@ -1374,15 +1471,15 @@ arrScatter @(N : intindex) @(e i : bare)
     (to_bare_s : BoxedType s -> Init s)
     (pointerless_s : bool).
 
-  mk_scatter @arr_t @i2 @(arr N s) @a
+  mk_scatter @arr_t @i2 @(arr N s) @iniF @updF
   (repr_arr @N @s count repr_s)
-  (\ (f : NoneType -> a) (p : OutPtr (arr N s)) -> EffTok.
+  (\ (f : iniF) (p : OutPtr (arr N s)) -> EffTok.
      -- Initialize all array elements
      toEffTok @(arr N s)
      (arr1D_build @N @s repr_s count
       (\ (i : int) (ret : OutPtr s) -> Store.
          fromEffTok @s (initializer f ret)) p))
-  (\ (f : a -> a) (index : i2) (in_tok : EffTok) (p : OutPtr (arr N s))
+  (\ (f : updF) (index : i2) (in_tok : EffTok) (p : OutPtr (arr N s))
      -> EffTok.
      case index of
        pyonTuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
@@ -1390,7 +1487,7 @@ arrScatter @(N : intindex) @(e i : bare)
 
      -- If index is out of bounds, do nothing
      if or (u_arr_index <# 0) (u_arr_index >=# u_count)
-     then except @EffTok
+     then in_tok
      else updater f elt_index in_tok
           (subscript_out @N @s sa_s p u_arr_index))
 
@@ -1417,11 +1514,67 @@ arrScatter @(N : intindex) @(e i : bare)
              f (subscript @N @s sa_s accumulator i) ret)
           ret)
    })
-   (\ (index : i2) -> a -> a.
+   (\ (index : i2) -> updF.
       case index of
         pyonTuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
       update_f elt_index)
    init_f;
+
+
+listScatter @(e i : bare)
+  (repr_i : Repr i)
+  (repr_e : Repr e)
+  (dom : list_dim)
+  (reduction_op : Scatter e i)
+  -> Scatter (list e) (PyonTuple2 (Stored int) i) =
+
+  let type i2 = (PyonTuple2 (Stored int) i) in
+  let type ret_type = Scatter (list e) i2 in
+
+  case dom of mk_list_dim (mlist_size : MaybeVal int).
+  case mlist_size of {
+    justVal @int (list_size : int).
+      case defineIntIndex list_size of
+        someIInt @(N : intindex) (count : FIInt N).
+
+      -- Create a plain array scatter reducer.
+      case arrScatter @N @e @i repr_i repr_e count reduction_op of
+        mk_scatter @(arr N e) @i2 @(s : bare) @(iniF : box) @(updF : box)
+        (repr_s : Repr s)
+        (initializer : iniF -> OutPtr s -> EffTok)
+        (updater : updF -> i2 -> EffTok -> OutPtr s -> EffTok)
+        (combiner : s -> s -> Init s)
+        (finalizer : UpdateInPlaceFinalizer s (arr N e))
+        (make_updater : i2 -> updF)
+        (make_init : iniF).
+
+      -- Create a scatter reducer that wraps it in a list
+      let list_finalizer : UpdateInPlaceFinalizer s (list e) =
+            mutateAndCopy @s @(list e)
+            (\ (accumulator : s) (ret : OutPtr (list e)) -> Store.
+               make_list @e @N count
+               (stuckBox @(arr N e)
+                (case finalizer of {
+                   mutateInPlace @s @(arr N e) (co : coerce @bare s (arr N e)).
+                     copy @(arr N e) (repr_arr @N @e count repr_e)
+                     (coerce @s @(arr N e) accumulator)
+                 ; mutateAndCopy @s @(arr N e) (f : s -> Init (arr N e)).
+                     f accumulator
+                 }))
+               ret) in
+
+      mk_scatter @(list e) @i2 @s @iniF @updF
+      repr_s
+      initializer
+      updater
+      combiner
+      list_finalizer
+      make_updater
+      make_init
+
+  ; nothingVal @int.
+      except @(Scatter (list e) (PyonTuple2 (Stored int) i))
+  };
 
 
 array1Scatter @(e i : bare)
@@ -1443,14 +1596,14 @@ array1Scatter @(e i : bare)
 
            -- Create a plain array scatter reducer.
            case arrScatter @N @e @i repr_i repr_e count reduction_op of
-             mk_scatter @(arr N e) @i2 @(s : bare) @(a : val)
+             mk_scatter @(arr N e) @i2 @(s : bare) @(iniF : box) @(updF : box)
              (repr_s : Repr s)
-             (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
-             (updater : (a -> a) -> i2 -> EffTok -> OutPtr s -> EffTok)
+             (initializer : iniF -> OutPtr s -> EffTok)
+             (updater : updF -> i2 -> EffTok -> OutPtr s -> EffTok)
              (combiner : s -> s -> Init s)
              (finalizer : UpdateInPlaceFinalizer s (arr N e))
-             (make_updater : i2 -> a -> a)
-             (make_init : NoneType -> a).
+             (make_updater : i2 -> updF)
+             (make_init : iniF).
 
            -- Create a scatter reducer that wraps it in an array
            let array_finalizer : UpdateInPlaceFinalizer s (array1 e) =
@@ -1471,7 +1624,7 @@ array1Scatter @(e i : bare)
            -- Transform dim1 indices to linear indices
            letfun
              linearized_updater
-               (f : a -> a) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
+               (f : updF) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
                -> EffTok =
                case ix of pyonTuple2 @(Stored int) @i (arr_ix : Stored int) (val : i).
                case arr_ix of stored @int (u_arr_ix : int).
@@ -1487,7 +1640,7 @@ array1Scatter @(e i : bare)
            in
 
            ref @ret_type
-           (mk_scatter @(array1 e) @i2 @s @a
+           (mk_scatter @(array1 e) @i2 @s @iniF @updF
             repr_s
             initializer
             linearized_updater
@@ -1513,14 +1666,14 @@ barray1Scatter @(a i : bare)
   -- Use array1Scatter
   case array1Scatter @boxed_a @i
        repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
-    mk_scatter @(array1 boxed_a) @i2 @(s : bare) @(b : val)
+    mk_scatter @(array1 boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
-    (initializer : (NoneType -> b) -> OutPtr s -> EffTok)
-    (updater : (b -> b) -> i2 -> EffTok -> OutPtr s -> EffTok)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i2 -> EffTok -> OutPtr s -> EffTok)
     (combiner : s -> s -> Init s)
     (finalizer : UpdateInPlaceFinalizer s (array1 boxed_a))
-    (make_updater : i2 -> b -> b)
-    (make_init : NoneType -> b).
+    (make_updater : i2 -> updF)
+    (make_init : iniF).
 
   -- Wrap with barray1
   let repr_array_a : Repr (array1 boxed_a) =
@@ -1540,7 +1693,7 @@ barray1Scatter @(a i : bare)
             (\ (x : s) -> Init (barray1 a). mk_barray1 @a (f x))
         } in
 
-  mk_scatter @(barray1 a) @i2 @s @b repr_s initializer updater combiner
+  mk_scatter @(barray1 a) @i2 @s @iniF @updF repr_s initializer updater combiner
   barray_finalizer make_updater make_init;
 
 
@@ -1612,14 +1765,15 @@ array2Scatter @(e i : bare)
                       ret)
                    xy_scatter_reduction in
               case arr_scatter_reduction of
-                mk_scatter @(arr M (arr N e)) @i2 @(s : bare) @(a : val)
+                mk_scatter @(arr M (arr N e)) @i2 @(s : bare)
+                           @(iniF : box) @(updF : box)
                 (repr_s : Repr s)
-                (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
-                (updater : (a -> a) -> i2 -> EffTok -> OutPtr s -> EffTok)
+                (initializer : iniF -> OutPtr s -> EffTok)
+                (updater : updF -> i2 -> EffTok -> OutPtr s -> EffTok)
                 (combiner : s -> s -> Init s)
                 (finalizer : UpdateInPlaceFinalizer s (arr M (arr N e)))
-                (make_updater : i2 -> a -> a)
-                (make_init : NoneType -> a).
+                (make_updater : i2 -> updF)
+                (make_init : iniF).
 
               -- Create a scatter reducer that wraps it in an array
               let array_finalizer : UpdateInPlaceFinalizer s (array2 e) =
@@ -1641,7 +1795,7 @@ array2Scatter @(e i : bare)
               -- Transform dim2 indices to linear indices
               letfun
                 linearized_updater
-                  (f : a -> a) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
+                  (f : updF) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
                   -> EffTok =
                   case ix of pyonTuple2 @(index dim2) @i
                              (arr_ix : index dim2) (val : i).
@@ -1666,7 +1820,7 @@ array2Scatter @(e i : bare)
               in
 
               ref @ret_type
-              (mk_scatter @(array2 e) @i2 @s @a
+              (mk_scatter @(array2 e) @i2 @s @iniF @updF
                repr_s
                initializer
                linearized_updater
@@ -1693,14 +1847,14 @@ barray2Scatter @(a i : bare)
   -- Use array2Scatter
   case array2Scatter @boxed_a @i
        repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
-    mk_scatter @(array2 boxed_a) @i2 @(s : bare) @(b : val)
+    mk_scatter @(array2 boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
-    (initializer : (NoneType -> b) -> OutPtr s -> EffTok)
-    (updater : (b -> b) -> i2 -> EffTok -> OutPtr s -> EffTok)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i2 -> EffTok -> OutPtr s -> EffTok)
     (combiner : s -> s -> Init s)
     (finalizer : UpdateInPlaceFinalizer s (array2 boxed_a))
-    (make_updater : i2 -> b -> b)
-    (make_init : NoneType -> b).
+    (make_updater : i2 -> updF)
+    (make_init : iniF).
 
   -- Wrap with barray2
   let repr_array_a : Repr (array2 boxed_a) =
@@ -1720,7 +1874,7 @@ barray2Scatter @(a i : bare)
             (\ (x : s) -> Init (barray2 a). mk_barray2 @a (f x))
         } in
 
-  mk_scatter @(barray2 a) @i2 @s @b repr_s initializer updater combiner
+  mk_scatter @(barray2 a) @i2 @s @iniF @updF repr_s initializer updater combiner
   barray_finalizer make_updater make_init;
 
 
@@ -1809,14 +1963,14 @@ array3Scatter @(e i : bare)
                          ret)
                       xyz_scatter_reduction in
                  case arr_scatter_reduction of
-                   mk_scatter @arr3d @i3 @(s : bare) @(a : val)
+                   mk_scatter @arr3d @i3 @(s : bare) @(iniF : box) @(updF : box)
                    (repr_s : Repr s)
-                   (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
-                   (updater : (a -> a) -> i3 -> EffTok -> OutPtr s -> EffTok)
+                   (initializer : iniF -> OutPtr s -> EffTok)
+                   (updater : updF -> i3 -> EffTok -> OutPtr s -> EffTok)
                    (combiner : s -> s -> Init s)
                    (finalizer : UpdateInPlaceFinalizer s arr3d)
-                   (make_updater : i3 -> a -> a)
-                   (make_init : NoneType -> a).
+                   (make_updater : i3 -> updF)
+                   (make_init : iniF).
 
                  -- Create a scatter reducer that wraps it in an array
                  let array_finalizer : UpdateInPlaceFinalizer s (array3 e) =
@@ -1840,7 +1994,7 @@ array3Scatter @(e i : bare)
                  -- Transform dim3 indices to linear indices
                  letfun
                    linearized_updater
-                     (f : a -> a) (ix : i3) (tok_in : EffTok) (ret : OutPtr s)
+                     (f : updF) (ix : i3) (tok_in : EffTok) (ret : OutPtr s)
                      -> EffTok =
                      case ix of pyonTuple2 @(index dim3) @i
                                 (arr_ix : index dim3) (val : i).
@@ -1871,7 +2025,7 @@ array3Scatter @(e i : bare)
                  in
 
                  ref @ret_type
-                 (mk_scatter @(array3 e) @i3 @s @a
+                 (mk_scatter @(array3 e) @i3 @s @iniF @updF
                   repr_s
                   initializer
                   linearized_updater
@@ -1899,14 +2053,14 @@ barray3Scatter @(a i : bare)
   -- Use array3Scatter
   case array3Scatter @boxed_a @i
        repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
-    mk_scatter @(array3 boxed_a) @i2 @(s : bare) @(b : val)
+    mk_scatter @(array3 boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
-    (initializer : (NoneType -> b) -> OutPtr s -> EffTok)
-    (updater : (b -> b) -> i2 -> EffTok -> OutPtr s -> EffTok)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i2 -> EffTok -> OutPtr s -> EffTok)
     (combiner : s -> s -> Init s)
     (finalizer : UpdateInPlaceFinalizer s (array3 boxed_a))
-    (make_updater : i2 -> b -> b)
-    (make_init : NoneType -> b).
+    (make_updater : i2 -> updF)
+    (make_init : iniF).
 
   -- Wrap with barray3
   let repr_array_a : Repr (array3 boxed_a) =
@@ -1926,7 +2080,7 @@ barray3Scatter @(a i : bare)
             (\ (x : s) -> Init (barray3 a). mk_barray3 @a (f x))
         } in
 
-  mk_scatter @(barray3 a) @i2 @s @b repr_s initializer updater combiner
+  mk_scatter @(barray3 a) @i2 @s @iniF @updF repr_s initializer updater combiner
   barray_finalizer make_updater make_init;
 
 
@@ -5061,7 +5215,7 @@ displaceView @(t : bare -> bare) @(a : bare)
     (loBound : sh -> Init (Maybe ix))
     (hiBound : sh -> Init (Maybe ix))
     (get_stride : sh -> Init ix)
-    (arrayRange : ix -> ix -> sh)
+    (arrayDomain : ix -> ix -> sh)
     (displaceDomain : sh -> ix -> sh)
     (multiplyDomain : sh -> ix -> sh)
     (divideDomain : sh -> ix -> sh)
@@ -5108,7 +5262,7 @@ multiplyView @(t : bare -> bare) @(a : bare)
     (loBound : sh -> Init (Maybe ix))
     (hiBound : sh -> Init (Maybe ix))
     (get_stride : sh -> Init ix)
-    (arrayRange : ix -> ix -> sh)
+    (arrayDomain : ix -> ix -> sh)
     (displaceDomain : sh -> ix -> sh)
     (multiplyDomain : sh -> ix -> sh)
     (divideDomain : sh -> ix -> sh)
@@ -5148,7 +5302,7 @@ divideView @(t : bare -> bare) @(a : bare)
     (loBound : sh -> Init (Maybe ix))
     (hiBound : sh -> Init (Maybe ix))
     (get_stride : sh -> Init ix)
-    (arrayRange : ix -> ix -> sh)
+    (arrayDomain : ix -> ix -> sh)
     (displaceDomain : sh -> ix -> sh)
     (multiplyDomain : sh -> ix -> sh)
     (divideDomain : sh -> ix -> sh)
@@ -5679,14 +5833,14 @@ scatter_list_dim @(i r : bare)
   attribute(inline, inline_sequential) =
 
   case op of
-    mk_scatter @r @i @(s : bare) @(a : val)
+    mk_scatter @r @i @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
-    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
-    (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
     (combiner : s -> s -> Init s)
     (finalizer : UpdateInPlaceFinalizer s r)
-    (make_updater : i -> a -> a)
-    (make_init : NoneType -> a).
+    (make_updater : i -> updF)
+    (make_init : iniF).
 
   letfun
     use_finalizer (w : Init s) (ret : OutPtr r) -> Store =
@@ -5861,14 +6015,14 @@ Sequence_scatter @(i r : bare)
   attribute(inline, inline_sequential) =
 
   case op of
-    mk_scatter @r @i @(s : bare) @(a : val)
+    mk_scatter @r @i @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
-    (initializer : (NoneType -> a) -> OutPtr s -> EffTok)
-    (updater : (a -> a) -> i -> EffTok -> OutPtr s -> EffTok)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
     (combiner : s -> s -> Init s)
     (finalizer : UpdateInPlaceFinalizer s r)
-    (make_updater : i -> a -> a)
-    (make_init : NoneType -> a).
+    (make_updater : i -> updF)
+    (make_init : iniF).
 
   letfun
     use_finalizer (w : Init s) (ret : OutPtr r) -> Store =

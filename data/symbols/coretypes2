@@ -440,14 +440,14 @@ data UpdateInPlaceFinalizer : bare -> bare -> box
 -- the reduction.
 data Scatter : bare -> bare -> box
 {
-  mk_scatter (r i : bare) (s : bare, a : val)
+  mk_scatter (r i : bare) (s : bare, iniF : box, updF : box)
   (Repr s,
-   (NoneType -> a) -> OutPtr s -> EffTok,       -- Initializer
-   (a -> a) -> i -> EffTok -> OutPtr s -> EffTok, -- Updater
+   iniF -> OutPtr s -> EffTok,                -- Initializer
+   updF -> i -> EffTok -> OutPtr s -> EffTok, -- Updater
    s -> s -> Init s,                          -- Combining function
-   UpdateInPlaceFinalizer s r,                  -- Final value constructor
-   i -> (a -> a),                               -- Update function
-   NoneType -> a                                -- Initial value
+   UpdateInPlaceFinalizer s r,                -- Final value constructor
+   i -> updF,                                 -- Update function
+   iniF                                       -- Initial value
   );
 };
 
@@ -504,10 +504,31 @@ boxedScatter : (a : box) -> (b : bare) -> Repr b
             -> Scatter (StuckRef a) b;
 
 boxedScatter_updater : (a : box)
-                    -> ((a,) -> (a,))
+                    -> (a -> a)
                     -> EffTok
                     -> OutPtr (StuckRef a)
                     -> EffTok;
+
+appendScatter : (a : bare) -> Repr a -> Scatter (list a) a;
+appendScatter_initializer : (a : bare) -> SizeAlign a -> (NoneType -> NoneType)
+                         -> OutPtr (append_list a) -> EffTok;
+appendScatter_updater : (a : bare)
+                     -> Repr a
+                     -> (OutPtr a -> Store)
+                     -> a
+                     -> EffTok
+                     -> OutPtr (append_list a)
+                     -> EffTok;
+
+appendScatter_update_real : (a : bare)
+                     -> Repr a
+                     -> (OutPtr a -> Store)
+                     -> EffTok
+                     -> OutPtr (append_list a)
+                     -> EffTok;
+
+appendScatter_concatenate : (a : bare) -> Repr a -> append_list a
+                         -> append_list a -> Init (append_list a);
 
 arrScatter : (N : intindex)
                    -> (s i : bare)
@@ -525,6 +546,13 @@ comapScatterIndex :
  -> (i2 -> Init i1)
  -> Scatter s i1
  -> Scatter s i2;
+
+listScatter : (s i : bare)
+           -> Repr i
+           -> Repr s
+           -> list_dim
+           -> Scatter s i
+           -> Scatter (list s) (PyonTuple2 (Stored int) i);
 
 array1Scatter : (s i : bare)
                       -> Repr i
@@ -646,6 +674,17 @@ data list : bare -> bare
 data blist : bare -> bare
 {
   make_blist (a : bare) () (list (StuckRef (BoxedType a)));
+};
+
+-- A list with extra fields supporting a mutable "append" operation.
+-- The 'FIInt n' field is the actual array size.
+-- The int field is the number of valid array elements.  Other elements are
+-- zeroed.
+-- Mutable operations are implemented in low-level code.
+data append_list : bare -> bare
+{
+  make_append_list (a : bare) (n : intindex)
+  (FIInt n, int, StuckBox (arr n a));
 };
 
 -- An array type, parameterized over its dimension.
@@ -806,6 +845,7 @@ repr_index3 : Repr (PyonTuple3 (Stored int) (Stored int) (Stored int));
 repr_slice3 : Repr (PyonTuple3 SliceObject SliceObject SliceObject);
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
+repr_append_list : (a : bare) -> Repr a -> Repr (append_list a);
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
 repr_array1 : (a : bare) -> Repr a -> Repr (array1 a);
 repr_array2 : (a : bare) -> Repr a -> Repr (array2 a);
@@ -1499,7 +1539,7 @@ CartesianDict_dim0_hiBound :
     dim0 -> Init (Maybe (index dim0));
 CartesianDict_dim0_stride :
     dim0 -> Init (index dim0);
-CartesianDict_dim0_arrayRange :
+CartesianDict_dim0_arrayDomain :
     index dim0 -> index dim0 -> dim0;
 CartesianDict_dim0_displaceDomain :
     dim0 -> index dim0 -> dim0;
@@ -1519,7 +1559,7 @@ CartesianDict_dim1_hiBound :
     dim1 -> Init (Maybe (index dim1));
 CartesianDict_dim1_stride :
     dim1 -> Init (index dim1);
-CartesianDict_dim1_arrayRange :
+CartesianDict_dim1_arrayDomain :
     index dim1 -> index dim1 -> dim1;
 CartesianDict_dim1_displaceDomain :
     dim1 -> index dim1 -> dim1;
@@ -1539,7 +1579,7 @@ CartesianDict_dim2_hiBound :
     dim2 -> Init (Maybe (index dim2));
 CartesianDict_dim2_stride :
     dim2 -> Init (index dim2);
-CartesianDict_dim2_arrayRange :
+CartesianDict_dim2_arrayDomain :
     index dim2 -> index dim2 -> dim2;
 CartesianDict_dim2_displaceDomain :
     dim2 -> index dim2 -> dim2;
@@ -1559,7 +1599,7 @@ CartesianDict_dim3_hiBound :
     dim3 -> Init (Maybe (index dim3));
 CartesianDict_dim3_stride :
     dim3 -> Init (index dim3);
-CartesianDict_dim3_arrayRange :
+CartesianDict_dim3_arrayDomain :
     index dim3 -> index dim3 -> dim3;
 CartesianDict_dim3_displaceDomain :
     dim3 -> index dim3 -> dim3;

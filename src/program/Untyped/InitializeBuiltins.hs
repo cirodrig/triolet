@@ -965,13 +965,13 @@ mkCartesianClass = do
             [TFunAppTy (tiBuiltin the_con_cartesianDomain) [ix_ty] `IsEqual` dom_ty]
             (pyonBuiltin SystemF.The_CartesianDict)
             (pyonBuiltin SystemF.The_cartesianDict)
-            [loBound, hiBound, stride, arrayRange, displace, multiply, divide,
+            [loBound, hiBound, stride, arrayDomain, displace, multiply, divide,
              multiplyI, divideI, unbounded]
             [dim0_instance, dim1_instance, dim2_instance, dim3_instance]
       loBound <- mkClassMethod cls 0 "loBound" bound_scheme
       hiBound <- mkClassMethod cls 1 "hiBound" bound_scheme
       stride <- mkClassMethod cls 2 "stride" stride_scheme
-      arrayRange <- mkClassMethod cls 3 "arrayRange" range_scheme
+      arrayDomain <- mkClassMethod cls 3 "arrayDomain" range_scheme
       displace <- mkClassMethod cls 4 "displaceDomain" displace_scheme
       multiply <- mkClassMethod cls 5 "multiplyDomain" displace_scheme
       divide <- mkClassMethod cls 6 "divideDomain" displace_scheme
@@ -987,7 +987,7 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_arrayRange
+              pyonBuiltin SystemF.The_CartesianDict_dim0_arrayDomain
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim0_displaceDomain
             , InstanceMethod $
@@ -1010,7 +1010,7 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_arrayRange
+              pyonBuiltin SystemF.The_CartesianDict_dim1_arrayDomain
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim1_displaceDomain
             , InstanceMethod $
@@ -1032,7 +1032,7 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_arrayRange
+              pyonBuiltin SystemF.The_CartesianDict_dim2_arrayDomain
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim2_displaceDomain
             , InstanceMethod $
@@ -1054,7 +1054,7 @@ mkCartesianClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim3_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_arrayRange
+              pyonBuiltin SystemF.The_CartesianDict_dim3_arrayDomain
             , InstanceMethod $
               pyonBuiltin SystemF.The_CartesianDict_dim3_displaceDomain
             , InstanceMethod $
@@ -1629,6 +1629,12 @@ mkBoxedScatterType =
                     functionType [aT, aT] aT,
                     aT] scatter_type)
 
+mkAppendScatterType =
+  forallType [Star] $ \[a] ->
+  let aT = ConTy a
+  in ([passable aT], ConTy (tiBuiltin the_con_Scatter) @@
+                     (ConTy (tiBuiltin the_con_list) @@ aT) @@ aT)
+
 mkArrayScatterType dom_type arr_type index_type mk_elt_type =
   forallType [Star, Star] $ \[s, i] ->
   let sT = ConTy s
@@ -1639,6 +1645,13 @@ mkArrayScatterType dom_type arr_type index_type mk_elt_type =
       functionType [dom_type, scatter_elt_type]
       (ConTy (tiBuiltin the_con_Scatter) @@
        (arr_type @@ sT) @@ (TupleTy 2 @@ index_type @@ iT)))
+
+mkListScatterType =
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_list_dim)
+  (ConTy $ tiBuiltin the_con_list)
+  (ConTy $ tiBuiltin the_con_int)
+  id
 
 mkArray1ScatterType =
   mkArrayScatterType
@@ -2020,6 +2033,12 @@ initializeTIBuiltins = do
               ("boxedScatter", [| mkBoxedScatterType |]
               , [| pyonBuiltin SystemF.The_boxedScatter |]
               ),
+              ("appendScatter", [| mkAppendScatterType |]
+              , [| pyonBuiltin SystemF.The_appendScatter |]
+              ),
+              ("listScatter", [| mkListScatterType |]
+              , [| pyonBuiltin SystemF.The_listScatter |]
+              ),
               ("array1Scatter", [| mkArray1ScatterType |]
               , [| pyonBuiltin SystemF.The_array1Scatter |]
               ),
@@ -2113,7 +2132,7 @@ initializeTIBuiltins = do
                                     "sin", "cos", "tan", "pi"])
             , ([| the_c_Vector |], ["scale", "magnitude", "dot"])
             , ([| the_c_Cartesian |], ["loBound", "hiBound", "stride",
-                                       "arrayRange",
+                                       "arrayDomain",
                                        "displaceDomain", "multiplyDomain",
                                        "divideDomain", "multiplyIndex",
                                        "divideIndex", "unbounded"])

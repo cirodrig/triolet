@@ -1,6 +1,6 @@
 
 def heat(m : array2(float)):
-  sten_domain = arrayRange((-1,-1), (2,2))
+  sten_domain = arrayDomain((-1,-1), (2,2))
   def sten(x):
     return (x[-1, 0] + x[0, -1] + x[1, 0] + x[0, 1]) / 4
 

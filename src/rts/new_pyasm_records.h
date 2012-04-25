@@ -199,6 +199,16 @@ record PyonList {
   owned contents;		// Pointer to list contents
 };
 
+/* Append-lists
+ *
+ * A list-like data structure that supports mutable append
+ */
+record AppendList {
+  FinIndInt nelems;             // Number of elements allocated for the list
+  int used;                     // Number of elements in use
+  owned contents;               // Pointer to list contents
+};
+
 /* 0D arrays
  *
  * A 0-dimensional array contains just a single value.

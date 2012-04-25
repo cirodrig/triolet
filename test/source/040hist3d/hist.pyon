@@ -1,6 +1,6 @@
 
 def f(a):
-  domain = arrayRange((0, -2, -2), (4, 3, 3))
+  domain = arrayDomain((0, -2, -2), (4, 3, 3))
   alg = array3Scatter(domain, floatSumScatter)
   return scatter(alg, (((z, y, x), n) for (z, y, x, n) in a))
 

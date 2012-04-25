@@ -6,10 +6,32 @@ module pyon.internal.inplace;
 #include "apply_py.h"
 #include "debug.h"
 #include "inplace.h"
+#include "prim.h"
 
 import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
+
+function repr_append_list (owned rep) -> owned
+{
+  alist_rep = pointer primcall pyon_alloc (sizeof Repr);
+  alist_rep @! Repr.sizealign = SA {sizeof AppendList, alignof AppendList};
+  alist_rep @! Repr.copy = copy_append_list;
+  alist_rep @! Repr.convert_to_boxed =
+    owned call make_Boxed (sizeof AppendList, alignof AppendList);
+  alist_rep @! Repr.convert_to_bare =
+    owned call from_Boxed (sizeof AppendList, alignof AppendList,
+                           copy_append_list);
+  alist_rep @! Repr.is_pointerless = false;
+  alist_rep as owned;
+};
+
+function copy_append_list (pointer src, pointer dst) -> unit {
+  dst @! AppendList.nelems = src @! AppendList.nelems;
+  dst @! AppendList.used = src @! AppendList.used;
+  dst @! AppendList.contents = src @! AppendList.contents;
+  nil;
+};
 
 function inline intSumScatter_make_init (unit dummy) -> int
 {
@@ -52,8 +74,56 @@ function inline floatUpdateInPlace_updater (owned f, unit _, pointer ret) -> uni
 
 function inline boxedScatter_updater (owned f, unit _, pointer ret) -> unit
 {
-  U1Tuple(owned){old_val} = U1Tuple(owned) load ret;
-  U1Tuple(owned){new_val} = owned call f(old_val);
+  // Function 'f' has type (a -> a) for some boxed type 'a'
+  old_val = U1Tuple(owned) load ret;
+  new_val = owned call f(old_val);
   !ret = new_val;
+  nil;
+};
+
+function inline appendScatter_initializer (SA sizealign, owned _, pointer ret) -> unit
+{
+  ret @! AppendList.nelems = FinIndInt {int 0};
+  ret @! AppendList.used = int 0;
+  ret @! AppendList.contents = null as owned;
+  nil;
+};
+
+function inline appendScatter_update_real (owned rep, owned writer, unit _, pointer alist) -> unit
+{
+  SA {elt_size, elt_align} = rep @! Repr.sizealign;
+  typedef elt = bytes(value elt_size, value elt_align);
+
+  FinIndInt {n_elems} = alist @! AppendList.nelems;
+  used = alist @! AppendList.used;
+  old_contents = alist @! AppendList.contents;
+
+  // Need to resize list?
+  (new_contents, new_n_elems) = if (used == n_elems) {
+    typedef old_arr = array(value n_elems, elt);
+
+    // Create a new array with 'ne' elements
+    ne = n_elems + n_elems + int 2;
+    typedef new_arr = array(value ne, elt);
+    nc = pointer primcall pyon_alloc (sizeof new_arr) as owned;
+
+    // Copy old to new array
+    () = () primcall memcpy (nc, old_contents, sizeof old_arr);
+    (nc, ne);
+  }
+  else {
+    (old_contents, n_elems);
+  };
+
+  typedef new_arr = array(value new_n_elems, elt);
+
+  // Write to list
+  _ = unit call writer (new_contents @ new_arr[used]);
+
+  // Update the list object
+  alist @! AppendList.nelems = FinIndInt {new_n_elems};
+  alist @! AppendList.used = used + int 1;
+  alist @! AppendList.contents = new_contents;
+
   nil;
 };

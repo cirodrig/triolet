@@ -256,6 +256,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_rangeIndexed) |])
   , (PyonName module_stream "histogram",
      Right [| pyonBuiltin (SystemF.The_histogram) |])-}
+  , (PyonName module_inplace "repr_append_list",
+     Right [| pyonBuiltin SystemF.The_repr_append_list |])
   , (PyonName module_inplace "intSumScatter_make_init",
      Right [| pyonBuiltin (SystemF.The_intSumScatter_make_init) |])
   , (PyonName module_inplace "countingScatter_make_init",
@@ -272,6 +274,10 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_updater) |])
   , (PyonName module_inplace "boxedScatter_updater",
      Right [| pyonBuiltin (SystemF.The_boxedScatter_updater) |])
+  , (PyonName module_inplace "appendScatter_initializer",
+     Right [| pyonBuiltin (SystemF.The_appendScatter_initializer) |])
+  , (PyonName module_inplace "appendScatter_update_real",
+     Right [| pyonBuiltin (SystemF.The_appendScatter_update_real) |])
   , (PyonName module_effects "seqEffTok",
      Right [| pyonBuiltin (SystemF.The_seqEffTok) |])
   , (PyonName module_effects "toEffTok",
