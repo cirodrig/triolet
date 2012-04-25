@@ -232,6 +232,8 @@ createDictEnv = do
   maybe_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin The_Maybe) [VarT arg],
      createDict_Maybe arg)
+  tuple1_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin The_PyonTuple1) [VarT arg], createDict_Tuple1 arg)
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin The_PyonTuple2) [VarT arg1, VarT arg2],
      createDict_Tuple2 arg1 arg2)
@@ -294,7 +296,7 @@ createDictEnv = do
                                   blist_dict, barray1_dict, barray2_dict,
                                   complex_dict, array_dict,
                                   {-referenced_dict,-} maybe_dict,
-                                  tuple2_dict, tuple3_dict, tuple4_dict,
+                                  tuple1_dict, tuple2_dict, tuple3_dict, tuple4_dict,
                                   eq_dict, ord_dict,
                                   additive_dict, multiplicative_dict,
                                   index_dict, slice_dict]
@@ -325,6 +327,16 @@ valueDict value dict_var =
     pattern_type = varApp (pyonBuiltin The_Stored) [value]
     expr = MkDict $ return $ ExpM $ VarE defaultExpInfo dict_var
 
+createDict_Tuple1 :: Var -> TypeSubst -> MkDict
+createDict_Tuple1 param_var subst = MkDict $
+  withReprDict param1 $ \dict1 ->
+  return $ ExpM $ AppE defaultExpInfo dict_oper [param1] [dict1]
+  where
+    param1 = getParamType param_var subst
+    
+    data_type = varApp (pyonBuiltin The_PyonTuple1) [param1]
+    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple1)
+
 createDict_Tuple2 :: Var -> Var -> TypeSubst -> MkDict
 createDict_Tuple2 param_var1 param_var2 subst = MkDict $
   withReprDict param1 $ \dict1 ->
@@ -336,7 +348,6 @@ createDict_Tuple2 param_var1 param_var2 subst = MkDict $
     param2 = getParamType param_var2 subst
     
     data_type = varApp (pyonBuiltin The_PyonTuple2) [param1, param2]
-    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple2)
 
 createDict_Tuple3 :: Var -> Var -> Var -> TypeSubst -> MkDict
@@ -353,7 +364,6 @@ createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $
     param3 = getParamType pv3 subst
 
     data_type = varApp (pyonBuiltin The_PyonTuple3) [param1, param2, param3]
-    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple3)
 
 createDict_Tuple4 :: Var -> Var -> Var -> Var -> TypeSubst -> MkDict
@@ -372,7 +382,6 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
     param4 = getParamType pv4 subst
 
     data_type = varApp (pyonBuiltin The_PyonTuple4) [param1, param2, param3, param4]
-    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple4)
 
 createDict_list :: Var -> TypeSubst -> MkDict
@@ -447,7 +456,6 @@ createDict_array param_var1 param_var2 subst = MkDict $
     param2 = getParamType param_var2 subst
     
     data_type = varApp (pyonBuiltin The_arr) [param1, param2]
-    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_arr)
 
 createDict_ref :: Var -> TypeSubst -> MkDict

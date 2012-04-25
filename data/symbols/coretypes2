@@ -153,6 +153,13 @@ data arr : intindex -> bare -> bare
 {};
 
 
+data PyonTuple1 : bare -> bare
+{
+  pyonTuple1
+  (a : bare) () (a);
+};
+
+
 data PyonTuple2 : bare -> bare -> bare
 {
   pyonTuple2
@@ -858,6 +865,9 @@ repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
 repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
 repr_MaybeVal_int : Repr (MaybeVal int);
 repr_MaybeVal_MaybeVal_int : Repr (MaybeVal (MaybeVal int));
+
+repr_PyonTuple1 :
+    (a : bare) -> Repr a -> Repr (PyonTuple1 a);
 
 repr_PyonTuple2 :
     (a b : bare) -> Repr a -> Repr b -> Repr (PyonTuple2 a b);

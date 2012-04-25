@@ -14,6 +14,9 @@ extern function pyon.internal.structures.repr_arr
 extern function pyon.internal.structures.repr_Maybe
   (owned) -> owned;
 
+extern function pyon.internal.structures.repr_PyonTuple1
+  (owned) -> owned;
+
 extern function pyon.internal.structures.repr_PyonTuple2
   (owned, owned) -> owned;
 

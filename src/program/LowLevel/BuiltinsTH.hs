@@ -293,6 +293,8 @@ builtinFunctions =
      closureFunctionType [PrimType UnitType,
                           PrimType PointerType,
                           PrimType PointerType] []) -}
+  , (PyonName module_structures "repr_PyonTuple1",
+     Right [| SystemF.pyonBuiltin SystemF.The_repr_PyonTuple1 |])
   , (PyonName module_structures "repr_PyonTuple2",
      Right [| SystemF.pyonBuiltin SystemF.The_repr_PyonTuple2 |])
   , (PyonName module_structures "repr_PyonTuple3",
