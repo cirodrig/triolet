@@ -59,11 +59,11 @@ loadBuiltins cl_globals = do
     SystemF.TypecheckMem.typeCheckModule core_module
     initializeGlobalVar the_coreModule (return core_module)
 
-  -- TESTING: Compute size and alignment of each built-in type 
-  mem_types <- readInitGlobalVarIO the_memTypes
+  -- IN DEVELOPMENT: Compute size and alignment of each built-in type
+  {-mem_types <- readInitGlobalVarIO the_memTypes
   withTheNewVarIdentSupply $ \supply -> do
     layouts <- computeTypeLayouts supply mem_types
-    initializeGlobalVar the_layouts (return layouts)
+    initializeGlobalVar the_layouts (return layouts)-}
 
   -- Initialize the low-level builtins
   withTheLLVarIdentSupply $ \ll_supply -> do

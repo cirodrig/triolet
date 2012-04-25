@@ -444,14 +444,14 @@ rewriteApp ruleset int_env id_supply tenv inf op_var ty_args args =
                 in runRW do_rewrite id_supply int_env tenv
      Nothing -> return Nothing
   where
-    trace_rewrite subst_args m = do
+    trace_rewrite _ m = m
+    {-trace_rewrite subst_args m = do
       x <- m
       case x of
         Nothing -> return x
         Just e' -> do
           let old_exp = pprExp $ appE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args subst_args
-          traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x
-    
+          traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x-}
 
 -- | Turn a call of 'convertToBare' into a constructor application or
 --   case statement, if the type is known.  Also, cancel applications of

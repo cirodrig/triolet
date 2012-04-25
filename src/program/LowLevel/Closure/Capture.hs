@@ -52,7 +52,7 @@ import LowLevel.Closure.LocalCPSAnn
 import qualified LowLevel.Closure.LocalCPS as LocalCPS
 import Globals
 
-debug = True
+debug = False
 
 -------------------------------------------------------------------------------
 -- Constraints

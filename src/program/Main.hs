@@ -183,8 +183,9 @@ compilePyonToPyonMem :: CompileFlags -> FilePath -> String
 compilePyonToPyonMem compile_flags path text = do
   -- Parse and generate untyped code
   untyped_mod <- parseFile path text
-  putStrLn "Untyped"
-  print $ Untyped.pprModule untyped_mod
+  when debugMode $ void $ do
+    putStrLn "Untyped"
+    print $ Untyped.pprModule untyped_mod
   
   -- Generate System F
   sf_mod <- Untyped.typeInferModule untyped_mod
@@ -193,20 +194,23 @@ compilePyonToPyonMem compile_flags path text = do
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   sf_mod <- SystemF.DeadCodeSF.eliminateDeadCode sf_mod
 
-  putStrLn ""
-  putStrLn "System F"
-  print $ SystemF.pprModule sf_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "System F"
+    print $ SystemF.pprModule sf_mod
 
   -- Convert to explicit memory representation
   repr_mod <- SystemF.representationInference sf_mod
   
   -- Add predefined functions to the module
   repr_mod <- SystemF.insertGlobalSystemFFunctions repr_mod
-  
-  putStrLn ""
-  putStrLn "Memory IR"
-  print $ pprMemModule repr_mod
+
   when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Memory IR"
+    print $ pprMemModule repr_mod
+
+    -- Check for type errors produced by previous steps
     SystemF.TypecheckMem.typeCheckModule repr_mod
   
   return repr_mod
@@ -227,32 +231,36 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
   repr_mod <- iterateM (highLevelOptimizations False SystemF.GeneralSimplifierPhase) 5 repr_mod
   
-  putStrLn ""
-  putStrLn "Before loop dimension analysis"
-  print $ pprMemModule repr_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Before loop dimension analysis"
+    print $ pprMemModule repr_mod
 
   repr_mod <- iterateM (highLevelOptimizations True SystemF.DimensionalitySimplifierPhase) 7 repr_mod
 
-  putStrLn ""
-  putStrLn "Before parallelizing"
-  print $ pprMemModule repr_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Before parallelizing"
+    print $ pprMemModule repr_mod
 
   -- Parallelize outer loops
   repr_mod <-
     if lookupCompileFlag DoParallelization compile_flags
     then do repr_mod <- SystemF.parallelLoopRewrite repr_mod
-            putStrLn ""
-            putStrLn "After parallelizing"
-            print $ pprMemModule repr_mod
+            when debugMode $ void $ do
+              putStrLn ""
+              putStrLn "After parallelizing"
+              print $ pprMemModule repr_mod
             highLevelOptimizations False SystemF.DimensionalitySimplifierPhase repr_mod
     else return repr_mod
 
   -- Sequentialize remaining loops
   repr_mod <- iterateM (highLevelOptimizations False SystemF.SequentialSimplifierPhase) 6 repr_mod
 
-  putStrLn ""
-  putStrLn "After Simplifying"
-  print $ pprMemModule repr_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "After Simplifying"
+    print $ pprMemModule repr_mod
   
   -- Inline loops
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
@@ -275,88 +283,22 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   when debugMode $ void $ do
     putStrLn "After argument flattening"
     print $ pprMemModule repr_mod
-    evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
+    evaluate $ SystemF.checkForShadowingModule repr_mod
 
   -- Reconstruct demand information after flattening variables,
   -- so that the next optimization pass can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
   repr_mod <- iterateM (highLevelOptimizations True SystemF.PostFinalSimplifierPhase) 5 repr_mod
 
-  putStrLn ""
-  putStrLn "Optimized"
-  print $ pprMemModule repr_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Optimized"
+    print $ pprMemModule repr_mod
 
   when debugMode $ void $ do
     SystemF.TypecheckMem.typeCheckModule repr_mod
 
   ll_mod <- SystemF.lowerModule repr_mod
-  
-  {- This is the old optimization sequence
-  print "Generating memory IR"
-  mem_mod <- SystemF.generateMemoryIR tc_mod
-  
-  putStrLn "Memory"
-  print $ SystemF.PrintMemoryIR.pprModule mem_mod
-  
-  -- Optimizations on memory representation.
-  -- The first group of optimizations performs inlining to create bigger 
-  -- functions, then floating and dead code elimination.  These steps 
-  -- are primarily setup to improve the accuracy of the simplifier.
-  mem_mod <- highLevelOptimizations True False mem_mod
-
-  -- The next group of optimizations does the main set of optimizations,
-  -- including high-level transformations via rewriting.
-  -- Currently there are inter-pass dependences that we
-  -- stupidly resolve by running them lots of times.
-  mem_mod <- highLevelOptimizations True False mem_mod
-  mem_mod <- iterateM (highLevelOptimizations False False) 6 mem_mod
-
-  -- Parallelize loops, then sequentialize the remaining loops
-  mem_mod <-
-    if lookupCompileFlag DoParallelization compile_flags  
-    then do mem_mod <- SystemF.parallelLoopRewrite mem_mod
-            highLevelOptimizations False False mem_mod
-    else return mem_mod
-
-  mem_mod <- iterateM (highLevelOptimizations False True) 2 mem_mod
-  putStrLn "Loop rewritten"
-  print $ SystemF.PrintMemoryIR.pprModule mem_mod
-
-  -- Flatten function arguments and local variables.
-  -- We transform arguments and returns first, then run a simplifier pass 
-  -- to rebuild demand information.
-  -- Argument flattening leads to more precise demand information,
-  -- which makes local variable flattening more effective.
-  --
-  -- Loop through this twice because some streams are still being
-  -- converted to loops at this point.  This issue should really be fixed
-  -- by improving the optimizations that come before this point.
-  let flatten_variables mod = do
-        mod <- SystemF.flattenArguments mod
-        mod <- highLevelOptimizations False True mod
-        mod <- SystemF.flattenLocals mod
-
-        -- Simplify the code that was introduced by flattening. 
-        -- Flattening also enables more value propagation and rewrites, which
-        -- may expose more opportunities for flattening.
-        mod <- iterateM (highLevelOptimizations False True) 4 mod
-        return mod
-
-  mem_mod <- iterateM flatten_variables 3 mem_mod
-
-  putStrLn "Optimized Memory"
-  print $ SystemF.PrintMemoryIR.pprModule mem_mod
-
-  -- Lower
-  tc_mem_mod <- SystemF.TypecheckMem.typeCheckModule mem_mod
-  --SystemF.inferSideEffects tc_mod
-  ll_mod <- SystemF.lowerModule tc_mem_mod
-  -}
-
-  putStrLn ""
-  putStrLn "Lowered"
-  print $ LowLevel.pprModule ll_mod
-  
   return ll_mod
 
 parsePyonAsm input_path input_text = do
@@ -372,15 +314,15 @@ loadIface iface_file = do
 -- | Compile an input low-level module to C code.  Generate an interface file.
 -- Generate a header file if there are exported routines.
 compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
-  print $ LowLevel.pprModule ll_mod
   -- Low-level transformations
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
   
   -- Link to interfaces
   ll_mod <- foldM (flip LowLevel.addInterfaceToModuleImports) ll_mod ifaces
-  putStrLn ""
-  putStrLn "Lowered and flattened"
-  print $ LowLevel.pprModule ll_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Lowered and flattened"
+    print $ LowLevel.pprModule ll_mod
   
   -- First round of optimizations: Simplify code
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
@@ -403,9 +345,11 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
 
   -- Cleanup
   ll_mod <- return $ LowLevel.clearImportedFunctionDefinitions ll_mod
-  putStrLn ""
-  putStrLn "Optimized"
-  print $ LowLevel.pprModule ll_mod  
+
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Optimized"
+    print $ LowLevel.pprModule ll_mod  
   
   -- Generate interface file
   (ll_mod, ll_interface) <- LowLevel.createModuleInterface ll_mod
@@ -413,13 +357,15 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
 
   -- Closure conversion
   -- Remove any lambda values created by the last round of optimization
-  putStrLn ""
-  putStrLn "Before closure conversion"
-  print $ LowLevel.pprModule ll_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Before closure conversion"
+    print $ LowLevel.pprModule ll_mod
   ll_mod <- LowLevel.closureConvert ll_mod
-  putStrLn ""
-  putStrLn "After closure conversion"
-  print $ LowLevel.pprModule ll_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "After closure conversion"
+    print $ LowLevel.pprModule ll_mod
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
 
   -- After closure conversion, unit values are superfluous
@@ -432,9 +378,10 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   -- FIXME: Why do we need to call 'eliminateDeadCode' twice to
   -- get the job done?
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  putStrLn ""
-  putStrLn "Second optimization pass"
-  print $ LowLevel.pprModule ll_mod  
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Final low-level code"
+    print $ LowLevel.pprModule ll_mod  
 
   -- Generate and compile a C file
   c_mod <- LowLevel.generateCFile ll_mod
