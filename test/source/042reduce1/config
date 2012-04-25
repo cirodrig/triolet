@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Sequentialized reduction without an identity element",
+  pyonSources	 = ["seqreduce.pyon"],
+  llpyonSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
+  expectedResult = ShouldPrint "3, 8"
+}

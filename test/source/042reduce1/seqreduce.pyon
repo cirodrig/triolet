@@ -1,0 +1,20 @@
+# Test whether a use of 'reduce1' with 'filter' works properly
+
+def highest(a, b):
+  (suit_a, rank_a) = a
+  (suit_b, rank_b) = b
+  if rank_a == 1 or rank_a >= rank_b: return a
+  else: return b
+
+def highest_card(hand): return reduce1(highest, hand)
+
+def suit_is_diamonds(c):
+  (suit, rank) = c
+  return suit == 3
+
+def diamonds(hand): return filter(suit_is_diamonds, hand)
+
+def foo(a):
+  return highest_card(diamonds(iter([(1,3), (1,9), (3,6), (2,12), (3,8)])))
+
+export cplusplus foo : NoneType -> (int, int)
