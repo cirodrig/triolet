@@ -596,6 +596,10 @@ genStmtAtom tenv stmt =
      LetrecS fdefs body -> do
        emitLetrec . LL.Rec =<< lift (mapM (genFunctionDef tenv) fdefs)
        genStmtAtom tenv body
+     TypedefS (SynonymT (TypeSynonym type_id _)) ty stmt -> do
+       -- Compute specification of this type
+       ty' <- genDynamicType tenv ty
+       genStmtAtom (insertTypeSynonym type_id ty' tenv) stmt
      IfS cond if_true if_false Nothing -> do
        -- Generate an if statement, then group its result values into an atom
        let return_types = map convertToValueType $ stmtType if_true
