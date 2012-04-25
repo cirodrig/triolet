@@ -2239,6 +2239,9 @@ count : Stream list_dim (Stored int);
 
 range : int -> Stream list_dim (Stored int);
 
+arrayRange : (sh : box) -> ShapeDict sh -> CartesianDict sh
+  -> index sh -> index sh -> Stream sh (index sh);
+
 singletonIter : (a : bare) -> Repr a -> Init a -> Stream list_dim a;
 
 -- Helper function for 'singletonIter'

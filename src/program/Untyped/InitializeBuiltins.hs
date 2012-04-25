@@ -1452,6 +1452,14 @@ mkRangeType =
   in return $ monomorphic $
      functionType [int_type] (listIterType int_type)
 
+mkArrayRangeType =
+  forallType [Star] $ \[sh] ->
+  let shT = ConTy sh
+      indexT = TFunAppTy (tiBuiltin the_con_index) [shT]
+  in ([ shT `IsInst` tiBuiltin the_c_Shape
+      , shT `IsInst` tiBuiltin the_c_Cartesian],
+      functionType [indexT, indexT] (ConTy (tiBuiltin the_con_iter) @@ shT @@ indexT))
+
 mkChainType =
   forallType [Star] $ \[a] ->
   let iter_type =
@@ -1957,6 +1965,9 @@ initializeTIBuiltins = do
               ),
               ("range", [| mkRangeType |]
               , [| pyonBuiltin SystemF.The_range |]
+              ),
+              ("arrayRange", [| mkArrayRangeType |]
+              , [| pyonBuiltin SystemF.The_arrayRange |]
               ),
               ("chain", [| mkChainType |]
               , [| pyonBuiltin SystemF.The_chain |]

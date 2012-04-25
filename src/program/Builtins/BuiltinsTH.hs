@@ -546,6 +546,7 @@ pyonBuiltinVariableNames =
   , "fun_zip4"
   , "count"
   , "range"
+  , "arrayRange"
   , "singletonIter"
   , "chain"
   , "len"

@@ -4644,6 +4644,29 @@ range (length : int) -> Stream list_dim (Stored int)
       copy @(Stored int) repr_int i));
 
 
+arrayRange @(sh : box) (shape : ShapeDict sh) (cartesian : CartesianDict sh)
+  (lo : index sh) (hi : index sh)
+  -> Stream sh (index sh)
+  attribute(inline) =
+
+  let type ix = index sh in
+  case cartesian of
+    cartesianDict @sh
+    (has_shape : coerce @box (cartesianDomain ix) sh)
+    (loBound : sh -> Init (Maybe ix))
+    (hiBound : sh -> Init (Maybe ix))
+    (get_stride : sh -> Init ix)
+    (arrayDomain : ix -> ix -> sh)
+    (displaceDomain : sh -> ix -> sh)
+    (multiplyDomain : sh -> ix -> sh)
+    (divideDomain : sh -> ix -> sh)
+    (multiplyIndex : ix -> ix -> Init ix)
+    (divideIndex : ix -> ix -> Init ix)
+    (unbounded : sh).
+
+  fun_indices @sh shape (arrayDomain lo hi);
+
+
 singletonIter @(a : bare) (repr : Repr a) (w : Init a) -> Stream list_dim a
   attribute(inline) =
   viewStream @a (singleton_list_dim_view @a repr w);
