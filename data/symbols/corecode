@@ -3926,6 +3926,26 @@ fun_reduce1 @(t : bare -> bare) @(a : bare)
   };
 
 
+fun_sum @(t : bare -> bare) @(a : bare)
+  (traversable : TraversableDict t)
+  (shape : ShapeDict (shape t))
+  (rep : Repr a)
+  (additive : AdditiveDict a)
+  (src : t a)
+  (ret : OutPtr a)
+  -> Store
+  attribute(inline) =
+
+  case additive of
+    additiveDict @a
+    (add : a -> a -> Init a)
+    (sub : a -> a -> Init a)
+    (negate : a -> Init a)
+    (zero : a).
+
+  fun_reduce @t @a traversable shape rep add zero src ret;
+
+
 fun_scatter @(t : bare -> bare) @(i r : bare)
   (shape_dict : ShapeDict (shape t))
   (traversable : TraversableDict t)

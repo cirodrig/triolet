@@ -539,6 +539,7 @@ pyonBuiltinVariableNames =
   , "fun_filter"
   , "fun_reduce"
   , "fun_reduce1"
+  , "fun_sum"
   , "fun_scatter"
   , "fun_indices"
   , "fun_zip"

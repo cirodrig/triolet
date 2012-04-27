@@ -1361,6 +1361,14 @@ mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
       , passable aT],
       functionType [functionType [aT, aT] aT, tT @@ aT] aT)
 
+mkSumType = forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+  in ([tT `IsInst` tiBuiltin the_c_Traversable,
+       shapeType tT `IsInst` tiBuiltin the_c_Shape,
+       passable aT, aT `IsInst` tiBuiltin the_c_Additive],
+      functionType [tT @@ aT] aT)
+
 mkIndicesType =
   forallType [Star] $ \[sh] ->
   let shT = ConTy sh
@@ -1947,6 +1955,9 @@ initializeTIBuiltins = do
               ),
               ("reduce1", [| mkReduce1Type |]
               , [| pyonBuiltin SystemF.The_fun_reduce1 |]
+              ),
+              ("sum", [| mkSumType |]
+              , [| pyonBuiltin SystemF.The_fun_sum |]
               ),
               ("indices", [| mkIndicesType |]
               , [| pyonBuiltin SystemF.The_fun_indices |]

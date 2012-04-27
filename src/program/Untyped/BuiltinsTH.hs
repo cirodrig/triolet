@@ -47,6 +47,7 @@ pyonSourceGlobals =
   , "filter"
   , "reduce"
   , "reduce1"
+  , "sum"
   , "zip"
   , "zip3"
   , "zip4"

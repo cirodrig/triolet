@@ -2026,6 +2026,15 @@ fun_reduce1 : (t : bare -> bare)
            -> t a
            -> Init a;
 
+fun_sum : (t : bare -> bare)
+       -> (a : bare)
+       -> TraversableDict t
+       -> ShapeDict (shape t)
+       -> Repr a
+       -> AdditiveDict a
+       -> t a
+       -> Init a;
+
 fun_indices : (sh : box) -> ShapeDict sh -> sh -> Stream sh (index sh);
 
 displaceView : (t : bare -> bare) -> (a : bare)
