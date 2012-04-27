@@ -324,6 +324,11 @@ data StreamOp =
     -- > empty @{output type} {output repr} {} {}
   | EmptyOp !StreamType !Type
 
+    -- | Concatenate two sequences.
+    --
+    -- > chain @{output type} {output repr} {} {input stream 1, input stream 2}
+  | ChainOp !Type
+
     -- | The bind operation on sequences.
     --
     -- > bind @{producer type, transformer type}
@@ -352,6 +357,7 @@ instance Renameable StreamOp where
        ToView1Op st ty -> ToView1Op (rename rn st) (rename rn ty)
        ReturnOp ty -> ReturnOp (rename rn ty)
        EmptyOp st ty -> EmptyOp (rename rn st) (rename rn ty)
+       ChainOp t -> ChainOp (rename rn t)
        BindOp t1 t2 -> BindOp (rename rn t1) (rename rn t2)
        GenerateBindOp t -> GenerateBindOp (rename rn t)
        ConsumeOp st r -> ConsumeOp (rename rn st) (rename rn r)
@@ -382,6 +388,8 @@ instance Substitutable StreamOp where
          ReturnOp `liftM` substitute s ty
        EmptyOp st ty ->
          EmptyOp `liftM` substitute s st `ap` substitute s ty
+       ChainOp ty ->
+         ChainOp `liftM` substitute s ty
        BindOp t1 t2 ->
          BindOp `liftM` substitute s t1 `ap` substitute s t2
        GenerateBindOp t ->
@@ -492,6 +500,9 @@ pprStreamOp' (ReturnOp t) =
 pprStreamOp' (EmptyOp st t) =
   nameApplication "empty" [pprStreamType st, pprTypePrec t]
 
+pprStreamOp' (ChainOp t) =
+  nameApplication "chain" [pprTypePrec t]
+
 pprStreamOp' (ConsumeOp st op) =
   let (name, tys) = case op
                     of Reduce ty -> ("reduce", [ty])
@@ -593,6 +604,7 @@ streamOpTable =
            , (pyonBuiltin The_Sequence_generate_bind, interpretGenerateBind)
            , (pyonBuiltin The_Sequence_return, interpretReturn)
            , (pyonBuiltin The_Sequence_empty, interpretEmpty SequenceType)
+           , (pyonBuiltin The_Sequence_chain, interpretChain)
              {-, (pyonBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
            , (pyonBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
            , (pyonBuiltin The_view1_empty, interpretEmptyView)
@@ -786,6 +798,16 @@ interpretEmpty stream_type = StreamOpInterpreter check_arity interpret
     
     interpret inf [ty] [repr] = do
       return $ Just $ OpSE inf (EmptyOp stream_type ty) [repr] [] [] Nothing
+
+interpretChain = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 3 = True
+    check_arity _ _ = False
+
+    interpret inf [ty] [repr, s1, s2] = do
+      s1' <- interpretStreamSubExp s1
+      s2' <- interpretStreamSubExp s2
+      return $ Just $ OpSE inf (ChainOp ty) [repr] [] [s1', s2'] Nothing
 
 {-
 
@@ -984,6 +1006,9 @@ embedOp (EmptyOp st ty) =
            of SequenceType -> varE' $ pyonBuiltin The_Sequence_empty
               ListViewType -> varE' $ pyonBuiltin The_empty_list_dim_view
   in (op, [ty])
+
+embedOp (ChainOp ty) =
+  (varE' $ pyonBuiltin The_Sequence_chain, [ty])
 
 embedOp (BindOp t1 t2) =
   (varE' $ pyonBuiltin The_Sequence_bind, [t1, t2])
@@ -1282,6 +1307,22 @@ fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
          OpSE inf (EmptyOp st _) [_] [] [] Nothing -> 
            progress $ OpSE inf (EmptyOp st ty) [repr] [] [] Nothing
 
+         OpSE inf (ReturnOp return_t) [_] [v] [] Nothing -> do
+           -- Apply function to value
+           tmpvar <- newAnonymousVar ObjectLevel
+           let boxed_value = conE' (VarCon (pyonBuiltin The_boxed) [return_t] []) [v]
+               call = appE' map_f [] [varE' tmpvar]
+               return_value = ExpM $ CaseE defaultExpInfo boxed_value
+                              [AltM $ Alt (VarDeCon (pyonBuiltin The_boxed) [return_t] [])
+                               [patM (tmpvar ::: return_t)] call]
+           progress $ OpSE inf (ReturnOp ty) [repr] [return_value] [] Nothing
+
+         OpSE inf (ChainOp _) [_] [] [s1, s2] Nothing -> do
+           -- Distribute over both streams
+           (_, s1') <- fuse_with_producer shape s1
+           (_, s2') <- fuse_with_producer shape s2
+           progress $ OpSE inf (ChainOp ty) [repr] [] [s1', s2'] Nothing
+
          OpSE inf (ToSequenceOp st _) [_] [] [s] Nothing -> do
            (_, s') <- fuse_with_producer st s
            progress $ OpSE inf (ToSequenceOp st ty) [repr] [] [s'] Nothing
@@ -1508,9 +1549,33 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
        -- Accumulate the written value
        localE ret_ty (return w) $ \x_var ->
        return $ appE' combiner [] [acc, varE' x_var]
+
      OpSE inf (EmptyOp _ _) _ _ [] Nothing ->
        -- Return the accumulator
        varAppE (pyonBuiltin The_copy) [acc_ty] [mkVarE acc_repr_var, return acc]
+
+     OpSE inf (ChainOp _) [_] [] [s1, s2] Nothing -> do
+       -- Fold over the first stream, then over the second
+       partial_result <-
+         sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner s1
+
+       partial_result_var <- newAnonymousVar ObjectLevel
+       let partial_result_exp = varE' partial_result_var
+       final_result <-
+         assume partial_result_var acc_ty $
+         sequentializeFold acc_ty a_ty acc_repr_var a_repr partial_result_exp combiner s2
+
+       -- Partial result goes into a temporary boxed object
+       let boxed_result =
+             conE' (VarCon (pyonBuiltin The_boxed) [acc_ty] [])
+             [partial_result]
+           use_boxed_result =
+             ExpM $ CaseE defaultExpInfo boxed_result
+             [AltM $ Alt (VarDeCon (pyonBuiltin The_boxed) [acc_ty] [])
+              [patM (partial_result_var ::: acc_ty)]
+              final_result]
+       return use_boxed_result
+       
      OpSE inf (BindOp p_ty _) [p_repr] [] [producer, transformer] Nothing -> do
        -- The "bind" operator is what makes sequentializing folds interesting.
        -- This transformation is performed:
