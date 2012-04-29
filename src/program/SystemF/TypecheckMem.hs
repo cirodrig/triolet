@@ -41,6 +41,12 @@ import qualified Type.Rename as Rename
 import qualified Type.Substitute as Substitute
 import Type.Compare
 
+arrayInitializerType len element_type =
+  let length_type = IntT $ fromIntegral len
+      arr_type = varApp (pyonBuiltin The_arr) [length_type, element_type]
+  in varApp (pyonBuiltin The_OutPtr) [arr_type] `FunT`
+     VarT (pyonBuiltin The_Store)
+
 assumeAndAnnotatePat :: PatM -> TCM b -> TCM b
 assumeAndAnnotatePat (PatM (v ::: ty) _) k = do
   typeCheckType ty              -- Verify that type is well-formed
@@ -365,9 +371,7 @@ typeInferArray inf ty es = do
 
   forM_ e_tys $ \g_ty -> checkType message (getSourcePos inf) init_type g_ty
 
-  -- Return an array type
-  let len = IntT $ fromIntegral $ length es
-  return $ varApp (pyonBuiltin The_arr) [len, ty]
+  return $ arrayInitializerType (length es) ty
 
 checkConstant :: Constant Mem -> TCM ()
 checkConstant (Constant inf ty e) = do
@@ -449,9 +453,7 @@ inferExpType expression =
          CoerceE {expRetType = rt} ->
            return rt
          ArrayE _ ty es ->
-           let n_type = IntT $ fromIntegral $ length es
-               array_type = varApp (pyonBuiltin The_arr) [n_type, ty]
-           in return array_type
+           return $ arrayInitializerType (length es) ty
          _ ->
            typeInferExp expression
 
