@@ -1477,6 +1477,40 @@ sequentializeStreamExp expression =
                 sequentializeFold ty ty repr_var
                 (varE' repr_var) init reducer src
               return $ appE inf fold_exp [] (maybeToList ret_arg)
+
+          Reduce1 ty -> runMaybeT $ do
+            let [reducer] = misc_args
+                [repr] = repr_args
+
+            -- Assign the Repr to a variable to avoid replicating the
+            -- same expression many times
+            let_repr ty repr $ \repr_var -> do
+              let repr_exp = varE' repr_var
+
+              -- Always create a function
+              f <- lamE $
+                   mkFun [] (\ [] -> return ([outType ty], initEffectType ty))
+                   (\ [] [ret_var] -> do
+                     -- Peeled continuation: call sequentializeFold
+                     let peeled_cont s =
+                           lamE $
+                           mkFun [] (\ [] -> return ([ty, outType ty],
+                                                    initEffectType ty))
+                           (\ [] [x, ret] -> do
+                               fold_exp <- sequentializeFold ty ty repr_var
+                                           repr_exp (varE' x) reducer s
+                               return $ appE inf fold_exp [] [varE' ret])
+                     -- Empty continuation: error
+                     let empty_cont =
+                           lamE $ 
+                           mkFun[] (\ [] -> return ([outType ty],
+                                                    initEffectType ty))
+                           (\ [] [ret] -> do
+                               return $ ExpM $ ExceptE inf (initEffectType ty))
+                     peelStream ty (varE' repr_var) ty repr_exp
+                       peeled_cont empty_cont src (varE' ret_var))
+              return $ appE inf f [] (maybeToList ret_arg)
+
           Fold in_ty acc_ty -> runMaybeT $ do
             let [reducer, init] = misc_args
                 [repr_in, repr_acc] = repr_args
@@ -1497,7 +1531,204 @@ sequentializeStreamExp expression =
       k_expr <- k repr_var
       let repr_pat = patM (repr_var ::: varApp (pyonBuiltin The_Repr) [ty])
       return $ letE repr_pat val k_expr
-      
+
+-- | Evaluate just the first element of a sequence that has list domain.
+--   Statically construct a
+--   new stream expression representing the rest of the stream.
+--   This is used when sequentializing 'reduce1'.
+peelStream :: Type              -- ^ Stream contents type
+           -> ExpM              -- ^ Repr dictionary for stream source
+           -> Type              -- ^ Return type produced by continuations
+           -> ExpM              -- ^ Repr dictionary for return values
+           -> (ExpS -> MaybeT TypeEvalM ExpM)
+              -- ^ Continuation to process a peeled stream.
+              --   The computed expression has type
+              --   @Var -> OutPtr ret -> Store@.
+           -> MaybeT TypeEvalM ExpM
+              -- ^ Continuation to process a missing value.
+              --   The computed expression has type @OutPtr ret -> Store@.
+           -> ExpS              -- ^ Input stream
+           -> ExpM              -- ^ Output pointer
+           -> MaybeT TypeEvalM ExpM
+peelStream a_ty a_repr ret_ty ret_repr value_cont empty_cont source ret_ptr =
+  -- This transformation may generate nested copies of the stream code
+  -- (an outer copy to find the first element, and inner copies to process
+  -- the remaining elements).
+  -- Perform renaming to avoid name shadowing.
+  freshenExpS source >>=
+  peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr
+
+peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
+  case source
+  of OpSE inf (GenerateBindOp _) [] [shape] [f] Nothing -> do
+       -- Return (f 0) and a stream of (f 1 .. f N)
+
+       -- > peel_generate_bind @a @r a_repr ret_repr shape
+       -- > $(make_body_function f) $(empty_cont) ret_ptr
+
+       body_function <- make_body_function f
+       failure <- empty_cont
+       return $ appE' (varE' $ pyonBuiltin The_peel_generate_bind)
+         [a_ty, ret_ty]
+         [a_repr, ret_repr, shape, body_function, failure, ret_ptr]
+
+     OpSE inf (GenerateOp _ _) [repr] [shape, f] [] Nothing ->
+       internalError "peelStream: Not implemented for 'generate'"
+     
+     OpSE inf (ReturnOp ty) [_] [w] [] Nothing -> do
+       -- Bind the value to a temporary variable
+       localE a_ty (return w) $ \x -> do
+         -- The remaining stream is empty
+         let s = OpSE inf (EmptyOp SequenceType a_ty) [a_repr] [] [] Nothing
+         k_exp <- value_cont s
+         return $ appE inf k_exp [] [varE' x, ret_ptr]
+
+     OpSE inf (EmptyOp _ _) [_] [] [] Nothing -> do
+       -- Stream is empty
+       k_exp <- empty_cont
+       return $ appE' k_exp [] [ret_ptr]
+
+     LetSE inf pat rhs body -> assumeBinder (patMBinder pat) $ do
+       -- Create a let binding
+       e <- peelStream a_ty a_repr ret_ty ret_repr value_cont empty_cont
+            body ret_ptr
+       return $ ExpM $ LetE inf pat rhs e
+
+     CaseSE inf scr alts -> do
+       -- Create a case expression
+       case_alts <- mapM peel_alt alts
+       return $ ExpM $ CaseE inf scr case_alts
+
+     -- We can't peel a 'bind' operation because the peeled stream is
+     -- hard to compute
+     OpSE _ (BindOp _ _) _ _ _ _ -> mzero
+
+     -- We should handle more cases.
+     _ -> internalError "peelStream: Unhandled expression constructor"
+  where
+    peel_alt (AltS (Alt decon params body)) =
+      assumeBinders (deConExTypes decon) $
+      assumePatMs [p | PatS p <- params] $ do
+        body' <- peelStream a_ty a_repr ret_ty ret_repr value_cont empty_cont
+                 body ret_ptr
+        return $ AltM $ Alt decon [p | PatS p <- params] body'
+
+    -- Create a loop body function 
+    --
+    -- > (\i d k r ->
+    -- >    case boxed (stored i) of boxed stored_i.
+    -- >    $(peel (\x s' -> value_cont x
+    -- >                     (make_leftover_stream inner_stream i d s'))
+    -- >           (k r)
+    -- >           (inner_stream stored_i) r)
+    make_body_function inner_stream =
+      lamE $
+      mkFun []
+      (\ [] -> return ([int_type, list_dim_type, cont_type, outType a_ty],
+                       initEffectType a_ty))
+      (\ [] [index, leftover_domain, loop_cont, r] -> do
+         tenv <- getTypeEnv
+
+         stored_index <- newAnonymousVar ObjectLevel
+         (inner_param, inner_body) <- freshenUnaryStreamFunction inner_stream
+         let inner_body' =
+               rename (Rename.singleton inner_param stored_index) inner_body
+
+         assume stored_index stored_int_type $ do
+           -- If peeling the inner stream produces a value, then construct
+           -- a leftover stream and pass it to the value continuation
+           let body_value_cont :: ExpS -> MaybeT TypeEvalM ExpM
+               body_value_cont leftover_stream = do
+                 s <- make_leftover_stream inner_stream index leftover_domain
+                      leftover_stream
+                 value_cont s
+
+           -- If no value is produced, invoke the failure continuation
+           let body_empty_cont = return $ varE' loop_cont
+
+           -- Peel the inner stream
+           body_exp <- peelStream a_ty a_repr ret_ty ret_repr
+                       body_value_cont body_empty_cont
+                       inner_body' (varE' r)
+
+           -- Bind the stored index to a variable
+           let exp = as_stored_int (varE' index) stored_index body_exp
+           return exp)
+         
+
+    -- Create a stream expression representing the part of the stream that
+    -- wasn't evaluated by peeling.
+    -- It consists of the rest of the current inner loop and the remaining
+    -- iterations of the outer loop.
+    --
+    -- inner_stream has type @Sequence $(a_ty)@
+    -- outer_index has type @int@
+    -- leftover_domain has type @list_dim@
+    -- leftover_inner_stream has typ @Sequence $(a_ty)@
+    make_leftover_stream inner_stream
+      outer_index leftover_domain leftover_inner_stream = do
+
+      new_param <- newAnonymousVar ObjectLevel
+
+      -- Adjust the index
+      -- (\i ->
+      --   case i of stored value_i.
+      --   case boxed (stored (value_i + outer_index + 1)) of boxed i'.
+      --   f i')
+      inner_stream_exp <- do
+        (inner_param, inner_body) <- freshenUnaryStreamFunction inner_stream
+        i <- newAnonymousVar ObjectLevel
+        value_i <- newAnonymousVar ObjectLevel       
+        i' <- newAnonymousVar ObjectLevel
+
+        -- Replace 'inner_param' by 'i'' in inner_body
+        let inner_body' = rename (Rename.singleton inner_param i') inner_body
+
+        -- Create expressions
+        let add_expression =
+              appE' (varE' $ pyonBuiltin The_AdditiveDict_int_add) []
+              [ appE' (varE' $ pyonBuiltin The_AdditiveDict_int_add) []
+                [varE' outer_index, varE' value_i]
+              , ExpM (LitE defaultExpInfo (IntL 1 int_type))
+              ]
+        let inner_stream_exp =
+              CaseSE defaultExpInfo (varE' i)
+              [AltS $ Alt stored_decon [PatS $ patM (value_i ::: int_type)]
+               (as_stored_int_stream add_expression i' inner_body')]
+            adjusted_inner_stream =
+              mkUnaryStreamFunction defaultExpInfo i stored_int_type
+              a_ty inner_stream_exp
+
+        return adjusted_inner_stream
+
+      -- Build the stream
+      let leftover_outer_stream =
+            OpSE defaultExpInfo (GenerateBindOp a_ty) []
+            [varE' leftover_domain] [inner_stream_exp] Nothing
+      return $ OpSE defaultExpInfo (ChainOp a_ty) [a_repr] []
+        [leftover_inner_stream, leftover_outer_stream] Nothing
+
+    -- Convert an int to a stored int in an expression
+    as_stored_int int_e int_var body_e =
+      ExpM $ CaseE defaultExpInfo
+      (conE' boxed_con [conE' stored_con [int_e]])
+      [AltM $ Alt boxed_decon [patM (int_var ::: stored_int_type)] body_e]
+
+    -- Convert an int to a stored int in a stream
+    as_stored_int_stream int_e int_var body_s =
+      CaseSE defaultExpInfo
+      (conE' boxed_con [conE' stored_con [int_e]])
+      [AltS $ Alt boxed_decon [PatS $ patM (int_var ::: stored_int_type)] body_s]
+
+    int_type = VarT (pyonBuiltin The_int)
+    stored_int_type = varApp (pyonBuiltin The_Stored) [int_type]
+    list_dim_type = VarT (pyonBuiltin The_list_dim)
+    cont_type = writerType ret_ty
+
+    stored_decon = VarDeCon (pyonBuiltin The_stored) [int_type] []
+    boxed_decon = VarDeCon (pyonBuiltin The_boxed) [stored_int_type] []
+    stored_con = VarCon (pyonBuiltin The_stored) [int_type] []
+    boxed_con = VarCon (pyonBuiltin The_boxed) [stored_int_type] []
 
 
 -- | Convert a fold over a sequence to a sequential loop.
@@ -1676,6 +1907,33 @@ mkUnaryStreamFunction :: ExpInfo -> Var -> Type -> Type -> ExpS -> ExpS
 mkUnaryStreamFunction inf v param_ty return_stream_ty body =
   LamSE inf $
   FunS $ Fun inf [] [PatS $ patM (v ::: param_ty)] return_stream_ty body
+
+-- | Rename variables bound by the outermost term of the expression.
+--   Variables bound by 'ExpM' expressions (in an 'OtherSE' term) do not
+--   get renamed.
+freshenExpS expression =
+  case expression
+  of LetSE inf pat rhs body -> do
+       (pat', rn) <- freshenPatM pat
+       let body' = rename rn body
+       return $ LetSE inf pat' rhs body'
+     CaseSE inf scr alts -> do
+       alts' <- mapM freshen_alt alts
+       return $ CaseSE inf scr alts'
+     ExceptSE {} -> return expression
+     OpSE {} -> return expression
+     OtherSE {} -> return expression
+     LamSE {} ->
+       -- If this is a stream-valued function,
+       -- then 'freshenUnaryStreamFunction' should have been called
+       internalError "freshenExpS: Unexpected function"
+  where
+    freshen_alt (AltS (Alt decon params body)) = do
+      (decon', rn1) <- freshenDeConInst decon
+      renamePatMs rn1 (map fromPatS params) $ \rn1' rn_params -> do
+        (params', rn2) <- freshenPatMs rn_params
+        let body' = rename (rn2 `Rename.compose` rn1') body
+        return $ AltS $ Alt decon' (map PatS params') body'
 
 sequentializeFoldCaseAlternative acc_ty a_ty acc_repr_var a_repr acc combiner
   (AltS (Alt decon params body)) = do

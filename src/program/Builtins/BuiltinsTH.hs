@@ -632,6 +632,8 @@ pyonBuiltinVariableNames =
   , "Sequence_array1_build"
   , "empty_list_dim_view"
   , "singleton_list_dim_view"
+  , "peel_generate"
+  , "peel_generate_bind"
     
     -- Sequence functions
   , "Stream1_empty"

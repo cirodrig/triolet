@@ -4700,6 +4700,39 @@ singleton_list_dim_view @(a : bare) (repr : Repr a) (w : Init a)
   (\ (i : Stored int) -> Init a. w);
 
 
+-- Helper function for stream rewriting transformations
+peel_generate_bind @(a r : bare)
+  (rep_a : Repr a)
+  (rep_r : Repr r)
+  (dom : list_dim)
+  (proceed : int -> list_dim -> Init r -> Init r)
+  (failure : Init r)
+  (ret : OutPtr r)
+  -> Store
+  attribute(inline) =
+
+  case dom of mk_list_dim (msize : MaybeVal int).
+  case msize of {
+    justVal @int (size : int).
+      letfun
+        -- Loop over each element of the domain
+        loop (i : int) (ret : OutPtr r) -> Store =
+          if i <# size
+          then let new_dom : list_dim =
+                     mk_list_dim (justVal @int (size -# i -# 1)) in
+
+               -- Pass the index, leftover domain, and loop continuation
+               -- to 'proceed'.  'proceed' will call the continuation or
+               -- do its own thing.
+               proceed i new_dom (loop (i +# 1)) ret
+          else failure ret
+      in loop 0 ret
+
+  ; nothingVal @int.
+      except @Store
+  };
+
+
 chain @(a : bare)
   (repr : Repr a) (i1 : Stream list_dim a) (i2 : Stream list_dim a)
   -> Stream list_dim a
