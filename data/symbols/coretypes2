@@ -2269,6 +2269,9 @@ singleton_list_dim_view : (a : bare) -> Repr a -> Init a -> view list_dim a;
 peel_generate_bind : (a r : bare) -> Repr a -> Repr r
   -> list_dim -> (int -> list_dim -> Init r -> Init r) -> Init r -> Init r;
 
+peel_generate : (a r : bare) -> Repr a -> Repr r
+  -> list_dim -> (list_dim -> Init r) -> Init r -> Init r;
+
 chain : (a : bare) -> Repr a -> Stream list_dim a -> Stream list_dim a -> Stream list_dim a;
 
 len : (t : bare -> bare) -> (a : bare)

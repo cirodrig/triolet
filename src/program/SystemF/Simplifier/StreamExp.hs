@@ -1543,7 +1543,7 @@ peelStream :: Type              -- ^ Stream contents type
            -> (ExpS -> MaybeT TypeEvalM ExpM)
               -- ^ Continuation to process a peeled stream.
               --   The computed expression has type
-              --   @Var -> OutPtr ret -> Store@.
+              --   @ret -> OutPtr ret -> Store@.
            -> MaybeT TypeEvalM ExpM
               -- ^ Continuation to process a missing value.
               --   The computed expression has type @OutPtr ret -> Store@.
@@ -1572,8 +1572,15 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
          [a_ty, ret_ty]
          [a_repr, ret_repr, shape, body_function, failure, ret_ptr]
 
-     OpSE inf (GenerateOp _ _) [repr] [shape, f] [] Nothing ->
-       internalError "peelStream: Not implemented for 'generate'"
+     OpSE inf (GenerateOp _ _) [repr] [shape, f] [] Nothing -> do
+       -- Return (f 0) and a stream of (f 1 .. f N)
+       -- > peel_generate @a @r a_repr ret_repr shape f
+       -- > $(make_generate_function f) $(empty_cont) ret_ptr
+       body_function <- make_generate_function f
+       failure <- empty_cont
+       return $ appE' (varE' $ pyonBuiltin The_peel_generate)
+         [a_ty, ret_ty]
+         [a_repr, ret_repr, shape, body_function, failure, ret_ptr]
      
      OpSE inf (ReturnOp ty) [_] [w] [] Nothing -> do
        -- Bind the value to a temporary variable
@@ -1613,6 +1620,54 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
                  body ret_ptr
         return $ AltM $ Alt decon [p | PatS p <- params] body'
 
+    -- Create a shortened 'generate' loop
+    --
+    -- > (\d r -> $(value_cont (make_leftover_stream d f))
+    -- >          (f 0) r)
+    make_generate_function f =
+      lamE $
+      mkFun []
+      (\ [] -> return ([list_dim_type, outType ret_ty], initEffectType ret_ty))
+      (\ [] [leftover_domain, r] -> do
+         s' <- make_leftover_generate_stream (varE' leftover_domain) f
+         k <- value_cont s'
+
+         -- Create a stored 'zero' value
+         zero_var <- newAnonymousVar ObjectLevel
+         let zero_exp = ExpM (LitE defaultExpInfo (IntL 0 int_type))
+
+         -- Call 'f' to create a value
+         let value_exp = as_stored_int zero_exp zero_var $
+                         appE' f [] [varE' zero_var]
+
+         -- Bind the value to a new variable
+         value_var <- newAnonymousVar ObjectLevel
+         let cont_exp = appE' k [] [varE' value_var, varE' r]
+
+         return $ letViaBoxed (value_var ::: a_ty) value_exp cont_exp)
+
+    make_leftover_generate_stream d f = do
+      f' <- lamE $
+            mkFun [] (\ [] -> return ([stored_int_type, outType a_ty],
+                                      initEffectType a_ty))
+            (\ [] [i, r] -> do
+               value_i <- newAnonymousVar ObjectLevel
+               i' <- newAnonymousVar ObjectLevel
+
+               -- Compute (i+1)
+               let add_expression =
+                     appE' (varE' $ pyonBuiltin The_AdditiveDict_int_add) []
+                     [varE' value_i,
+                      ExpM (LitE defaultExpInfo (IntL 1 int_type))]
+
+               return $ ExpM $ CaseE defaultExpInfo (varE' i)
+                 [AltM $ Alt stored_decon [patM (value_i ::: int_type)]
+                  (as_stored_int add_expression i' $
+                   appE' f [] [varE' i', varE' r])])
+
+      return $ OpSE defaultExpInfo (GenerateOp SequenceType a_ty) [a_repr]
+        [d, f'] [] Nothing
+
     -- Create a loop body function 
     --
     -- > (\i d k r ->
@@ -1627,20 +1682,18 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
       (\ [] -> return ([int_type, list_dim_type, cont_type, outType a_ty],
                        initEffectType a_ty))
       (\ [] [index, leftover_domain, loop_cont, r] -> do
-         tenv <- getTypeEnv
-
          stored_index <- newAnonymousVar ObjectLevel
          (inner_param, inner_body) <- freshenUnaryStreamFunction inner_stream
          let inner_body' =
                rename (Rename.singleton inner_param stored_index) inner_body
-
+ 
          assume stored_index stored_int_type $ do
            -- If peeling the inner stream produces a value, then construct
            -- a leftover stream and pass it to the value continuation
            let body_value_cont :: ExpS -> MaybeT TypeEvalM ExpM
                body_value_cont leftover_stream = do
-                 s <- make_leftover_stream inner_stream index leftover_domain
-                      leftover_stream
+                 s <- make_leftover_generate_bind_stream inner_stream index
+                      leftover_domain leftover_stream
                  value_cont s
 
            -- If no value is produced, invoke the failure continuation
@@ -1665,7 +1718,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
     -- outer_index has type @int@
     -- leftover_domain has type @list_dim@
     -- leftover_inner_stream has typ @Sequence $(a_ty)@
-    make_leftover_stream inner_stream
+    make_leftover_generate_bind_stream inner_stream
       outer_index leftover_domain leftover_inner_stream = do
 
       new_param <- newAnonymousVar ObjectLevel

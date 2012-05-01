@@ -4733,6 +4733,29 @@ peel_generate_bind @(a r : bare)
   };
 
 
+peel_generate @(a r : bare)
+  (rep_a : Repr a)
+  (rep_r : Repr r)
+  (dom : list_dim)
+  (proceed : list_dim -> Init r)
+  (failure : Init r)
+  (ret : OutPtr r)
+  -> Store
+  attribute(inline) =
+
+  case dom of mk_list_dim (msize : MaybeVal int).
+  case msize of {
+    justVal @int (size : int).
+      if size ==# 0
+      then failure ret
+      else let new_dom : list_dim = mk_list_dim (justVal @int (size -# 1)) in
+           proceed new_dom ret
+
+  ; nothingVal @int.
+      except @Store
+  };
+
+
 chain @(a : bare)
   (repr : Repr a) (i1 : Stream list_dim a) (i2 : Stream list_dim a)
   -> Stream list_dim a
