@@ -449,6 +449,8 @@ builtinGlobals =
      Right [| pyonBuiltin (SystemF.The_repr_float) |] )
   , (PyonName module_structures "repr_bool",
      Right [| pyonBuiltin (SystemF.The_repr_bool) |] )
+  , (PyonName module_structures "repr_NoneType",
+     Right [| pyonBuiltin (SystemF.The_repr_NoneType) |] )
     -- Streams
   , (PyonName module_stream "Stream_count",
      Right [| pyonBuiltin (SystemF.The_count) |])

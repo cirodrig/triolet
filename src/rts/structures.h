@@ -35,6 +35,7 @@ extern data owned pyon.internal.structures.repr_EmptyReference;
 extern data owned pyon.internal.structures.repr_int;
 extern data owned pyon.internal.structures.repr_float;
 extern data owned pyon.internal.structures.repr_bool;
+extern data owned pyon.internal.structures.repr_NoneType;
 extern data owned pyon.internal.structures.repr_MaybeVal_int;
 extern data owned pyon.internal.structures.repr_MaybeVal_MaybeVal_int;
 extern data owned pyon.internal.structures.OpaqueTraversableDict_list;

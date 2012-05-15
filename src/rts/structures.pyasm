@@ -207,6 +207,20 @@ data owned repr_bool = Repr {
   IS_POINTERLESS
 };
 
+// Parameter-passing convention dictionary of bool
+data owned repr_NoneType = Repr {
+  ObjectHeader { repr_info },
+  SA {sizeof unit, alignof unit},
+  copy_nothing,
+  make_Boxed_0,
+  from_Boxed_0,
+  IS_POINTERLESS
+};
+
+function inline copy_nothing (pointer src, pointer dst) -> unit {
+  nil;
+};
+
 // Parameter-passing convention dictionary of MaybeVal int
 data owned repr_MaybeVal_int = Repr {
   ObjectHeader { repr_info },
