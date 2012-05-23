@@ -98,6 +98,9 @@ data Prim =
   | PrimDivZ !Signedness !Size  -- ^ Divide (floor) X by Y
   | PrimMaxZ !Signedness !Size  -- ^ Compute maximum
   | PrimMinZ !Signedness !Size  -- ^ Compute minimum
+  | PrimAndZ !Signedness !Size  -- ^ Bitwise and
+  | PrimOrZ !Signedness !Size   -- ^ Bitwise or
+  | PrimXorZ !Signedness !Size  -- ^ Bitwise xor
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
   | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
   | PrimSelect !ValueType             -- ^ Boolean value select
@@ -172,6 +175,9 @@ primReturnType prim =
      PrimDivZ sgn sz          -> int sgn sz
      PrimMaxZ sgn sz          -> int sgn sz
      PrimMinZ sgn sz          -> int sgn sz
+     PrimAndZ sgn sz          -> int sgn sz
+     PrimOrZ sgn sz           -> int sgn sz
+     PrimXorZ sgn sz          -> int sgn sz
      PrimCmpZ _ _ _           -> bool
      PrimCmpP _               -> bool
      PrimSelect t             -> [t]

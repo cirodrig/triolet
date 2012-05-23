@@ -1630,6 +1630,12 @@ CartesianDict_dim3_unbounded :
 min_int : int -> int -> int;
 max_int : int -> int -> int;
 
+floor : float -> int;
+
+oper_BITWISEAND : int -> int -> int;
+oper_BITWISEOR : int -> int -> int;
+oper_BITWISEXOR : int -> int -> int;
+
 or : bool -> bool -> bool;
 and : bool -> bool -> bool;
 not : bool -> bool;

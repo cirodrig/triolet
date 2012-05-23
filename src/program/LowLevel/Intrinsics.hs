@@ -36,6 +36,12 @@ lowerIntrinsicOp v
     assocs =
       [ (pyonBuiltin The_or, binary_bool PrimOr)
       , (pyonBuiltin The_and, binary_bool PrimAnd)
+      , (pyonBuiltin The_oper_BITWISEAND,
+         binary_int (PrimAndZ Signed S32))
+      , (pyonBuiltin The_oper_BITWISEOR,
+         binary_int (PrimOrZ Signed S32))
+      , (pyonBuiltin The_oper_BITWISEXOR,
+         binary_int (PrimXorZ Signed S32))
       , (pyonBuiltin The_AdditiveDict_int_add,
          binary_int (PrimAddZ Signed S32))
       , (pyonBuiltin The_AdditiveDict_int_sub,
