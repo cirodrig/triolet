@@ -102,7 +102,8 @@ instance Monoid InlState where
 newtype Inl s a = Inl {unInl :: RWST InlEnv () s IO a}
                   deriving(Monad, Functor, Applicative, MonadIO)
 
-instance MonadReader InlEnv (Inl s) where
+instance MonadReader (Inl s) where
+  type EnvType (Inl s) = InlEnv
   ask = Inl ask
   local f (Inl m) = Inl (local f m)
 

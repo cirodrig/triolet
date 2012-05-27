@@ -167,10 +167,27 @@ generateDepFile lbi exe verbosity depfile main_path = do
 preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
   ppRunAlex exe $ "LLParser" </> "Lexer"
   ppRunAlex exe $ "CParser2" </> "Lexer"
+  ppRunAlex exe $ "Language" </> "Python" </> "Version3" </> "Parser" </> "Lexer"
+  ppRunHappy exe $ "Language" </> "Python" </> "Version3" </> "Parser" </> "Parser"
   ppRunHsc exe $ "CxxInterface" </> "SignatureHS"
   where
     verb = fromFlag $ buildVerbosity flags
     autogen_dir = autogenModulesDir lbi
+    
+    ppRunHappy exe path = do
+      -- Find paths to input and output files
+      let hspath = autogen_dir </> path `addExtension` ".hs"
+      ypath <- findFile (pyonSearchPaths lbi exe) $ path `addExtension` ".y"
+  
+      -- Create output directory
+      createDirectoryIfMissingVerbose verb True (dropFileName hspath)
+
+      -- Is target out of date?
+      out_of_date <- hspath `olderThan` [ypath]
+  
+      -- Run parser generator
+      let happy = ppHappy (buildInfo exe) lbi
+      when out_of_date $ runSimplePreProcessor happy ypath hspath verb
     
     ppRunAlex exe path = do
       -- Find paths to input and output files

@@ -67,11 +67,13 @@ instance Monad Df where
                         of (x, dmd1) -> case runDf (k x) env
                                         of (y, dmd2) -> (y, joinSeq dmd1 dmd2))
 
-instance MonadReader TypeEnv Df where
+instance MonadReader Df where
+  type EnvType Df = TypeEnv
   ask = Df (\tenv -> (tenv, IntMap.empty))
   local f m = Df (\tenv -> runDf m (f tenv))
 
-instance MonadWriter Dmds Df where
+instance MonadWriter Df where
+  type WriterType Df = Dmds
   tell w = Df (\_ -> ((), w))
   listen m = Df (\tenv -> let (x, w) = runDf m tenv in ((x, w), w))
   pass m = Df (\tenv -> let ((x, f), w) = runDf m tenv in (x, f w))

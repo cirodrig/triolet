@@ -42,10 +42,9 @@ Executable pyon
     binary,
     containers,
     transformers,
-    monads-fd,
+    monads-tf,
     fgl,
     pretty,
-    language-python-pyon == 0.2.4,
     language-c,
     parsec == 3.*,
     unix,
@@ -86,6 +85,24 @@ Executable pyon
     Common.Supply
     Common.THRecord
     Common.Worklist
+    Language.Python.Common
+    Language.Python.Common.ParseError
+    Language.Python.Common.SrcLocation
+    Language.Python.Common.Pretty
+    Language.Python.Common.Token
+    Language.Python.Common.ParserMonad
+    Language.Python.Common.PrettyToken
+    Language.Python.Common.AST
+    Language.Python.Common.PrettyAST
+    Language.Python.Version3
+    Language.Python.Version3.Parser
+    Language.Python.Version3.Lexer
+    Language.Python.Common.PrettyParseError
+    Language.Python.Common.StringEscape
+    Language.Python.Common.ParserUtils
+    Language.Python.Common.LexerUtils
+    Language.Python.Version3.Parser.Parser
+    Language.Python.Version3.Parser.Lexer
     CxxInterface.SignatureHS
     Parser.Driver
     Parser.Parser

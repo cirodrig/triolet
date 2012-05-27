@@ -55,7 +55,9 @@ instance MonadTrans Gen where
   lift m = Gen (\_ -> do x <- m
                          return (x, mempty))
 
-instance Monad m => MonadWriter MkStm (Gen m) where
+instance Monad m => MonadWriter (Gen m) where
+  type WriterType (Gen m) = MkStm
+
   tell w = Gen (\_ -> return ((), w))
   listen (Gen m) = Gen (\rt -> do x@(_, w) <- m rt
                                   return (x, w))

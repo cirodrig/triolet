@@ -14,7 +14,6 @@ where
 import Prelude hiding(mapM)
 import Control.Applicative
 import Control.Monad hiding(mapM, forM)
-import Control.Monad.Identity hiding(mapM, forM)
 import Control.Monad.Reader hiding(mapM, forM)
 import Control.Monad.RWS hiding(mapM, forM)
 import Control.Monad.Trans

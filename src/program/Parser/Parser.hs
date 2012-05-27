@@ -574,10 +574,15 @@ expression lv expr =
                    , Py.left_op_arg = l
                    , Py.right_op_arg = r} -> 
          Binary source_pos op <$> subexpression l <*> subexpression r
-       Py.Subscript {Py.subscriptee = base, Py.subscript_exprs = indices} ->
-         assert_value_level $
-         Subscript source_pos <$> subexpression base <*>
-         traverse subexpression indices
+       Py.Subscript {Py.subscriptee = base, Py.subscript_expr = ind} ->
+         -- If subscript expression is a tuple expression, decompose it
+         let indices =
+               case ind
+               of Py.Tuple {Py.tuple_exprs = xs} -> xs
+                  _ -> [ind]
+         in assert_value_level $
+            Subscript source_pos <$> subexpression base <*>
+            traverse subexpression indices
        Py.SlicedExpr {Py.slicee = base, Py.slices = slices} ->
          assert_value_level $
          Slicing source_pos <$> subexpression base <*> traverse slice slices
