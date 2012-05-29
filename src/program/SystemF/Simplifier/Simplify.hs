@@ -521,7 +521,7 @@ interpretStreamInSimplifier inf op ty_args args = LR $ \env ->
 
     simplify_stream s = do
       s' <- simplifyStreamExp s
-      let e' = traceShow (text "INTERPRETED" <+> pprExpS s) $ embedStreamExp s'
+      let e' = embedStreamExp s'
       return $ Just e'
 
     serialize_stream s = do
