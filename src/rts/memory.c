@@ -7,7 +7,7 @@
 #include "machine.h"
 
 /* When defined, print a message on every allocation and deallocation. */
-#define CHATTY_ALLOC
+// #define CHATTY_ALLOC
 
 /* Allocate some heap data */
 PyonPtr
