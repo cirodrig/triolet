@@ -32,17 +32,6 @@ eliminateDeadCode (Module module_name [] defss exports) = do
       exports' <- mapM edcExport exports
       return ([], exports')
 
--- | If the expression is a tuple expression, then return the expression's
--- field values.
-deconstructTupleExp :: ExpSF -> Maybe [ExpSF]
-deconstructTupleExp expression =
-  -- If the operator is a tuple value constructor, then return the arguments
-  -- otherwise, return nothing
-  case unpackPolymorphicCall expression
-  of Just (ExpSF (VarE {expVar = con}), ty_args, args)
-       | isPyonTupleCon con -> Just args
-     _ -> Nothing
-
 -------------------------------------------------------------------------------
 
 -- | Find mentioned variables in an export declaration

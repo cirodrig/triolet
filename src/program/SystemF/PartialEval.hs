@@ -40,17 +40,6 @@ lookupVar v = asks (Map.lookup v)
 lookupVarDefault :: ExpSF -> Var -> PE ExpSF
 lookupVarDefault defl v = asks (Map.findWithDefault defl v)
 
--- | If the expression is a tuple expression, then return the expression's
--- field values.
-deconstructTupleExp :: ExpSF -> Maybe [ExpSF]
-deconstructTupleExp expression =
-  -- If the operator is a tuple value constructor, then return the arguments
-  -- otherwise, return nothing
-  case uncurryUnpackPolymorphicCall expression
-  of Just (ExpSF (VarE {expVar = con}), ty_args, args)
-       | isPyonTupleCon con -> Just args
-     _ -> Nothing
-
 -- | Uncurry a function call.
 --
 -- Transform nested calls of the form @((f x y) z w)@ into flat calls
