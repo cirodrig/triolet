@@ -153,28 +153,28 @@ data arr : intindex -> bare -> bare
 {};
 
 
-data PyonTuple1 : bare -> bare
+data Tuple1 : bare -> bare
 {
-  pyonTuple1
+  tuple1
   (a : bare) () (a);
 };
 
 
-data PyonTuple2 : bare -> bare -> bare
+data Tuple2 : bare -> bare -> bare
 {
-  pyonTuple2
+  tuple2
   (a : bare, b : bare) () (a, b);
 };
 
-data PyonTuple3 : bare -> bare -> bare -> bare
+data Tuple3 : bare -> bare -> bare -> bare
 {
-  pyonTuple3
+  tuple3
   (a : bare, b : bare, c : bare) () (a, b, c);
 };
 
-data PyonTuple4 : bare -> bare -> bare -> bare -> bare
+data Tuple4 : bare -> bare -> bare -> bare -> bare
 {
-  pyonTuple4
+  tuple4
   (a : bare, b : bare, c : bare, d : bare) () (a, b, c, d);
 };
 
@@ -543,7 +543,7 @@ arrScatter : (N : intindex)
                    -> Repr s
                    -> FIInt N
                    -> Scatter s i
-                   -> Scatter (arr N s) (PyonTuple2 (Stored int) i);
+                   -> Scatter (arr N s) (Tuple2 (Stored int) i);
 
 comapScatterIndex :
     (s i1 i2 : bare)
@@ -559,49 +559,49 @@ listScatter : (s i : bare)
            -> Repr s
            -> list_dim
            -> Scatter s i
-           -> Scatter (list s) (PyonTuple2 (Stored int) i);
+           -> Scatter (list s) (Tuple2 (Stored int) i);
 
 array1Scatter : (s i : bare)
                       -> Repr i
                       -> Repr s
                       -> dim1
                       -> Scatter s i
-                      -> Scatter (array1 s) (PyonTuple2 (Stored int) i);
+                      -> Scatter (array1 s) (Tuple2 (Stored int) i);
 
 barray1Scatter : (a i : bare)
               -> Repr i
               -> Repr a
               -> dim1
               -> Scatter (StuckRef (BoxedType a)) i
-              -> Scatter (barray1 a) (PyonTuple2 (Stored int) i);
+              -> Scatter (barray1 a) (Tuple2 (Stored int) i);
 
 array2Scatter : (s i : bare)
                       -> Repr i
                       -> Repr s
                       -> dim2
                       -> Scatter s i
-                      -> Scatter (array2 s) (PyonTuple2 (index dim2) i);
+                      -> Scatter (array2 s) (Tuple2 (index dim2) i);
 
 barray2Scatter : (a i : bare)
               -> Repr i
               -> Repr a
               -> dim2
               -> Scatter (StuckRef (BoxedType a)) i
-              -> Scatter (barray2 a) (PyonTuple2 (index dim2) i);
+              -> Scatter (barray2 a) (Tuple2 (index dim2) i);
 
 array3Scatter : (s i : bare)
                       -> Repr i
                       -> Repr s
                       -> dim3
                       -> Scatter s i
-                      -> Scatter (array3 s) (PyonTuple2 (index dim3) i);
+                      -> Scatter (array3 s) (Tuple2 (index dim3) i);
 
 barray3Scatter : (a i : bare)
               -> Repr i
               -> Repr a
               -> dim3
               -> Scatter (StuckRef (BoxedType a)) i
-              -> Scatter (barray3 a) (PyonTuple2 (index dim3) i);
+              -> Scatter (barray3 a) (Tuple2 (index dim3) i);
 
 -------------------------------------------------------------------------------
 -- Streams
@@ -845,11 +845,11 @@ repr_dim1 : Repr (Ref dim1);
 repr_dim2 : Repr (Ref dim2);
 repr_dim3 : Repr (Ref dim3);
 
-repr_index2 : Repr (PyonTuple2 (Stored int) (Stored int));
-repr_slice2 : Repr (PyonTuple2 SliceObject SliceObject);
+repr_index2 : Repr (Tuple2 (Stored int) (Stored int));
+repr_slice2 : Repr (Tuple2 SliceObject SliceObject);
 
-repr_index3 : Repr (PyonTuple3 (Stored int) (Stored int) (Stored int));
-repr_slice3 : Repr (PyonTuple3 SliceObject SliceObject SliceObject);
+repr_index3 : Repr (Tuple3 (Stored int) (Stored int) (Stored int));
+repr_slice3 : Repr (Tuple3 SliceObject SliceObject SliceObject);
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_append_list : (a : bare) -> Repr a -> Repr (append_list a);
@@ -866,21 +866,21 @@ repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
 repr_MaybeVal_int : Repr (MaybeVal int);
 repr_MaybeVal_MaybeVal_int : Repr (MaybeVal (MaybeVal int));
 
-repr_PyonTuple1 :
-    (a : bare) -> Repr a -> Repr (PyonTuple1 a);
+repr_Tuple1 :
+    (a : bare) -> Repr a -> Repr (Tuple1 a);
 
-repr_PyonTuple2 :
-    (a b : bare) -> Repr a -> Repr b -> Repr (PyonTuple2 a b);
+repr_Tuple2 :
+    (a b : bare) -> Repr a -> Repr b -> Repr (Tuple2 a b);
 
-repr_PyonTuple3 :
+repr_Tuple3 :
     (a b c : bare)
  -> Repr a -> Repr b -> Repr c
- -> Repr (PyonTuple3 a b c);
+ -> Repr (Tuple3 a b c);
 
-repr_PyonTuple4 :
+repr_Tuple4 :
     (a b c d : bare)
  -> Repr a -> Repr b -> Repr c -> Repr d
- -> Repr (PyonTuple4 a b c d);
+ -> Repr (Tuple4 a b c d);
 
 -- Representation of any boxed object
 repr_Box : (a : box) -> Repr (BareType a);
@@ -1259,7 +1259,7 @@ IndexableDict_array1_get_shape :
   (a : bare) -> array1 a -> dim1;
 
 IndexableDict_array2_at_point :
-  (a : bare) -> Repr a -> array2 a -> PyonTuple2 (Stored int) (Stored int)
+  (a : bare) -> Repr a -> array2 a -> Tuple2 (Stored int) (Stored int)
   -> Init a;
 
 IndexableDict_array2_get_shape :
@@ -1278,7 +1278,7 @@ IndexableDict_barray1_get_shape :
   (a : bare) -> barray1 a -> dim1;
 
 IndexableDict_barray2_at_point :
-  (a : bare) -> Repr a -> barray2 a -> PyonTuple2 (Stored int) (Stored int)
+  (a : bare) -> Repr a -> barray2 a -> Tuple2 (Stored int) (Stored int)
   -> Init a;
 
 IndexableDict_barray2_get_shape :
@@ -1294,9 +1294,9 @@ EqDict_float_eq : float -> float -> bool;
 EqDict_float_ne : float -> float -> bool;
 
 EqDict_Tuple2_eq : (a b : bare) -> EqDict a -> EqDict b
-                -> PyonTuple2 a b -> PyonTuple2 a b -> bool;
+                -> Tuple2 a b -> Tuple2 a b -> bool;
 EqDict_Tuple2_ne : (a b : bare) -> EqDict a -> EqDict b
-                -> PyonTuple2 a b -> PyonTuple2 a b -> bool;
+                -> Tuple2 a b -> Tuple2 a b -> bool;
 
 OrdDict_int_lt : int -> int -> bool;
 OrdDict_int_le : int -> int -> bool;
@@ -1326,35 +1326,35 @@ AdditiveDict_float_sub : float -> float -> float;
 AdditiveDict_float_negate : float -> float;
 AdditiveDict_float_zero : float;
 
-AdditiveDict_PyonTuple2_add : (a b : bare)
-                           -> Repr a
-                           -> Repr b
-                           -> AdditiveDict a
-                           -> AdditiveDict b
-                           -> PyonTuple2 a b
-                           -> PyonTuple2 a b
-                           -> Init (PyonTuple2 a b);
-AdditiveDict_PyonTuple2_sub : (a b : bare)
-                           -> Repr a
-                           -> Repr b
-                           -> AdditiveDict a
-                           -> AdditiveDict b
-                           -> PyonTuple2 a b
-                           -> PyonTuple2 a b
-                           -> Init (PyonTuple2 a b);
-AdditiveDict_PyonTuple2_negate : (a b : bare)
-                              -> Repr a
-                              -> Repr b
-                              -> AdditiveDict a
-                              -> AdditiveDict b
-                              -> PyonTuple2 a b
-                              -> Init (PyonTuple2 a b);
-AdditiveDict_PyonTuple2_zero : (a b : bare)
-                            -> Repr a
-                            -> Repr b
-                            -> AdditiveDict a
-                            -> AdditiveDict b
-                            -> Init (PyonTuple2 a b);
+AdditiveDict_Tuple2_add : (a b : bare)
+                       -> Repr a
+                       -> Repr b
+                       -> AdditiveDict a
+                       -> AdditiveDict b
+                       -> Tuple2 a b
+                       -> Tuple2 a b
+                       -> Init (Tuple2 a b);
+AdditiveDict_Tuple2_sub : (a b : bare)
+                       -> Repr a
+                       -> Repr b
+                       -> AdditiveDict a
+                       -> AdditiveDict b
+                       -> Tuple2 a b
+                       -> Tuple2 a b
+                       -> Init (Tuple2 a b);
+AdditiveDict_Tuple2_negate : (a b : bare)
+                          -> Repr a
+                          -> Repr b
+                          -> AdditiveDict a
+                          -> AdditiveDict b
+                          -> Tuple2 a b
+                          -> Init (Tuple2 a b);
+AdditiveDict_Tuple2_zero : (a b : bare)
+                        -> Repr a
+                        -> Repr b
+                        -> AdditiveDict a
+                        -> AdditiveDict b
+                        -> Init (Tuple2 a b);
 
 {-AdditiveDict_Complex_add :
     (a : bare)
@@ -1975,7 +1975,7 @@ fun_zip : (t1 t2 : bare -> bare)
        -> Repr b
        -> t1 a
        -> t2 b
-       -> Stream (shape t1) (PyonTuple2 a b);
+       -> Stream (shape t1) (Tuple2 a b);
 
 fun_zip3 : (t1 t2 t3 : bare -> bare)
         -> (a b c : bare)
@@ -1991,7 +1991,7 @@ fun_zip3 : (t1 t2 t3 : bare -> bare)
         -> t1 a
         -> t2 b
         -> t3 c
-        -> Stream (shape t1) (PyonTuple3 a b c);
+        -> Stream (shape t1) (Tuple3 a b c);
 
 fun_zip4 : (t1 t2 t3 t4 : bare -> bare)
         -> (a b c d : bare)
@@ -2011,7 +2011,7 @@ fun_zip4 : (t1 t2 t3 t4 : bare -> bare)
         -> t2 b
         -> t3 c
         -> t4 d
-        -> Stream (shape t1) (PyonTuple4 a b c d);
+        -> Stream (shape t1) (Tuple4 a b c d);
 
 fun_reduce : (t : bare -> bare)
           -> (a : bare)
@@ -2236,7 +2236,7 @@ fun_zip_Stream : (sh a b : bare)
        	      -> Repr b
        	      -> Stream sh a
        	      -> Stream sh b
-       	      -> Stream sh (PyonTuple2 a b);
+       	      -> Stream sh (Tuple2 a b);
 
 fun_zip3_Stream : (sh a b c : bare)
 	       -> ShapeDict sh
@@ -2246,7 +2246,7 @@ fun_zip3_Stream : (sh a b c : bare)
                -> Stream sh a
                -> Stream sh b
                -> Stream sh c
-               -> Stream sh (PyonTuple3 a b c);
+               -> Stream sh (Tuple3 a b c);
 
 fun_zip4_Stream : (sh a b c d : bare)
 	       -> ShapeDict sh
@@ -2258,7 +2258,7 @@ fun_zip4_Stream : (sh a b c d : bare)
                -> Stream sh b
                -> Stream sh c
                -> Stream sh d
-               -> Stream sh (PyonTuple4 a b c d);
+               -> Stream sh (Tuple4 a b c d);
 
 count : Stream list_dim (Stored int);
 
@@ -2322,13 +2322,13 @@ outerproduct : (t u : bare -> bare) -> (a b : bare)
             -> Repr a -> Repr b
 	    -> t a
 	    -> u b
-	    -> Stream dim2 (PyonTuple2 a b);
+	    -> Stream dim2 (Tuple2 a b);
 
 outerproductStream : (a b : bare)
             -> Repr a -> Repr b
 	    -> Stream dim1 a
 	    -> Stream dim1 b
-	    -> Stream dim2 (PyonTuple2 a b);
+	    -> Stream dim2 (Tuple2 a b);
 
 transpose : (t : bare -> bare) -> (a : bare)
          -> IndexableDict t

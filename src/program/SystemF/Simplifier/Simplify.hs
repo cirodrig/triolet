@@ -76,7 +76,7 @@ isTrivialExp _                = False
 --   in some respects like a data constructor.
 isReifyApp :: ExpM -> Bool
 isReifyApp e = case unpackVarAppM e
-               of Just (op, _, _) | op `isPyonBuiltin` The_reify -> True
+               of Just (op, _, _) | op `isCoreBuiltin` The_reify -> True
                   _ -> False
 
 isTrivialOrReifyExp e = isTrivialExp e || isReifyApp e
@@ -1124,7 +1124,7 @@ eliminateUselessCopying expression = do
       scrutinee' <- freshenHead scrutinee
       case scrutinee' of
         ConE _ (VarCon op [ty_arg] []) [initializer]
-          | op `isPyonBuiltin` The_boxed ->
+          | op `isCoreBuiltin` The_boxed ->
              case alts
              of [AltSM (Alt _ [field] body)] -> do
                   let pattern_var = patMVar $ fromPatSM field
@@ -1138,7 +1138,7 @@ eliminateUselessCopying expression = do
                     case body' of
                       AppE _ op [_] [_, copy_src, copy_dst] -> do
                         is_copy <-
-                          checkForVariableExpr (pyonBuiltin The_copy) op >&&>
+                          checkForVariableExpr (coreBuiltin The_copy) op >&&>
                           checkForVariableExpr pattern_var copy_src
 
                         if is_copy
@@ -1231,14 +1231,14 @@ checkForCopyExpr v e = checkForCopyExpr' v =<< freshenHead e
 checkForCopyExpr' v e =
   case e
   of AppE _ op [_] [_, copy_src] ->
-       checkForVariableExpr (pyonBuiltin The_copy) op >&&>
+       checkForVariableExpr (coreBuiltin The_copy) op >&&>
        checkForVariableExpr v copy_src
      LamE _ (FunSM (Fun _ [] [rparam] _ body)) -> do
        let rparam_var = patMVar (fromPatSM rparam)
        subst_body <- freshenHead body
        case subst_body of
          AppE _ op [_] [_, copy_src, copy_dst] ->
-           checkForVariableExpr (pyonBuiltin The_copy) op >&&>
+           checkForVariableExpr (coreBuiltin The_copy) op >&&>
            checkForVariableExpr v copy_src >&&>
            checkForVariableExpr rparam_var copy_dst
          _ -> return False
@@ -1601,9 +1601,9 @@ builtinFunctionSimplifiers =
   IntMap.fromList [(fromIdent $ varID v, (a, b, c)) | (v, a, b, c) <- entries]
   where
     entries =
-      [ (pyonBuiltin The_copy, 1, 2, rwCopyApp)
-      , (pyonBuiltin The_EqDict_int_eq, 0, 2, rwIntEqApp)
-      , (pyonBuiltin The_and, 0, 2, rwAndApp)
+      [ (coreBuiltin The_copy, 1, 2, rwCopyApp)
+      , (coreBuiltin The_EqDict_int_eq, 0, 2, rwIntEqApp)
+      , (coreBuiltin The_and, 0, 2, rwAndApp)
       ]
 
 lookupBuiltinFunctionSimplifier n_ty_args n_args op_var =
@@ -1634,7 +1634,7 @@ rwCopyApp inf [ty] args = debug $
            src_op' <- freshenHead src_op
            case src_op' of
              VarE _ src_op_var
-               | src_op_var `isPyonBuiltin` The_reify ->
+               | src_op_var `isCoreBuiltin` The_reify ->
                    -- Rewrite to src_arg.  Apply the argument from 'maybe_dst'
                    -- if it exists.
                    case maybe_dst
@@ -1657,7 +1657,7 @@ rwCopyApp inf [ty] args = debug $
              pprExp (appE inf copy_op [ty] args') $$ text "----" $$ pprExp e) $ return x
     -}
 
-    copy_op = varE inf (pyonBuiltin The_copy)
+    copy_op = varE inf (coreBuiltin The_copy)
 
     wrong_number_of_arguments :: a
     wrong_number_of_arguments =
@@ -1666,7 +1666,7 @@ rwCopyApp inf [ty] args = debug $
 rwCopyApp1 inf ty repr src m_dst = do
   whnf_type <- reduceToWhnf ty
   case fromVarApp whnf_type of
-    Just (op, [val_type]) | op `isPyonBuiltin` The_Stored ->
+    Just (op, [val_type]) | op `isCoreBuiltin` The_Stored ->
       copyStoredValue inf val_type repr src m_dst
     _ -> do
       (repr', repr_value) <- rwExp False repr
@@ -1710,7 +1710,7 @@ rwCopyApp1 inf ty repr src m_dst = do
 
       ifElseFuel create_initializer rebuild_copy_expr
   where
-    copy_op = varE inf (pyonBuiltin The_copy)
+    copy_op = varE inf (coreBuiltin The_copy)
 
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
 --
@@ -1722,14 +1722,14 @@ copyStoredValue inf val_type repr arg m_dst = do
   m_dst' <- mapM applySubstitution m_dst
 
   let -- Construct a stored value
-      stored_con = VarCon (pyonBuiltin The_stored) [val_type] []
+      stored_con = VarCon (coreBuiltin The_stored) [val_type] []
       value = conE inf stored_con [ExpM $ VarE inf tmpvar]
       result_value = case m_dst'
                      of Nothing  -> value
                         Just dst -> appE inf value [] [dst]
 
       -- Deconstruct the original value
-      stored_decon = VarDeCon (pyonBuiltin The_stored) [val_type] []
+      stored_decon = VarDeCon (coreBuiltin The_stored) [val_type] []
       alt = AltM $ Alt { altCon = stored_decon
                        , altParams = [setPatMDmd (Dmd OnceSafe Used) $
                                       patM (tmpvar ::: val_type)]
@@ -1762,12 +1762,12 @@ rwIntEqApp inf [] [arg1, arg2] = do
 
     return_true =
       -- Simplified to the constant value 'True'
-      let constructor = VarCon (pyonBuiltin The_True) [] []
+      let constructor = VarCon (coreBuiltin The_True) [] []
       in return (conE inf constructor [], trueCode)
 
     return_false =
       -- Simplified to the constant value 'False'
-      let constructor = VarCon (pyonBuiltin The_False) [] []
+      let constructor = VarCon (coreBuiltin The_False) [] []
       in return (conE inf constructor [], falseCode)
 
   -- Try to compute value information for this expression
@@ -1787,7 +1787,7 @@ rwIntEqApp inf [] [arg1, arg2] = do
         _                       -> can't_simplify
     _ -> can't_simplify
   where
-    eq_op = varE inf (pyonBuiltin The_EqDict_int_eq)
+    eq_op = varE inf (coreBuiltin The_EqDict_int_eq)
       
 rwAndApp inf [] [arg1, arg2] = do
   -- Evaluate arguments
@@ -1798,7 +1798,7 @@ rwAndApp inf [] [arg1, arg2] = do
   return (appE inf and_op [] [arg1', arg2'],
           conjunctionCode val1 val2)
   where
-    and_op = varE inf (pyonBuiltin The_and)
+    and_op = varE inf (coreBuiltin The_and)
 
 -- | Rewrite a let expression.  The expression may be from the input program,
 --   or it may have been generated by case elimination or beta reduction.
@@ -1930,7 +1930,7 @@ rwCase is_stream_arg inf scrut alts = do
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
 rwCase1 is_stream_arg tenv inf scrut alts
   | [alt@(AltSM (Alt {altCon = VarDeCon op _ _}))] <- alts,
-    op `isPyonBuiltin` The_boxed = do
+    op `isCoreBuiltin` The_boxed = do
       let AltSM (Alt _ [binder] body) = alt
       rwLetViaBoxed tenv inf scrut binder (substAndRwExp is_stream_arg body)
 
@@ -1951,7 +1951,7 @@ rwCase1 is_stream_arg tenv inf scrut alts
         AppE _ op _ [_, arg] -> do
           op' <- freshenHead op
           case op' of
-            VarE _ v | v `isPyonBuiltin` The_reify ->
+            VarE _ v | v `isCoreBuiltin` The_reify ->
               -- Verify that argument is a data constructor application.
               -- Only the simplifier puts a 'reify' expression here, and
               -- it should only put in a data constructor.
@@ -2043,7 +2043,7 @@ rwLetViaBoxed tenv inf scrut (PatSM pat) compute_body =
 
                   -- Create the expression @reify t repr_t $(subst_val)@
                   subst_val' <- withReprDict val_type $ \val_repr ->
-                    return $ appE inf (varE' (pyonBuiltin The_reify))
+                    return $ appE inf (varE' (coreBuiltin The_reify))
                              [val_type] [val_repr, subst_val]
 
                   -- Simplify the body of the case statement
@@ -2120,7 +2120,7 @@ rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
         -- True if the data constructor is 'boxed'
         is_boxed_con =
           case con
-          of VarCon op _ _ -> op `isPyonBuiltin` The_boxed
+          of VarCon op _ _ -> op `isCoreBuiltin` The_boxed
              _ -> False
 
         -- The data constructor's type argument
@@ -2152,7 +2152,7 @@ rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
                     compute_body emptySubst
 
       -- Construct a new case alternative
-      let decon = VarDeCon (pyonBuiltin The_boxed) [patMType pat] []
+      let decon = VarDeCon (coreBuiltin The_boxed) [patMType pat] []
       return $ AltM $ Alt decon [pat] body'
       
     -- The scrutinee has been simplified.  Propagate its value into the case 
@@ -2265,8 +2265,8 @@ rwCase2 is_stream_arg inf alts scrut' scrut_val = do
         apply altsm@(AltSM alt) =
           case altCon alt
           of VarDeCon v [] []
-               | v `isPyonBuiltin` The_True -> substitute t altsm
-               | v `isPyonBuiltin` The_False -> substitute f altsm
+               | v `isCoreBuiltin` The_True -> substitute t altsm
+               | v `isCoreBuiltin` The_False -> substitute f altsm
              -- Anything else is not boolean-valued 
              _ -> internalError "rwCase: Bool scrutinee of non-boolean case"
 
@@ -2441,7 +2441,7 @@ caseInitializerBinding kind param initializer compute_body =
     _ ->
       rwLet defaultExpInfo param' initializer compute_body
   where
-    constructor = VarCon (pyonBuiltin The_boxed) [patMType param] []
+    constructor = VarCon (coreBuiltin The_boxed) [patMType param] []
     param' = PatSM $ setPatMDmd unknownDmd param
 
 caseInitializerBindings :: [(BaseKind, PatM, ExpSM)]
@@ -2598,7 +2598,7 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
       let boxed_body =
             case result_is_boxed
             of Nothing -> altBody branch
-               Just t -> let con = VarCon (pyonBuiltin The_boxed) [t] []
+               Just t -> let con = VarCon (coreBuiltin The_boxed) [t] []
                          in ExpM $ ConE inf con [altBody branch]
           body' = ExpM $ CaseE inf boxed_body moveable_alts
       in return $ AltM (branch {altBody = body'})
@@ -2633,7 +2633,7 @@ makeBranchContinuation inf m_return_param alt = do
     if null (altParams $ fromAltSM alt) && isNothing m_return_param'
     then do
       field_var <- newAnonymousVar ObjectLevel
-      return $ Just $ PatSM $ patM (field_var ::: VarT (pyonBuiltin The_NoneType))
+      return $ Just $ PatSM $ patM (field_var ::: VarT (coreBuiltin The_NoneType))
     else return Nothing
 
   fun <- constructBranchContinuationFunction
@@ -2709,7 +2709,7 @@ constructBranchContinuationAlt
       decon_args = [ExpM $ VarE inf (patMVar p) | p <- params']
       dummy_arg = case m_dummy_param
                   of Nothing -> []
-                     Just _ -> [conE inf (VarCon (pyonBuiltin The_None) [] []) []]
+                     Just _ -> [conE inf (VarCon (coreBuiltin The_None) [] []) []]
       call_args = dummy_arg ++ decon_args ++ maybeToList m_return_arg
       call = ExpM $ AppE inf (ExpM $ VarE inf callee) call_ty_args call_args
   return $ AltM $ Alt decon' params' call
@@ -2780,7 +2780,7 @@ rwFun' (FunSM f) = do
             last_param_kind = toBaseKind $ typeKind tenv $ patMType last_param
             returns_store =
               case rtype
-              of VarT v -> v `isPyonBuiltin` The_Store
+              of VarT v -> v `isCoreBuiltin` The_Store
                  _ -> False
         if last_param_kind == OutK && returns_store
           then setCurrentReturnParameter (Just last_param) k

@@ -4,7 +4,7 @@
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
   int n = doubled(21);
   printf("%d", n);
   return 0;

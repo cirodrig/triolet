@@ -121,7 +121,7 @@ pprInterface iface =
 -- Creating an interface
 
 -- | Given a module, create an interface containing the symbols it exports
---   to Pyon code.  Include values of functions and data that are small
+--   to Triolet code.  Include values of functions and data that are small
 --   enough to inline.  DCE should be run first to calculate code size.
 --
 --   Any global symbols that are mentioned in the exported code will become
@@ -129,7 +129,7 @@ pprInterface iface =
 createModuleInterface :: Module -> IO (Module, Interface)
 createModuleInterface mod = do
   -- Find all exported symbols, transitively
-  let export_vars = Set.fromList [v | (v, PyonExportSig) <- moduleExports mod]
+  let export_vars = Set.fromList [v | (v, TrioletExportSig) <- moduleExports mod]
       (pre_imports, _) =
         slurpExports export_vars $ concatMap groupMembers $ moduleGlobals mod
       
@@ -161,8 +161,9 @@ createModuleInterface mod = do
                                 , ifaceExports = exports}
           
       -- Extend the export list with the new exported variables
-      let new_exports = [(v, PyonExportSig) | Def v _ <- pre_imports'
-                                            , not $ v `Set.member` export_vars]
+      let new_exports = [(v, TrioletExportSig)
+                        | Def v _ <- pre_imports'
+                        , not $ v `Set.member` export_vars]
           mod3 = mod2 {moduleExports = new_exports ++ moduleExports mod2}
       
       return (mod3, interface)
@@ -186,7 +187,7 @@ createExternNames mod_name id_supply from_vars =
                  of Just label -> return label
                     Nothing -> do
                       local_id <- supplyValue id_supply
-                      return $ anonymousPyonLabel mod_name local_id Nothing
+                      return $ anonymousLabel mod_name local_id Nothing
         new_v <- runFreshVarM ll_supply $ newExternalVar label (varType v)
         return (v, new_v)
 

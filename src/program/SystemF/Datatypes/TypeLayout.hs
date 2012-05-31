@@ -164,7 +164,7 @@ dynamicLayoutFunction data_kind typarams data_type premises derivations layout =
   dummy_param <-
     if null premises
     then do v <- newAnonymousVar ObjectLevel
-            return $ Just $ patM (v ::: VarT (pyonBuiltin The_NoneType))
+            return $ Just $ patM (v ::: VarT (coreBuiltin The_NoneType))
     else return Nothing
 
   -- Create a function from the derivations

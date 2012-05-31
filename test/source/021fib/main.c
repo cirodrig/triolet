@@ -6,12 +6,12 @@
 
 int main()
 {
-  Pyon_init();
-  PyonList *l = fibs(SIZE);
-  PyonInt data[SIZE];
+  Triolet_init();
+  TrioletList *l = fibs(SIZE);
+  TrioletInt data[SIZE];
 
-  pyon_List_PyonInt_ToArray(l, data);
-  pyon_List_PyonInt_Free(l);
+  triolet_List_Int_ToArray(l, data);
+  triolet_List_Int_Free(l);
 
   int i;
   for (i = 0; i < SIZE; i++) {

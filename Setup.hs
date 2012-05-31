@@ -157,7 +157,7 @@ generateDepFile lbi exe verbosity depfile main_path = do
   where
     hsdep_args econfig =
       ["-M", "-dep-makefile", depfile] ++
-      pyonGhcOpts econfig exe lbi ++
+      trioletGhcOpts econfig exe lbi ++
       [main_path]
 
 -------------------------------------------------------------------------------
@@ -177,7 +177,7 @@ preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
     ppRunHappy exe path = do
       -- Find paths to input and output files
       let hspath = autogen_dir </> path `addExtension` ".hs"
-      ypath <- findFile (pyonSearchPaths lbi exe) $ path `addExtension` ".y"
+      ypath <- findFile (trioletSearchPaths lbi exe) $ path `addExtension` ".y"
   
       -- Create output directory
       createDirectoryIfMissingVerbose verb True (dropFileName hspath)
@@ -192,7 +192,7 @@ preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
     ppRunAlex exe path = do
       -- Find paths to input and output files
       let hspath = autogen_dir </> path `addExtension` ".hs"
-      alexpath <- findFile (pyonSearchPaths lbi exe) $ path `addExtension` ".x"
+      alexpath <- findFile (trioletSearchPaths lbi exe) $ path `addExtension` ".x"
   
       -- Create output directory
       createDirectoryIfMissingVerbose verb True (dropFileName hspath)
@@ -207,7 +207,7 @@ preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
     ppRunHsc exe path = do
       -- Find paths to input and output files
       let hspath = autogen_dir </> path `addExtension` ".hs"
-      hscpath <- findFile (pyonSearchPaths lbi exe) $ path `addExtension` ".hsc"
+      hscpath <- findFile (trioletSearchPaths lbi exe) $ path `addExtension` ".hsc"
       -- Create output directory
       createDirectoryIfMissingVerbose verb True (dropFileName hspath)
 
@@ -240,7 +240,7 @@ doBuild pkg_desc lbi hooks flags = do
       -- Generate make rules and variables
       generateCabalMakefile verb econfig exe lbi
 
-      main_path <- findFile (pyonSearchPaths lbi exe) (modulePath exe)
+      main_path <- findFile (trioletSearchPaths lbi exe) (modulePath exe)
 
       -- Generate Haskell dependences (without profiling)
       let noprof_lbi = lbi {withProfExe = False}
@@ -277,13 +277,13 @@ doHaddock pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
   -- Invoke haddock
   sources <- forM (exeModules exe) $ \mod -> do 
     let filename = toFilePath mod `addExtension` ".hs"
-    path <- findFilePath' (pyonSearchPaths lbi exe) filename
+    path <- findFilePath' (trioletSearchPaths lbi exe) filename
     return $ path </> filename
 
   doc_flags <- packageDocFlags exe lbi -- Find installed package documentation
   let haddock_args =
         ["-o", haddock_dir, "-h"] ++
-        pass_to_ghc (pyonGhcOpts econfig exe lbi) ++
+        pass_to_ghc (trioletGhcOpts econfig exe lbi) ++
         doc_flags ++ sources
   rawSystemExit verb "haddock" haddock_args
   where
@@ -375,7 +375,7 @@ customConfigureCommand progs =
 
     include_option =
       option [] ["extra-target-include-dirs"]
-      "An additional include directory to use when compiling pyon code"
+      "An additional include directory to use when compiling triolet code"
       get_extra_include set_extra_include
       (reqArg' "PATH" return id)
     get_extra_include = configTargetIncludeDirs . configExtraFlags
@@ -385,7 +385,7 @@ customConfigureCommand progs =
 
     lib_option =
       option [] ["extra-target-lib-dirs"]
-      "An additional library directory to use when compiling pyon code"
+      "An additional library directory to use when compiling triolet code"
       get_extra_lib set_extra_lib
       (reqArg' "PATH" return id)
     get_extra_lib = configTargetLibDirs . configExtraFlags

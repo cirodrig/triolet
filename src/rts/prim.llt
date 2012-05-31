@@ -1,5 +1,5 @@
 
-module pyon.internal.prim;
+module core.internal.prim;
 
 #include "rts.h"
 #include "memory_py.h"
@@ -23,9 +23,9 @@ procedure inline from_finite_IndInt (IndInt ii) -> int {
 // Allocate some memory.  Use the flag to determine what kind of allocation.
 procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   if (is_pointerless) {
-    pointer primcall pyon_alloc_nopointers (size);
+    pointer primcall triolet_alloc_nopointers (size);
   } else {
-    pointer primcall pyon_alloc (size);
+    pointer primcall triolet_alloc (size);
   };
 };
 
@@ -44,10 +44,10 @@ function inline make_Boxed (uint size, uint align, owned writer) -> owned {
   typedef elt_type = bytes(value size, value align);
   typedef boxed_type = Boxed(elt_type);
 
-  p = pointer primcall pyon_alloc (sizeof boxed_type);
+  p = pointer primcall triolet_alloc (sizeof boxed_type);
 
   // TODO: initialize object Header
-  () = () primcall pyon_db_pointer (writer as pointer);
+  // () = () primcall triolet_db_pointer (writer as pointer);
   _ = unit call writer (p @ boxed_type.member);
   p as owned;
 };
@@ -63,7 +63,7 @@ function inline from_Boxed (uint size, uint align, owned copy, owned boxed, poin
 };
 
 function inline make_Boxed_0 (owned writer) -> owned {
-  p = pointer primcall pyon_alloc (sizeof Boxed(unit));
+  p = pointer primcall triolet_alloc (sizeof Boxed(unit));
 
   // FIXME: initialize object header
   _ = unit call writer (p @ Boxed(unit).member);
@@ -71,7 +71,7 @@ function inline make_Boxed_0 (owned writer) -> owned {
 };
 
 function inline make_Boxed_1 (owned writer) -> owned {
-  p = pointer primcall pyon_alloc (sizeof Boxed(bytes(value uint 1, value uint 1)));
+  p = pointer primcall triolet_alloc (sizeof Boxed(bytes(value uint 1, value uint 1)));
 
   // FIXME: initialize object header
   _ = unit call writer (p @ Boxed(unit).member);
@@ -79,7 +79,7 @@ function inline make_Boxed_1 (owned writer) -> owned {
 };
 
 function inline make_Boxed_4 (owned writer) -> owned {
-  p = pointer primcall pyon_alloc (sizeof Boxed(bytes(value uint 4, value uint 4)));
+  p = pointer primcall triolet_alloc (sizeof Boxed(bytes(value uint 4, value uint 4)));
 
   // FIXME: initialize object header
   _ = unit call writer (p @ Boxed(unit).member);
@@ -320,7 +320,7 @@ function blocked_1d_reduce
   FinIndInt {count} = size;
 
   // Main computation is written in C++
-  owned primcall pyon_C_blocked_reduce(reduce_data, init, count);
+  owned primcall triolet_C_blocked_reduce(reduce_data, init, count);
 };
 
 procedure blocked_reduce_accumulate_range
@@ -348,7 +348,7 @@ function blocked_2d_reduce
   FinIndInt {count_y} = size_y;
   FinIndInt {count_x} = size_x;
 
-  owned primcall pyon_C_blocked_reduce2 (reduce_data, init, count_y, count_x);
+  owned primcall triolet_C_blocked_reduce2 (reduce_data, init, count_y, count_x);
 };
 
 // Functions called from the C side of the library
@@ -368,7 +368,7 @@ function inline blocked_doall
   (FinIndInt size, owned worker) -> unit {
   FinIndInt {count} = size;
 
-  () = () primcall pyon_C_blocked_doall (worker, count);
+  () = () primcall triolet_C_blocked_doall (worker, count);
   nil;
 };
 
@@ -382,7 +382,7 @@ function blocked_doall2
   FinIndInt {count_y} = size_y;
   FinIndInt {count_x} = size_x;
 
-  () = () primcall pyon_C_blocked_doall2 (worker, count_y, count_x);
+  () = () primcall triolet_C_blocked_doall2 (worker, count_y, count_x);
   nil;
 };
 

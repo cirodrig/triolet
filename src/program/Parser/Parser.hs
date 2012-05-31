@@ -31,6 +31,8 @@ import qualified Data.Set as Set
 import Data.Traversable
 import System.FilePath
 
+import qualified Language.Python.Common as Py
+import qualified Language.Python.Version3 as Py
 import qualified Language.Python.Version3.Parser as Py
 import qualified Language.Python.Common.AST as Py
 import qualified Language.Python.Common.Pretty as Py
@@ -220,7 +222,7 @@ oneError = (:)
 identName id = Py.ident_string id
 
 -------------------------------------------------------------------------------
--- The process of converting to a Pyon AST.
+-- Monads for converting parsed code to an internal AST.
 --
 -- Keeps track of the current context and thread a name supply through the
 -- computation.
@@ -994,7 +996,7 @@ instance MentionsVars (Comprehension Int Expr) where
 -------------------------------------------------------------------------------
 -- Exported functions
 
--- | Convert a Python statement to a Pyon expression.
+-- | Convert a Python statement to a triolet expression.
 -- The lowest unassigned variable ID is returned.
 convertStatement :: PyStmt -> Int -> IO (Either [String] (Int, Int, [Stmt Int]))
 convertStatement stmt names =
@@ -1003,7 +1005,7 @@ convertStatement stmt names =
           return $! case x of (ms, ns, Left errs)    -> Left errs
                               (ms, ns, Right result) -> Right (ms, ns, result)
 
--- | Convert a Python module to a Pyon module.
+-- | Convert a Python module to a triolet module.
 -- The lowest unassigned variable ID is returned.
 convertModule :: [(Var Int, Level)] -- ^ Predefined global variables
               -> Py.ModuleSpan   -- ^ Module to scan

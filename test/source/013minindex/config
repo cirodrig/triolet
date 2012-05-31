@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Compute a reduction to find the minimum index in a list",
-  pyonSources	 = ["minindex.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["minindex.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "4"

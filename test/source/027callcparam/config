@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Calling a C function pointer from pyon",
-  pyonSources	 = ["callc.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["callc.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "ok"

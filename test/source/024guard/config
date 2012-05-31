@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Guarded streams",
-  pyonSources	 = ["sumpos.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["sumpos.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "47"

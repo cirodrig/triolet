@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Compute dot product of two lists",
-  pyonSources	 = ["dot.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["dot.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "ok"

@@ -136,8 +136,8 @@ generateBuildRulesWhenFound template target_dir source_dirs source_files = do
 -- > build_path/A.o : src_path/A.c
 -- > 	mkdir -p build_path
 -- > 	$(CC) -c $< $(PYON_C_C_OPTS)
-pyonCFileTemplate :: MakeRuleTemplate
-pyonCFileTemplate build_path src_path file =
+trioletCFileTemplate :: MakeRuleTemplate
+trioletCFileTemplate build_path src_path file =
   let o_file = build_path </> file `replaceExtension` ".o"
       src_file = src_path </> file `replaceExtension` ".c"
   in MakeRule [o_file] [src_file] $
@@ -150,8 +150,8 @@ pyonCFileTemplate build_path src_path file =
 -- > 	mkdir -p build_path
 -- > 	$(HC) -c $< $(PYON_HS_C_OPTS)
 -- > 	touch build_path/A.hi
-pyonHsFileTemplate :: MakeRuleTemplate
-pyonHsFileTemplate build_path src_path file =
+trioletHsFileTemplate :: MakeRuleTemplate
+trioletHsFileTemplate build_path src_path file =
   let src_file = src_path </> file `replaceExtension` ".hs"
       o_file = build_path </> file `replaceExtension` ".o"
       hi_file = build_path </> file `replaceExtension` ".hi"
@@ -161,8 +161,8 @@ pyonHsFileTemplate build_path src_path file =
      \touch " ++ hi_file
 
 -- Compile with profiling
-pyonHsProfFileTemplate :: MakeRuleTemplate
-pyonHsProfFileTemplate build_path src_path file =
+trioletHsProfFileTemplate :: MakeRuleTemplate
+trioletHsProfFileTemplate build_path src_path file =
   let src_file = src_path </> file `replaceExtension` ".hs"
       o_file = build_path </> file `replaceExtension` ".p_o"
       hi_file = build_path </> file `replaceExtension` ".p_hi"
@@ -214,19 +214,19 @@ compileCxxRtsFile build_path source_path src =
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(CXX) $(RTS_CXX_C_OPTS) -c $< -o $@"
 
--- | Generate a rule to compile a low-level pyon file for the RTS
+-- | Generate a rule to compile a low-level triolet file for the RTS
 --
--- > build_path/A.o : src_path/A.pyasm $(BOOT_DATA_FILES)
+-- > build_path/A.o : src_path/A.llt $(BOOT_DATA_FILES)
 -- > 	mkdir -p build_path
--- > 	pyon_program -B build_path/data $< -o $@
+-- > 	triolet_program -B build_path/data $< -o $@
 compilePyAsmRtsFile :: ExtraConfigFlags -> FilePath -> FilePath -> MakeRuleTemplate
-compilePyAsmRtsFile econfig pyon_program data_path build_path source_path src =
+compilePyAsmRtsFile econfig triolet_program data_path build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
-      iface_file = build_path </> src `replaceExtension` ".pi"
-      i_file = source_path </> src `replaceExtension` ".pyasm"
+      iface_file = build_path </> src `replaceExtension` ".ti"
+      i_file = source_path </> src `replaceExtension` ".llt"
   in MakeRule [o_file, iface_file] [i_file, "$(PYON_TARGET)", "$(BOOT_DATA_FILES)"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n" ++
-     pyon_program ++ " -B " ++ data_path ++
+     triolet_program ++ " -B " ++ data_path ++
      " $(RTS_PYASM_C_OPTS) --keep-c-files $< -o " ++ o_file
 
 -- | Copy a file
@@ -243,7 +243,7 @@ copyDataFile build_path source_path src =
 
 {-
 -- | If we are using 32-bit GHC on a 64-bit system, then we need to force
---   32-bit mode when linking pyon
+--   32-bit mode when linking triolet
 force32BitCompilation :: Bool
 force32BitCompilation =
   case (System.Info.arch, System.Info.os)
@@ -288,15 +288,15 @@ packageDocFlags exe lbi = do
       , iface_path <- haddockInterfaces pkg_info
       , html_path  <- haddockHTMLs pkg_info]
 
-pyonExtensionFlags exe =
+trioletExtensionFlags exe =
   ["-X" ++ show ext | ext <- defaultExtensions $ buildInfo exe]
 
-pyonGhcPathFlags exe lbi = o_flags ++ i_flags
+trioletGhcPathFlags exe lbi = o_flags ++ i_flags
   where
-    o_flags = ["-outputdir", pyonBuildDir lbi]
-    i_flags = ["-i" ++ path | path <- pyonBuildDir lbi : pyonSearchPaths lbi exe]
+    o_flags = ["-outputdir", trioletBuildDir lbi]
+    i_flags = ["-i" ++ path | path <- trioletBuildDir lbi : trioletSearchPaths lbi exe]
 
--- | Target-specific compilation flags for C, C++, and pyasm code. 
+-- | Target-specific compilation flags for C, C++, and llt code. 
 targetCompileFlags econfig = target_paths ++ target_tbb
   where
     target_paths =
@@ -323,7 +323,7 @@ rtsCCompileFlags is_cxx lbi econfig =
       then []
       else ["-Werror", "-Wimplicit-function-declaration", "-Wimplicit-int"]
 
--- | Flags for compiling pyasm files.
+-- | Flags for compiling llt files.
 rtsPyasmCompileFlags lbi econfig = rts_include_paths ++ rts_tbb
   where
     rts_include_paths = ["-I" ++ path | path <- rtsSearchPaths lbi]
@@ -384,13 +384,13 @@ configuredGhcFlags exe lbi =
   in fromMaybe [] $ lookup compiler_flavor $ options (buildInfo exe)
 
 -- | Get the options to pass to GHC for compiling a HS file that is part of
---   the Pyon executable.
-pyonGhcOpts econfig exe lbi =
-  let clbi = case lookup "pyon" $ executableConfigs lbi
+--   the Triolet executable.
+trioletGhcOpts econfig exe lbi =
+  let clbi = case lookup "triolet" $ executableConfigs lbi
              of Nothing -> error "Unexpected missing build info"
                 Just x -> x
       options =
-        ghcOptions lbi (buildInfo exe) clbi "dist/build/pyon"
+        ghcOptions lbi (buildInfo exe) clbi "dist/build/triolet"
       prof_options = options ++ profFlags
   in if withProfExe lbi
      then prof_options
@@ -398,18 +398,18 @@ pyonGhcOpts econfig exe lbi =
   {-
   configuredGhcFlags exe lbi ++
   optimizationFlags lbi ++
-  pyonGhcPathFlags exe lbi ++
+  trioletGhcPathFlags exe lbi ++
   packageFlags exe lbi ++
-  pyonExtensionFlags exe -}
+  trioletExtensionFlags exe -}
 
-pyonCOpts econfig exe lbi =
+trioletCOpts econfig exe lbi =
   let build_info = buildInfo exe
       includes = ["-I" ++ path | path <- Distribution.PackageDescription.includeDirs build_info]
       -- TODO: Actually determine whether m32 flag is needed
   in includes
 
--- | Get the options for linking the \'pyon\' binary.
-pyonLinkOpts econfig exe lbi = ["-rtsopts"] ++ pyonGhcOpts econfig exe lbi
+-- | Get the options for linking the \'triolet\' binary.
+trioletLinkOpts econfig exe lbi = ["-rtsopts"] ++ trioletGhcOpts econfig exe lbi
 
 -- | C compiler options when building unit tests.
 --
@@ -427,15 +427,15 @@ unitTestLinkOpts base_path econfig exe lbi = [] :: [String]
 -- Rules to generate a makefile
 
 generateCabalMakefile verbosity econfig exe lbi = do
-  (pyon_rules, pyon_object_files, pyon_source_files) <-
-    generatePyonRules verbosity lbi exe
+  (triolet_rules, triolet_object_files, triolet_source_files) <-
+    generateTrioletRules verbosity lbi exe
   (rts_rules, rts_files) <- generateRtsRules verbosity econfig lbi
   (data_rules, prebuilt_data_files) <- generateDataRules verbosity lbi
   test_rules <- generateTestRules verbosity lbi
-  variables <- generateVariables econfig exe lbi pyon_rules rts_rules data_rules
-               pyon_object_files pyon_source_files
+  variables <- generateVariables econfig exe lbi triolet_rules rts_rules data_rules
+               triolet_object_files triolet_source_files
                prebuilt_data_files
-  writeCabalMakefile variables (pyon_rules ++ rts_rules ++ data_rules ++ test_rules)
+  writeCabalMakefile variables (triolet_rules ++ rts_rules ++ data_rules ++ test_rules)
 
 -- | Create variables for a makefile.
 generateVariables :: ExtraConfigFlags
@@ -448,8 +448,9 @@ generateVariables :: ExtraConfigFlags
                   -> [FilePath]
                   -> [FilePath]
                   -> IO [(String, String)]
-generateVariables econfig exe lbi pyon_rules rts_rules data_rules 
-                  pyon_object_files pyon_source_files prebuilt_data_files = do
+generateVariables econfig exe lbi triolet_rules rts_rules data_rules 
+                  triolet_object_files triolet_source_files
+                  prebuilt_data_files = do
   -- Get paths
   cc_path <-
     case lookupProgram gccProgram $ withPrograms lbi
@@ -476,14 +477,14 @@ generateVariables econfig exe lbi pyon_rules rts_rules data_rules
       rts_object_files = getObjectTargets rts_rules
       rts_interface_files = getInterfaceTargets rts_rules
       interface_data_files =
-        [ dataBuildDir lbi </> "interfaces" </> fl `replaceExtension` ".pi"
+        [ dataBuildDir lbi </> "interfaces" </> fl `replaceExtension` ".ti"
         | fl <- rtsPyAsmFiles]
 
   return [ -- paths within the project directory
            ("BUILDDIR", buildDir lbi)
          , ("DATADIR", "data")
          , ("SRCDIR", "src")
-         , ("PYON_BUILD_DIR", pyonBuildDir lbi)
+         , ("PYON_BUILD_DIR", trioletBuildDir lbi)
          , ("RTS_BUILD_DIR", rtsBuildDir lbi)
          , ("DATA_BUILD_DIR", dataBuildDir lbi)
            -- paths outside the project directory
@@ -506,22 +507,22 @@ generateVariables econfig exe lbi pyon_rules rts_rules data_rules
          -- , ("LFLAGS", intercalate " " (targetLdLinkFlags econfig))
          , ("RTS_PYASM_C_OPTS", intercalate " " (rtsPyasmCompileFlags lbi econfig))
          , ("RTS_LINK_OPTS", intercalate " " (targetLinkFlags econfig))
-           -- flags: pyon program
-         , ("PYON_C_C_OPTS", intercalate " " $ pyonCOpts econfig exe lbi)
-         , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts econfig exe (lbi {withProfExe = False}))
-         , ("PYON_HS_PC_OPTS", intercalate " " $ pyonGhcOpts econfig exe (lbi {withProfExe = True}))
-         , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts econfig exe lbi)
+           -- flags: triolet program
+         , ("PYON_C_C_OPTS", intercalate " " $ trioletCOpts econfig exe lbi)
+         , ("PYON_HS_C_OPTS", intercalate " " $ trioletGhcOpts econfig exe (lbi {withProfExe = False}))
+         , ("PYON_HS_PC_OPTS", intercalate " " $ trioletGhcOpts econfig exe (lbi {withProfExe = True}))
+         , ("PYON_L_OPTS", intercalate " " $ trioletLinkOpts econfig exe lbi)
 
            -- files: RTS
-         , ("RTS_TARGET", buildDir lbi </> "rts" </> "libpyonrts.so")
+         , ("RTS_TARGET", buildDir lbi </> "rts" </> "libtrioletrts.so")
          , ("RTS_SOURCE_FILES", makefileList rts_source_files)
          , ("RTS_OBJECT_FILES", makefileList rts_object_files)
          , ("RTS_INTERFACE_FILES", makefileList rts_interface_files)
-           -- files: pyon program
-         , ("PYON_TARGET", buildDir lbi </> "pyon" </> "pyon")
-         , ("PYON_SOURCE_FILES", makefileList pyon_source_files)
-         , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
-           -- files: pyon data files
+           -- files: triolet program
+         , ("PYON_TARGET", buildDir lbi </> "triolet" </> "triolet")
+         , ("PYON_SOURCE_FILES", makefileList triolet_source_files)
+         , ("PYON_OBJECT_FILES", makefileList triolet_object_files)
+           -- files: triolet data files
          , ("BOOT_DATA_FILES", makefileList prebuilt_data_files)
          , ("INTERFACE_DATA_FILES", makefileList interface_data_files)
          ]
@@ -529,32 +530,32 @@ generateVariables econfig exe lbi pyon_rules rts_rules data_rules
     makefileList ss = concat $ intersperse " " ss
     getSources rules = filter is_source $ concatMap makePrerequisites rules
       where
-        is_source f = takeExtension f `elem` [".hs", ".c", ".pyasm"]
+        is_source f = takeExtension f `elem` [".hs", ".c", ".llt"]
     getObjectTargets rules = 
         filter ((".o" ==) . takeExtension) $ concatMap makeTargets rules
     getInterfaceTargets rules = 
-        filter ((".pi" ==) . takeExtension) $ concatMap makeTargets rules
+        filter ((".ti" ==) . takeExtension) $ concatMap makeTargets rules
 
 -- | Create Makefile rules to create all object files used in building the
--- 'pyon' executable.
+-- 'triolet' executable.
 --
 --   Returns the rules, the set of object files, and the set of source files.
-generatePyonRules :: Verbosity
-                  -> LocalBuildInfo
-                  -> Executable
-                  -> IO ([MakeRule], [FilePath], [FilePath])
-generatePyonRules verb lbi exe = do
-  info verb "Locating source code files for 'pyon'"
-  c_rules <- generateBuildRules pyonCFileTemplate pyon_build_dir
-             pyon_source_paths c_files
-  hs_rules <- generateBuildRules pyonHsFileTemplate pyon_build_dir
-              pyon_source_paths pyon_modules
-  hs_p_rules <- generateBuildRules pyonHsProfFileTemplate pyon_build_dir
-                pyon_source_paths pyon_modules
-  boot_rules <- generateBuildRulesWhenFound compileHsBootFile pyon_build_dir
-                pyon_source_paths boot_modules
-  boot_p_rules <- generateBuildRulesWhenFound compileHsProfBootFile pyon_build_dir
-                  pyon_source_paths boot_modules
+generateTrioletRules :: Verbosity
+                     -> LocalBuildInfo
+                     -> Executable
+                     -> IO ([MakeRule], [FilePath], [FilePath])
+generateTrioletRules verb lbi exe = do
+  info verb "Locating source code files for 'triolet'"
+  c_rules <- generateBuildRules trioletCFileTemplate triolet_build_dir
+             triolet_source_paths c_files
+  hs_rules <- generateBuildRules trioletHsFileTemplate triolet_build_dir
+              triolet_source_paths triolet_modules
+  hs_p_rules <- generateBuildRules trioletHsProfFileTemplate triolet_build_dir
+                triolet_source_paths triolet_modules
+  boot_rules <- generateBuildRulesWhenFound compileHsBootFile triolet_build_dir
+                triolet_source_paths boot_modules
+  boot_p_rules <- generateBuildRulesWhenFound compileHsProfBootFile triolet_build_dir
+                  triolet_source_paths boot_modules
 
   let rules = c_rules ++ hs_rules ++ hs_p_rules ++ boot_rules ++ boot_p_rules
       -- The profiling and non-profiling rules have the same sources, so
@@ -573,9 +574,9 @@ generatePyonRules verb lbi exe = do
              concatMap makeTargets hs_rules
   return (rules, object_files, source_files)
   where
-    pyon_build_dir = pyonBuildDir lbi
-    pyon_source_paths = pyonSearchPaths lbi exe
-    pyon_modules = [toFilePath m `addExtension` ".hs"
+    triolet_build_dir = trioletBuildDir lbi
+    triolet_source_paths = trioletSearchPaths lbi exe
+    triolet_modules = [toFilePath m `addExtension` ".hs"
                    | m <- fromString "Main" : exeModules exe]
   
     boot_modules = [toFilePath m `addExtension` ".hs-boot"
@@ -592,12 +593,12 @@ generateRtsRules verb econfig lbi = do
              rtsCSourceFiles
   cxx_rules <- generateBuildRules compileCxxRtsFile rts_build_dir
                rts_source_paths rtsCxxSourceFiles
-  asm_rules <- generateBuildRules (compilePyAsmRtsFile econfig pyon_program data_path)
+  asm_rules <- generateBuildRules (compilePyAsmRtsFile econfig triolet_program data_path)
                rts_build_dir rts_source_paths rtsPyAsmFiles
   let rules = c_rules ++ cxx_rules ++ asm_rules
   return (rules, concatMap makePrerequisites rules)
   where
-    pyon_program = pyonBuildDir lbi </> "pyon"
+    triolet_program = trioletBuildDir lbi </> "triolet"
     data_path = dataBuildDir lbi
     rts_build_dir = rtsBuildDir lbi
     rts_source_paths = rtsSearchPaths lbi
@@ -616,7 +617,7 @@ generateDataRules verb lbi = do
         map (copyDataFile (dataBuildDir lbi </> "testcases") "data/testcases") testcase_files
         
   -- Find all RTS interfaces
-  let rts_interface_files = map (`replaceExtension` ".pi") rtsPyAsmFiles
+  let rts_interface_files = map (`replaceExtension` ".ti") rtsPyAsmFiles
       build_dir = rtsBuildDir lbi
       rts_interface_rules =
         map (copyDataFile (dataBuildDir lbi </> "interfaces") build_dir) rts_interface_files

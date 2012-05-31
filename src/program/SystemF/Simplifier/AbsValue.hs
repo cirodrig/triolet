@@ -183,9 +183,9 @@ litCode l = valueCode $ LitAV l
 
 trueCode, falseCode :: AbsCode
 trueCode =
-  valueCode $ DataAV $ AbsData (VarCon (pyonBuiltin The_True) [] []) []
+  valueCode $ DataAV $ AbsData (VarCon (coreBuiltin The_True) [] []) []
 falseCode =
-  valueCode $ DataAV $ AbsData (VarCon (pyonBuiltin The_False) [] []) []
+  valueCode $ DataAV $ AbsData (VarCon (coreBuiltin The_False) [] []) []
 
 -- | Create abstract code of the boolean expression @v == L@ for some variable
 --   @v@ and literal @L@.
@@ -778,7 +778,7 @@ initializerValue data_value ty =
 initializerValueHelper :: AbsComputation -> Type -> TypeEvalM AbsCode
 initializerValueHelper data_comp ty = do
   param <- newAnonymousVar ObjectLevel
-  let param_type = varApp (pyonBuiltin The_OutPtr) [ty]
+  let param_type = varApp (coreBuiltin The_OutPtr) [ty]
       pattern = patM (param ::: param_type)
   computation <- interpretComputation data_comp $ \data_value ->
     return $ ReturnAC $ valueCode $ HeapAV $ AbsHeap (HeapMap [(param, data_value)])
@@ -948,8 +948,8 @@ concretizeDataConApp (AbsData con fs) = do
   where
     concretize_field BareK ty f = do
       -- Create and concretize an initializer value
-      let init_type = varApp (pyonBuiltin The_OutPtr) [ty] `FunT`
-                      VarT (pyonBuiltin The_Store)
+      let init_type = varApp (coreBuiltin The_OutPtr) [ty] `FunT`
+                      VarT (coreBuiltin The_Store)
       concretize' init_type =<< lift (initializerValue f ty)
 
     concretize_field BoxK ty f = concretize' ty f

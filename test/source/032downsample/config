@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Matrix slicing",
-  pyonSources	 = ["downsample.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["downsample.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "243 100 92 245 149 89 "

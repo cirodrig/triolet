@@ -4,7 +4,7 @@
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
 
   float e = 2.71828;
   float p = 3.14159;

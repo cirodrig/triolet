@@ -792,7 +792,7 @@ allocateLocalMem ptr_var pass_conv rtypes mk_block = do
   -- Finalize and free the object
   fini <- selectPassConvFinalize pass_conv
   bindAtom0 $ closureCallA fini [VarV ptr_var]
-  bindAtom0 $ primCallA (builtinVar the_prim_pyon_dealloc) [VarV ptr_var]
+  bindAtom0 $ primCallA (builtinVar the_prim_triolet_dealloc) [VarV ptr_var]
   
   -- Return the temporary values
   return $ ValA $ map VarV rvars
@@ -835,14 +835,14 @@ allocateHeapMemAs size is_pointerless dst =
     pointerless = allocateHeapMemPointerlessAs size dst
 
 allocateHeapMemCompositeAs size dst =
-  bindAtom1 dst $ primCallA (builtinVar the_prim_pyon_alloc) [size]
+  bindAtom1 dst $ primCallA (builtinVar the_prim_triolet_alloc) [size]
 
 allocateHeapMemPointerlessAs size dst =
-  bindAtom1 dst $ primCallA (builtinVar the_prim_pyon_alloc_nopointers) [size]
+  bindAtom1 dst $ primCallA (builtinVar the_prim_triolet_alloc_nopointers) [size]
 
 deallocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
 deallocateHeapMem ptr =
-  emitAtom0 $ primCallA (builtinVar the_prim_pyon_dealloc) [ptr]
+  emitAtom0 $ primCallA (builtinVar the_prim_triolet_dealloc) [ptr]
 
 -------------------------------------------------------------------------------
 -- Manipulating objects

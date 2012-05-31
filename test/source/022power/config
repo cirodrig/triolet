@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "A sequential loop",
-  pyonSources	 = ["mypower.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["mypower.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "1096"

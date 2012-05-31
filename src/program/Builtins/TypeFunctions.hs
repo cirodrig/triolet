@@ -36,7 +36,7 @@ shapeLike f = typeFunction 1 compute_shape
         Nothing -> cannot_reduce container_type
       where
         cannot_reduce container_type =
-          return $ varApp (pyonBuiltin The_shape) (container_type : other_types)
+          return $ varApp (coreBuiltin The_shape) (container_type : other_types)
 
 unpackArrayShapeArgs :: EvalMonad m => [Type] -> m [Type]
 unpackArrayShapeArgs [size, next] = liftM (size :) $ unpackArrayShape next
@@ -46,28 +46,28 @@ unpackArrayShape ty = do
   ty' <- reduceToWhnf ty
   case fromVarApp ty' of
     Just (op, args)
-      | op `isPyonBuiltin` The_arr_shape -> unpackArrayShapeArgs args
-      | op `isPyonBuiltin` The_dim0 -> return []
+      | op `isCoreBuiltin` The_arr_shape -> unpackArrayShapeArgs args
+      | op `isCoreBuiltin` The_dim0 -> return []
     _ -> internalError "unpackArrayShape: Argument is not an array shape"
 
 -- Create a 1D array shape expression
 array_shape sh =
-  varApp (pyonBuiltin The_arr_shape) [sh, VarT $ pyonBuiltin The_dim0]
+  varApp (coreBuiltin The_arr_shape) [sh, VarT $ coreBuiltin The_dim0]
 
 builtinTypeFunctions :: Map.Map Var BuiltinTypeFunction
 builtinTypeFunctions =
   Map.fromList
-  [ (pyonBuiltin The_minus_i, BuiltinTypeFunction minusTF minusTF)
-  , (pyonBuiltin The_plus_i, BuiltinTypeFunction plusTF plusTF)
-  , (pyonBuiltin The_min_i, BuiltinTypeFunction minTF minTF)
-  , (pyonBuiltin The_max_i, BuiltinTypeFunction maxTF maxTF)
-  , (pyonBuiltin The_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
-  , (pyonBuiltin The_cartesianDomain, BuiltinTypeFunction cartPureTF cartMemTF)
-  , (pyonBuiltin The_index, BuiltinTypeFunction indexPureTF indexMemTF)
-  , (pyonBuiltin The_slice, BuiltinTypeFunction slicePureTF sliceMemTF)
-  , (pyonBuiltin The_Stream, BuiltinTypeFunction streamPureTF streamMemTF)
-  , (pyonBuiltin The_BoxedType, BuiltinTypeFunction boxedPureTF boxedMemTF)
-  , (pyonBuiltin The_BareType, BuiltinTypeFunction barePureTF bareMemTF)
+  [ (coreBuiltin The_minus_i, BuiltinTypeFunction minusTF minusTF)
+  , (coreBuiltin The_plus_i, BuiltinTypeFunction plusTF plusTF)
+  , (coreBuiltin The_min_i, BuiltinTypeFunction minTF minTF)
+  , (coreBuiltin The_max_i, BuiltinTypeFunction maxTF maxTF)
+  , (coreBuiltin The_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
+  , (coreBuiltin The_cartesianDomain, BuiltinTypeFunction cartPureTF cartMemTF)
+  , (coreBuiltin The_index, BuiltinTypeFunction indexPureTF indexMemTF)
+  , (coreBuiltin The_slice, BuiltinTypeFunction slicePureTF sliceMemTF)
+  , (coreBuiltin The_Stream, BuiltinTypeFunction streamPureTF streamMemTF)
+  , (coreBuiltin The_BoxedType, BuiltinTypeFunction boxedPureTF boxedMemTF)
+  , (coreBuiltin The_BareType, BuiltinTypeFunction barePureTF bareMemTF)
   ]
 
 -- | The integers extended with @+infinity@ and @-infinity@
@@ -137,7 +137,7 @@ binaryIntTF operator left_unit right_unit f = typeFunction 2 $ \args ->
 
 -- | Subtract type-level integers.
 --   This function works the same in System F and Mem.
-minusTF = binaryIntTF (pyonBuiltin The_minus_i) (Just fin0) (Just fin0) function
+minusTF = binaryIntTF (coreBuiltin The_minus_i) (Just fin0) (Just fin0) function
   where
     function (Fin x) (Fin y) = Just (Fin (x - y))
     function (Fin _) NegInf  = Just PosInf
@@ -149,7 +149,7 @@ minusTF = binaryIntTF (pyonBuiltin The_minus_i) (Just fin0) (Just fin0) function
 
 -- | Add type-level integers.
 --   This function works the same in System F and Mem.
-plusTF = binaryIntTF (pyonBuiltin The_plus_i) (Just fin0) (Just fin0) function
+plusTF = binaryIntTF (coreBuiltin The_plus_i) (Just fin0) (Just fin0) function
   where
     function (Fin x) (Fin y) = Just (Fin (x + y))
     function (Fin _) NegInf  = Just NegInf
@@ -161,7 +161,7 @@ plusTF = binaryIntTF (pyonBuiltin The_plus_i) (Just fin0) (Just fin0) function
 
 -- | Take the minimum of type-level integers.
 --   This function works the same in System F and Mem.
-minTF = binaryIntTF (pyonBuiltin The_min_i) (Just PosInf) (Just PosInf) function
+minTF = binaryIntTF (coreBuiltin The_min_i) (Just PosInf) (Just PosInf) function
   where
     function (Fin x) (Fin y) = Just (Fin (min x y))
     function _       NegInf  = Just NegInf
@@ -171,7 +171,7 @@ minTF = binaryIntTF (pyonBuiltin The_min_i) (Just PosInf) (Just PosInf) function
 
 -- | Take the maximum of type-level integers.
 --   This function works the same in System F and Mem.
-maxTF = binaryIntTF (pyonBuiltin The_max_i) (Just NegInf) (Just NegInf) function
+maxTF = binaryIntTF (coreBuiltin The_max_i) (Just NegInf) (Just NegInf) function
   where
     function (Fin x) (Fin y) = Just (Fin (max x y))
     function _       PosInf  = Just PosInf
@@ -182,56 +182,56 @@ maxTF = binaryIntTF (pyonBuiltin The_max_i) (Just NegInf) (Just NegInf) function
 -- | Compute the shape of a data type in the pure type system
 shapePureTF = shapeLike $ \op args ->
   case ()
-  of () | op `isPyonBuiltin` The_Stream ->
+  of () | op `isCoreBuiltin` The_Stream ->
             case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-        | op `isPyonBuiltin` The_view ->
+        | op `isCoreBuiltin` The_view ->
             case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-        | op `isPyonBuiltin` The_Stream1 -> return_list_dim
-        | op `isPyonBuiltin` The_Sequence -> return_list_dim
-        | op `isPyonBuiltin` The_list -> return_list_dim
-        | op `isPyonBuiltin` The_array0 -> return_dim0
-        | op `isPyonBuiltin` The_array1 -> return_dim1
-        | op `isPyonBuiltin` The_array2 -> return_dim2
-        | op `isPyonBuiltin` The_array3 -> return_dim3
-        | op `isPyonBuiltin` The_blist -> return_list_dim
-        | op `isPyonBuiltin` The_barray1 -> return_dim1
-        | op `isPyonBuiltin` The_barray2 -> return_dim2
-        | op `isPyonBuiltin` The_barray3 -> return_dim3
-        | op `isPyonBuiltin` The_array ->
+        | op `isCoreBuiltin` The_Stream1 -> return_list_dim
+        | op `isCoreBuiltin` The_Sequence -> return_list_dim
+        | op `isCoreBuiltin` The_list -> return_list_dim
+        | op `isCoreBuiltin` The_array0 -> return_dim0
+        | op `isCoreBuiltin` The_array1 -> return_dim1
+        | op `isCoreBuiltin` The_array2 -> return_dim2
+        | op `isCoreBuiltin` The_array3 -> return_dim3
+        | op `isCoreBuiltin` The_blist -> return_list_dim
+        | op `isCoreBuiltin` The_barray1 -> return_dim1
+        | op `isCoreBuiltin` The_barray2 -> return_dim2
+        | op `isCoreBuiltin` The_barray3 -> return_dim3
+        | op `isCoreBuiltin` The_array ->
             case args
             of [dim, _] -> do
                  dim' <- reduceToWhnf dim
                  case dim' of
-                   VarT v | v `isPyonBuiltin` The_dim0 -> return_dim0
-                          | v `isPyonBuiltin` The_dim1 -> return_dim1
-                          | v `isPyonBuiltin` The_dim2 -> return_dim2
-                          | v `isPyonBuiltin` The_dim3 -> return_dim3
+                   VarT v | v `isCoreBuiltin` The_dim0 -> return_dim0
+                          | v `isCoreBuiltin` The_dim1 -> return_dim1
+                          | v `isCoreBuiltin` The_dim2 -> return_dim2
+                          | v `isCoreBuiltin` The_dim3 -> return_dim3
                    _ -> return Nothing
-        | op `isPyonBuiltin` The_arr ->
+        | op `isCoreBuiltin` The_arr ->
             case args
             of [arg, _] -> return $ Just $ array_shape arg
      _ -> return Nothing
   where
     return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
-    return_list_dim = return $ Just $ VarT (pyonBuiltin The_list_dim)
-    return_dim0 = return $ Just $ VarT (pyonBuiltin The_dim0)
-    return_dim1 = return $ Just $ VarT (pyonBuiltin The_dim1)
-    return_dim2 = return $ Just $ VarT (pyonBuiltin The_dim2)
-    return_dim3 = return $ Just $ VarT (pyonBuiltin The_dim3)
+    return_list_dim = return $ Just $ VarT (coreBuiltin The_list_dim)
+    return_dim0 = return $ Just $ VarT (coreBuiltin The_dim0)
+    return_dim1 = return $ Just $ VarT (coreBuiltin The_dim1)
+    return_dim2 = return $ Just $ VarT (coreBuiltin The_dim2)
+    return_dim3 = return $ Just $ VarT (coreBuiltin The_dim3)
 
 cartPureTF = typeFunction 1 $ \[index_type] -> do
   index_type' <- reduceToWhnf index_type
   let can't_reduce =
-        return $ varApp (pyonBuiltin The_cartesianDomain) [index_type]
+        return $ varApp (coreBuiltin The_cartesianDomain) [index_type]
   case fromVarApp index_type' of
     Just (op, [])
-      | op `isPyonBuiltin` The_NoneType -> return_dim0
-      | op `isPyonBuiltin` The_int -> return_dim1
+      | op `isCoreBuiltin` The_NoneType -> return_dim0
+      | op `isCoreBuiltin` The_int -> return_dim1
     Just (op, [t1, t2])
-      | op `isPyonBuiltin` The_PyonTuple2 ->
+      | op `isCoreBuiltin` The_Tuple2 ->
           ifM (is_int t1 >&&> is_int t2) return_dim2 can't_reduce
     Just (op, [t1, t2, t3])
-      | op `isPyonBuiltin` The_PyonTuple3 ->
+      | op `isCoreBuiltin` The_Tuple3 ->
           ifM (is_int t1 >&&> is_int t2 >&&> is_int t3) return_dim3 can't_reduce
     _ -> can't_reduce
   where
@@ -239,32 +239,32 @@ cartPureTF = typeFunction 1 $ \[index_type] -> do
     is_int ty = do
       ty' <- reduceToWhnf ty
       return $! case ty
-                of VarT v -> v `isPyonBuiltin` The_int
+                of VarT v -> v `isCoreBuiltin` The_int
                    _      -> False
     return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m Type
-    return_dim0 = return $ VarT (pyonBuiltin The_dim0)
-    return_dim1 = return $ VarT (pyonBuiltin The_dim1)
-    return_dim2 = return $ VarT (pyonBuiltin The_dim2)
-    return_dim3 = return $ VarT (pyonBuiltin The_dim3)
+    return_dim0 = return $ VarT (coreBuiltin The_dim0)
+    return_dim1 = return $ VarT (coreBuiltin The_dim1)
+    return_dim2 = return $ VarT (coreBuiltin The_dim2)
+    return_dim3 = return $ VarT (coreBuiltin The_dim3)
 
 cartMemTF = typeFunction 1 $ \[index_type] -> do
   index_type' <- reduceToWhnf index_type
   let can't_reduce =
-        return $ varApp (pyonBuiltin The_cartesianDomain) [index_type]
+        return $ varApp (coreBuiltin The_cartesianDomain) [index_type]
   case fromVarApp index_type' of
     Just (op, [arg_ty])
-      | op `isPyonBuiltin` The_Stored -> do
+      | op `isCoreBuiltin` The_Stored -> do
            arg_ty' <- reduceToWhnf arg_ty
            case fromVarApp arg_ty' of
              Just (op, [])
-               | op `isPyonBuiltin` The_NoneType -> return_dim0
-               | op `isPyonBuiltin` The_int -> return_dim1
+               | op `isCoreBuiltin` The_NoneType -> return_dim0
+               | op `isCoreBuiltin` The_int -> return_dim1
              _ -> can't_reduce
     Just (op, [t1, t2])
-      | op `isPyonBuiltin` The_PyonTuple2 ->
+      | op `isCoreBuiltin` The_Tuple2 ->
           ifM (is_int t1 >&&> is_int t2) return_dim2 can't_reduce
     Just (op, [t1, t2, t3])
-      | op `isPyonBuiltin` The_PyonTuple3 ->
+      | op `isCoreBuiltin` The_Tuple3 ->
           ifM (is_int t1 >&&> is_int t2 >&&> is_int t3) return_dim3 can't_reduce
     _ -> can't_reduce
   where
@@ -273,55 +273,55 @@ cartMemTF = typeFunction 1 $ \[index_type] -> do
       ty' <- reduceToWhnf ty
       case fromVarApp ty' of
         Just (op, [arg_ty]) 
-          | op `isPyonBuiltin` The_Stored -> do
+          | op `isCoreBuiltin` The_Stored -> do
               arg_ty' <- reduceToWhnf arg_ty
               return $! case arg_ty'
-                        of VarT v -> v `isPyonBuiltin` The_int
+                        of VarT v -> v `isCoreBuiltin` The_int
                            _      -> False
         _ -> return False
 
     return_dim0, return_dim1, return_dim2 :: EvalMonad m => m Type
-    return_dim0 = return $ VarT (pyonBuiltin The_dim0)
-    return_dim1 = return $ VarT (pyonBuiltin The_dim1)
-    return_dim2 = return $ VarT (pyonBuiltin The_dim2)
-    return_dim3 = return $ VarT (pyonBuiltin The_dim3)
+    return_dim0 = return $ VarT (coreBuiltin The_dim0)
+    return_dim1 = return $ VarT (coreBuiltin The_dim1)
+    return_dim2 = return $ VarT (coreBuiltin The_dim2)
+    return_dim3 = return $ VarT (coreBuiltin The_dim3)
 
 -- | Compute the shape of a data type in the memory type system
 shapeMemTF = shapeLike $ \op args ->
   case ()
-  of () | op `isPyonBuiltin` The_Ref ->
+  of () | op `isCoreBuiltin` The_Ref ->
           case args
           of [arg] ->
                case fromVarApp arg 
                of Just (op, [arg2, _]) 
-                    | op `isPyonBuiltin` The_Stream ->
+                    | op `isCoreBuiltin` The_Stream ->
                         liftM Just $ reduceToWhnf arg2
-                    | op `isPyonBuiltin` The_view ->
+                    | op `isCoreBuiltin` The_view ->
                         liftM Just $ reduceToWhnf arg2
                   Just (op, [_])
-                    | op `isPyonBuiltin` The_Stream1 -> return_list_dim
-                    | op `isPyonBuiltin` The_Sequence -> return_list_dim
+                    | op `isCoreBuiltin` The_Stream1 -> return_list_dim
+                    | op `isCoreBuiltin` The_Sequence -> return_list_dim
                   _ -> return Nothing
-        | op `isPyonBuiltin` The_list -> return_list_dim
-        | op `isPyonBuiltin` The_array0 -> return_dim0
-        | op `isPyonBuiltin` The_array1 -> return_dim1
-        | op `isPyonBuiltin` The_array2 -> return_dim2
-        | op `isPyonBuiltin` The_array3 -> return_dim3
-        | op `isPyonBuiltin` The_blist -> return_list_dim
-        | op `isPyonBuiltin` The_barray1 -> return_dim1
-        | op `isPyonBuiltin` The_barray2 -> return_dim2
-        | op `isPyonBuiltin` The_barray3 -> return_dim3
-        | op `isPyonBuiltin` The_array ->
+        | op `isCoreBuiltin` The_list -> return_list_dim
+        | op `isCoreBuiltin` The_array0 -> return_dim0
+        | op `isCoreBuiltin` The_array1 -> return_dim1
+        | op `isCoreBuiltin` The_array2 -> return_dim2
+        | op `isCoreBuiltin` The_array3 -> return_dim3
+        | op `isCoreBuiltin` The_blist -> return_list_dim
+        | op `isCoreBuiltin` The_barray1 -> return_dim1
+        | op `isCoreBuiltin` The_barray2 -> return_dim2
+        | op `isCoreBuiltin` The_barray3 -> return_dim3
+        | op `isCoreBuiltin` The_array ->
             case args
             of [arg, _] -> return $ Just $ array_shape arg
      _ -> return Nothing
   where
     return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
-    return_list_dim = return $ Just $ VarT (pyonBuiltin The_list_dim)
-    return_dim0 = return $ Just $ VarT (pyonBuiltin The_dim0)
-    return_dim1 = return $ Just $ VarT (pyonBuiltin The_dim1)
-    return_dim2 = return $ Just $ VarT (pyonBuiltin The_dim2)
-    return_dim3 = return $ Just $ VarT (pyonBuiltin The_dim3)
+    return_list_dim = return $ Just $ VarT (coreBuiltin The_list_dim)
+    return_dim0 = return $ Just $ VarT (coreBuiltin The_dim0)
+    return_dim1 = return $ Just $ VarT (coreBuiltin The_dim1)
+    return_dim2 = return $ Just $ VarT (coreBuiltin The_dim2)
+    return_dim3 = return $ Just $ VarT (coreBuiltin The_dim3)
 
 indexPureTF = typeFunction 1 compute_eliminator
   where
@@ -331,17 +331,17 @@ indexPureTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` The_list_dim -> return int_type
-           | op `isPyonBuiltin` The_dim0 -> return none_type
-           | op `isPyonBuiltin` The_dim1 -> return int_type
-           | op `isPyonBuiltin` The_dim2 -> return int2_type
-           | op `isPyonBuiltin` The_dim3 -> return int3_type
-        _ -> return $ varApp (pyonBuiltin The_index) [shape_arg']
+           | op `isCoreBuiltin` The_list_dim -> return int_type
+           | op `isCoreBuiltin` The_dim0 -> return none_type
+           | op `isCoreBuiltin` The_dim1 -> return int_type
+           | op `isCoreBuiltin` The_dim2 -> return int2_type
+           | op `isCoreBuiltin` The_dim3 -> return int3_type
+        _ -> return $ varApp (coreBuiltin The_index) [shape_arg']
 
-    none_type = VarT (pyonBuiltin The_NoneType)
-    int_type = VarT (pyonBuiltin The_int)
-    int2_type = varApp (pyonBuiltin The_PyonTuple2) [int_type, int_type]
-    int3_type = varApp (pyonBuiltin The_PyonTuple3) [int_type, int_type, int_type]
+    none_type = VarT (coreBuiltin The_NoneType)
+    int_type = VarT (coreBuiltin The_int)
+    int2_type = varApp (coreBuiltin The_Tuple2) [int_type, int_type]
+    int3_type = varApp (coreBuiltin The_Tuple3) [int_type, int_type, int_type]
 
 indexMemTF = typeFunction 1 compute_eliminator
   where
@@ -351,21 +351,21 @@ indexMemTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` The_list_dim -> return int_type
-           | op `isPyonBuiltin` The_dim0 -> return none_type
-           | op `isPyonBuiltin` The_dim1 -> return int_type
-           | op `isPyonBuiltin` The_dim2 -> return int2_type
-           | op `isPyonBuiltin` The_dim3 -> return int3_type
-        _ -> return $ varApp (pyonBuiltin The_index) [shape_arg']
+           | op `isCoreBuiltin` The_list_dim -> return int_type
+           | op `isCoreBuiltin` The_dim0 -> return none_type
+           | op `isCoreBuiltin` The_dim1 -> return int_type
+           | op `isCoreBuiltin` The_dim2 -> return int2_type
+           | op `isCoreBuiltin` The_dim3 -> return int3_type
+        _ -> return $ varApp (coreBuiltin The_index) [shape_arg']
 
     compute_eliminator ts =
       internalError "Error in type application when reducing a type function"
 
-    none_type = varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_NoneType)]
-    int_type = varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_int)]
-    int2_type = varApp (pyonBuiltin The_PyonTuple2)
+    none_type = varApp (coreBuiltin The_Stored) [VarT (coreBuiltin The_NoneType)]
+    int_type = varApp (coreBuiltin The_Stored) [VarT (coreBuiltin The_int)]
+    int2_type = varApp (coreBuiltin The_Tuple2)
                 [int_type, int_type]
-    int3_type = varApp (pyonBuiltin The_PyonTuple3)
+    int3_type = varApp (coreBuiltin The_Tuple3)
                 [int_type, int_type, int_type]
 
 slicePureTF = typeFunction 1 compute_eliminator
@@ -376,18 +376,18 @@ slicePureTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` The_list_dim -> return slice_type
-           | op `isPyonBuiltin` The_dim0 -> return none_type
-           | op `isPyonBuiltin` The_dim1 -> return slice_type
-           | op `isPyonBuiltin` The_dim2 -> return slice2_type
-           | op `isPyonBuiltin` The_dim3 -> return slice3_type
-        _ -> return $ varApp (pyonBuiltin The_slice) [shape_arg']
+           | op `isCoreBuiltin` The_list_dim -> return slice_type
+           | op `isCoreBuiltin` The_dim0 -> return none_type
+           | op `isCoreBuiltin` The_dim1 -> return slice_type
+           | op `isCoreBuiltin` The_dim2 -> return slice2_type
+           | op `isCoreBuiltin` The_dim3 -> return slice3_type
+        _ -> return $ varApp (coreBuiltin The_slice) [shape_arg']
 
-    none_type = VarT (pyonBuiltin The_NoneType)
-    slice_type = VarT (pyonBuiltin The_SliceObject)
-    slice2_type = varApp (pyonBuiltin The_PyonTuple2)
+    none_type = VarT (coreBuiltin The_NoneType)
+    slice_type = VarT (coreBuiltin The_SliceObject)
+    slice2_type = varApp (coreBuiltin The_Tuple2)
                   [slice_type, slice_type]
-    slice3_type = varApp (pyonBuiltin The_PyonTuple3)
+    slice3_type = varApp (coreBuiltin The_Tuple3)
                   [slice_type, slice_type, slice_type]
 
 sliceMemTF = typeFunction 1 compute_eliminator
@@ -398,19 +398,19 @@ sliceMemTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` The_list_dim -> return slice_type
-           | op `isPyonBuiltin` The_dim0 -> return none_type
-           | op `isPyonBuiltin` The_dim1 -> return slice_type
-           | op `isPyonBuiltin` The_dim2 -> return slice2_type
-           | op `isPyonBuiltin` The_dim3 -> return slice3_type
-        _ -> return $ varApp (pyonBuiltin The_slice) [shape_arg']
+           | op `isCoreBuiltin` The_list_dim -> return slice_type
+           | op `isCoreBuiltin` The_dim0 -> return none_type
+           | op `isCoreBuiltin` The_dim1 -> return slice_type
+           | op `isCoreBuiltin` The_dim2 -> return slice2_type
+           | op `isCoreBuiltin` The_dim3 -> return slice3_type
+        _ -> return $ varApp (coreBuiltin The_slice) [shape_arg']
 
-    none_type = varApp (pyonBuiltin The_Stored)
-                [VarT (pyonBuiltin The_NoneType)]
-    slice_type = VarT (pyonBuiltin The_SliceObject)
-    slice2_type = varApp (pyonBuiltin The_PyonTuple2)
+    none_type = varApp (coreBuiltin The_Stored)
+                [VarT (coreBuiltin The_NoneType)]
+    slice_type = VarT (coreBuiltin The_SliceObject)
+    slice2_type = varApp (coreBuiltin The_Tuple2)
                   [slice_type, slice_type]
-    slice3_type = varApp (pyonBuiltin The_PyonTuple3)
+    slice3_type = varApp (coreBuiltin The_Tuple3)
                   [slice_type, slice_type, slice_type]
 
 {-
@@ -422,15 +422,15 @@ viewPureTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` The_list_dim ->
-             return $ varApp (pyonBuiltin The_list_view) other_args
-           | op `isPyonBuiltin` The_dim0 ->
-             return $ varApp (pyonBuiltin The_view0) other_args
-           | op `isPyonBuiltin` The_dim1 ->
-             return $ varApp (pyonBuiltin The_view1) other_args
-           | op `isPyonBuiltin` The_dim2 ->
-             return $ varApp (pyonBuiltin The_view2) other_args
-        _ -> return $ varApp (pyonBuiltin The_view) (shape_arg' : other_args)
+           | op `isCoreBuiltin` The_list_dim ->
+             return $ varApp (coreBuiltin The_list_view) other_args
+           | op `isCoreBuiltin` The_dim0 ->
+             return $ varApp (coreBuiltin The_view0) other_args
+           | op `isCoreBuiltin` The_dim1 ->
+             return $ varApp (coreBuiltin The_view1) other_args
+           | op `isCoreBuiltin` The_dim2 ->
+             return $ varApp (coreBuiltin The_view2) other_args
+        _ -> return $ varApp (coreBuiltin The_view) (shape_arg' : other_args)
 
 viewMemTF = typeFunction 1 compute_eliminator
   where
@@ -440,15 +440,15 @@ viewMemTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` The_list_dim ->
-             return $ varApp (pyonBuiltin The_list_view) other_args
-           | op `isPyonBuiltin` The_dim0 ->
-             return $ varApp (pyonBuiltin The_view0) other_args
-           | op `isPyonBuiltin` The_dim1 ->
-             return $ varApp (pyonBuiltin The_view1) other_args
-           | op `isPyonBuiltin` The_dim2 ->
-             return $ varApp (pyonBuiltin The_view2) other_args
-        _ -> return $ varApp (pyonBuiltin The_view) (shape_arg' : other_args)
+           | op `isCoreBuiltin` The_list_dim ->
+             return $ varApp (coreBuiltin The_list_view) other_args
+           | op `isCoreBuiltin` The_dim0 ->
+             return $ varApp (coreBuiltin The_view0) other_args
+           | op `isCoreBuiltin` The_dim1 ->
+             return $ varApp (coreBuiltin The_view1) other_args
+           | op `isCoreBuiltin` The_dim2 ->
+             return $ varApp (coreBuiltin The_view2) other_args
+        _ -> return $ varApp (coreBuiltin The_view) (shape_arg' : other_args)
 -}
 
 streamPureTF = typeFunction 1 compute_stream
@@ -459,19 +459,19 @@ streamPureTF = typeFunction 1 compute_stream
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-          | op `isPyonBuiltin` The_list_dim ->
+          | op `isCoreBuiltin` The_list_dim ->
             return_con The_Stream1 []
-          | op `isPyonBuiltin` The_dim0 ||
-            op `isPyonBuiltin` The_dim1 ||
-            op `isPyonBuiltin` The_dim2 ||
-            op `isPyonBuiltin` The_dim3 ->
+          | op `isCoreBuiltin` The_dim0 ||
+            op `isCoreBuiltin` The_dim1 ||
+            op `isCoreBuiltin` The_dim2 ||
+            op `isCoreBuiltin` The_dim3 ->
               return_con The_view [shape_arg']
         _ -> return_con The_Stream [shape_arg']
       where
         return_con :: forall m. EvalMonad m =>
                       BuiltinThing -> [Type] -> m Type
         return_con con args =
-          return $ varApp (pyonBuiltin con) (args ++ other_args)
+          return $ varApp (coreBuiltin con) (args ++ other_args)
 
 streamMemTF = typeFunction 1 compute_stream
   where
@@ -481,19 +481,19 @@ streamMemTF = typeFunction 1 compute_stream
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-          | op `isPyonBuiltin` The_list_dim ->
+          | op `isCoreBuiltin` The_list_dim ->
               return_con The_Stream1 []
-          | op `isPyonBuiltin` The_dim0 ||
-            op `isPyonBuiltin` The_dim1 ||
-            op `isPyonBuiltin` The_dim2 ||
-            op `isPyonBuiltin` The_dim3 ->
+          | op `isCoreBuiltin` The_dim0 ||
+            op `isCoreBuiltin` The_dim1 ||
+            op `isCoreBuiltin` The_dim2 ||
+            op `isCoreBuiltin` The_dim3 ->
               return_con The_view [shape_arg']
         _ -> return_con The_Stream [shape_arg']
       where
         return_con :: forall m. EvalMonad m =>
                       BuiltinThing -> [Type] -> m Type
         return_con con args =
-          return $ varApp (pyonBuiltin con) (args ++ other_args)
+          return $ varApp (coreBuiltin con) (args ++ other_args)
 
 -- | The 'BoxedType' data type should never appear in the pure type system
 boxedPureTF =
@@ -515,8 +515,8 @@ boxedMemTF = typeFunction 1 compute_boxed
     eval arg =
       case fromVarApp arg
       of Just (op, args')
-           | op `isPyonBuiltin` The_BareType ||
-             op `isPyonBuiltin` The_Ref ->
+           | op `isCoreBuiltin` The_BareType ||
+             op `isCoreBuiltin` The_Ref ->
                -- BoxedType (BareType t)   =  t
                -- BoxedType (StoredBox t)  =  t
                case args'
@@ -527,12 +527,12 @@ boxedMemTF = typeFunction 1 compute_boxed
                -- use 'Boxed' as the adapter type
                tenv <- getTypeEnv
                case lookupDataType op tenv of
-                 Just _ -> return $ varApp (pyonBuiltin The_Boxed) [arg]
+                 Just _ -> return $ varApp (coreBuiltin The_Boxed) [arg]
                  _ -> cannot_reduce
          _ -> cannot_reduce
       where
         cannot_reduce =
-          return $ varApp (pyonBuiltin The_BoxedType) [arg]
+          return $ varApp (coreBuiltin The_BoxedType) [arg]
           
 -- | The 'BareType' data type should never appear in the pure type system
 barePureTF =
@@ -556,14 +556,14 @@ bareMemTF = typeFunction 1 compute_bare
          AllT {} -> stored_type -- Forall'd types are naturally boxed
          _ -> case fromVarApp arg
               of Just (op, args')
-                   | op `isPyonBuiltin` The_BoxedType ||
-                     op `isPyonBuiltin` The_Boxed ->
+                   | op `isCoreBuiltin` The_BoxedType ||
+                     op `isCoreBuiltin` The_Boxed ->
                        -- BareType (BoxedType t)  =  t
                        -- BareType (Boxed t)      =  t
                        case args'
                        of [arg'] -> reduceToWhnf arg'
 
-                   | op `isPyonBuiltin` The_Stream ->
+                   | op `isCoreBuiltin` The_Stream ->
                        -- All fully applied 'Stream' types are naturally
                        -- boxed
                        stored_type
@@ -579,6 +579,6 @@ bareMemTF = typeFunction 1 compute_bare
                  _ -> cannot_reduce
       where
         stored_type =
-          return $ varApp (pyonBuiltin The_Ref) [arg]
+          return $ varApp (coreBuiltin The_Ref) [arg]
         cannot_reduce =
-          return $ varApp (pyonBuiltin The_BareType) [arg]
+          return $ varApp (coreBuiltin The_BareType) [arg]

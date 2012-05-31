@@ -19,6 +19,7 @@ import Export
 data FILE
 
 foreign import ccall fdopen :: CInt -> CString -> IO (Ptr FILE)
+foreign import ccall fputs :: CString -> Ptr FILE -> IO CInt
 foreign import ccall fclose :: Ptr FILE -> IO ()
 
 -- | Get the module's exported C++ functions
@@ -36,6 +37,11 @@ writeCxxHeader mod hdl = do
   fd <- handleToFd hdl
   let Fd fd_int = fd
   file_ptr <- withCString "w" $ \str -> fdopen fd_int str
+  
+  -- Write header stuff
+  withCString "#include <TrioletData.h>\n\n" $ \str -> fputs str file_ptr
+
+  -- Write functions
   mapM_ (writeCxxWrapper file_ptr) $ cxxExports mod
   fclose file_ptr
 

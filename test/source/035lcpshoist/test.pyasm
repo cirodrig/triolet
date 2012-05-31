@@ -1,7 +1,7 @@
 
 module test.test;
 
-extern procedure pyon.internal.pyon_alloc "pyon_alloc" (uint32) -> pointer;
+extern procedure core.internal.triolet_alloc "triolet_alloc" (uint32) -> pointer;
 extern function test.test.testfoo "testfoo" (int32, int32, int32) -> int32;
 
 /* Test hoisting of continuations created by local CPS transformation.

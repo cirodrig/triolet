@@ -140,16 +140,16 @@ negInftyT = VarT negInftyV
 
 kindV, intindexV, valV, boxV, bareV, outV, initV, propV, posInftyV, negInftyV :: Var
 
-kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
-intindexV = mkVar intindexVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
-valV = mkVar valVarID (Just $ pyonLabel builtinModuleName "val") KindLevel
-boxV = mkVar boxVarID (Just $ pyonLabel builtinModuleName "box") KindLevel
-bareV = mkVar bareVarID (Just $ pyonLabel builtinModuleName "bare") KindLevel
-outV = mkVar outVarID (Just $ pyonLabel builtinModuleName "out") KindLevel
-initV = mkVar writeVarID (Just $ pyonLabel builtinModuleName "write") KindLevel
-propV = mkVar propVarID (Just $ pyonLabel builtinModuleName "prop") KindLevel
-posInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
-negInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "neg_infty") TypeLevel
+kindV = mkVar kindVarID (Just $ plainLabel builtinModuleName "kind") SortLevel
+intindexV = mkVar intindexVarID (Just $ plainLabel builtinModuleName "intindex") KindLevel
+valV = mkVar valVarID (Just $ plainLabel builtinModuleName "val") KindLevel
+boxV = mkVar boxVarID (Just $ plainLabel builtinModuleName "box") KindLevel
+bareV = mkVar bareVarID (Just $ plainLabel builtinModuleName "bare") KindLevel
+outV = mkVar outVarID (Just $ plainLabel builtinModuleName "out") KindLevel
+initV = mkVar writeVarID (Just $ plainLabel builtinModuleName "write") KindLevel
+propV = mkVar propVarID (Just $ plainLabel builtinModuleName "prop") KindLevel
+posInftyV = mkVar posInftyVarID (Just $ plainLabel builtinModuleName "pos_infty") TypeLevel
+negInftyV = mkVar posInftyVarID (Just $ plainLabel builtinModuleName "neg_infty") TypeLevel
 
 kindVarID = toIdent 1
 intindexVarID = toIdent 2

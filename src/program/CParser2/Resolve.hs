@@ -186,7 +186,7 @@ newRVar :: Level -> Identifier Parsed -> NR ResolvedVar
 newRVar lv parsed_name = do
   modname <- getModuleName
   id <- fresh
-  let label = pyonLabel modname parsed_name
+  let label = plainLabel modname parsed_name
       v = ResolvedVar (mkVar id (Just label) lv) Nothing
   def parsed_name v
   return v

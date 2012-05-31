@@ -520,7 +520,7 @@ externDecl = extern_decl <|> import_decl
         make_extern_decl = do
           (mod, name) <- fullyQualifiedName
           c_name <- optionMaybe string
-          let label_ext = externPyonLabel mod name c_name
+          let label_ext = externLabel mod name c_name
           return $ \t -> ExternDecl t label_ext
     
     import_decl = match ImportTok >> parse_decl make_import_decl
@@ -528,7 +528,7 @@ externDecl = extern_decl <|> import_decl
         make_import_decl = do
           local_name <- identifier
           c_name <- option local_name string
-          let label = externPyonLabel builtinModuleName local_name (Just c_name)
+          let label = externLabel builtinModuleName local_name (Just c_name)
           return $ \t -> ImportDecl t label local_name
 
     parse_decl :: P (ExternType Parsed -> ExternDecl Parsed)

@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Integer and floating-point comparison",
-  pyonSources	 = ["compare.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["compare.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "ok"

@@ -46,8 +46,8 @@ actionPriority ConflictingAction = 11
 -- | A language to process
 data Language =
     NoneLanguage                -- ^ Infer language based on file extension
-  | PyonLanguage                -- ^ Pyon code
-  | PyonAsmLanguage             -- ^ Low-level Pyon code
+  | TrioletLanguage             -- ^ Triolet code
+  | LLTrioletLanguage           -- ^ Low-level Triolet code
     deriving(Eq)
 
 -- | A command-line option modifies the option interpreter state
@@ -66,13 +66,13 @@ optionDescrs =
     "save generated C files in output directory"
   , Option "x" [] (ReqArg (\lang -> Opt $ setLanguage lang) "LANG")
     ("specify input language\n" ++
-     "(options are 'none', 'pyon', 'pyonasm')")
+     "(options are 'none', 'triolet', 'lltriolet')")
   , Option "o" [] (ReqArg (\file -> Opt $ setOutput file) "FILE")
     "specify output file"
   , Option "D" [] (ReqArg (\mac -> Opt $ addMacro mac) "MACRO")
-    "define a preprocessor macro; ignored when compiling pyon files"
+    "define a preprocessor macro; ignored when compiling triolet files"
   , Option "I" [] (ReqArg (\mac -> Opt $ addIncludePath mac) "PATH")
-    "add a path to the include search path; ignored when compiling pyon files"
+    "add a path to the include search path; ignored when compiling triolet files"
   , Option "f" [] (ReqArg (Opt . addFlag) "FLAG")
     "enable/disable a compiler flag"
   , Option "" ["fuel"] (ReqArg (\fuel -> Opt $ setFuel fuel) "FUEL")
@@ -159,11 +159,11 @@ postProcessCommands commands = do
         of GetUsage | not $ null (inputFiles commands) -> CompileObject
            x -> x
       need_core_ir =
-        -- If generating the builtin library or compiling a Pyon file, the
+        -- If generating the builtin library or compiling a Triolet file, the
         -- core builtin module must be loaded
         currentNeedCoreIR commands ||
         currentAction commands == GenerateBuiltinLibrary ||
-        any (PyonLanguage ==) input_languages
+        any (TrioletLanguage ==) input_languages
 
   let commands' = commands { currentNeedCoreIR = need_core_ir
                            , currentAction = action}
@@ -254,8 +254,8 @@ setLanguage lang_string st =
   where
     language = lookup lang_string
                [ ("none", NoneLanguage)
-               , ("pyon", PyonLanguage)
-               , ("pyonasm", PyonAsmLanguage)
+               , ("triolet", TrioletLanguage)
+               , ("lltriolet", LLTrioletLanguage)
                ]
 
 setFuel fuel_string st =
@@ -304,8 +304,8 @@ chooseLanguage :: (String, Language) -> IO Language
 chooseLanguage (file_path, NoneLanguage) = from_suffix file_path
   where
     from_suffix path
-      | takeExtension path == ".pyon" = return PyonLanguage
-      | takeExtension path == ".pyasm" = return PyonAsmLanguage
+      | takeExtension path == ".tri" = return TrioletLanguage
+      | takeExtension path == ".llt" = return LLTrioletLanguage
       | otherwise = let msg = "Cannot determine language of '" ++ path ++ "'"
                     in fail msg
 
@@ -348,7 +348,7 @@ compileObjectJob config (file_path, language) moutput_path = do
 
   -- Read and compile the file.  Decide where to put the temporary C file.
   case input_language of
-    PyonLanguage -> do
+    TrioletLanguage -> do
       iface_files <- findInterfaceFiles
       let infile = readFileFromPath file_path
           hfile = writeFileFromPath $ headerPath output_path
@@ -360,7 +360,7 @@ compileObjectJob config (file_path, language) moutput_path = do
                            (commandLineFlags config) infile iface_files
                            cfile ifile hfile hxxfile outfile
 
-    PyonAsmLanguage ->
+    LLTrioletLanguage ->
       let infile = readFileFromPath file_path
           ifile = writeFileFromPath $ ifacePath output_path
           outfile = writeFileFromPath output_path
@@ -382,7 +382,7 @@ headerPath output_path = dropExtension output_path ++ "_interface.h"
 hxxPath output_path = dropExtension output_path ++ "_cxx.h"
 
 -- Exported Pyon interface goes here
-ifacePath output_path = replaceExtension output_path ".pi"
+ifacePath output_path = replaceExtension output_path ".ti"
 
 -- Get all interface files
 findInterfaceFiles = forM interface_files $ \fname -> do
@@ -392,8 +392,8 @@ findInterfaceFiles = forM interface_files $ \fname -> do
     -- These are the RTS interface files that were generated when
     -- the compiler was built
     interface_files =
-      ["memory_py.pi", "prim.pi", "structures.pi", "list.pi", "stream.pi",
-       "inplace.pi", "effects.pi"]
+      ["memory_py.ti", "prim.ti", "structures.ti", "list.ti", "stream.ti",
+       "inplace.ti", "effects.ti"]
    
 -- | Compile and generate an intermediate C file.
 -- If C files are kept, put the C file in the same location as the output, with
@@ -438,13 +438,13 @@ pyonCompilation compile_flags infile iface_files cfile ifile hfile hxxfile outfi
 
 pyonAsmCompilation :: [(String, Maybe String)] -- ^ Preprocessor macros
                    -> [String]                 -- ^ Include paths
-                   -> ReadFile  -- ^ Input pyasm file
+                   -> ReadFile  -- ^ Input llt file
                    -> TempFile  -- ^ Temporary C file
                    -> WriteFile -- ^ Output interface file
                    -> WriteFile -- ^ Output object file
                    -> Job ()
 pyonAsmCompilation macros search_paths infile cfile ifile outfile = do
-  asm <- withAnonymousFile ".pyasm" $ \ppfile -> do
+  asm <- withAnonymousFile ".llt" $ \ppfile -> do
     taskJob $ PreprocessCPP macros search_paths infile (writeTempFile ppfile)
     taskJob $ ParsePyonAsm (readTempFile ppfile)
     

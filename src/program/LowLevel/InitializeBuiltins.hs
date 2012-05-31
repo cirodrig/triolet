@@ -34,14 +34,14 @@ import SystemF.Lowering.LowerMonad(LowerEnv, initializeLowerEnv)
 
 fromBuiltinVarName :: BuiltinVarName -> (ModuleName, String, Maybe String)
 fromBuiltinVarName (CName mod nm) = (mod, nm, Just nm)
-fromBuiltinVarName (PyonName mod nm) = (mod, nm, Nothing)
+fromBuiltinVarName (CoreName mod nm) = (mod, nm, Nothing)
 
 initializePrimField :: IdentSupply Var -> BuiltinVarName -> FunctionType 
                     -> IO (Var, FunctionType)
 initializePrimField supply name fty =
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = externPyonLabel mod nm ext_name
+        lab = externLabel mod nm ext_name
     v <- newExternalVar lab (PrimType PointerType)
     return (v, fty)
 
@@ -53,7 +53,7 @@ initializeClosureField supply name fty = do
   when (not $ ftIsClosure fty) $ print "initializeClosureField: Error"
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = externPyonLabel mod nm ext_name
+        lab = externLabel mod nm ext_name
     v <- newExternalVar lab (PrimType OwnedType)
     ep <- mkGlobalEntryPoints fty lab v
     return (v, ep)
@@ -65,7 +65,7 @@ initializeVarField :: IdentSupply Var
 initializeVarField supply name ty =
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = externPyonLabel mod nm ext_name
+        lab = externLabel mod nm ext_name
     newExternalVar lab ty
 
 {-

@@ -849,8 +849,8 @@ generateLowLevelModule module_name externs defs = do
       where
         pick_export impent
           | impent_var `Set.member` defined_here =
-              -- Assume it's exported to other Pyon code
-              Left (impent_var, PyonExportSig)
+              -- Assume it's exported to other Triolet code
+              Left (impent_var, TrioletExportSig)
           | otherwise = Right impent
           where
             impent_var = LL.importVar impent

@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Basic floating-point math",
-  pyonSources	 = ["f.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["f.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "ok"

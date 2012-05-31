@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Variable capture test",
-  pyonSources	 = ["capture.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["capture.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "ok"

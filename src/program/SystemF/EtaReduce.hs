@@ -63,7 +63,7 @@ etaExpandFun (FunM f) =
   case funReturn f
   of FunT ret_dom ret_rng ->
        case fromVarApp ret_dom
-       of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr ->
+       of Just (op, [arg]) | op `isCoreBuiltin` The_OutPtr ->
             eta_expand ret_dom ret_rng
           _ -> no_eta_expand
      _ -> no_eta_expand

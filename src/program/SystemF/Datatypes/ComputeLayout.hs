@@ -313,7 +313,7 @@ saveDerivation lc kind ty derivation = do
 computeIntValue :: Algorithm e d -> Type -> Compute e d d
 computeIntValue lc ty = do
   ty' <- reduceToWhnf ty
-  let evidence_type = varApp (pyonBuiltin The_IInt) [ty']
+  let evidence_type = varApp (coreBuiltin The_IInt) [ty']
   case fromVarApp ty' of
     Just (v, []) -> lcUseEvidence lc IntIndexK ty `liftM`
                     lookupOrCreatePremise lc ValK evidence_type
@@ -384,16 +384,16 @@ computeTypeAppSize lc kind con dtype args
       internalError "computeTypeAppSize: Unexpected kind"
 
   -- Handle special cases
-  | con `isPyonBuiltin` The_arr = do
+  | con `isCoreBuiltin` The_arr = do
       let [size, element] = args
       int_evidence <- computeIntValue lc size
       element_evidence <- computeFieldLayout lc BareK element
       lcArrType lc int_evidence element_evidence
 
-  | con `isPyonBuiltin` The_int = lcIntType lc
-  | con `isPyonBuiltin` The_uint = lcUintType lc
-  | con `isPyonBuiltin` The_float = lcFloatType lc
-  | con `isPyonBuiltin` The_bool = lcBoolType lc
+  | con `isCoreBuiltin` The_int = lcIntType lc
+  | con `isCoreBuiltin` The_uint = lcUintType lc
+  | con `isCoreBuiltin` The_float = lcFloatType lc
+  | con `isCoreBuiltin` The_bool = lcBoolType lc
 
   -- General cases are algebraic data types
   | otherwise = do

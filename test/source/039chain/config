@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Iterator chaining",
-  pyonSources	 = ["chain.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["chain.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "121,169,"

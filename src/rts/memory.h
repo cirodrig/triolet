@@ -3,8 +3,8 @@
  */
 
 /* The general-purpose memory allocator interface */
-PyonPtr pyon_alloc(uint32_t);
-PyonPtr pyon_alloc_nopointers(uint32_t);
-void pyon_dealloc(PyonPtr);
+TrioletPtr triolet_alloc(uint32_t);
+TrioletPtr triolet_alloc_nopointers(uint32_t);
+void triolet_dealloc(TrioletPtr);
 
-PyonPtr pyon_alloc_boxed(uint32_t, uint32_t);
+TrioletPtr triolet_alloc_boxed(uint32_t, uint32_t);

@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Recursive type constraint solving",
-  pyonSources	 = ["reccst.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["reccst.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = [],
   expectedResult = ShouldCompile

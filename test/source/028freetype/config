@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Nested function definitions where the inner function references type variables from the outer function",
-  pyonSources	 = ["test.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["test.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = [],
   expectedResult = ShouldCompile

@@ -1,10 +1,9 @@
 
-#include <PyonData.h>
 #include "seqreduce_cxx.h"
-using namespace Pyon;
+using namespace Triolet;
 
 int main() {
-  Pyon_init();
+  Triolet_init();
   Tuple<Int, Int> t = foo(NoneType());
   printf("%d, %d", (int)t.get<0>(), (int)t.get<1>());
 

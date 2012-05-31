@@ -2,21 +2,21 @@
 /* C++ data marshaling interface for Pyon
  */
 
-#ifndef PYON_DATA_H
-#define PYON_DATA_H
+#ifndef TRIOLET_DATA_H
+#define TRIOLET_DATA_H
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <pyon.h>
-#include <pyon/Base.h>
-#include <pyon/Layout.h>
+#include <triolet.h>
+#include <triolet/Base.h>
+#include <triolet/Layout.h>
 
 #include "inttypes.h"
 
-namespace Pyon {
+namespace Triolet {
 
   /****************************************************************************/
   /* Concept checks */
@@ -41,34 +41,34 @@ namespace Pyon {
   /****************************************************************************/
   /* Kind conversions */
 
-  template<typename kind, typename pyon_type> struct AsBareTypeWithTag;
-  template<typename pyon_type> struct AsBareType;
+  template<typename kind, typename tri_type> struct AsBareTypeWithTag;
+  template<typename tri_type> struct AsBareType;
 
   /* Compute the bare type corresponding to a Pyon type.  The type
    * is computed by dispatching on the type's kind.
    */
-  template<typename pyon_type>
+  template<typename tri_type>
   struct AsBareType {
-    typedef typename AsBareTypeWithTag<typename pyon_type::kind,
-				       pyon_type>::type type;
+    typedef typename AsBareTypeWithTag<typename tri_type::kind,
+				       tri_type>::type type;
   };
 
   /* This class is used by 'AsBareType' */
-  template<typename kind, typename pyon_type>
+  template<typename kind, typename tri_type>
   struct AsBareTypeWithTag {
 #if BEGIN_SIGNATURE
     typedef _ type;
 #endif
   };
 
-  template<typename pyon_type>
-  struct AsBareTypeWithTag<BareKindTag, pyon_type> {
-    typedef pyon_type type;
+  template<typename tri_type>
+  struct AsBareTypeWithTag<BareKindTag, tri_type> {
+    typedef tri_type type;
   };
 
-  template<typename pyon_type>
-  struct AsBareTypeWithTag<ValKindTag, pyon_type> {
-    typedef Stored<pyon_type> type;
+  template<typename tri_type>
+  struct AsBareTypeWithTag<ValKindTag, tri_type> {
+    typedef Stored<tri_type> type;
   };
 
   /* The bare type corresponding to a Boxed object is its unboxed form */
@@ -77,34 +77,34 @@ namespace Pyon {
     typedef bare_type type;
   };
 
-  template<typename kind, typename pyon_type> struct AsBoxTypeWithTag;
-  template<typename pyon_type> struct AsBoxType;
+  template<typename kind, typename tri_type> struct AsBoxTypeWithTag;
+  template<typename tri_type> struct AsBoxType;
 
   /* Compute the boxed type corresponding to a Pyon type.  The type
    * is computed by dispatching on the type's kind.
    */
-  template<typename pyon_type>
+  template<typename tri_type>
   struct AsBoxType {
-    typedef typename AsBoxTypeWithTag<typename pyon_type::kind,
-				        pyon_type>::type type;
+    typedef typename AsBoxTypeWithTag<typename tri_type::kind,
+				        tri_type>::type type;
   };
 
   /* This class is used by 'AsBoxType' */
-  template<typename kind, typename pyon_type>
+  template<typename kind, typename tri_type>
   struct AsBoxTypeWithTag {
 #if BEGIN_SIGNATURE
     typedef _ type;
 #endif
   };
 
-  template<typename pyon_type>
-  struct AsBoxTypeWithTag<BoxKindTag, pyon_type> {
-    typedef pyon_type type;
+  template<typename tri_type>
+  struct AsBoxTypeWithTag<BoxKindTag, tri_type> {
+    typedef tri_type type;
   };
 
-  template<typename pyon_type>
-  struct AsBoxTypeWithTag<ValKindTag, pyon_type> {
-    typedef Boxed<Stored<pyon_type> > type;
+  template<typename tri_type>
+  struct AsBoxTypeWithTag<ValKindTag, tri_type> {
+    typedef Boxed<Stored<tri_type> > type;
   };
 
   /* The boxed type corresponding to any other object is its wrapped form */
@@ -141,8 +141,8 @@ namespace Pyon {
   template<typename bare_type>
   class IncompleteSingleRef {
   private:
-    PyonBoxPtr owner;
-    PyonBarePtr object;
+    TriBoxPtr owner;
+    TriBarePtr object;
 
   public:
     // Exactly one of the following three predicates is true at any time.
@@ -155,23 +155,23 @@ namespace Pyon {
     IncompleteSingleRef(void) : owner(NULL), object(NULL) {}
 
     // Construct a borrowed incomplete reference
-    IncompleteSingleRef(PyonBarePtr _s) : owner(NULL), object(_s) {}
+    IncompleteSingleRef(TriBarePtr _s) : owner(NULL), object(_s) {}
 
     IncompleteSingleRef(const IncompleteSingleRef& other) {
       // Cannot copy incomplete references that own an object
       if (other.isOwner()) {
-        pyonError ("Cannot copy a reference to an allocated object");
+        trioletError ("Cannot copy a reference to an allocated object");
       }
       owner = NULL;
       object = other.object;
     }
     
-    PyonBarePtr getObject() { return object; }
+    TriBarePtr getObject() { return object; }
 
     void operator=(const IncompleteSingleRef& other) {
       // Cannot copy incomplete references that own an object
       if (other.isOwner()) {
-        pyonError ("Cannot copy a reference to an allocated object");
+        trioletError ("Cannot copy a reference to an allocated object");
       }
 
       // If the reference owns an object, release it first
@@ -185,21 +185,21 @@ namespace Pyon {
 
     void allocate(void) {
       if (!isEmpty()) {
-        pyonError("Incomplete object is already referencing an object");
+        trioletError("Incomplete object is already referencing an object");
       }
 
       // Create boxed object and initialize header
-      owner = pyon_alloc_boxed(bare_type::getSize(), bare_type::getAlignment());
+      owner = triolet_alloc_boxed(bare_type::getSize(), bare_type::getAlignment());
 
       // Get pointer to the bare object
-      object = (PyonBarePtr) ((char *)owner) + addPadding<bare_type>(sizeof(void *));
+      object = (TriBarePtr) ((char *)owner) + addPadding<bare_type>(sizeof(void *));
     }
 
     bare_type freeze(void) {
       if (!isOwner()) {
-        pyonError("No incomplete object reference");
+        trioletError("No incomplete object reference");
       }
-      PyonBarePtr ret = object;
+      TriBarePtr ret = object;
       object = NULL;
       owner = NULL;
       return bare_type(ret);
@@ -209,7 +209,7 @@ namespace Pyon {
   template<typename boxed_type>
   class IncompleteBoxedRef {
   private:
-    PyonBoxPtr object;
+    TriBoxPtr object;
 
   public:
     bool isEmpty(void) const {return object == NULL;}
@@ -220,19 +220,19 @@ namespace Pyon {
     // Construct an empty incomplete reference
     IncompleteBoxedRef(void) : object(NULL) {}
 
-    PyonBoxPtr getObject() { return object; }
+    TriBoxPtr getObject() { return object; }
 
     void allocate(void) {
       if (!isEmpty()) {
-        pyonError("Incomplete object is already referencing an object");
+        trioletError("Incomplete object is already referencing an object");
       }
       // Create boxed object and initialize header
-      object = pyon_alloc_boxed(boxed_type::getSize(), boxed_type::getAlignment());
+      object = triolet_alloc_boxed(boxed_type::getSize(), boxed_type::getAlignment());
     }
 
     boxed_type freeze(void) {
       if (!isOwner()) {
-        pyonError("No incomplete object reference");
+        trioletError("No incomplete object reference");
       }
       boxed_type ret(object);
       object = NULL;
@@ -491,10 +491,10 @@ namespace Pyon {
       template<typename T2> friend class Incomplete;
     };
 
-    StuckRef(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+    StuckRef(TriBarePtr _bare_data) : BareType(_bare_data) {}
 
-    static unsigned int getSize(void) {return sizeof(PyonBoxPtr);}
-    static unsigned int getAlignment(void) {return __alignof__(PyonBoxPtr);}
+    static unsigned int getSize(void) {return sizeof(TriBoxPtr);}
+    static unsigned int getAlignment(void) {return __alignof__(TriBoxPtr);}
     static void copy(StuckRef<T> ref, Incomplete<StuckRef<T> >&incompleteRef)
     {
       incompleteRef = ref;
@@ -502,7 +502,7 @@ namespace Pyon {
     static bool isPOD(void) {return false;}
 
     operator T_Box() {
-      return T_Box(*(PyonBoxPtr*)getBareData());
+      return T_Box(*(TriBoxPtr*)getBareData());
     }
   };
 
@@ -522,23 +522,23 @@ namespace Pyon {
     typedef typename T_Bare::initializer initializer;
 
   public:
-    Boxed(PyonBoxPtr p) : BoxType(p) {}
-    PyonBarePtr getContents(void) const
+    Boxed(TriBoxPtr p) : BoxType(p) {}
+    TriBarePtr getContents(void) const
     {
       /* Compute size of header plus padding */
       unsigned int contents_offset =
-        addPadding<T_Bare>(PYON_OBJECT_HEADER_SIZE);
-      return (PyonBarePtr)((char *)getBoxData() + contents_offset);
+        addPadding<T_Bare>(TRIOLET_OBJECT_HEADER_SIZE);
+      return (TriBarePtr)((char *)getBoxData() + contents_offset);
     }
 
     static unsigned int getSize(void)
-    { return allocateObject<T_Bare>(PYON_OBJECT_HEADER_SIZE); }
+    { return allocateObject<T_Bare>(TRIOLET_OBJECT_HEADER_SIZE); }
 
     static unsigned int getAlignment(void)
     {
       unsigned int bare_align = T_Bare::getAlignment();
-      return (bare_align > PYON_OBJECT_HEADER_SIZE)
-        ? bare_align : PYON_OBJECT_HEADER_SIZE;
+      return (bare_align > TRIOLET_OBJECT_HEADER_SIZE)
+        ? bare_align : TRIOLET_OBJECT_HEADER_SIZE;
     }
     operator T() const {
       return T(getContents());
@@ -588,7 +588,7 @@ namespace Pyon {
       };
     public:
       // Constructors
-      Tuple<T1, T2, T3, T4>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      Tuple<T1, T2, T3, T4>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -748,7 +748,7 @@ namespace Pyon {
       };
     public:
       // Constructors
-      Tuple<T1, T2, T3>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      Tuple<T1, T2, T3>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -878,7 +878,7 @@ namespace Pyon {
       };
     public:
       // Constructors
-      Tuple<T1,T2>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      Tuple<T1,T2>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -967,27 +967,27 @@ namespace Pyon {
       };
     public:
       // Constructors
-      List<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      List<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_List_size;
+        return triolet_List_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_List_alignment;
+        return triolet_List_alignment;
       }
       
       static void 
       copy(List<T> list, Incomplete< List<T> > &incompleteList) { 
         if (!incompleteList.isEmpty()) {
-          pyonError("Attempted to write an already-initalized list\n");
+          trioletError("Attempted to write an already-initalized list\n");
         }
 
         /* Create the new list */
-        int length = pyon_List_get_length(list.getBareData());
+        int length = triolet_List_get_length(list.getBareData());
         incompleteList.create(length);
 
         /* Copy list contents */
@@ -1002,8 +1002,8 @@ namespace Pyon {
       // Member Functions
       T_Bare 
       at(int index) { 
-        PyonBarePtr list_contents =
-          pyon_List_get_contents(getBareData(),
+        TriBarePtr list_contents =
+          triolet_List_get_contents(getBareData(),
                                  T_Bare::getSize(), T_Bare::getAlignment());
         return T_Bare(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
       }
@@ -1031,37 +1031,37 @@ namespace Pyon {
       // no definition of defaultInitializer
     public:
       // Constructors
-      BList<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      BList<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_List_size;
+        return triolet_List_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_List_alignment;
+        return triolet_List_alignment;
       }
       
       static void 
       copy(BList<T> list, Incomplete<BList<T> > &incompleteList) { 
         if (!incompleteList.isEmpty()) {
-          pyonError("Attempted to write an already-initalized list\n");
+          trioletError("Attempted to write an already-initalized list\n");
         }
 
         /* Create the new list */
-        int length = pyon_List_get_length(list.getBareData());
+        int length = triolet_List_get_length(list.getBareData());
         incompleteList.create(length);
 
         /* Copy list contents.  It's an array of pointers. */
-        PyonBarePtr src_array =
-          pyon_List_get_contents(list.getBareData(),
-                                 sizeof(PyonBoxPtr), __alignof__(PyonBoxPtr));
-        PyonBarePtr dst_array =
-          pyon_List_get_contents(incompleteList.getObject(),
-                                 sizeof(PyonBoxPtr), __alignof__(PyonBoxPtr));
-        memcpy(dst_array, src_array, length * sizeof(PyonBoxPtr));
+        TriBarePtr src_array =
+          triolet_List_get_contents(list.getBareData(),
+                                 sizeof(TriBoxPtr), __alignof__(TriBoxPtr));
+        TriBarePtr dst_array =
+          triolet_List_get_contents(incompleteList.getObject(),
+                                 sizeof(TriBoxPtr), __alignof__(TriBoxPtr));
+        memcpy(dst_array, src_array, length * sizeof(TriBoxPtr));
       }
 
       static bool 
@@ -1070,10 +1070,10 @@ namespace Pyon {
       // Member Functions
       T_Box
       at(int index) { 
-        PyonBoxPtr *list_contents =
-          (PyonBoxPtr *)pyon_List_get_contents(getBareData(),
-                                               sizeof(PyonBoxPtr),
-                                               __alignof__(PyonBoxPtr));
+        TriBoxPtr *list_contents =
+          (TriBoxPtr *)triolet_List_get_contents(getBareData(),
+                                               sizeof(TriBoxPtr),
+                                               __alignof__(TriBoxPtr));
         return T_Box(list_contents[index]);
       }
   };
@@ -1100,29 +1100,29 @@ namespace Pyon {
       };
     public:
       // Constructors
-      Array1<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      Array1<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_Array1_size;
+        return triolet_Array1_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_Array1_alignment;
+        return triolet_Array1_alignment;
       }
       
       static void 
       copy(Array1<T> array1, Incomplete< Array1<T> > &incompleteArray1) { 
         if (!incompleteArray1.isEmpty()) {
-          pyonError("Attempted to write an already-initalized array\n");
+          trioletError("Attempted to write an already-initalized array\n");
         }
 
         /* Create the new array */
-        Array1Bounds bounds = pyon_Array1_get_bounds(array1.getBareData());
+        Array1Bounds bounds = triolet_Array1_get_bounds(array1.getBareData());
         if (bounds.stride != 1) {
-          pyonError("Non-unit stride arrays are not implemented\n");
+          trioletError("Non-unit stride arrays are not implemented\n");
         }
         incompleteArray1.create(bounds.min, bounds.min + bounds.size);
 
@@ -1140,16 +1140,16 @@ namespace Pyon {
       // Member Functions
       T_Bare 
       at(int index) { 
-        Array1Bounds array1Bounds = pyon_Array1_get_bounds(getBareData());
+        Array1Bounds array1Bounds = triolet_Array1_get_bounds(getBareData());
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t displacement = index - array1Bounds.min;
         int i = displacement / array1Bounds.stride;
         if (displacement % array1Bounds.stride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
-        PyonBarePtr array1_contents =
-          pyon_Array1_get_contents(getBareData(),
+        TriBarePtr array1_contents =
+          triolet_Array1_get_contents(getBareData(),
                                    T_Bare::getSize(), T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
         return T_Bare(array1_contents + i * element_size);
@@ -1180,42 +1180,42 @@ namespace Pyon {
       };
     public:
       // Constructors
-      BArray1<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      BArray1<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_Array1_size;
+        return triolet_Array1_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_Array1_alignment;
+        return triolet_Array1_alignment;
       }
       
       static void 
       copy(BArray1<T> array1, Incomplete< BArray1<T> > &incompleteArray1) {
         if (!incompleteArray1.isEmpty()) {
-          pyonError("Attempted to write an already-initalized array\n");
+          trioletError("Attempted to write an already-initalized array\n");
         }
 
         /* Create the new array */
-        Array1Bounds bounds = pyon_Array1_get_bounds(array1.getBareData());
+        Array1Bounds bounds = triolet_Array1_get_bounds(array1.getBareData());
         if (bounds.stride != 1) {
-          pyonError("Non-unit stride arrays are not implemented\n");
+          trioletError("Non-unit stride arrays are not implemented\n");
         }
         incompleteArray1.create(bounds.min, bounds.min + bounds.size);
 
         /* Copy array contents, which is an array of pointers */
-        PyonBarePtr dst_array =
-          pyon_Array1_get_contents(incompleteArray1.getObject(),
-                                   sizeof(PyonBoxPtr),
-                                   __alignof__(PyonBoxPtr));
-        PyonBarePtr src_array =
-          pyon_Array1_get_contents(array1.getBareData(),
-                                   sizeof(PyonBoxPtr),
-                                   __alignof__(PyonBoxPtr));
-        memcpy(dst_array, src_array, bounds.size * sizeof(PyonBoxPtr));
+        TriBarePtr dst_array =
+          triolet_Array1_get_contents(incompleteArray1.getObject(),
+                                   sizeof(TriBoxPtr),
+                                   __alignof__(TriBoxPtr));
+        TriBarePtr src_array =
+          triolet_Array1_get_contents(array1.getBareData(),
+                                   sizeof(TriBoxPtr),
+                                   __alignof__(TriBoxPtr));
+        memcpy(dst_array, src_array, bounds.size * sizeof(TriBoxPtr));
       }
       
       static bool 
@@ -1224,18 +1224,18 @@ namespace Pyon {
       // Member Functions
       T_Box
       at(int index) { 
-        Array1Bounds array1Bounds = pyon_Array1_get_bounds(getBareData());
+        Array1Bounds array1Bounds = triolet_Array1_get_bounds(getBareData());
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t displacement = index - array1Bounds.min;
         int i = displacement / array1Bounds.stride;
         if (displacement % array1Bounds.stride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
-        PyonBoxPtr *array1_contents =
-          (PyonBoxPtr *)pyon_Array1_get_contents(getBareData(),
-                                                 sizeof(PyonBoxPtr),
-                                                 __alignof__(PyonBoxPtr));
+        TriBoxPtr *array1_contents =
+          (TriBoxPtr *)triolet_Array1_get_contents(getBareData(),
+                                                 sizeof(TriBoxPtr),
+                                                 __alignof__(TriBoxPtr));
         return T_Box(array1_contents[i]);
       }
 
@@ -1264,29 +1264,29 @@ namespace Pyon {
       };
     public:
       // Constructors
-      Array2<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      Array2<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_Array2_size;
+        return triolet_Array2_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_Array2_alignment;
+        return triolet_Array2_alignment;
       }
       
       static void 
       copy(Array2<T> array2, Incomplete< Array2<T> > &incompleteArray2) { 
         if (!incompleteArray2.isEmpty()) {
-          pyonError("Attempted to write an already-initalized array\n");
+          trioletError("Attempted to write an already-initalized array\n");
         }
 
         /* Create the new array */
-        Array2Bounds bounds = pyon_Array2_get_bounds(array2.getBareData());
+        Array2Bounds bounds = triolet_Array2_get_bounds(array2.getBareData());
         if (bounds.ystride != 1 || bounds.xstride != 1) {
-          pyonError("Non-unit stride arrays are not implemented\n");
+          trioletError("Non-unit stride arrays are not implemented\n");
         }
         incompleteArray2.create(bounds.ymin, bounds.ymin + bounds.ysize,
                                 bounds.xmin, bounds.xmin + bounds.xsize);
@@ -1308,23 +1308,23 @@ namespace Pyon {
       // Member Functions
       T_Bare 
       at(int rowIndex, int columnIndex) {
-        Array2Bounds array2Bounds = pyon_Array2_get_bounds(getBareData());
+        Array2Bounds array2Bounds = triolet_Array2_get_bounds(getBareData());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array2Bounds.xmin;
         int xi = x_displacement / array2Bounds.xstride;
         if (x_displacement % array2Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array2Bounds.ymin;
         int yi = y_displacement / array2Bounds.ystride;
         if (y_displacement % array2Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        PyonBarePtr array2_contents = pyon_Array2_get_contents(getBareData(),
+        TriBarePtr array2_contents = triolet_Array2_get_contents(getBareData(),
                                                                T_Bare::getSize(),
                                                                T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
@@ -1358,44 +1358,44 @@ namespace Pyon {
       // no definition of defaultInitializer
     public:
       // Constructors
-      BArray2<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      BArray2<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_Array2_size;
+        return triolet_Array2_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_Array2_alignment;
+        return triolet_Array2_alignment;
       }
       
       static void 
       copy(BArray2<T> array2, Incomplete< BArray2<T> > &incompleteArray2) { 
         if (!incompleteArray2.isEmpty()) {
-          pyonError("Attempted to write an already-initalized array\n");
+          trioletError("Attempted to write an already-initalized array\n");
         }
 
         /* Create the new array */
-        Array2Bounds bounds = pyon_Array2_get_bounds(array2.getBareData());
+        Array2Bounds bounds = triolet_Array2_get_bounds(array2.getBareData());
         if (bounds.ystride != 1 || bounds.xstride != 1) {
-          pyonError("Non-unit stride arrays are not implemented\n");
+          trioletError("Non-unit stride arrays are not implemented\n");
         }
         incompleteArray2.create(bounds.ymin, bounds.ymin + bounds.ysize,
                                 bounds.xmin, bounds.xmin + bounds.xsize);
 
         /* Copy array contents.  It's an array of pointers. */
-        PyonBarePtr dst_array =
-          pyon_Array2_get_contents(incompleteArray2.getObject(),
-                                   sizeof(PyonBoxPtr),
-                                   __alignof__(PyonBoxPtr));
-        PyonBarePtr src_array =
-          pyon_Array2_get_contents(array2.getBareData(),
-                                   sizeof(PyonBoxPtr),
-                                   __alignof__(PyonBoxPtr));
+        TriBarePtr dst_array =
+          triolet_Array2_get_contents(incompleteArray2.getObject(),
+                                   sizeof(TriBoxPtr),
+                                   __alignof__(TriBoxPtr));
+        TriBarePtr src_array =
+          triolet_Array2_get_contents(array2.getBareData(),
+                                   sizeof(TriBoxPtr),
+                                   __alignof__(TriBoxPtr));
         memcpy(dst_array, src_array,
-               bounds.ysize * bounds.xsize * sizeof(PyonBoxPtr));
+               bounds.ysize * bounds.xsize * sizeof(TriBoxPtr));
       }
       
       static bool 
@@ -1404,26 +1404,26 @@ namespace Pyon {
       // Member Functions
       T_Box
       at(int rowIndex, int columnIndex) {
-        Array2Bounds array2Bounds = pyon_Array2_get_bounds(getBareData());
+        Array2Bounds array2Bounds = triolet_Array2_get_bounds(getBareData());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array2Bounds.xmin;
         int xi = x_displacement / array2Bounds.xstride;
         if (x_displacement % array2Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array2Bounds.ymin;
         int yi = y_displacement / array2Bounds.ystride;
         if (y_displacement % array2Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        PyonBoxPtr *array2_contents =
-          (PyonBoxPtr *)pyon_Array2_get_contents(getBareData(),
-                                                 sizeof(PyonBoxPtr),
-                                                 __alignof__(PyonBoxPtr));
+        TriBoxPtr *array2_contents =
+          (TriBoxPtr *)triolet_Array2_get_contents(getBareData(),
+                                                 sizeof(TriBoxPtr),
+                                                 __alignof__(TriBoxPtr));
         return T_Box(array2_contents[index]);
       }
   };
@@ -1457,29 +1457,29 @@ namespace Pyon {
       };
     public:
       // Constructors
-      Array3<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      Array3<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_Array3_size;
+        return triolet_Array3_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_Array3_alignment;
+        return triolet_Array3_alignment;
       }
       
       static void
       copy(Array3<T> array3, Incomplete< Array3<T> > &incompleteArray3) { 
         if (!incompleteArray3.isEmpty()) {
-          pyonError("Attempted to write an already-initalized array\n");
+          trioletError("Attempted to write an already-initalized array\n");
         }
 
         /* Create the new array */
-        Array3Bounds bounds = pyon_Array3_get_bounds(array3.getBareData());
+        Array3Bounds bounds = triolet_Array3_get_bounds(array3.getBareData());
         if (bounds.zstride != 1 || bounds.ystride != 1 || bounds.xstride != 1) {
-          pyonError("Non-unit stride arrays are not implemented\n");
+          trioletError("Non-unit stride arrays are not implemented\n");
         }
         incompleteArray3.create(bounds.zmin, bounds.zmin + bounds.zsize,
                                 bounds.ymin, bounds.ymin + bounds.ysize,
@@ -1505,30 +1505,30 @@ namespace Pyon {
       // Member Functions
       T_Bare
       at(int zIndex, int rowIndex, int columnIndex) {
-        Array3Bounds array3Bounds = pyon_Array3_get_bounds(getBareData());
+        Array3Bounds array3Bounds = triolet_Array3_get_bounds(getBareData());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array3Bounds.xmin;
         int xi = x_displacement / array3Bounds.xstride;
         if (x_displacement % array3Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array3Bounds.ymin;
         int yi = y_displacement / array3Bounds.ystride;
         if (y_displacement % array3Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t z_displacement = zIndex - array3Bounds.zmin;
         int zi = z_displacement / array3Bounds.zstride;
         if (z_displacement % array3Bounds.zstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        PyonBarePtr array3_contents =
-          pyon_Array3_get_contents(getBareData(),
+        TriBarePtr array3_contents =
+          triolet_Array3_get_contents(getBareData(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
@@ -1567,45 +1567,45 @@ namespace Pyon {
       // no definition of defaultInitializer
     public:
       // Constructors
-      BArray3<T>(PyonBarePtr _bare_data) : BareType(_bare_data) { }
+      BArray3<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
       static unsigned int 
       getSize() {
-        return pyon_Array3_size;
+        return triolet_Array3_size;
       }
       
       static unsigned int 
       getAlignment() { 
-        return pyon_Array3_alignment;
+        return triolet_Array3_alignment;
       }
       
       static void
       copy(BArray3<T> array3, Incomplete< BArray3<T> > &incompleteArray3) { 
         if (!incompleteArray3.isEmpty()) {
-          pyonError("Attempted to write an already-initalized array\n");
+          trioletError("Attempted to write an already-initalized array\n");
         }
 
         /* Create the new array */
-        Array3Bounds bounds = pyon_Array3_get_bounds(array3.getBareData());
+        Array3Bounds bounds = triolet_Array3_get_bounds(array3.getBareData());
         if (bounds.zstride != 1 || bounds.ystride != 1 || bounds.xstride != 1) {
-          pyonError("Non-unit stride arrays are not implemented\n");
+          trioletError("Non-unit stride arrays are not implemented\n");
         }
         incompleteArray3.create(bounds.zmin, bounds.zmin + bounds.zsize,
                                 bounds.ymin, bounds.ymin + bounds.ysize,
                                 bounds.xmin, bounds.xmin + bounds.xsize);
 
         /* Copy array contents.  It's an array of pointers. */
-        PyonBarePtr dst_array =
-          pyon_Array3_get_contents(incompleteArray3.getObject(),
-                                   sizeof(PyonBoxPtr),
-                                   __alignof__(PyonBoxPtr));
-        PyonBarePtr src_array =
-          pyon_Array3_get_contents(array3.getBareData(),
-                                   sizeof(PyonBoxPtr),
-                                   __alignof__(PyonBoxPtr));
+        TriBarePtr dst_array =
+          triolet_Array3_get_contents(incompleteArray3.getObject(),
+                                   sizeof(TriBoxPtr),
+                                   __alignof__(TriBoxPtr));
+        TriBarePtr src_array =
+          triolet_Array3_get_contents(array3.getBareData(),
+                                   sizeof(TriBoxPtr),
+                                   __alignof__(TriBoxPtr));
         memcpy(dst_array, src_array,
-               bounds.zsize * bounds.ysize * bounds.xsize * sizeof(PyonBoxPtr));
+               bounds.zsize * bounds.ysize * bounds.xsize * sizeof(TriBoxPtr));
       }
 
       static bool
@@ -1614,32 +1614,32 @@ namespace Pyon {
       // Member Functions
       T_Box
       at(int zIndex, int rowIndex, int columnIndex) {
-        Array3Bounds array3Bounds = pyon_Array3_get_bounds(getBareData());
+        Array3Bounds array3Bounds = triolet_Array3_get_bounds(getBareData());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array3Bounds.xmin;
         int xi = x_displacement / array3Bounds.xstride;
         if (x_displacement % array3Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array3Bounds.ymin;
         int yi = y_displacement / array3Bounds.ystride;
         if (y_displacement % array3Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t z_displacement = zIndex - array3Bounds.zmin;
         int zi = z_displacement / array3Bounds.zstride;
         if (z_displacement % array3Bounds.zstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        PyonBoxPtr *array3_contents =
-          (PyonBoxPtr *)pyon_Array3_get_contents(getBareData(),
-                                                 sizeof(PyonBoxPtr),
-                                                 __alignof__(PyonBoxPtr));
+        TriBoxPtr *array3_contents =
+          (TriBoxPtr *)triolet_Array3_get_contents(getBareData(),
+                                                 sizeof(TriBoxPtr),
+                                                 __alignof__(TriBoxPtr));
         return T_Box(array3_contents[index]);
       }
 
@@ -1664,7 +1664,7 @@ namespace Pyon {
       };
 
       // Constructors
-      Stored<T>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      Stored<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -1706,7 +1706,7 @@ namespace Pyon {
       };
 
       // Constructors
-      Stored<NoneType>(PyonBarePtr _bare_data) : BareType(_bare_data) {}
+      Stored<NoneType>(TriBarePtr _bare_data) : BareType(_bare_data) {}
 
       // Static Member Functions
       static unsigned int 
@@ -1740,13 +1740,13 @@ namespace Pyon {
     public:
       Incomplete < StuckRef<T> >(void)
         : IncompleteSingleRef< StuckRef<T> >() {}
-      Incomplete < StuckRef<T> >(PyonBarePtr _s)
+      Incomplete < StuckRef<T> >(TriBarePtr _s)
         : IncompleteSingleRef< StuckRef<T> >(_s) {}
       void initialize(const typename StuckRef<T>::initializer&init =
                       typename StuckRef<T>::initializer())
       {
         /* Copy a pointer */
-        PyonBoxPtr *data = (PyonBoxPtr *)this->getObject();
+        TriBoxPtr *data = (TriBoxPtr *)this->getObject();
         *data = init.value.getBoxData();
       }
       void create(const typename StuckRef<T>::initializer&init =
@@ -1768,7 +1768,7 @@ namespace Pyon {
   class Incomplete< Stored<T> > : public IncompleteSingleRef< Stored<T> > {
     public:
       Incomplete< Stored<T> >(void) : IncompleteSingleRef< Stored<T> >() {}
-      Incomplete< Stored<T> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
+      Incomplete< Stored<T> >(TriBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
       void initialize(const typename Stored<T>::initializer &init =
                       typename Stored<T>::initializer())
       {
@@ -1796,7 +1796,7 @@ namespace Pyon {
       : public IncompleteSingleRef< Stored<NoneType> > {
     public:
       Incomplete< Stored<NoneType> >(void) : IncompleteSingleRef< Stored<NoneType> >() {}
-      Incomplete< Stored<NoneType> >(PyonBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
+      Incomplete< Stored<NoneType> >(TriBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
       void initialize(const Stored<NoneType>::initializer &init =
                       Stored<NoneType>::initializer())
       {
@@ -1829,7 +1829,7 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete<T>(void) : IncompleteSingleRef<T>() {}
-      Incomplete<T>(PyonBarePtr _s) : IncompleteSingleRef<T>(_s) {}
+      Incomplete<T>(TriBarePtr _s) : IncompleteSingleRef<T>(_s) {}
 
       // Member Functions
       void initialize(const typename T::initializer& init =
@@ -1862,7 +1862,7 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete<T>(void) : IncompleteSingleRef<T>() {}
-      Incomplete<T>(PyonBarePtr _s) : IncompleteSingleRef<T>(_s) {}
+      Incomplete<T>(TriBarePtr _s) : IncompleteSingleRef<T>(_s) {}
       
       // Member Functions
       void initialize(const typename T::initializer& init =
@@ -1893,7 +1893,7 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete<T>(void) : IncompleteSingleRef<T>() {}
-      Incomplete<T>(PyonBarePtr _s) : IncompleteSingleRef<T>(_s) {}
+      Incomplete<T>(TriBarePtr _s) : IncompleteSingleRef<T>(_s) {}
       
       // Member Functions
       void initialize(const typename T::initializer& init =
@@ -1924,14 +1924,14 @@ namespace Pyon {
       // Constructors
       Incomplete< List<T> >(void)
         : IncompleteSingleRef< List<T> >() {}
-      Incomplete< List<T> >(PyonBarePtr _s)
+      Incomplete< List<T> >(TriBarePtr _s)
         : IncompleteSingleRef< List<T> >(_s) {}
 
       // Member Functions
       void initialize(const typename List<T>::initializer& init =
                       typename List<T>::initializer()) {
         if (!init.is_dummy) {
-          pyon_List_initialize(init.length,
+          triolet_List_initialize(init.length,
                                T_Bare::getSize(),
                                T_Bare::getAlignment(),
                                this->getObject());
@@ -1948,7 +1948,7 @@ namespace Pyon {
 
       Incomplete< T_Bare > 
       at(int index) { 
-        PyonBarePtr list_contents = pyon_List_get_contents(this->getObject(),
+        TriBarePtr list_contents = triolet_List_get_contents(this->getObject(),
                                                            T_Bare::getSize(),
                                                            T_Bare::getAlignment());
         return Incomplete<T_Bare>(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
@@ -1966,16 +1966,16 @@ namespace Pyon {
       // Constructors
       Incomplete<BList<T> >(void)
         : IncompleteSingleRef<BList<T> >() {}
-      Incomplete<BList<T> >(PyonBarePtr _s)
+      Incomplete<BList<T> >(TriBarePtr _s)
         : IncompleteSingleRef<BList<T> >(_s) {}
 
       // Member Functions
       void initialize(const typename BList<T>::initializer& init =
                       typename BList<T>::initializer()) {
         if(!init.is_dummy)
-          pyon_List_initialize(init.length,
-                               sizeof(PyonBoxPtr),
-                               __alignof__(PyonBoxPtr),
+          triolet_List_initialize(init.length,
+                               sizeof(TriBoxPtr),
+                               __alignof__(TriBoxPtr),
                                this->getObject());
       }
       void create(const typename BList<T>::initializer& init =
@@ -1988,11 +1988,11 @@ namespace Pyon {
 
       Incomplete<StuckRef<T_Box> > 
       at(int index) {
-        PyonBoxPtr *list_contents =
-          (PyonBoxPtr *)pyon_List_get_contents(this->getObject(),
-                                               sizeof(PyonBoxPtr),
-                                               __alignof__(PyonBoxPtr));
-        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&list_contents[index]);
+        TriBoxPtr *list_contents =
+          (TriBoxPtr *)triolet_List_get_contents(this->getObject(),
+                                               sizeof(TriBoxPtr),
+                                               __alignof__(TriBoxPtr));
+        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&list_contents[index]);
       }
     };
 
@@ -2005,14 +2005,14 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete< Array1<T> >(void) : IncompleteSingleRef< Array1<T> >() { }
-      Incomplete< Array1<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array1<T> >(_s) { }
+      Incomplete< Array1<T> >(TriBarePtr _s) : IncompleteSingleRef< Array1<T> >(_s) { }
       
       // Member Functions
       void initialize(const typename Array1<T>::initializer &init =
                       typename Array1<T>::initializer())
       {
         if (!init.is_dummy) {
-          pyon_Array1_initialize(init.min, 1, init.end,
+          triolet_Array1_initialize(init.min, 1, init.end,
                                  T_Bare::getSize(),
                                  T_Bare::getAlignment(),
                                  this->getObject());
@@ -2029,9 +2029,9 @@ namespace Pyon {
 
       Incomplete< T_Bare > 
       at(int index) { 
-        int32_t min = pyon_Array1_get_bounds(this->getObject()).min;
-        PyonBarePtr array1_contents =
-          pyon_Array1_get_contents(this->getObject(),
+        int32_t min = triolet_Array1_get_bounds(this->getObject()).min;
+        TriBarePtr array1_contents =
+          triolet_Array1_get_contents(this->getObject(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
         return Incomplete<T_Bare>(array1_contents + (index - min)*addPadding<T_Bare>(T_Bare::getSize()) ); 
@@ -2046,16 +2046,16 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete< BArray1<T> >(void) : IncompleteSingleRef< BArray1<T> >() { }
-      Incomplete< BArray1<T> >(PyonBarePtr _s) : IncompleteSingleRef< BArray1<T> >(_s) { }
+      Incomplete< BArray1<T> >(TriBarePtr _s) : IncompleteSingleRef< BArray1<T> >(_s) { }
       
       // Member Functions
       void initialize(const typename BArray1<T>::initializer &init =
                       typename BArray1<T>::initializer())
       {
         if (!init.is_dummy) {
-          pyon_Array1_initialize(init.min, 1, init.end,
-                                 sizeof(PyonBarePtr),
-                                 __alignof__(PyonBarePtr),
+          triolet_Array1_initialize(init.min, 1, init.end,
+                                 sizeof(TriBarePtr),
+                                 __alignof__(TriBarePtr),
                                  this->getObject());
         }
       }
@@ -2069,13 +2069,13 @@ namespace Pyon {
 
       Incomplete<StuckRef<T_Box> > 
       at(int index) {
-        int32_t min = pyon_Array1_get_bounds(this->getObject()).min;
-        PyonBoxPtr *array1_contents =
-          (PyonBoxPtr *)pyon_Array1_get_contents(this->getObject(),
-                                                 sizeof(PyonBoxPtr),
-                                                 __alignof(PyonBoxPtr));
+        int32_t min = triolet_Array1_get_bounds(this->getObject()).min;
+        TriBoxPtr *array1_contents =
+          (TriBoxPtr *)triolet_Array1_get_contents(this->getObject(),
+                                                 sizeof(TriBoxPtr),
+                                                 __alignof(TriBoxPtr));
         
-        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&array1_contents[index - min]);
+        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&array1_contents[index - min]);
       }
 
   };
@@ -2089,14 +2089,14 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete< Array2<T> >(void) : IncompleteSingleRef< Array2<T> >() { }
-      Incomplete< Array2<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array2<T> >(_s) { }
+      Incomplete< Array2<T> >(TriBarePtr _s) : IncompleteSingleRef< Array2<T> >(_s) { }
       
       // Member Functions
       void initialize(const typename Array2<T>::initializer &init =
                       typename Array2<T>::initializer())
       {
         if (!init.is_dummy) {
-          pyon_Array2_initialize(init.ymin, 1, init.yend,
+          triolet_Array2_initialize(init.ymin, 1, init.yend,
                                  init.xmin, 1, init.xend,
                                  T_Bare::getSize(),
                                  T_Bare::getAlignment(),
@@ -2115,24 +2115,24 @@ namespace Pyon {
 
       Incomplete< T_Bare > 
       at(int rowIndex, int columnIndex) { 
-        Array2Bounds array2Bounds = pyon_Array2_get_bounds(this->getObject());
+        Array2Bounds array2Bounds = triolet_Array2_get_bounds(this->getObject());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array2Bounds.xmin;
         int xi = x_displacement / array2Bounds.xstride;
         if (x_displacement % array2Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array2Bounds.ymin;
         int yi = y_displacement / array2Bounds.ystride;
         if (y_displacement % array2Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        PyonBarePtr array2_contents =
-          pyon_Array2_get_contents(this->getObject(),
+        TriBarePtr array2_contents =
+          triolet_Array2_get_contents(this->getObject(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
@@ -2149,17 +2149,17 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete<BArray2<T> >(void) : IncompleteSingleRef<BArray2<T> >() { }
-      Incomplete<BArray2<T> >(PyonBarePtr _s) : IncompleteSingleRef<BArray2<T> >(_s) { }
+      Incomplete<BArray2<T> >(TriBarePtr _s) : IncompleteSingleRef<BArray2<T> >(_s) { }
 
       // Member Functions
       void initialize(const typename BArray2<T>::initializer &init =
                       typename BArray2<T>::initializer())
       {
         if (!init.is_dummy) {
-          pyon_Array2_initialize(init.ymin, 1, init.yend,
+          triolet_Array2_initialize(init.ymin, 1, init.yend,
                                  init.xmin, 1, init.xend,
-                                 sizeof(PyonBoxPtr),
-                                 __alignof__(PyonBoxPtr),
+                                 sizeof(TriBoxPtr),
+                                 __alignof__(TriBoxPtr),
                                  this->getObject());
         }
       }
@@ -2175,27 +2175,27 @@ namespace Pyon {
 
       Incomplete<StuckRef<T_Box > >
       at(int rowIndex, int columnIndex) { 
-        Array2Bounds array2Bounds = pyon_Array2_get_bounds(this->getObject());
+        Array2Bounds array2Bounds = triolet_Array2_get_bounds(this->getObject());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array2Bounds.xmin;
         int xi = x_displacement / array2Bounds.xstride;
         if (x_displacement % array2Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array2Bounds.ymin;
         int yi = y_displacement / array2Bounds.ystride;
         if (y_displacement % array2Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        PyonBoxPtr *array2_contents =
-          (PyonBoxPtr *)pyon_Array2_get_contents(this->getObject(),
-                                                 sizeof(PyonBoxPtr),
-                                                 __alignof__(PyonBoxPtr));
-        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&array2_contents[index]); 
+        TriBoxPtr *array2_contents =
+          (TriBoxPtr *)triolet_Array2_get_contents(this->getObject(),
+                                                 sizeof(TriBoxPtr),
+                                                 __alignof__(TriBoxPtr));
+        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&array2_contents[index]); 
       }
   };
 
@@ -2208,14 +2208,14 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete< Array3<T> >(void) : IncompleteSingleRef< Array3<T> >() { }
-      Incomplete< Array3<T> >(PyonBarePtr _s) : IncompleteSingleRef< Array3<T> >(_s) { }
+      Incomplete< Array3<T> >(TriBarePtr _s) : IncompleteSingleRef< Array3<T> >(_s) { }
       
       // Member Functions
       void initialize(const typename Array3<T>::initializer &init =
                       typename Array3<T>::initializer())
       {
         if (!init.is_dummy) {
-          pyon_Array3_initialize(init.zmin, 1, init.zend,
+          triolet_Array3_initialize(init.zmin, 1, init.zend,
                                  init.ymin, 1, init.yend,
                                  init.xmin, 1, init.xend,
                                  T_Bare::getSize(),
@@ -2243,30 +2243,30 @@ namespace Pyon {
 
       Incomplete< T_Bare > 
       at(int zIndex, int rowIndex, int columnIndex) { 
-        Array3Bounds array3Bounds = pyon_Array3_get_bounds(this->getObject());
+        Array3Bounds array3Bounds = triolet_Array3_get_bounds(this->getObject());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array3Bounds.xmin;
         int xi = x_displacement / array3Bounds.xstride;
         if (x_displacement % array3Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array3Bounds.ymin;
         int yi = y_displacement / array3Bounds.ystride;
         if (y_displacement % array3Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t z_displacement = zIndex - array3Bounds.zmin;
         int zi = z_displacement / array3Bounds.zstride;
         if (z_displacement % array3Bounds.zstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        PyonBarePtr contents =
-          pyon_Array3_get_contents(this->getObject(),
+        TriBarePtr contents =
+          triolet_Array3_get_contents(this->getObject(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
@@ -2283,18 +2283,18 @@ namespace Pyon {
     public:
       // Constructors
       Incomplete<BArray3<T> >(void) : IncompleteSingleRef<BArray3<T> >() { }
-      Incomplete<BArray3<T> >(PyonBarePtr _s) : IncompleteSingleRef<BArray3<T> >(_s) { }
+      Incomplete<BArray3<T> >(TriBarePtr _s) : IncompleteSingleRef<BArray3<T> >(_s) { }
 
       // Member Functions
       void initialize(const typename BArray3<T>::initializer &init =
                       typename BArray3<T>::initializer())
       {
         if (!init.is_dummy) {
-          pyon_Array3_initialize(init.zmin, 1, init.zend,
+          triolet_Array3_initialize(init.zmin, 1, init.zend,
                                  init.ymin, 1, init.yend,
                                  init.xmin, 1, init.xend,
-                                 sizeof(PyonBoxPtr),
-                                 __alignof__(PyonBoxPtr),
+                                 sizeof(TriBoxPtr),
+                                 __alignof__(TriBoxPtr),
                                  this->getObject());
         }
       }
@@ -2318,33 +2318,33 @@ namespace Pyon {
 
       Incomplete<StuckRef<T_Box > >
       at(int zIndex, int rowIndex, int columnIndex) { 
-        Array3Bounds array3Bounds = pyon_Array3_get_bounds(this->getObject());
+        Array3Bounds array3Bounds = triolet_Array3_get_bounds(this->getObject());
 
         // The real index in each dimension is (i - lower_bound) / stride.
         // The remainder modulo the stride must be zero.
         int32_t x_displacement = columnIndex - array3Bounds.xmin;
         int xi = x_displacement / array3Bounds.xstride;
         if (x_displacement % array3Bounds.xstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t y_displacement = rowIndex - array3Bounds.ymin;
         int yi = y_displacement / array3Bounds.ystride;
         if (y_displacement % array3Bounds.ystride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t z_displacement = zIndex - array3Bounds.zmin;
         int zi = z_displacement / array3Bounds.zstride;
         if (z_displacement % array3Bounds.zstride != 0)
-          pyonError("Array index out of bounds\n");
+          trioletError("Array index out of bounds\n");
 
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        PyonBoxPtr *contents =
-          (PyonBoxPtr *)pyon_Array3_get_contents(this->getObject(),
-                                                 sizeof(PyonBoxPtr),
-                                                 __alignof__(PyonBoxPtr));
-        return Incomplete<StuckRef<T_Box> >((PyonBarePtr)&contents[index]);
+        TriBoxPtr *contents =
+          (TriBoxPtr *)triolet_Array3_get_contents(this->getObject(),
+                                                 sizeof(TriBoxPtr),
+                                                 __alignof__(TriBoxPtr));
+        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&contents[index]);
       }
   };
 
@@ -2372,9 +2372,9 @@ namespace Pyon {
         /* Get a reference to the contents of this boxed object.
          * Compute size of object header plus padding. */
         unsigned int contents_offset =
-          addPadding<T_Bare>(PYON_OBJECT_HEADER_SIZE);
-        PyonBarePtr contents_ptr =
-          (PyonBarePtr)((char *)this->getObject() + contents_offset);
+          addPadding<T_Bare>(TRIOLET_OBJECT_HEADER_SIZE);
+        TriBarePtr contents_ptr =
+          (TriBarePtr)((char *)this->getObject() + contents_offset);
         return Incomplete<T_Bare>(contents_ptr);
       }
   };
@@ -2486,14 +2486,14 @@ namespace Pyon {
   static inline void
   FromIntList(int *values, List<Int> l)
   {
-    int n = pyon_List_get_length(l.getBareData());
+    int n = triolet_List_get_length(l.getBareData());
     for (int i = 0; i < n; i++) values[i] = l.at(i);
   }
 
   static inline void
   FromFloatList(float *values, List<Float> l)
   {
-    int n = pyon_List_get_length(l.getBareData());
+    int n = triolet_List_get_length(l.getBareData());
     for (int i = 0; i < n; i++) values[i] = l.at(i);
   }
 
@@ -2536,7 +2536,7 @@ namespace Pyon {
     /* T::initializer exists and is POD */
     typename T::initializer init = *(typename T::initializer *)NULL;
 
-    PyonBarePtr p = x.getBareData();
+    TriBarePtr p = x.getBareData();
 
     /* Incomplete<T> methods */
     Incomplete<T> incomplete_t;
@@ -2561,7 +2561,7 @@ namespace Pyon {
     /* T::initializer exists and is POD */
     typename T::initializer init = *(typename T::initializer *)NULL;
 
-    PyonBoxPtr p = x.getBoxData();
+    TriBoxPtr p = x.getBoxData();
 
     /* Incomplete<T> methods */
     Incomplete<T> incomplete_t;
@@ -2577,7 +2577,7 @@ namespace Pyon {
   /* This function performs compile-time correctness checks.
    * It is not meant to be called. */
   static void
-  Pyon_concept_checks(void) {
+  Triolet_concept_checks(void) {
     void (*f_NoneType)(NoneType) = &ValType_concept;
     void (*f_Bool)(Bool)         = &ValType_concept;
     void (*f_Int)(Int)           = &ValType_concept;

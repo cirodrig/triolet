@@ -3,7 +3,7 @@
 #include "pairwise_interface.h"
 
 // Random points in a unit 3-ball
-PyonFloat x_coords[10] = {
+TrioletFloat x_coords[10] = {
   8.860380111462525e-2,
   -7.77867287578496e-2,
   0.547480095305359,
@@ -16,7 +16,7 @@ PyonFloat x_coords[10] = {
   -0.373228905809398
 };
 
-PyonFloat y_coords[10] = {
+TrioletFloat y_coords[10] = {
   -0.4240137931015375,
   -9.498282803571383e-3,
   0.6771305842970337,
@@ -29,7 +29,7 @@ PyonFloat y_coords[10] = {
   0.46424868573999234
 };
 
-PyonFloat z_coords[10] = {
+TrioletFloat z_coords[10] = {
   -0.29495616450322704,
   0.2366519985340191,
   0.20904609193304696,
@@ -43,15 +43,15 @@ PyonFloat z_coords[10] = {
 };
 
 int main() {
-  Pyon_init();
-  PyonList *x_list = pyon_List_PyonFloat_FromArray(10, x_coords);
-  PyonList *y_list = pyon_List_PyonFloat_FromArray(10, y_coords);
-  PyonList *z_list = pyon_List_PyonFloat_FromArray(10, z_coords);
+  Triolet_init();
+  TrioletList *x_list = triolet_List_Float_FromArray(10, x_coords);
+  TrioletList *y_list = triolet_List_Float_FromArray(10, y_coords);
+  TrioletList *z_list = triolet_List_Float_FromArray(10, z_coords);
 
-  PyonFloat energy = compute_energy(x_list, y_list, z_list);
-  pyon_List_PyonFloat_Free(x_list);
-  pyon_List_PyonFloat_Free(y_list);
-  pyon_List_PyonFloat_Free(z_list);
+  TrioletFloat energy = compute_energy(x_list, y_list, z_list);
+  triolet_List_Float_Free(x_list);
+  triolet_List_Float_Free(y_list);
+  triolet_List_Float_Free(z_list);
 
   if (energy < 56.59 || energy > 56.60)
     printf("not ok");

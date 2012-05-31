@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Three-dimensional scatter",
-  pyonSources	 = ["hist.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["hist.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "Ok"

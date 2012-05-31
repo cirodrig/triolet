@@ -59,9 +59,9 @@ assumeSingletonValue :: Type -> LL.Var -> Lower a -> Lower a
 assumeSingletonValue ty bound_var m =
   case fromVarApp ty
   of Just (con, [arg])
-       | con `isPyonBuiltin` The_Repr ->
+       | con `isCoreBuiltin` The_Repr ->
            assumeReprDict arg (LL.VarV bound_var) m
-       | con `isPyonBuiltin` The_FIInt ->
+       | con `isCoreBuiltin` The_FIInt ->
            assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
 
@@ -236,13 +236,13 @@ lowerLit lit =
   of IntL n ty ->
        case fromVarApp ty
        of Just (con, [])
-            | con `isPyonBuiltin` The_int ->
-              LL.LitV $ LL.IntL LL.Signed LL.pyonIntSize n
+            | con `isCoreBuiltin` The_int ->
+              LL.LitV $ LL.IntL LL.Signed LL.trioletIntSize n
      FloatL n ty ->
        case fromVarApp ty
        of Just (con, [])
-            | con `isPyonBuiltin` The_float ->
-              LL.LitV $ LL.FloatL LL.pyonFloatSize n
+            | con `isCoreBuiltin` The_float ->
+              LL.LitV $ LL.FloatL LL.trioletFloatSize n
 
 -- | Lower a data constructor application.  Generate code to construct a value.
 
@@ -478,7 +478,7 @@ lowerGlobalDefGroup defgroup k =
           -- If exported, add it to the export list
           k' v
             | is_exported = k (v, Nothing)
-            | otherwise = k (v, Just (v, PyonExportSig))
+            | otherwise = k (v, Just (v, TrioletExportSig))
 
           ty = case ent
                of FunEnt f  -> functionType f
@@ -509,7 +509,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       wrapped_fun <- createCMarshalingFunction c_export_sig fun
 
       -- Create function name.  Function is exported with the given name.
-      let label = externPyonLabel module_name exported_name (Just exported_name)
+      let label = externLabel module_name exported_name (Just exported_name)
       v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
       return (LL.Def v wrapped_fun, CExportSig c_export_sig)
 
@@ -523,7 +523,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       -- Create a function name.  This isn't the name the user sees.
       -- The function with this name will be put into object code.  It will
       -- be called from some automatically generated C++ source code.
-      let label = pyonLabel module_name exported_name
+      let label = plainLabel module_name exported_name
       v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
       return (LL.Def v wrapped_fun, CXXExportSig cxx_export_sig)
 

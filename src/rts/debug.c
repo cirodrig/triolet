@@ -1,26 +1,26 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include "pyon.h"
+#include "triolet.h"
 
 /* Debugging routines that can be called from pyon */
 
-void pyon_db_word(uint32_t w) {
-  fprintf(stderr, "pyon_db: %u\n", w);
+void triolet_db_word(uint32_t w) {
+  fprintf(stderr, "triolet_db: %u\n", w);
 }
 
-void pyon_db_int(int32_t i) {
-  fprintf(stderr, "pyon_db: %d\n", i);
+void triolet_db_int(int32_t i) {
+  fprintf(stderr, "triolet_db: %d\n", i);
 }
 
-void pyon_db_float(float f) {
-  fprintf(stderr, "pyon_db: %g\n", f);
+void triolet_db_float(float f) {
+  fprintf(stderr, "triolet_db: %g\n", f);
 }
 
-void pyon_db_pointer(void *p) {
-  fprintf(stderr, "pyon_db: %p\n", p);
+void triolet_db_pointer(void *p) {
+  fprintf(stderr, "triolet_db: %p\n", p);
 }
 
-void pyon_exit(int arg) {
+void triolet_exit(int arg) {
   exit(arg);
 }

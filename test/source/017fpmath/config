@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Floating-point intrinsic functions",
-  pyonSources	 = ["fp.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["fp.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "ok"

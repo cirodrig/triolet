@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Polymorphic parameter and return passing",
-  pyonSources	 = ["poly.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["poly.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "(11)(13)(2.71828)(3.14159)"

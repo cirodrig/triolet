@@ -1,4 +1,4 @@
-{-| Hard-coded file paths used when building Pyon.
+{-| Hard-coded file paths used when building Triolet.
 -}
 
 module SetupPaths where
@@ -10,13 +10,14 @@ import Distribution.Simple.BuildPaths
 import Distribution.Simple.LocalBuildInfo
 import Distribution.PackageDescription
 
--- | The directories where source files belonging to the \"pyon\" program are
-pyonSearchPaths :: LocalBuildInfo -> Executable -> [FilePath]
-pyonSearchPaths lbi exe = autogenModulesDir lbi : hsSourceDirs (buildInfo exe)
+-- | The directories where source files belonging to the \"triolet\" program are
+trioletSearchPaths :: LocalBuildInfo -> Executable -> [FilePath]
+trioletSearchPaths lbi exe =
+  autogenModulesDir lbi : hsSourceDirs (buildInfo exe)
 
--- | Destination for object files belonging to the \"pyon\" program
-pyonBuildDir :: LocalBuildInfo -> FilePath
-pyonBuildDir lbi = buildDir lbi </> "pyon"
+-- | Destination for object files belonging to the \"triolet\" program
+trioletBuildDir :: LocalBuildInfo -> FilePath
+trioletBuildDir lbi = buildDir lbi </> "triolet"
 
 -- | Directories containing source files belonging to the RTS
 rtsSearchPaths :: LocalBuildInfo -> [FilePath]
@@ -60,20 +61,19 @@ rtsCSourceFiles = ["apply_data.c", "memory.c", "debug.c"]
 -- | C++ Source files used in RTS
 rtsCxxSourceFiles = ["par_loops.cc"]
 
--- | Pyon-asm files used in RTS
-rtsPyAsmFiles = ["apply_new.pyasm",
-                 "memory_py.pyasm",
-                 "effects.pyasm",
-                 "prim.pyasm",
-                 "inplace.pyasm",
-                 "structures.pyasm",
-                 "complex.pyasm",
-		 "list.pyasm", "stream.pyasm"]
+-- | Triolet-asm files used in RTS
+rtsPyAsmFiles = ["apply_new.llt",
+                 "memory_py.llt",
+                 "effects.llt",
+                 "prim.llt",
+                 "inplace.llt",
+                 "structures.llt",
+		 "list.llt", "stream.llt"]
 
 -- | Data files that are not programmatically generated
-prebuiltDataFiles = ["include/pyon.h", "include/pyon_list.h",
-                     "include/pyon_matrix.h",
-                     "include/PyonData.h",
-                     "include/pyon/Base.h",
-                     "include/pyon/Layout.h",
+prebuiltDataFiles = ["include/triolet.h", "include/triolet_list.h",
+                     "include/triolet_matrix.h",
+                     "include/TrioletData.h",
+                     "include/triolet/Base.h",
+                     "include/triolet/Layout.h",
                      "symbols/corecode", "symbols/coretypes2"]

@@ -43,9 +43,9 @@ import Type.Compare
 
 arrayInitializerType len element_type =
   let length_type = IntT $ fromIntegral len
-      arr_type = varApp (pyonBuiltin The_arr) [length_type, element_type]
-  in varApp (pyonBuiltin The_OutPtr) [arr_type] `FunT`
-     VarT (pyonBuiltin The_Store)
+      arr_type = varApp (coreBuiltin The_arr) [length_type, element_type]
+  in varApp (coreBuiltin The_OutPtr) [arr_type] `FunT`
+     VarT (coreBuiltin The_Store)
 
 assumeAndAnnotatePat :: PatM -> TCM b -> TCM b
 assumeAndAnnotatePat (PatM (v ::: ty) _) k = do
@@ -141,7 +141,7 @@ typeInferCon con@(VarCon op ty_args ex_types) = do
   return (con_field_types, con_result_type)
   where
     make_initializer BareK ty =
-      varApp (pyonBuiltin The_OutPtr) [ty] `FunT` VarT (pyonBuiltin The_Store)
+      varApp (coreBuiltin The_OutPtr) [ty] `FunT` VarT (coreBuiltin The_Store)
     make_initializer _ ty = ty
 
 typeInferCon con@(TupleCon types) = do
@@ -299,7 +299,7 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
   let invalid_type =
         case expected_scr_type
         of FunT {} -> True
-           AppT (VarT v) _ | v `isPyonBuiltin` The_OutPtr -> True
+           AppT (VarT v) _ | v `isCoreBuiltin` The_OutPtr -> True
            _ -> False
   when invalid_type $ internalError "typeCheckAlternative: Invalid pattern"
 
@@ -366,7 +366,7 @@ typeInferArray inf ty es = do
   
   -- Expressions must have an initializer type
   let init_type = 
-        varApp (pyonBuiltin The_OutPtr) [ty] `FunT` VarT (pyonBuiltin The_Store)
+        varApp (coreBuiltin The_OutPtr) [ty] `FunT` VarT (coreBuiltin The_Store)
   let message = text "Expecting array element to have type " <+> pprType init_type
 
   forM_ e_tys $ \g_ty -> checkType message (getSourcePos inf) init_type g_ty
@@ -504,8 +504,8 @@ inferConAppType (VarCon op ty_args _) = do
       -- Create a writer function type, if it's a bare type
       in return $!
          case dataTypeKind data_type
-         of BareK -> varApp (pyonBuiltin The_OutPtr) [app_type] `FunT`
-                     VarT (pyonBuiltin The_Store)
+         of BareK -> varApp (coreBuiltin The_OutPtr) [app_type] `FunT`
+                     VarT (coreBuiltin The_Store)
             _ -> app_type
 
 inferConAppType (TupleCon ty_args) = do

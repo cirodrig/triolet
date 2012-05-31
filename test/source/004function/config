@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Function parameter passing",
-  pyonSources	 = ["function.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["function.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "42"

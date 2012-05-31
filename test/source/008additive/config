@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Additive dictionary passing",
-  pyonSources	 = ["add.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["add.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "(-21)(1.375)"

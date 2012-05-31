@@ -105,12 +105,12 @@ letViaBoxed :: Binder -> ExpM -> ExpM -> ExpM
 letViaBoxed binder rhs body =
   let -- Apply the 'boxed' constructor to the RHS
       ty = binderType binder
-      boxed_con = VarCon (pyonBuiltin The_boxed) [ty] []
+      boxed_con = VarCon (coreBuiltin The_boxed) [ty] []
       boxed_rhs = conE defaultExpInfo boxed_con [rhs]
   
       -- Create a case statement that binds a temporary value for the body
       expr = ExpM $ CaseE defaultExpInfo boxed_rhs [alt]
-      decon = VarDeCon (pyonBuiltin The_boxed) [ty] []
+      decon = VarDeCon (coreBuiltin The_boxed) [ty] []
       alt = AltM $ Alt { altCon = decon
                        , altParams = [patM binder]
                        , altBody = body}
@@ -133,8 +133,8 @@ ifE mk_cond mk_tr mk_fa = do
   cond <- mk_cond
   tr <- mk_tr
   fa <- mk_fa
-  let true_con = VarDeCon (pyonBuiltin The_True) [] []
-      false_con = VarDeCon (pyonBuiltin The_False) [] []
+  let true_con = VarDeCon (coreBuiltin The_True) [] []
+      false_con = VarDeCon (coreBuiltin The_False) [] []
       true  = AltM $ Alt true_con [] tr
       false = AltM $ Alt false_con [] fa
   return $ ExpM $ CaseE defaultExpInfo cond [true, false]
@@ -180,9 +180,9 @@ mkAlt tenv con ty_args mk_body =
        return $ AltM $ Alt decon patterns body
      _ -> internalError "mkAlt"
 
-outType t = varApp (pyonBuiltin The_OutPtr) [t]
-initEffectType t = VarT (pyonBuiltin The_Store)
-storedType t = varApp (pyonBuiltin The_Stored) [t]
+outType t = varApp (coreBuiltin The_OutPtr) [t]
+initEffectType t = VarT (coreBuiltin The_Store)
+storedType t = varApp (coreBuiltin The_Stored) [t]
 
 writerType t = outType t `FunT` initEffectType t
 

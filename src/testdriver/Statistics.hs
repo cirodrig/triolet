@@ -82,7 +82,7 @@ runTests :: forall a. Testable a => [a] -> IO ()
 runTests tests = do
   -- Set up temporary directory for tests
   tmp_base_dir <- getTemporaryDirectory
-  tmpdir <- mkdtemp (tmp_base_dir </> "pyontest.XXXXXX")
+  tmpdir <- mkdtemp (tmp_base_dir </> "triolettest.XXXXXX")
   bracket getCurrentDirectory setCurrentDirectory $ \_ -> do
     setCurrentDirectory tmpdir
     

@@ -84,18 +84,18 @@ data ExternDecl a =
     -- file.
     ExternDecl 
     { -- | Type of the external symbol
-      externType :: !(ExternType a)
+      extType :: !(ExternType a)
       -- | Symbol name
-    , externLabel :: Label
+    , extLabel :: Label
     }
     -- | An imported symbol that was not created by the Pyon compiler.
   | ImportDecl 
     { -- | Type of the external symbol.  Must be procedure or data.
-      externType :: !(ExternType a)
+      extType :: !(ExternType a)
       -- | Symbol name
-    , externLabel :: Label
+    , extLabel :: Label
       -- | The variable representing this symbol
-    , externVar :: VarName a
+    , extVar :: VarName a
     }
 
 -- | A definition

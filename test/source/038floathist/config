@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "2D floating-point histogram",
-  pyonSources	 = ["fhist.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["fhist.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "ok"

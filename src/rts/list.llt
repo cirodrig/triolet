@@ -1,0 +1,563 @@
+
+module core.internal.list;
+
+#include "rts.h"
+#include "debug.h"
+#include "prim.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "stream.h"
+#include "list.h"
+#include "structures.h"
+
+import procedure exit "exit" (int) -> ();
+
+#include "new_pyasm_records.h"
+
+function repr_list (owned elem_repr) -> owned {
+  repr = pointer primcall triolet_alloc (sizeof Repr);
+
+  // FIXME: Initialize repr header
+  repr @! Repr.sizealign = SA {sizeof List, alignof List};
+  repr @! Repr.is_pointerless = NOT_POINTERLESS;
+  copy_function = owned call list_copy (elem_repr);
+  repr @! Repr.copy = copy_function;
+  repr @! Repr.convert_to_boxed =
+    owned call make_Boxed (sizeof List, alignof List);
+  repr @! Repr.convert_to_bare =
+    owned call from_Boxed (sizeof List, alignof List, copy_function);
+  repr as owned;
+};
+
+function list_copy (owned elem_repr, pointer src, pointer dst) -> unit {
+  dst @! List.nelems = src @! List.nelems;
+  dst @! List.contents = src @! List.contents;
+  nil;
+};
+
+// Create a list, leaving its elements uninitialized
+procedure list_create_uninitialized (owned elem_repr,
+                                     int nelems,
+                                     pointer list) -> () {
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef array_type = array(value nelems, elem_type);
+  
+  list @! List.nelems = FinIndInt {nelems};
+  list @! List.contents = if (elem_repr @! Repr.is_pointerless) {
+    pointer primcall triolet_alloc_nopointers (sizeof Boxed(array_type)) as owned;
+  } else {
+    pointer primcall triolet_alloc (sizeof Boxed(array_type)) as owned;
+  };
+  ();
+};
+
+// Increase the size of a list.  The list's 'contents' field may be modified.
+// The list's 'size' field is ignored.
+// Returns the new list size.
+//
+// The old list contents are
+// copied to the new list; the new contents are uninitialized.
+procedure list_grow (pointer elem_repr, pointer list, int old_size) -> int {
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+
+  typedef old_array_type = array(value old_size, elem_type);
+  new_size = old_size * int 2;
+  typedef new_array_type = array(value new_size, elem_type);
+
+  old_contents = list @! List.contents;
+  new_contents = if (elem_repr @! Repr.is_pointerless) {
+    pointer primcall triolet_alloc_nopointers (sizeof Boxed(new_array_type));
+  } else {
+    pointer primcall triolet_alloc (sizeof Boxed(new_array_type));
+  };
+
+  // Copy old contents to new list
+  _ = pointer primcall memcpy (new_contents @ Boxed(new_array_type).member,
+                               old_contents @ Boxed(old_array_type).member,
+                               sizeof old_array_type);
+
+  // Free old contents
+  () = () primcall triolet_dealloc(old_contents);
+
+  // Save new list contents.
+  // Don't save the new size anywhere; caller is responsible for keeping
+  // track.
+  list @! List.contents = new_contents as owned;
+  new_size;
+};
+
+// Get the length of a list
+function inline list_len (pointer p) -> int {
+  FinIndInt {n} = p @! List.nelems;
+  n;
+};
+
+// Create a list from a stream of unknown size
+function list_build
+    (owned elem_repr, owned stream, pointer ret) -> unit {
+  typedef Stream = Obj(StreamData);
+
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef array_type = Boxed(array(value int 0, elem_type));
+
+  // Initialize list with 4 elements
+  list_size = int 4;
+  () = () primcall list_create_uninitialized (elem_repr, list_size, ret);
+
+  // Set up stream
+  stream_init_state = stream @! Stream.payload.state;
+  stream_next = stream @! Stream.payload.next;
+
+  // Populate the list contents (pull_values); then finish building the list.
+  letrec {
+    procedure pull_values (int n_elems, int list_size, owned stream_state) -> unit {
+      // Make sure list can hold another element
+      new_list_size = if (n_elems == list_size) {
+        int primcall list_grow (elem_repr, ret, list_size);
+      } else {
+        list_size;
+      };
+
+      // Pull from the stream
+      StreamNext {result_tag, StreamNextData {next_state, result_val}} =
+        StreamNext call stream_next (stream_state);
+
+      if (result_tag == STREAM_VALUE) {
+        // Copy this value to the destination.
+        // The value was stored as a boxed object; convert it to a bare object.
+        current_elem = (ret @! List.contents) @ array_type.member[n_elems];
+        _ = unit call (elem_repr @! Repr.convert_to_bare) (result_val, current_elem);
+
+        // Continue pulling
+        unit primcall pull_values (n_elems + int 1, new_list_size, next_state);
+      } else {
+        // Stream is depleted.  Finish constructing list.
+        unit primcall finish (n_elems);
+      };
+    };
+
+    procedure finish (int n_elems) -> unit {
+      // Save the number of list elements that was created
+      ret @! List.nelems = FinIndInt {n_elems};
+      nil;
+    }
+  };
+  unit primcall pull_values (int 0, list_size, stream_init_state);
+};
+
+// Allocate and construct a list, given a suitably initialized array object.
+// A pointer to the new list is returned.
+procedure triolet_list_from_array (int n_elems,
+                                owned arr) -> pointer {
+  l = pointer primcall triolet_alloc (sizeof List);
+  l @! List.nelems = FinIndInt {n_elems};
+  l @! List.contents = arr;
+  l;
+};
+
+// Copy the contents of a plain-old-data list into an array.
+// The list is not modified.
+procedure triolet_list_to_array_POD (owned elem_repr,
+                                  pointer list,
+                                  pointer arr) -> () {
+  FinIndInt {n_elems} = list @! List.nelems;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef array_type = array(value n_elems, elem_type);
+
+  () = () primcall memcpy
+    (arr,
+     (list @! List.contents) @ Boxed(array_type).member,
+     sizeof array_type);
+  ();
+};
+
+procedure triolet_list_length (pointer list) -> int {
+  FinIndInt {n} = list @! List.nelems;
+  n;
+};
+
+// Free the POD list.
+procedure triolet_list_free_POD (pointer list) -> () {
+  () = () primcall triolet_dealloc(list @! List.contents);
+  () primcall triolet_dealloc(list);
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// Matrix functions
+
+function repr_array2 (owned elem_repr) -> owned {
+  repr = pointer primcall triolet_alloc (sizeof Repr);
+
+  // FIXME: initialize repr header
+  repr @! Repr.sizealign = SA {sizeof Array2, alignof Array2};
+  repr @! Repr.is_pointerless = NOT_POINTERLESS;
+  copy_function = owned call matrix_copy (elem_repr);
+  repr @! Repr.copy = copy_function;
+  repr @! Repr.convert_to_boxed =
+    owned call make_Boxed (sizeof Array2, alignof Array2);
+  repr @! Repr.convert_to_bare =
+    owned call from_Boxed (sizeof Array2, alignof Array2, copy_function);
+  repr as owned;
+};
+
+function matrix_copy (owned elem_repr, pointer src, pointer dst) -> unit {
+  first_y = src @! Array2.first_y;
+  stride_y = src @! Array2.stride_y;
+  FinIndInt {size_y} = src @! Array2.size_y;
+  first_x = src @! Array2.first_x;
+  stride_x = src @! Array2.stride_x;
+  FinIndInt {size_x} = src @! Array2.size_x;
+  src_contents = src @! Array2.contents;
+
+  dst @! Array2.first_y = first_y;
+  dst @! Array2.stride_y = stride_y;
+  dst @! Array2.size_y = FinIndInt {size_y};
+  dst @! Array2.first_x = first_x;
+  dst @! Array2.stride_x = stride_x;
+  dst @! Array2.size_x = FinIndInt {size_x};
+
+  // Copy list elements
+  dst @! Array2.contents = src @! Array2.contents;
+  nil;
+};
+
+// Allocate and construct a matrix, given a suitably initialized data array.
+// The data array is stolen by the matrix.
+// A pointer to the new matrix is returned.
+procedure triolet_matrix_from_array
+  (int ymin, int ystride, int ysize,
+   int xmin, int xstride, int xsize, pointer contents) -> pointer {
+  mat = pointer primcall triolet_alloc (sizeof Array2);
+  mat @! Array2.first_y = ymin;
+  mat @! Array2.stride_y = ystride;
+  mat @! Array2.size_y = FinIndInt {ysize};
+  mat @! Array2.first_x = xmin;
+  mat @! Array2.stride_x = xstride;
+  mat @! Array2.size_x = FinIndInt {xsize};
+  mat @! Array2.contents = contents;
+  mat;
+};
+
+// Copy the contents of a plain-old-data matrix into an array.
+// The matrix is not modified.
+procedure triolet_matrix_to_array_POD (owned elem_repr,
+                                    pointer mat,
+                                    pointer arr) -> () {
+  FinIndInt {h} = mat @! Array2.size_y;
+  FinIndInt {w} = mat @! Array2.size_x;
+  SA {elem_size, elem_align} = elem_repr @! Repr.sizealign;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef array_type = array(value h * w, elem_type);
+
+  () = () primcall memcpy
+    (arr,
+     mat @! Array2.contents @ Boxed(array_type).member,
+     sizeof array_type);
+  ();
+};
+
+// Free the POD matrix.
+procedure triolet_matrix_free_POD (pointer mat) -> () {
+  () = () primcall triolet_dealloc(mat @! Array2.contents);
+  () primcall triolet_dealloc(mat);
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// Exported to C for the C++ interface
+
+data pointer triolet_List_size = sizeof List;
+data pointer triolet_List_alignment = alignof List;
+
+// Allocate a boxed list with the given length.
+// The boolean parameter is true if the list contains POD data.
+procedure triolet_List_initialize
+  (int length, uint elt_size, uint elt_align, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value length, elt_type);
+  ret @! List.nelems = FinIndInt {length};
+  ret @! List.contents =
+    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+  ();
+};
+
+procedure triolet_List_get_contents (pointer lst, uint size, uint align) -> pointer {
+  // Use the alignment of list contents to figure out where the array begins
+  typedef contents_dummy_type = Boxed(bytes(value size, value align));
+  lst @! List.contents @ contents_dummy_type.member;
+};
+
+procedure triolet_List_get_length (pointer lst) -> uint {
+  FinIndInt {n} = lst @! List.nelems;
+  n as uint;
+};
+
+procedure triolet_Array0_size (uint size, uint align) -> uint {
+  sizeof Array0(bytes(value size, value align));
+};
+
+procedure triolet_Array0_alignment (uint size, uint align) -> uint {
+  alignof Array0(bytes(value size, value align));
+};
+
+procedure triolet_Array0_get_contents
+  (pointer arr, uint size, uint align) -> pointer {
+  arr @ Array0(bytes(value size, value align)).content;
+};
+
+data pointer triolet_Array1_size = sizeof Array1;
+data pointer triolet_Array1_alignment = alignof Array1;
+
+procedure triolet_Array1_initialize
+  (int min, int stride, int size, uint elt_size, uint elt_align,
+   pointer ret) -> () {
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value size, elt_type);
+
+  ret @! Array1.first = min;
+  ret @! Array1.stride = stride;
+  ret @! Array1.size = FinIndInt {size};
+  ret @! Array1.contents =
+    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+  ();
+};
+
+procedure triolet_Array1_get_contents (pointer arr, uint size, uint align) -> pointer {
+  typedef contents_dummy_type = Boxed(bytes(value size, value align));
+  arr @! Array1.contents @ contents_dummy_type.member;
+};
+
+procedure triolet_Array1_get_bounds (pointer arr) -> Tuple3(int, int, int)
+{
+  FinIndInt {size} = arr @! Array1.size;
+  Tuple3(int, int, int)
+  {arr @! Array1.first,
+   arr @! Array1.stride,
+   size};
+};
+
+
+data pointer triolet_Array2_size = sizeof Array2;
+data pointer triolet_Array2_alignment = alignof Array2;
+
+procedure triolet_Array2_initialize
+  (int y_min, int y_stride, int y_size, int x_min, int x_stride, int x_size,
+   uint elt_size, uint elt_align, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value y_size, array(value x_size, elt_type));
+
+  ret @! Array2.first_y = y_min;
+  ret @! Array2.stride_y = y_stride;
+  ret @! Array2.size_y = FinIndInt {y_size};
+  ret @! Array2.first_x = x_min;
+  ret @! Array2.stride_x = x_stride;
+  ret @! Array2.size_x = FinIndInt {x_size};
+  ret @! Array2.contents =
+    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+  ();
+};
+
+procedure triolet_Array2_get_contents (pointer arr, uint size, uint align) -> pointer {
+  typedef contents_dummy_type = Boxed(bytes(value size, value align));
+  arr @! Array2.contents @ contents_dummy_type.member;
+};
+
+procedure triolet_Array2_get_bounds (pointer arr)
+  -> Tuple6(int, int, int, int, int, int)
+{
+  FinIndInt {size_y} = arr @! Array2.size_y;
+  FinIndInt {size_x} = arr @! Array2.size_x;
+  Tuple6(int, int, int, int, int, int)
+  {arr @! Array2.first_y,
+   arr @! Array2.stride_y,
+   size_y,
+   arr @! Array2.first_x,
+   arr @! Array2.stride_x,
+   size_x};
+};
+
+data pointer triolet_Array3_size = sizeof Array3;
+data pointer triolet_Array3_alignment = alignof Array3;
+
+procedure triolet_Array3_initialize
+  (int z_min, int z_stride, int z_size,
+   int y_min, int y_stride, int y_size,
+   int x_min, int x_stride, int x_size,
+   uint elt_size, uint elt_align, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value y_size, array(value x_size, elt_type));
+
+  ret @! Array3.first_z = z_min;
+  ret @! Array3.stride_z = z_stride;
+  ret @! Array3.size_z = FinIndInt {z_size};
+  ret @! Array3.first_y = y_min;
+  ret @! Array3.stride_y = y_stride;
+  ret @! Array3.size_y = FinIndInt {y_size};
+  ret @! Array3.first_x = x_min;
+  ret @! Array3.stride_x = x_stride;
+  ret @! Array3.size_x = FinIndInt {x_size};
+  ret @! Array3.contents =
+    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+  ();
+};
+
+procedure triolet_Array3_get_contents (pointer arr, uint size, uint align) -> pointer {
+  typedef contents_dummy_type = Boxed(bytes(value size, value align));
+  arr @! Array3.contents @ contents_dummy_type.member;
+};
+
+procedure triolet_Array3_get_bounds (pointer arr)
+  -> Tuple3(Tuple3(int, int, int),
+            Tuple3(int, int, int),
+            Tuple3(int, int, int))
+{
+  FinIndInt {size_z} = arr @! Array3.size_z;
+  FinIndInt {size_y} = arr @! Array3.size_y;
+  FinIndInt {size_x} = arr @! Array3.size_x;
+  Tuple3(Tuple3(int, int, int),
+         Tuple3(int, int, int),
+         Tuple3(int, int, int))
+  {Tuple3(int, int, int)
+   {arr @! Array3.first_z,
+    arr @! Array3.stride_z,
+    size_z},
+   Tuple3(int, int, int)
+   {arr @! Array3.first_y,
+    arr @! Array3.stride_y,
+    size_y},
+   Tuple3(int, int, int)
+   {arr @! Array3.first_x,
+    arr @! Array3.stride_x,
+    size_x}};
+};
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Exported to C for the C interface
+
+// Create a list from an array of CInt.
+// The list holds a copy of the given array.
+procedure triolet_List_Int_FromArray (int n_elems, pointer arr) -> pointer {
+  typedef array_type = array(value n_elems, int);
+ 
+  new_arr = pointer primcall triolet_alloc_nopointers (sizeof Boxed(array_type));
+  () = () primcall memcpy (new_arr @ Boxed(array_type).member, arr, sizeof array_type);
+  pointer primcall triolet_list_from_array(n_elems, new_arr as owned);
+};
+
+// Copy the contents of a list into an array
+procedure triolet_List_Int_ToArray (pointer list, pointer dat) -> () {
+  () primcall triolet_list_to_array_POD (repr_int, list, dat);
+};
+
+procedure triolet_List_Int_Length (pointer list) -> int {
+  l = int primcall triolet_list_length (list);
+  l as int;
+};
+
+procedure triolet_List_Int_Copy (pointer list) -> pointer {
+  pointer call list_copy (repr_int, list);
+};
+
+procedure triolet_List_Int_Free (pointer list) -> () {
+  pointer primcall triolet_list_free_POD (list);
+};
+
+
+procedure triolet_List_Float_FromArray (int n_elems, pointer arr) -> pointer {
+  typedef array_type = array(value n_elems, float);
+ 
+  new_arr = pointer primcall triolet_alloc_nopointers (sizeof Boxed(array_type));
+  () = () primcall memcpy (new_arr @ Boxed(array_type).member, arr,
+                           sizeof array_type);
+  pointer primcall triolet_list_from_array(n_elems, new_arr as owned);
+};
+
+// Copy the contents of a list into an array
+procedure triolet_List_Float_ToArray (pointer list, pointer dat) -> () {
+  () primcall triolet_list_to_array_POD (repr_float, list, dat);
+};
+
+procedure triolet_List_Float_Length (pointer list) -> int {
+  l = int primcall triolet_list_length (list);
+  l as int;
+};
+
+procedure triolet_List_Float_Copy (pointer list) -> pointer {
+  pointer call list_copy (repr_float, list);
+};
+
+procedure triolet_List_Float_Free (pointer list) -> () {
+  pointer primcall triolet_list_free_POD (list);
+};
+
+procedure triolet_Matrix_Int_FromArray
+  (int ymin, int yend, int xmin, int xend, pointer arr) -> pointer {
+  height = yend - ymin;
+  width = xend - xmin;
+  n_elems = height * width;
+  typedef array_type = array(value n_elems, int);
+
+  new_arr = pointer primcall triolet_alloc_nopointers (sizeof Boxed(array_type));
+  () = () primcall memcpy(new_arr @ Boxed(array_type).member, arr, sizeof array_type);
+  pointer primcall triolet_matrix_from_array(ymin, int 1, height,
+                                          xmin, int 1, width,
+                                          new_arr as owned);
+};
+
+procedure triolet_Matrix_Int_ToArray(pointer mat, pointer dat) -> () {
+  () primcall triolet_matrix_to_array_POD (repr_int, mat, dat);
+};
+
+procedure triolet_Matrix_Int_Height (pointer mat) -> int {
+  mat @! Array2.size_y;
+};
+
+procedure triolet_Matrix_Int_Width (pointer mat) -> int {
+  mat @! Array2.size_x;
+};
+
+procedure triolet_Matrix_Int_Copy (pointer mat) -> pointer {
+  pointer call matrix_copy (repr_int, mat);
+};
+
+procedure triolet_Matrix_Int_Free (pointer mat) -> () {
+  pointer primcall triolet_matrix_free_POD (mat);
+};
+
+procedure triolet_Matrix_Float_FromArray
+  (int ymin, int yend, int xmin, int xend, pointer arr) -> pointer {
+  height = yend - ymin;
+  width = xend - xmin;
+  n_elems = height * width;
+  typedef array_type = array(value n_elems, float);
+
+  new_arr = pointer primcall triolet_alloc_nopointers (sizeof Boxed(array_type));
+  () = () primcall memcpy(new_arr @ Boxed(array_type).member, arr, sizeof array_type);
+  pointer primcall triolet_matrix_from_array(ymin, int 1, height,
+                                          xmin, int 1, width,
+                                          new_arr as owned);
+};
+
+procedure triolet_Matrix_Float_ToArray(pointer mat, pointer dat) -> () {
+  () primcall triolet_matrix_to_array_POD (repr_float, mat, dat);
+};
+
+procedure triolet_Matrix_Float_Height (pointer mat) -> int {
+  mat @! Array2.size_y;
+};
+
+procedure triolet_Matrix_Float_Width (pointer mat) -> int {
+  mat @! Array2.size_x;
+};
+
+procedure triolet_Matrix_Float_Copy (pointer mat) -> pointer {
+  pointer call matrix_copy (repr_float, mat);
+};
+
+procedure triolet_Matrix_Float_Free (pointer mat) -> () {
+  pointer primcall triolet_matrix_free_POD (mat);
+};

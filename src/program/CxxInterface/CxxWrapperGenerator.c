@@ -30,7 +30,6 @@ printCxxFunction(FILE* fp, char* wrappedFunctionName, char* wrapperFunctionName,
   Function* wrapperFunction = createWrapperFunctionDefinition(p, wrapperFunctionName, pyonSignature, wrappedFunction);
 
   // Print ASTs
-  fputs("\n#include <PyonData.h>\n\n", fp);
   printFunction(fp, wrappedFunction);
   fputs("\n", fp);
   printFunction(fp, wrapperFunction);
@@ -345,7 +344,7 @@ Type* pyonToWrappedParamType(Pool* p, const PyonType* pyonType) {
       return pyonToWrappedValType(p, pyonType);
       break;
     case BareTypeTag:
-      return createTmplNameInNamespace (p, TmplName_create_zero_types(p, Name_create_static(p, "PyonBarePtr")));
+      return createTmplNameInNamespace (p, TmplName_create_zero_types(p, Name_create_static(p, "TriBarePtr")));
       break;
     default: ERR("invalid TypeKindTag in function pyonToWrappedParamType(Pool*, PyonType*)");
   }
@@ -511,7 +510,7 @@ newVariableName(Pool* p) {
 Type*
 createTmplNameInNamespace (Pool* p, TmplName* tmplName) {
       QName* qName = QName_tmplName_create(p, tmplName);
-      qName = QName_namespace_qName_create(p, Name_create_static(p, "Pyon"), qName);
+      qName = QName_namespace_qName_create(p, Name_create_static(p, "Triolet"), qName);
       return Type_qName_create(p, qName);
 }
 

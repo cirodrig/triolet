@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Builtins.BuiltinsTH where
        
-pyonBuiltinTypeNames =
+builtinTypeNames =
   [ "bool"
   , "int"
   , "uint"
@@ -27,11 +27,11 @@ pyonBuiltinTypeNames =
   , "LinearMap"
   , "SliceObject"
   , "InternalSlice"             -- TODO: remove this type
-  , "PyonTuple0"
-  , "PyonTuple1"
-  , "PyonTuple2"
-  , "PyonTuple3"
-  , "PyonTuple4"
+  , "Tuple0"
+  , "Tuple1"
+  , "Tuple2"
+  , "Tuple3"
+  , "Tuple4"
   , "Stream"
   , "Stream1"
   , "Sequence"
@@ -103,7 +103,7 @@ pyonBuiltinTypeNames =
   , "CartesianDict"
   ]
 
-pyonBuiltinVariableNames =
+builtinVariableNames =
   [ -- Data constructors
     "True"
   , "False"
@@ -114,11 +114,11 @@ pyonBuiltinVariableNames =
   , "sliceObject"
   , "internalSlice"             -- TODO: Remove this object
   , "emptySlice"                -- TODO: Remove this object
-  , "pyonTuple0"
-  , "pyonTuple1"
-  , "pyonTuple2"
-  , "pyonTuple3"
-  , "pyonTuple4"
+  , "tuple0"
+  , "tuple1"
+  , "tuple2"
+  , "tuple3"
+  , "tuple4"
   , "just"
   , "nothing"
   , "justVal"
@@ -224,11 +224,11 @@ pyonBuiltinVariableNames =
   , "repr_arr_2"
   , "repr_EffTok"
   , "repr_SliceObject"
-  , "repr_PyonTuple0"
-  , "repr_PyonTuple1"
-  , "repr_PyonTuple2"
-  , "repr_PyonTuple3"
-  , "repr_PyonTuple4"
+  , "repr_Tuple0"
+  , "repr_Tuple1"
+  , "repr_Tuple2"
+  , "repr_Tuple3"
+  , "repr_Tuple4"
   , "ShapeDict_list_dim"
   , "ShapeDict_dim0"
   , "ShapeDict_dim1"
@@ -368,10 +368,10 @@ pyonBuiltinVariableNames =
   , "AdditiveDict_float_sub"
   , "AdditiveDict_float_negate"
   , "AdditiveDict_float_zero"
-  , "AdditiveDict_PyonTuple2_add"
-  , "AdditiveDict_PyonTuple2_sub"
-  , "AdditiveDict_PyonTuple2_negate"
-  , "AdditiveDict_PyonTuple2_zero"
+  , "AdditiveDict_Tuple2_add"
+  , "AdditiveDict_Tuple2_sub"
+  , "AdditiveDict_Tuple2_negate"
+  , "AdditiveDict_Tuple2_zero"
   , "AdditiveDict_Complex_add"
   , "AdditiveDict_Complex_sub"
   , "AdditiveDict_Complex_negate"

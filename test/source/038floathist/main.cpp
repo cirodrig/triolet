@@ -1,10 +1,8 @@
 
 #include <stdio.h>
-#include <pyon.h>
-#include <PyonData.h>
 #include "fhist_cxx.h"
 
-using namespace Pyon;
+using namespace Triolet;
 
 // Each input is a coordinate and a value
 struct Input {
@@ -13,7 +11,7 @@ struct Input {
   float value;
 };
 
-typedef Tuple<Tuple<Int, Int>, Float> PyonInput;
+typedef Tuple<Tuple<Int, Int>, Float> TriInput;
 
 #define N_INPUTS 10
 
@@ -38,8 +36,8 @@ float outputs[2][3] = {
   {-0.375, 3.0625, -1}
 };
 
-List<PyonInput> make_inputs(void) {
-  Incomplete<List<PyonInput> > mk_list;
+List<TriInput> make_inputs(void) {
+  Incomplete<List<TriInput> > mk_list;
   mk_list.create(N_INPUTS);
   int i;
   for (i = 0; i < N_INPUTS; i++) {
@@ -52,8 +50,8 @@ List<PyonInput> make_inputs(void) {
 
 int main()
 {
-  GC_INIT();
-  List<PyonInput> arr = make_inputs();
+  Triolet_init();
+  List<TriInput> arr = make_inputs();
   Array2<Float> result = f(arr);
 
   // Check output

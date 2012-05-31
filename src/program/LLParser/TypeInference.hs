@@ -396,7 +396,7 @@ getCurrentTypeArity = NR $ \ctx env errs ->
 createVar :: String -> ValueType -> NR LL.Var
 createVar name ty = do
   module_name <- getSourceModuleName
-  let label = pyonLabel module_name name
+  let label = plainLabel module_name name
   LL.newVar (Just label) ty
 
 {-
@@ -405,7 +405,7 @@ createVar name ty = do
 createExternalVar :: ModuleName -> String -> Maybe String -> ValueType
                   -> NR LL.Var
 createExternalVar module_name name ext_name ty = do
-  let label = pyonLabel module_name name
+  let label = plainLabel module_name name
   LL.newExternalVar label ty-}
 
 -- | Create a global variable in the current module.  If the variable has
@@ -1190,7 +1190,7 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
     Nothing -> return ()
   where
     compare_to_import =
-      case (externType edef, impent)
+      case (extType edef, impent)
       of (ExternProcedure domain range, LL.ImportPrimFun _ imptype _) ->
            let domain' = map convertToValueType domain
                range' = map convertToValueType range
@@ -1220,10 +1220,10 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
 
     compare_to_def (FunctionDefEnt d)
       | functionIsProcedure d, 
-        ExternProcedure e_domain e_range <- externType edef =
+        ExternProcedure e_domain e_range <- extType edef =
           compare_function_type e_domain e_range
       | not (functionIsProcedure d),
-        ExternFunction e_domain e_range <- externType edef =
+        ExternFunction e_domain e_range <- extType edef =
           compare_function_type e_domain e_range
       | otherwise =
           throwErrorMaybe incompatible_definition
@@ -1240,7 +1240,7 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
              else incompatible_definition
 
     compare_to_def (DataDefEnt d)
-      | ExternData e_type <- externType edef =
+      | ExternData e_type <- extType edef =
         throwErrorMaybe $
         if dataType d == e_type
         then Nothing
@@ -1266,11 +1266,11 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
 resolveExternDecl :: ExternDecl Parsed
                   -> NR (ExternDecl Typed, Bool, LL.Import)
 resolveExternDecl decl = do
-  let label = externLabel decl
-  let primtype = externTypePrimType (externType decl)
+  let label = extLabel decl
+  let primtype = externTypePrimType (extType decl)
   
   -- Resolve the type
-  new_type <- resolveExternType (externType decl)
+  new_type <- resolveExternType (extType decl)
   
   -- If it's a builtin variable, get the imported variable.
   -- Otherwise, create an Import structure.
@@ -1333,7 +1333,7 @@ defineExternalVar :: ExternDecl Parsed
 defineExternalVar decl = do
   (resolved_decl, is_builtin, impent) <- resolveExternDecl decl
   let var = LL.importVar impent
-      ty  = externTypePrimType $ externType decl
+      ty  = externTypePrimType $ extType decl
   -- If the variable is not in the current module, then define it.
   -- Otherwise, it will be defined later.
   current_module <- getSourceModuleName

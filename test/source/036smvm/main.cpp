@@ -1,10 +1,9 @@
 
 #include <iostream>
 #include <math.h>
-#include <pyon.h>
 #include "smvm_cxx.h"
 
-using namespace Pyon;
+using namespace Triolet;
 
 typedef Array1<List<Tuple<Int, Float> > > SparseMatrix;
 
@@ -28,7 +27,7 @@ void InitializeRow(Incomplete<List<Tuple<Int, Float> > > row,
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
 
   Incomplete<SparseMatrix> i_sparse_matrix;
   Incomplete<Array1<Float> > i_vector;

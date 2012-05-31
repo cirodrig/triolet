@@ -620,8 +620,8 @@ nullaryValueConCode value fields
 
 boolLayout :: AlgValLayout
 boolLayout = enumValLayout
-             [ (pyonBuiltin The_False, LL.BoolL False, [])
-             , (pyonBuiltin The_True, LL.BoolL True, [])]
+             [ (coreBuiltin The_False, LL.BoolL False, [])
+             , (coreBuiltin The_True, LL.BoolL True, [])]
 
 -- | Create the layout of a boxed reference, given the layout of the referent.
 --
@@ -724,7 +724,7 @@ memRecordLayout mk_record = DynamicMemLayout $ do
 --   any possible value of the referent type.
 referenceLayout :: MemLayout -> MemProd
 referenceLayout layout =
-  MemProd (VarTag $ pyonBuiltin The_referenced) IndirectMemLayout
+  MemProd (VarTag $ coreBuiltin The_referenced) IndirectMemLayout
   [MemLayout layout] builder writer reader
   where
     builder m_name [obj_value] = do
@@ -1162,11 +1162,11 @@ getValAlgLayout ty =
   of TypeLevel ->
        case fromTypeApp ty
        of (VarT op, args)
-            | op `isPyonBuiltin` The_bool  -> return boolLayout
-            | op `isPyonBuiltin` The_int   -> not_algebraic
-            | op `isPyonBuiltin` The_uint  -> not_algebraic
-            | op `isPyonBuiltin` The_float -> not_algebraic
-            | op `isPyonBuiltin` The_Pf    -> return AVErased
+            | op `isCoreBuiltin` The_bool  -> return boolLayout
+            | op `isCoreBuiltin` The_int   -> not_algebraic
+            | op `isCoreBuiltin` The_uint  -> not_algebraic
+            | op `isCoreBuiltin` The_float -> not_algebraic
+            | op `isCoreBuiltin` The_Pf    -> return AVErased
             | otherwise -> do
                 tenv <- getTypeEnv
                 case lookupDataTypeForLayout tenv ty of
@@ -1273,7 +1273,7 @@ getRefAlgLayout :: Type -> Lower AlgMemLayout
 getRefAlgLayout ty =
   case fromVarApp ty
   of {-Just (op, [arg])
-        | op `isPyonBuiltin` The_Referenced -> do
+        | op `isCoreBuiltin` The_Referenced -> do
            arg_layout <- getRefLayout =<< reduceToWhnf arg
            return $ nonSumMemLayout $ referenceLayout arg_layout-}
      _ -> do
@@ -1332,11 +1332,11 @@ getValLayout ty
       ty' <- Substitute.freshen ty
       case fromTypeApp ty' of
          (VarT op, args)
-           | op `isPyonBuiltin` The_bool  -> prim_layout LL.BoolType
-           | op `isPyonBuiltin` The_int   -> prim_layout LL.pyonIntType
-           | op `isPyonBuiltin` The_uint  -> prim_layout LL.pyonUintType
-           | op `isPyonBuiltin` The_float -> prim_layout LL.pyonFloatType
-           | op `isPyonBuiltin` The_Pf    -> return VErased
+           | op `isCoreBuiltin` The_bool  -> prim_layout LL.BoolType
+           | op `isCoreBuiltin` The_int   -> prim_layout LL.trioletIntType
+           | op `isCoreBuiltin` The_uint  -> prim_layout LL.trioletUintType
+           | op `isCoreBuiltin` The_float -> prim_layout LL.trioletFloatType
+           | op `isCoreBuiltin` The_Pf    -> return VErased
            | otherwise -> do
                tenv <- getTypeEnv
                case toBaseKind $ typeKind tenv ty' of
@@ -1381,10 +1381,10 @@ getRefLayout ty = do
   ty' <- Substitute.freshen ty
   case fromTypeApp ty' of
      {-(VarT op, [arg])
-       | op `isPyonBuiltin` The_Referenced -> do
+       | op `isCoreBuiltin` The_Referenced -> do
            return IndirectMemLayout-}
      (VarT op, [arg1, arg2])
-       | op `isPyonBuiltin` The_arr -> do
+       | op `isCoreBuiltin` The_arr -> do
            field_layout <- getRefLayout =<< reduceToWhnf arg2
            return $ arrayLayout (lookupIndexedInt arg1) field_layout
      (AllT (v ::: k) rng, []) ->

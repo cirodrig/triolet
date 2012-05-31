@@ -1,24 +1,24 @@
 
 /* Object deallocation functions */
-void free_pap(PyonPtr);
+void free_pap(TrioletPtr);
 
 /* Apply functions */
-PyonPtr
-apply_o_f(PyonPtr obj, PyonPtr arg);
+TrioletPtr
+apply_o_f(TrioletPtr obj, TrioletPtr arg);
 void
-apply_o(PyonPtr obj, PyonPtr arg, PyonPtr return_struct);
+apply_o(TrioletPtr obj, TrioletPtr arg, TrioletPtr return_struct);
 
-PyonPtr
-apply_i32_f(PyonPtr obj, uint32_t arg);
+TrioletPtr
+apply_i32_f(TrioletPtr obj, uint32_t arg);
 void
-apply_i32(PyonPtr obj, uint32_t arg, PyonPtr return_struct);
+apply_i32(TrioletPtr obj, uint32_t arg, TrioletPtr return_struct);
 
-PyonPtr
-apply_f32_f(PyonPtr obj, float arg);
+TrioletPtr
+apply_f32_f(TrioletPtr obj, float arg);
 void
-apply_f32(PyonPtr obj, float arg, PyonPtr return_struct);
+apply_f32(TrioletPtr obj, float arg, TrioletPtr return_struct);
 
-PyonPtr
-apply_u_f(PyonPtr obj, int arg);
+TrioletPtr
+apply_u_f(TrioletPtr obj, int arg);
 void
-apply_u(PyonPtr obj, int arg, PyonPtr return_struct);
+apply_u(TrioletPtr obj, int arg, TrioletPtr return_struct);

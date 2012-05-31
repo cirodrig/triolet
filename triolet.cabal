@@ -1,7 +1,7 @@
-Name:		pyon
+Name:		triolet
 Version:	0.1
 Cabal-Version:	>= 1.8 && < 1.9
-Synopsis:	Compiler for the data-parallel Pyon language
+Synopsis:	Compiler for the data-parallel Triolet language
 License:	OtherLicense
 License-File:	LICENSE
 Stability:	experimental
@@ -13,12 +13,12 @@ Data-Dir:	dist/build/data
 Data-Files:
   symbols/corecode
   symbols/coretypes2
-  include/pyon.h
-  include/pyon_list.h
-  include/pyon_matrix.h
-  include/PyonData.h
-  include/pyon/Layout.h
-  include/pyon/Base.h
+  include/triolet.h
+  include/triolet_list.h
+  include/triolet_matrix.h
+  include/TrioletData.h
+  include/triolet/Layout.h
+  include/triolet/Base.h
   interfaces/memory_py.pi
   interfaces/effects.pi
   interfaces/prim.pi
@@ -26,9 +26,9 @@ Data-Files:
   interfaces/structures.pi
   interfaces/list.pi
   interfaces/stream.pi
-  libpyonrts.so
+  libtrioletrts.so
 
-Executable pyon
+Executable triolet 
   Hs-Source-Dirs: src/program
   Build-Depends:
     base >= 4 && < 5,
@@ -64,7 +64,7 @@ Executable pyon
     CxxInterface/CxxWrapperGeneratorPrint.c
     CxxInterface/CxxWrapperGenerator.c
   Other-Modules:
-    Paths_pyon
+    Paths_triolet
     Machine
     Paths
     Export

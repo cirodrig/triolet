@@ -15,7 +15,7 @@ data ForeignLanguage =
   | CPlusPlus
     deriving(Eq, Ord, Show)
 
--- | Get the foreign language's name as it appears in pyon source code
+-- | Get the foreign language's name as it appears in triolet source code
 foreignLanguageName :: ForeignLanguage -> String
 foreignLanguageName CCall = "ccall"
 foreignLanguageName CPlusPlus = "cplusplus"
@@ -33,12 +33,12 @@ data ExportDataType =
     -- | An N-tuple.
     TupleET [ExportDataType]
 
-    -- | A Pyon list.
+    -- | A Triolet list.
     --   The boolean parameter is the boxing of array elements 
     --   (True means boxed, False means unboxed)
   | ListET !Bool ExportDataType
 
-    -- | A Pyon array.
+    -- | A Triolet array.
     --   The first parameter is the array dimensionality.
     --   The second parameter is the boxing of array elements 
     --   (True means boxed, False means unboxed)
@@ -53,10 +53,10 @@ data ExportDataType =
   | FunctionET [ExportDataType] ExportDataType
 
     -- Plain old data types
-  | PyonNoneET                  -- ^ Pyon NoneType type
-  | PyonIntET                   -- ^ Pyon int type
-  | PyonFloatET                 -- ^ Pyon float type
-  | PyonBoolET                  -- ^ Pyon boolean type
+  | TrioletNoneET                  -- ^ Triolet NoneType type
+  | TrioletIntET                   -- ^ Triolet int type
+  | TrioletFloatET                 -- ^ Triolet float type
+  | TrioletBoolET                  -- ^ Triolet boolean type
   | CIntET                      -- ^ C int type
   | CFloatET                    -- ^ C float type
 
@@ -87,10 +87,10 @@ instance Show ExportDataType where
             show_params .
             showString ") -> " .
             shows ret
-       PyonNoneET -> showString "PyonNoneET"
-       PyonIntET -> showString "PyonIntET"
-       PyonFloatET -> showString "PyonFloatET"
-       PyonBoolET -> showString "PyonBoolET"
+       TrioletNoneET -> showString "TrioletNoneET"
+       TrioletIntET -> showString "TrioletIntET"
+       TrioletFloatET -> showString "TrioletFloatET"
+       TrioletBoolET -> showString "TrioletBoolET"
        CIntET -> showString "CIntET"
        CFloatET -> showString "CFloatET"
     where
@@ -102,8 +102,9 @@ instance Show ExportDataType where
 
 -- | A language-specific exported function signature
 data ExportSig =
-    -- | Exported to other Pyon code.  No additional information is required.
-    PyonExportSig
+    -- | Exported to other Triolet code.
+    -- No additional information is required.
+    TrioletExportSig
     -- | Exported to C
   | CExportSig !CSignature
     -- | Exported to C++

@@ -1,8 +1,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pyon.h>
-#include <PyonData.h>
+#include <TrioletData.h>
 #include <math.h>
 #include "stencil_cxx.h"
 
@@ -25,7 +24,7 @@ float expected_result[] = {
   0.2, 0.1, 0.1, 0.2
 };
 
-using namespace Pyon;
+using namespace Triolet;
 
 Array2<Float> make_array2(int height, int width, float *data)
 {
@@ -42,7 +41,7 @@ Array2<Float> make_array2(int height, int width, float *data)
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
 
   Array2<Float> mat1 = make_array2(DIMY, DIMX, arr);
   Array2<Float> mat2 = heat(mat1);

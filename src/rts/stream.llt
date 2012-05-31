@@ -1,5 +1,5 @@
 
-module pyon.internal.stream;
+module core.internal.stream;
 
 #include "rts.h"
 #include "debug.h"
@@ -16,9 +16,9 @@ import procedure exit (int) -> ();
 // Allocate some memory.  Use the flag to determine what kind of allocation.
 procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   if (is_pointerless) {
-    pointer primcall pyon_alloc_nopointers (size);
+    pointer primcall triolet_alloc_nopointers (size);
   } else {
-    pointer primcall pyon_alloc (size);
+    pointer primcall triolet_alloc (size);
   };
 };
 
@@ -40,7 +40,7 @@ data pointer Stream_info = InfoTableHeader {
 };
 
 procedure inline Stream_alloc () -> owned {
-  s = pointer primcall pyon_alloc (sizeof Obj(StreamData));
+  s = pointer primcall triolet_alloc (sizeof Obj(StreamData));
   // FIXME: initialize header
   s @! Obj(StreamData).header.info = Stream_info;
   s as owned;
@@ -68,7 +68,7 @@ data owned Stream_count_init_state = Boxed(int) {
 function Stream_count_next (owned state) -> StreamNext {
   counter = state @! Boxed(int).member;
 
-  new_state = pointer primcall pyon_alloc (sizeof Boxed(int));
+  new_state = pointer primcall triolet_alloc (sizeof Boxed(int));
   new_state @! Boxed(int).member = counter + int 1;
 
   StreamNext {STREAM_VALUE, StreamNextData {new_state as owned, state}};

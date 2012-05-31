@@ -75,7 +75,7 @@ tmpnam dir suffix = do
     -- Generate filenames until one is found
     generate_tmpnam = do
       random_chars <- replicateM 4 $ fmap (tmpnamTable !!) $ randomRIO (0, 63)
-      let fname = dir </> "pyon" ++ random_chars ++ suffix
+      let fname = dir </> "tri" ++ random_chars ++ suffix
       exists <- doesFileExist fname
       if exists then generate_tmpnam else return fname
 
@@ -85,7 +85,7 @@ foreign import ccall "unistd.h mkdtemp" mkdtemp :: Ptr CChar -> IO (Ptr CChar)
 
 -- | Create a temporary directory.  The directory name is returned.
 tmpdir :: IO FilePath
-tmpdir = withCString "/tmp/pyon.XXXXXX" $ \template -> do
+tmpdir = withCString "/tmp/triolet.XXXXXX" $ \template -> do
   dirname <- mkdtemp template
   if dirname == nullPtr
     then throwErrno "Creating directory for temporary files"

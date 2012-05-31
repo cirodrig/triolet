@@ -101,39 +101,39 @@ record U1Tuple(a) {
   a member;
 };
 
-// Pyon 1-tuples
-record PyonTuple1(a) {
+// Core 1-tuples
+record Tuple1(a) {
   const a member;
 };
 
-// Pyon 2-tuples
-record PyonTuple2(a, b) {
+// Core 2-tuples
+record Tuple2(a, b) {
   const a member1;
   const b member2;
 };
 
 // Mutable 2-tuples
-record MPyonTuple2(a, b) {
+record MTuple2(a, b) {
   a member1;
   b member2;
 };
 
-// Pyon 3-tuples
-record PyonTuple3(a, b, c) {
+// Core 3-tuples
+record Tuple3(a, b, c) {
   const a member1;
   const b member2;
   const c member3;
 };
 
 // Mutable 3-tuples
-record MPyonTuple3(a, b, c) {
+record MTuple3(a, b, c) {
   a member1;
   b member2;
   c member3;
 };
 
-// Pyon 4-tuples
-record PyonTuple4(a, b, c, d) {
+// Core 4-tuples
+record Tuple4(a, b, c, d) {
   const a member1;
   const b member2;
   const c member3;
@@ -141,15 +141,15 @@ record PyonTuple4(a, b, c, d) {
 };
 
 // Mutable 4-tuples
-record MPyonTuple4(a, b, c, d) {
+record MTuple4(a, b, c, d) {
   a member1;
   b member2;
   c member3;
   d member4;
 };
 
-// Pyon 5-tuples
-record PyonTuple5(a, b, c, d, e, f) {
+// Core 5-tuples
+record Tuple5(a, b, c, d, e, f) {
   const a member1;
   const b member2;
   const c member3;
@@ -157,8 +157,8 @@ record PyonTuple5(a, b, c, d, e, f) {
   const e member5;
 };
 
-// Pyon 6-tuples
-record PyonTuple6(a, b, c, d, e, f) {
+// Core 6-tuples
+record Tuple6(a, b, c, d, e, f) {
   const a member1;
   const b member2;
   const c member3;
@@ -198,7 +198,7 @@ record SliceObject {
  * The list elements have a type and size; this is not stored in the
  * list, but rather passed to functions that operate on the list.
  */
-record PyonList {
+record List {
   FinIndInt nelems;	// Number of elements in the list.
                                 // Actual allocated size may be larger.
   owned contents;		// Pointer to list contents
@@ -218,7 +218,7 @@ record AppendList {
  *
  * A 0-dimensional array contains just a single value.
  */
-record PyonArray0(a) {
+record Array0(a) {
   const a content;          // The single value contained in the array
 };
 
@@ -226,7 +226,7 @@ record PyonArray0(a) {
  *
  * An array has a lower bound, stride, and size.
  */
-record PyonArray1 {
+record Array1 {
   const int first;
   const int stride;
   const FinIndInt size;
@@ -241,7 +241,7 @@ record PyonArray1 {
  * The dimensions are given in the order (y, x).
  * Array elements are consecutive in the X dimension.
  */
-record PyonArray2 {
+record Array2 {
   const int first_y;
   const int stride_y;
   const FinIndInt size_y;
@@ -251,7 +251,7 @@ record PyonArray2 {
   const owned contents;		// Pointer to matrix contents
 };
 
-record PyonArray3 {
+record Array3 {
   const int first_z;
   const int stride_z;
   const FinIndInt size_z;

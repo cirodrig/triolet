@@ -110,7 +110,7 @@ expType (L pos expression) =
   of VarE v -> do
        Just ty <- lift $ askTypeEnv (lookupType (toVar v))
        return ty
-     IntE _ -> return $ Type.VarT $ pyonBuiltin The_int
+     IntE _ -> return $ Type.VarT $ coreBuiltin The_int
      TAppE op arg -> do
        -- Compute the result of type application
        op_type <- expType op
@@ -317,8 +317,8 @@ translateExp (L pos expression) =
        body' <- translateExp body
        return $ SystemF.ExpM $ SystemF.CoerceE inf ft tt body'
   where
-    int_type = Type.VarT $ pyonBuiltin The_int
-    float_type = Type.VarT $ pyonBuiltin The_float
+    int_type = Type.VarT $ coreBuiltin The_int
+    float_type = Type.VarT $ coreBuiltin The_float
     inf = SystemF.mkExpInfo pos
 
 translateApp inf op ty_args args = do

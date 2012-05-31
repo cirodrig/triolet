@@ -1,7 +1,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pyon.h>
+#include <triolet.h>
 #include <math.h>
 #include "matmul_interface.h"
 
@@ -30,22 +30,22 @@ float arr3[] = {
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
 
-  PyonMatrix *mat1 = pyon_Matrix_PyonFloat_FromArray(0, DIM1, 0, DIM2, arr1);
-  PyonMatrix *mat2 = pyon_Matrix_PyonFloat_FromArray(0, DIM2, 0, DIM3, arr2);
-  PyonMatrix *mat3 = mm(mat1, mat2);
-  pyon_Matrix_PyonFloat_Free(mat1);
-  pyon_Matrix_PyonFloat_Free(mat2);
+  TrioletMatrix *mat1 = triolet_Matrix_Float_FromArray(0, DIM1, 0, DIM2, arr1);
+  TrioletMatrix *mat2 = triolet_Matrix_Float_FromArray(0, DIM2, 0, DIM3, arr2);
+  TrioletMatrix *mat3 = mm(mat1, mat2);
+  triolet_Matrix_Float_Free(mat1);
+  triolet_Matrix_Float_Free(mat2);
 
   // Verify height of matrix product
-  if (pyon_Matrix_PyonFloat_Height(mat3) != DIM1) return -1;
-  if (pyon_Matrix_PyonFloat_Width(mat3) != DIM3) return -1;
+  if (triolet_Matrix_Float_Height(mat3) != DIM1) return -1;
+  if (triolet_Matrix_Float_Width(mat3) != DIM3) return -1;
 
   // Get matrix data
   float *data = malloc(DIM1 * DIM3 * sizeof(int));
-  pyon_Matrix_PyonFloat_ToArray(mat3, data);
-  pyon_Matrix_PyonFloat_Free(mat3);
+  triolet_Matrix_Float_ToArray(mat3, data);
+  triolet_Matrix_Float_Free(mat3);
 
   // Compare against expected output
   int y, x;

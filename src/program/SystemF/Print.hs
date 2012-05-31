@@ -138,9 +138,9 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
        let es_doc = punctuate comma $ map (pprExpFlagsPrec flags precOuter) es
        in text "array" <+> parens (pprType ty) <+> braces (fsep es_doc)
   where
-    is_true (VarDeCon op _ _) = op `isPyonBuiltin` The_True
+    is_true (VarDeCon op _ _) = op `isCoreBuiltin` The_True
     is_true _ = False
-    is_false (VarDeCon op _ _) = op `isPyonBuiltin` The_False
+    is_false (VarDeCon op _ _) = op `isCoreBuiltin` The_False
     is_false _ = False
 
 pprIf flags cond tr fa =

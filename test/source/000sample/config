@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Sample test case",
-  pyonSources	 = [],
-  llpyonSources  = [],
+  trioletSources	 = [],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldCompile

@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Find nearest neighbors",
-  pyonSources	 = ["nearest.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["nearest.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "1,2,0,1,4,3,"

@@ -4,11 +4,11 @@
 
 #define SIZE 21
 
-using namespace Pyon;
+using namespace Triolet;
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
   Array1<Int> arr = histo(100);
 
   int i;

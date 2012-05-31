@@ -1,12 +1,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pyon.h>
 #include <math.h>
-#include <PyonData.h>
 #include "matmul_cxx.h"
 
-using namespace Pyon;
+using namespace Triolet;
 
 #define DIM1 2
 #define DIM2 3
@@ -50,7 +48,7 @@ void from_matrix(int height, int width, float *data, BArray2<Float> mat) {
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
 
   BArray2<Float> mat1 = make_matrix(DIM1, DIM2, arr1);
   BArray2<Float> mat2 = make_matrix(DIM2, DIM3, arr2);

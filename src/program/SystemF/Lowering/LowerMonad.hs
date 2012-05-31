@@ -72,10 +72,10 @@ initializeLowerEnv var_supply ll_var_supply type_env var_map = do
 
 mkGlobalIntEnv = do
   minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin The_min_i) [VarT arg1, VarT arg2],
+    (varApp (coreBuiltin The_min_i) [VarT arg1, VarT arg2],
      binary_function arg1 arg2 (LL.llBuiltin LL.the_prim_min_fii))
   minus_int <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin The_minus_i) [VarT arg1, VarT arg2],
+    (varApp (coreBuiltin The_minus_i) [VarT arg1, VarT arg2],
      binary_function arg1 arg2 (LL.llBuiltin LL.the_prim_minus_fii))
   return $ DictEnv.DictEnv [minimum_int, minus_int]
   where
@@ -96,13 +96,13 @@ mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
 mkGlobalReprEnv = do
   -- All boxed objects use the same representation
   box_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin The_Ref) [VarT arg], mk_boxed_dict arg)
+    (varApp (coreBuiltin The_Ref) [VarT arg], mk_boxed_dict arg)
 
   -- Value dictionaries
   let int_dict =
-        mono_dict (stored_type $ VarT $ pyonBuiltin The_int) LL.the_bivar_repr_int
+        mono_dict (stored_type $ VarT $ coreBuiltin The_int) LL.the_bivar_repr_int
   let float_dict =
-        mono_dict (stored_type $ VarT $ pyonBuiltin The_float) LL.the_bivar_repr_float
+        mono_dict (stored_type $ VarT $ coreBuiltin The_float) LL.the_bivar_repr_float
 
   -- Bare object dictionaries
   (tuple2_dict, tuple3_dict, tuple4_dict) <- do
@@ -110,11 +110,11 @@ mkGlobalReprEnv = do
     v2 <- newAnonymousVar TypeLevel
     v3 <- newAnonymousVar TypeLevel
     v4 <- newAnonymousVar TypeLevel
-    let ty2 = varApp (pyonBuiltin The_PyonTuple2)
+    let ty2 = varApp (coreBuiltin The_Tuple2)
               [VarT v1, VarT v2]
-    let ty3 = varApp (pyonBuiltin The_PyonTuple3)
+    let ty3 = varApp (coreBuiltin The_Tuple3)
               [VarT v1, VarT v2, VarT v3]
-    let ty4 = varApp (pyonBuiltin The_PyonTuple4)
+    let ty4 = varApp (coreBuiltin The_Tuple4)
               [VarT v1, VarT v2, VarT v3, VarT v4]
     return (DictEnv.pattern [v1, v2] ty2 (mk_tuple_dict [v1, v2]),
             DictEnv.pattern [v1, v2, v3] ty3 (mk_tuple_dict [v1, v2, v3]),
@@ -122,7 +122,7 @@ mkGlobalReprEnv = do
   return $ DictEnv.DictEnv [float_dict, int_dict, box_dict,
                             tuple2_dict, tuple3_dict, tuple4_dict]
   where
-    stored_type t = varApp (pyonBuiltin The_Stored) [t]
+    stored_type t = varApp (coreBuiltin The_Stored) [t]
     mono_dict ty val =
       DictEnv.monoPattern ty (return (LL.VarV $ LL.llBuiltin val))
 
@@ -150,9 +150,9 @@ mkGlobalReprEnv = do
                         Nothing -> internalError "initializeLowerEnv"
           in lookupReprDict arg' k
     
-    tuple_dict_constructor 2 = LL.llBuiltin LL.the_fun_repr_PyonTuple2
-    tuple_dict_constructor 3 = LL.llBuiltin LL.the_fun_repr_PyonTuple3
-    tuple_dict_constructor 4 = LL.llBuiltin LL.the_fun_repr_PyonTuple4
+    tuple_dict_constructor 2 = LL.llBuiltin LL.the_fun_repr_Tuple2
+    tuple_dict_constructor 3 = LL.llBuiltin LL.the_fun_repr_Tuple3
+    tuple_dict_constructor 4 = LL.llBuiltin LL.the_fun_repr_Tuple4
 
 instance Supplies Lower (Ident Var) where
   fresh = Lower $ ReaderT $ \env -> supplyValue $ varSupply env

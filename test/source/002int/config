@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Integer math",
-  pyonSources	 = ["i.py"],
-  llpyonSources  = [],
+  trioletSources	 = ["i.py"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "ok"

@@ -348,7 +348,7 @@ flattenExportedFun export_sig fun =
        -- Don't flatten parameters of C++ functions
        flattenFun fun
 
-     PyonExportSig ->
+     TrioletExportSig ->
        -- Flatten the same way as an ordinary function
        flattenFun fun
 
@@ -392,10 +392,10 @@ flattenExportedParam etype original_param = do
     ListET _ _ -> no_change'
     TupleET _ -> no_change'
     ArrayET _ _ _ -> no_change'
-    PyonNoneET -> no_change'
-    PyonIntET -> no_change'
-    PyonFloatET -> no_change'
-    PyonBoolET -> no_change'
+    TrioletNoneET -> no_change'
+    TrioletIntET -> no_change'
+    TrioletFloatET -> no_change'
+    TrioletBoolET -> no_change'
     FunctionET _ _ -> unpack_record cClosureRecord xparams
   where
     -- No flattening is performed for this parameter.

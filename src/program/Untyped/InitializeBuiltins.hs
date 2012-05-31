@@ -27,7 +27,7 @@ import Untyped.BuiltinsTH
 import Untyped.Builtins
 import qualified Type.Type
 
-pyonBuiltin = SystemF.pyonBuiltin
+coreBuiltin = SystemF.coreBuiltin
 
 f @@ g = appTy f g
 
@@ -103,7 +103,7 @@ mkTyFunction name kind cst sf_var instances = do
 
 mkShapeTyFun = do
   rec { (con, fam) <- mkTyFunction "shape" shape_kind []
-                      (pyonBuiltin SystemF.The_shape)
+                      (coreBuiltin SystemF.The_shape)
                       [list_instance, blist_instance,
                        array1_instance, array2_instance, array3_instance,
                        barray1_instance, barray2_instance, barray3_instance,
@@ -157,7 +157,7 @@ mkShapeTyFun = do
 
 mkArrayTyFun = do
   rec { (con, fam) <- mkTyFunction "array" (Star :-> Star :-> Star) []
-                      (pyonBuiltin SystemF.The_array)
+                      (coreBuiltin SystemF.The_array)
                       [inst0, inst1, inst2, inst3]
 
       ; let inst0 =
@@ -181,7 +181,7 @@ mkArrayTyFun = do
 
 mkIndexTyFun = do
   rec { (con, fam) <- mkTyFunction "index" (Star :-> Star) []
-                      (pyonBuiltin SystemF.The_index)
+                      (coreBuiltin SystemF.The_index)
                       [list_instance,
                        dim1_instance, dim2_instance, dim3_instance]
       ; let list_instance =
@@ -207,7 +207,7 @@ mkIndexTyFun = do
 
 mkSliceTyFun = do
   rec { (con, fam) <- mkTyFunction "slice" (Star :-> Star) []
-                      (pyonBuiltin SystemF.The_slice)
+                      (coreBuiltin SystemF.The_slice)
                       [list_instance,
                        dim1_instance, dim2_instance, dim3_instance]
       ; let list_instance =
@@ -234,7 +234,7 @@ mkSliceTyFun = do
 
 mkCartesianDomainTyFun = do
   rec { (con, fam) <- mkTyFunction "cartesianDomain" (Star :-> Star) []
-                      (pyonBuiltin SystemF.The_cartesianDomain)
+                      (coreBuiltin SystemF.The_cartesianDomain)
                       [dim0_instance,
                        dim1_instance, dim2_instance, dim3_instance]
       ; let dim0_instance =
@@ -263,8 +263,8 @@ mkEqClass = do
         ; let compareScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy $ tiBuiltin the_con_bool)
 
         ; let cls = mkClass "Eq" a []
-                    (pyonBuiltin SystemF.The_EqDict)
-                    (pyonBuiltin SystemF.The_eqDict)
+                    (coreBuiltin SystemF.The_EqDict)
+                    (coreBuiltin SystemF.The_eqDict)
                     [eq, ne]
                     [int_instance, float_instance, tuple2_instance]
   
@@ -275,16 +275,16 @@ mkEqClass = do
                monomorphicInstance cls
                (ConTy $ tiBuiltin the_con_int)
                [ InstanceMethod $
-                 pyonBuiltin SystemF.The_EqDict_int_eq
+                 coreBuiltin SystemF.The_EqDict_int_eq
                , InstanceMethod $
-                 pyonBuiltin SystemF.The_EqDict_int_ne]
+                 coreBuiltin SystemF.The_EqDict_int_ne]
               float_instance =
                monomorphicInstance cls
                (ConTy $ tiBuiltin the_con_float)
                [ InstanceMethod $
-                 pyonBuiltin SystemF.The_EqDict_float_eq
+                 coreBuiltin SystemF.The_EqDict_float_eq
                , InstanceMethod $
-                 pyonBuiltin SystemF.The_EqDict_float_ne]
+                 coreBuiltin SystemF.The_EqDict_float_ne]
         ; tuple2_instance <- do
           a <- newTyVar Star Nothing
           b <- newTyVar Star Nothing
@@ -293,8 +293,8 @@ mkEqClass = do
                    [ConTy a `IsInst` cls, ConTy b `IsInst` cls]
                    cls
                    (TupleTy 2 @@ ConTy a @@ ConTy b)
-                   [ InstanceMethod $ pyonBuiltin SystemF.The_EqDict_Tuple2_eq,
-                     InstanceMethod $ pyonBuiltin SystemF.The_EqDict_Tuple2_ne]
+                   [ InstanceMethod $ coreBuiltin SystemF.The_EqDict_Tuple2_eq,
+                     InstanceMethod $ coreBuiltin SystemF.The_EqDict_Tuple2_ne]
         }
   return cls
 
@@ -303,8 +303,8 @@ mkOrdClass = do
         ; let compareScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy $ tiBuiltin the_con_bool)
 
         ; let cls = mkClass "Ord" a [ConTy a `IsInst` tiBuiltin the_c_Eq]
-                    (pyonBuiltin SystemF.The_OrdDict)
-                    (pyonBuiltin SystemF.The_ordDict)
+                    (coreBuiltin SystemF.The_OrdDict)
+                    (coreBuiltin SystemF.The_ordDict)
                     [lt, le, gt, ge]
                     [int_instance, float_instance, tuple2_instance]
 
@@ -317,24 +317,24 @@ mkOrdClass = do
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_int)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_int_lt
+                  coreBuiltin SystemF.The_OrdDict_int_lt
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_int_le
+                  coreBuiltin SystemF.The_OrdDict_int_le
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_int_gt
+                  coreBuiltin SystemF.The_OrdDict_int_gt
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_int_ge]
+                  coreBuiltin SystemF.The_OrdDict_int_ge]
               float_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_float)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_float_lt
+                  coreBuiltin SystemF.The_OrdDict_float_lt
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_float_le
+                  coreBuiltin SystemF.The_OrdDict_float_le
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_float_gt
+                  coreBuiltin SystemF.The_OrdDict_float_gt
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_OrdDict_float_ge]
+                  coreBuiltin SystemF.The_OrdDict_float_ge]
 
         ; tuple2_instance <- do
             a <- newTyVar Star Nothing
@@ -343,10 +343,10 @@ mkOrdClass = do
                      [ConTy a `IsInst` cls, ConTy b `IsInst` cls]
                      cls
                      (TupleTy 2 @@ ConTy a @@ ConTy b)
-                     [ InstanceMethod $ pyonBuiltin SystemF.The_OrdDict_Tuple2_lt
-                     , InstanceMethod $ pyonBuiltin SystemF.The_OrdDict_Tuple2_le
-                     , InstanceMethod $ pyonBuiltin SystemF.The_OrdDict_Tuple2_gt
-                     , InstanceMethod $ pyonBuiltin SystemF.The_OrdDict_Tuple2_ge]
+                     [ InstanceMethod $ coreBuiltin SystemF.The_OrdDict_Tuple2_lt
+                     , InstanceMethod $ coreBuiltin SystemF.The_OrdDict_Tuple2_le
+                     , InstanceMethod $ coreBuiltin SystemF.The_OrdDict_Tuple2_gt
+                     , InstanceMethod $ coreBuiltin SystemF.The_OrdDict_Tuple2_ge]
         }
   return cls
 
@@ -371,8 +371,8 @@ mkTraversableClass = do
     in ([passable aT], functionType [tT @@ aT] (shapeType tT))
 
   rec { let cls = mkClass "Traversable" t []
-                  (pyonBuiltin SystemF.The_TraversableDict)
-                  (pyonBuiltin SystemF.The_traversableDict)
+                  (coreBuiltin SystemF.The_TraversableDict)
+                  (coreBuiltin SystemF.The_traversableDict)
                   [iter, build]
                   [list_instance, blist_instance,
                    array1_instance, array2_instance, array3_instance,
@@ -392,106 +392,106 @@ mkTraversableClass = do
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_list)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_list_traverse
+                  coreBuiltin SystemF.The_TraversableDict_list_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_list_build]
+                  coreBuiltin SystemF.The_TraversableDict_list_build]
 
             blist_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_blist)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_blist_traverse
+                  coreBuiltin SystemF.The_TraversableDict_blist_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_blist_build]
+                  coreBuiltin SystemF.The_TraversableDict_blist_build]
 
             array3_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_array3)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_array3_traverse
+                  coreBuiltin SystemF.The_TraversableDict_array3_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_array3_build]
+                  coreBuiltin SystemF.The_TraversableDict_array3_build]
 
             array2_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_array2)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_array2_traverse
+                  coreBuiltin SystemF.The_TraversableDict_array2_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_array2_build]
+                  coreBuiltin SystemF.The_TraversableDict_array2_build]
 
             array1_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_array1)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_array1_traverse
+                  coreBuiltin SystemF.The_TraversableDict_array1_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_array1_build]
+                  coreBuiltin SystemF.The_TraversableDict_array1_build]
 
             barray3_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_barray3)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_barray3_traverse
+                  coreBuiltin SystemF.The_TraversableDict_barray3_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_barray3_build]
+                  coreBuiltin SystemF.The_TraversableDict_barray3_build]
 
             barray2_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_barray2)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_barray2_traverse
+                  coreBuiltin SystemF.The_TraversableDict_barray2_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_barray2_build]
+                  coreBuiltin SystemF.The_TraversableDict_barray2_build]
 
             barray1_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_barray1)
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_barray1_traverse
+                  coreBuiltin SystemF.The_TraversableDict_barray1_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_barray1_build]
+                  coreBuiltin SystemF.The_TraversableDict_barray1_build]
 
             view_list_dim_instance =
                 monomorphicInstance cls
                 (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_list_dim))
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_list_dim_traverse
+                  coreBuiltin SystemF.The_TraversableDict_view_list_dim_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_list_dim_build]
+                  coreBuiltin SystemF.The_TraversableDict_view_list_dim_build]
 
             view_dim0_instance =
                 monomorphicInstance cls
                 (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim0))
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_dim0_traverse
+                  coreBuiltin SystemF.The_TraversableDict_view_dim0_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_dim0_build]
+                  coreBuiltin SystemF.The_TraversableDict_view_dim0_build]
 
             view_dim1_instance =
                 monomorphicInstance cls
                 (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim1))
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_dim1_traverse
+                  coreBuiltin SystemF.The_TraversableDict_view_dim1_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_dim1_build]
+                  coreBuiltin SystemF.The_TraversableDict_view_dim1_build]
 
             view_dim2_instance =
                 monomorphicInstance cls
                 (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim2))
                 [ InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_dim2_traverse
+                  coreBuiltin SystemF.The_TraversableDict_view_dim2_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.The_TraversableDict_view_dim2_build]
+                  coreBuiltin SystemF.The_TraversableDict_view_dim2_build]
 
             iter_instance =
               -- A stream of anything is iterable
               polyInstance [sh] [] cls
               (ConTy (tiBuiltin the_con_iter) @@ ConTy sh)
               [ InstanceMethod $
-                pyonBuiltin SystemF.The_TraversableDict_Stream_traverse
+                coreBuiltin SystemF.The_TraversableDict_Stream_traverse
               , InstanceMethod $
-                pyonBuiltin SystemF.The_TraversableDict_Stream_build] }
+                coreBuiltin SystemF.The_TraversableDict_Stream_build] }
 
   return cls
 
@@ -536,8 +536,8 @@ mkShapeClass = do
         (ConTy (tiBuiltin the_con_view) @@ ConTy sh @@ aT))
 
   rec let cls = mkClass "Shape" sh [passable index_type, passable slice_type]
-                (pyonBuiltin SystemF.The_ShapeDict)
-                (pyonBuiltin SystemF.The_shapeDict)
+                (coreBuiltin SystemF.The_ShapeDict)
+                (coreBuiltin SystemF.The_shapeDict)
                 [member, intersection, flattenStream, generate, mapStream,
                  zipWithStream, zipWith3Stream, zipWith4Stream, getSlice]
                 [list_dim_instance, dim0_instance, dim1_instance,
@@ -556,63 +556,63 @@ mkShapeClass = do
       let list_dim_instance =
             monomorphicInstance cls
             (ConTy (tiBuiltin the_con_list_dim))
-            [ InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_member,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_intersect,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_flatten,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_generate,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_map,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_zipWith,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_zipWith3,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_zipWith4,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_list_dim_slice]
+            [ InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_member,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_intersect,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_flatten,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_generate,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_map,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_zipWith,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_zipWith3,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_zipWith4,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_list_dim_slice]
           dim0_instance =
             monomorphicInstance cls
             (ConTy (tiBuiltin the_con_dim0))
-            [ InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_member,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_intersect,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_flatten,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_generate,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_map,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_zipWith,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_zipWith3,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_zipWith4,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim0_slice]
+            [ InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_member,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_intersect,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_flatten,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_generate,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_map,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_zipWith,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_zipWith3,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_zipWith4,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim0_slice]
           dim1_instance =
             monomorphicInstance cls
             (ConTy (tiBuiltin the_con_dim1))
-            [ InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_member,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_intersect,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_flatten,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_generate,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_map,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_zipWith,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_zipWith3,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_zipWith4,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim1_slice]
+            [ InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_member,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_intersect,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_flatten,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_generate,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_map,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_zipWith,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_zipWith3,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_zipWith4,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim1_slice]
           dim2_instance =
             monomorphicInstance cls
             (ConTy (tiBuiltin the_con_dim2))
-            [ InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_member,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_intersect,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_flatten,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_generate,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_map,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_zipWith,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_zipWith3,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_zipWith4,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim2_slice]
+            [ InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_member,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_intersect,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_flatten,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_generate,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_map,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_zipWith,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_zipWith3,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_zipWith4,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim2_slice]
           dim3_instance =
             monomorphicInstance cls
             (ConTy (tiBuiltin the_con_dim3))
-            [ InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_member,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_intersect,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_flatten,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_generate,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_map,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_zipWith,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_zipWith3,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_zipWith4,
-              InstanceMethod $ pyonBuiltin SystemF.The_ShapeDict_dim3_slice]
+            [ InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_member,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_intersect,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_flatten,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_generate,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_map,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_zipWith,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_zipWith3,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_zipWith4,
+              InstanceMethod $ coreBuiltin SystemF.The_ShapeDict_dim3_slice]
 
   return cls
   where
@@ -643,8 +643,8 @@ mkIndexableClass = do
   get_shape_scheme <- forallType [Star] $ \[a] ->
     ([], functionType [ConTy t @@ ConTy a] t_shape)
   rec { let cls = mkClass "Indexable" t []
-                  (pyonBuiltin SystemF.The_IndexableDict)
-                  (pyonBuiltin SystemF.The_indexableDict)
+                  (coreBuiltin SystemF.The_IndexableDict)
+                  (coreBuiltin SystemF.The_indexableDict)
                   [at, get_shape]
                   [list_instance, blist_instance,
                    array1_instance, array2_instance,
@@ -656,39 +656,39 @@ mkIndexableClass = do
       ; let list_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_list)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_list_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_list_get_shape]
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_list_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_list_get_shape]
       ; let blist_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_blist)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_blist_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_blist_get_shape]
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_blist_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_blist_get_shape]
       ; let array1_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_array1)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array1_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array1_get_shape]
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array1_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array1_get_shape]
       ; let array2_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_array2)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array2_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_array2_get_shape]
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array2_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array2_get_shape]
       ; let barray1_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_barray1)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray1_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray1_get_shape]
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray1_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray1_get_shape]
       ; let barray2_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_barray2)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray2_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_barray2_get_shape]
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray2_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray2_get_shape]
       ; sh <- newTyVar Star Nothing
       ; let view_instance =
               polyInstance [sh] [ConTy sh `IsInst` tiBuiltin the_c_Shape] cls
               (ConTy (tiBuiltin the_con_view) @@ ConTy sh)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_view_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.The_IndexableDict_view_get_shape]
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_view_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_view_get_shape]
       }
   return cls
 
@@ -708,8 +708,8 @@ mkIndexable2Class = do
   with_shape_scheme <- forallType [Star] $ \[a] ->
     ([], functionType [ConTy t @@ ConTy a] t_shape)
   rec { let cls = mkClass "Indexable2" t []
-                  (pyonBuiltin SystemF.The_Indexable2Dict)
-                  (pyonBuiltin SystemF.The_indexable2Dict)
+                  (coreBuiltin SystemF.The_Indexable2Dict)
+                  (coreBuiltin SystemF.The_indexable2Dict)
                   [at, slice, with_shape]
                   [matrix_instance, matrixview_instance]
 
@@ -719,15 +719,15 @@ mkIndexable2Class = do
       ; let matrix_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_array2)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_Indexable2Dict_matrix_at_point2
-              , InstanceMethod $ pyonBuiltin SystemF.The_Indexable2Dict_matrix_at_slice2
-              , InstanceMethod $ pyonBuiltin SystemF.The_Indexable2Dict_matrix_with_shape2]
+              [ InstanceMethod $ coreBuiltin SystemF.The_Indexable2Dict_matrix_at_point2
+              , InstanceMethod $ coreBuiltin SystemF.The_Indexable2Dict_matrix_at_slice2
+              , InstanceMethod $ coreBuiltin SystemF.The_Indexable2Dict_matrix_with_shape2]
       ; let matrixview_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_view2)
-              [ InstanceMethod $ pyonBuiltin SystemF.The_Indexable2Dict_MatrixView_at_point2
-              , InstanceMethod $ pyonBuiltin SystemF.The_Indexable2Dict_MatrixView_at_slice2
-              , InstanceMethod $ pyonBuiltin SystemF.The_Indexable2Dict_MatrixView_with_shape2]
+              [ InstanceMethod $ coreBuiltin SystemF.The_Indexable2Dict_MatrixView_at_point2
+              , InstanceMethod $ coreBuiltin SystemF.The_Indexable2Dict_MatrixView_at_slice2
+              , InstanceMethod $ coreBuiltin SystemF.The_Indexable2Dict_MatrixView_with_shape2]
       }
   return cls-}
 
@@ -738,8 +738,8 @@ mkAdditiveClass = do
         negScheme = monomorphic $ functionType [ConTy a] (ConTy a)
 
   ; let cls = mkClass "Additive" a []
-              (pyonBuiltin SystemF.The_AdditiveDict)
-              (pyonBuiltin SystemF.The_additiveDict)
+              (coreBuiltin SystemF.The_AdditiveDict)
+              (coreBuiltin SystemF.The_additiveDict)
               [add, sub, negate, zero]
               [int_instance, float_instance, complex_instance, tuple2_instance]
 
@@ -751,35 +751,35 @@ mkAdditiveClass = do
   ; let int_instance =
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_int)
-          [ InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_int_add
-          , InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_int_sub
-          , InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_int_negate
-          , InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_int_zero]
+          [ InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_int_add
+          , InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_int_sub
+          , InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_int_negate
+          , InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_int_zero]
         float_instance =
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_float)
-          [ InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_float_add
-          , InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_float_sub
-          , InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_float_negate
-          , InstanceMethod $ pyonBuiltin SystemF.The_AdditiveDict_float_zero]
+          [ InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_float_add
+          , InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_float_sub
+          , InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_float_negate
+          , InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_float_zero]
   
   ; b <- newTyVar Star Nothing
   ; let complex_instance =
           polyInstance [b] [passable (ConTy b), ConTy b `IsInst` cls] cls
           (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
-          [ InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_Complex_add)
-          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_Complex_sub)
-          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_Complex_negate)
-          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_Complex_zero)]
+          [ InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_add)
+          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_sub)
+          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_negate)
+          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_zero)]
   ; c <- newTyVar Star Nothing
   ; let tuple2_instance =
           polyInstance [b, c] [passable (ConTy b), passable (ConTy c),
                                ConTy b `IsInst` cls, ConTy c `IsInst` cls] cls
           (TupleTy 2 @@ ConTy b @@ ConTy c)
-          [ InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_add)
-          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_sub)
-          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_negate)
-          , InstanceMethod (pyonBuiltin SystemF.The_AdditiveDict_PyonTuple2_zero)]
+          [ InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Tuple2_add)
+          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Tuple2_sub)
+          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Tuple2_negate)
+          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Tuple2_zero)]
   }
   return cls
 
@@ -790,8 +790,8 @@ mkMultiplicativeClass = do
         fromIntScheme = monomorphic $
                         functionType [ConTy (tiBuiltin the_con_int)] (ConTy a)
   ; let cls = mkClass "Multiplicative" a [ConTy a `IsInst` tiBuiltin the_c_Additive]
-              (pyonBuiltin SystemF.The_MultiplicativeDict)
-              (pyonBuiltin SystemF.The_multiplicativeDict)
+              (coreBuiltin SystemF.The_MultiplicativeDict)
+              (coreBuiltin SystemF.The_multiplicativeDict)
               [times, fromInt, one]
               [int_instance, float_instance, complex_instance]
 
@@ -803,27 +803,27 @@ mkMultiplicativeClass = do
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_int)
           [ InstanceMethod $
-            pyonBuiltin $ SystemF.The_MultiplicativeDict_int_mul
+            coreBuiltin $ SystemF.The_MultiplicativeDict_int_mul
           , InstanceMethod $
-            pyonBuiltin $ SystemF.The_MultiplicativeDict_int_fromInt
+            coreBuiltin $ SystemF.The_MultiplicativeDict_int_fromInt
           , InstanceMethod $
-            pyonBuiltin $ SystemF.The_MultiplicativeDict_int_one]
+            coreBuiltin $ SystemF.The_MultiplicativeDict_int_one]
         float_instance =
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_float)
           [ InstanceMethod $
-            pyonBuiltin $ SystemF.The_MultiplicativeDict_float_mul
+            coreBuiltin $ SystemF.The_MultiplicativeDict_float_mul
           , InstanceMethod $
-            pyonBuiltin $ SystemF.The_MultiplicativeDict_float_fromInt
+            coreBuiltin $ SystemF.The_MultiplicativeDict_float_fromInt
           , InstanceMethod $
-            pyonBuiltin $ SystemF.The_MultiplicativeDict_float_one]
+            coreBuiltin $ SystemF.The_MultiplicativeDict_float_one]
   ; b <- newTyVar Star Nothing
   ; let complex_instance =
           polyInstance [b] [ConTy b `IsInst` cls] cls
           (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
-          [ InstanceMethod (pyonBuiltin SystemF.The_MultiplicativeDict_Complex_mul)
-          , InstanceMethod (pyonBuiltin SystemF.The_MultiplicativeDict_Complex_fromInt)
-          , InstanceMethod (pyonBuiltin SystemF.The_MultiplicativeDict_Complex_one)]
+          [ InstanceMethod (coreBuiltin SystemF.The_MultiplicativeDict_Complex_mul)
+          , InstanceMethod (coreBuiltin SystemF.The_MultiplicativeDict_Complex_fromInt)
+          , InstanceMethod (coreBuiltin SystemF.The_MultiplicativeDict_Complex_one)]
           }
   
   return cls
@@ -835,8 +835,8 @@ mkFloatingClass = do
           fromFloatScheme = monomorphic $
                             functionType [ConTy $ tiBuiltin the_con_float] (ConTy a)
       let cls = mkClass "Floating" a []
-                (pyonBuiltin SystemF.The_FloatingDict)
-                (pyonBuiltin SystemF.The_floatingDict)
+                (coreBuiltin SystemF.The_FloatingDict)
+                (coreBuiltin SystemF.The_floatingDict)
                 [fromfloat, power, expfn, logfn, sqrtfn,
                  sinfn, cosfn, tanfn, pi]
                 [float_instance, complex_instance]
@@ -855,23 +855,23 @@ mkFloatingClass = do
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
             [ InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_fromfloat
+              coreBuiltin $ SystemF.The_FloatingDict_float_fromfloat
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_power
+              coreBuiltin $ SystemF.The_FloatingDict_float_power
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_exp
+              coreBuiltin $ SystemF.The_FloatingDict_float_exp
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_log
+              coreBuiltin $ SystemF.The_FloatingDict_float_log
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_sqrt
+              coreBuiltin $ SystemF.The_FloatingDict_float_sqrt
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_sin
+              coreBuiltin $ SystemF.The_FloatingDict_float_sin
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_cos
+              coreBuiltin $ SystemF.The_FloatingDict_float_cos
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_tan
+              coreBuiltin $ SystemF.The_FloatingDict_float_tan
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_FloatingDict_float_pi]
+              coreBuiltin $ SystemF.The_FloatingDict_float_pi]
 
       b <- newTyVar Star Nothing
       let complex_instance =
@@ -882,23 +882,23 @@ mkFloatingClass = do
              cls
              (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
              [ InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_fromfloat
+               coreBuiltin SystemF.The_FloatingDict_Complex_fromfloat
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_power
+               coreBuiltin SystemF.The_FloatingDict_Complex_power
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_exp
+               coreBuiltin SystemF.The_FloatingDict_Complex_exp
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_log
+               coreBuiltin SystemF.The_FloatingDict_Complex_log
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_sqrt
+               coreBuiltin SystemF.The_FloatingDict_Complex_sqrt
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_sin
+               coreBuiltin SystemF.The_FloatingDict_Complex_sin
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_cos
+               coreBuiltin SystemF.The_FloatingDict_Complex_cos
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_tan
+               coreBuiltin SystemF.The_FloatingDict_Complex_tan
              , InstanceMethod $
-               pyonBuiltin SystemF.The_FloatingDict_Complex_pi]
+               coreBuiltin SystemF.The_FloatingDict_Complex_pi]
   
   return cls
 
@@ -913,8 +913,8 @@ mkVectorClass = do
 
       let cls =
             mkClass "Vector" a [ConTy a `IsInst` tiBuiltin the_c_Additive]
-            (pyonBuiltin SystemF.The_VectorDict)
-            (pyonBuiltin SystemF.The_vectorDict)
+            (coreBuiltin SystemF.The_VectorDict)
+            (coreBuiltin SystemF.The_vectorDict)
             [scale, magnitude, dot]
             [float_instance, complex_instance]
 
@@ -926,22 +926,22 @@ mkVectorClass = do
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
             [ InstanceMethod $
-              pyonBuiltin SystemF.The_VectorDict_float_scale
+              coreBuiltin SystemF.The_VectorDict_float_scale
             , InstanceMethod $
-              pyonBuiltin SystemF.The_VectorDict_float_magnitude
+              coreBuiltin SystemF.The_VectorDict_float_magnitude
             , InstanceMethod $
-              pyonBuiltin SystemF.The_VectorDict_float_dot]
+              coreBuiltin SystemF.The_VectorDict_float_dot]
 
       b <- newTyVar Star Nothing
       let complex_instance =
             polyInstance [b] [ConTy b `IsInst` cls] cls
             (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
             [ InstanceMethod $
-              pyonBuiltin SystemF.The_VectorDict_Complex_scale
+              coreBuiltin SystemF.The_VectorDict_Complex_scale
             , InstanceMethod $
-              pyonBuiltin SystemF.The_VectorDict_Complex_magnitude
+              coreBuiltin SystemF.The_VectorDict_Complex_magnitude
             , InstanceMethod $
-              pyonBuiltin SystemF.The_VectorDict_Complex_dot]
+              coreBuiltin SystemF.The_VectorDict_Complex_dot]
 
   return cls
 
@@ -963,8 +963,8 @@ mkCartesianClass = do
   rec let cls =
             mkClass "Cartesian" sh
             [TFunAppTy (tiBuiltin the_con_cartesianDomain) [ix_ty] `IsEqual` dom_ty]
-            (pyonBuiltin SystemF.The_CartesianDict)
-            (pyonBuiltin SystemF.The_cartesianDict)
+            (coreBuiltin SystemF.The_CartesianDict)
+            (coreBuiltin SystemF.The_cartesianDict)
             [loBound, hiBound, stride, arrayDomain, displace, multiply, divide,
              multiplyI, divideI, unbounded]
             [dim0_instance, dim1_instance, dim2_instance, dim3_instance]
@@ -981,92 +981,92 @@ mkCartesianClass = do
       let dim0_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim0))
             [ InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_loBound
+              coreBuiltin SystemF.The_CartesianDict_dim0_loBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_hiBound
+              coreBuiltin SystemF.The_CartesianDict_dim0_hiBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_stride
+              coreBuiltin SystemF.The_CartesianDict_dim0_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_arrayDomain
+              coreBuiltin SystemF.The_CartesianDict_dim0_arrayDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_displaceDomain
+              coreBuiltin SystemF.The_CartesianDict_dim0_displaceDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_multiplyDomain
+              coreBuiltin SystemF.The_CartesianDict_dim0_multiplyDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_divideDomain
+              coreBuiltin SystemF.The_CartesianDict_dim0_divideDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_multiplyIndex
+              coreBuiltin SystemF.The_CartesianDict_dim0_multiplyIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_divideIndex
+              coreBuiltin SystemF.The_CartesianDict_dim0_divideIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim0_unbounded]
+              coreBuiltin SystemF.The_CartesianDict_dim0_unbounded]
       let int_type = ConTy (tiBuiltin the_con_int)
       let dim1_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim1))
             [ InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_loBound
+              coreBuiltin SystemF.The_CartesianDict_dim1_loBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_hiBound
+              coreBuiltin SystemF.The_CartesianDict_dim1_hiBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_stride
+              coreBuiltin SystemF.The_CartesianDict_dim1_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_arrayDomain
+              coreBuiltin SystemF.The_CartesianDict_dim1_arrayDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_displaceDomain
+              coreBuiltin SystemF.The_CartesianDict_dim1_displaceDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_multiplyDomain
+              coreBuiltin SystemF.The_CartesianDict_dim1_multiplyDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_divideDomain
+              coreBuiltin SystemF.The_CartesianDict_dim1_divideDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_multiplyIndex
+              coreBuiltin SystemF.The_CartesianDict_dim1_multiplyIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_divideIndex
+              coreBuiltin SystemF.The_CartesianDict_dim1_divideIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim1_unbounded]
+              coreBuiltin SystemF.The_CartesianDict_dim1_unbounded]
       let dim2_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim2))
             [ InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_loBound
+              coreBuiltin SystemF.The_CartesianDict_dim2_loBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_hiBound
+              coreBuiltin SystemF.The_CartesianDict_dim2_hiBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_stride
+              coreBuiltin SystemF.The_CartesianDict_dim2_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_arrayDomain
+              coreBuiltin SystemF.The_CartesianDict_dim2_arrayDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_displaceDomain
+              coreBuiltin SystemF.The_CartesianDict_dim2_displaceDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_multiplyDomain
+              coreBuiltin SystemF.The_CartesianDict_dim2_multiplyDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_divideDomain
+              coreBuiltin SystemF.The_CartesianDict_dim2_divideDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_multiplyIndex
+              coreBuiltin SystemF.The_CartesianDict_dim2_multiplyIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_divideIndex
+              coreBuiltin SystemF.The_CartesianDict_dim2_divideIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim2_unbounded]
+              coreBuiltin SystemF.The_CartesianDict_dim2_unbounded]
       let dim3_instance =
             monomorphicInstance cls (ConTy (tiBuiltin the_con_dim3))
             [ InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_loBound
+              coreBuiltin SystemF.The_CartesianDict_dim3_loBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_hiBound
+              coreBuiltin SystemF.The_CartesianDict_dim3_hiBound
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_stride
+              coreBuiltin SystemF.The_CartesianDict_dim3_stride
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_arrayDomain
+              coreBuiltin SystemF.The_CartesianDict_dim3_arrayDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_displaceDomain
+              coreBuiltin SystemF.The_CartesianDict_dim3_displaceDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_multiplyDomain
+              coreBuiltin SystemF.The_CartesianDict_dim3_multiplyDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_divideDomain
+              coreBuiltin SystemF.The_CartesianDict_dim3_divideDomain
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_multiplyIndex
+              coreBuiltin SystemF.The_CartesianDict_dim3_multiplyIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_divideIndex
+              coreBuiltin SystemF.The_CartesianDict_dim3_divideIndex
             , InstanceMethod $
-              pyonBuiltin SystemF.The_CartesianDict_dim3_unbounded]
+              coreBuiltin SystemF.The_CartesianDict_dim3_unbounded]
   return cls
 
 mkRemainderClass = do
@@ -1077,8 +1077,8 @@ mkRemainderClass = do
                   functionType [ConTy a, ConTy a] (ConTy a)
   rec let cls =
             mkClass "Remainder" a [ConTy a `IsInst` tiBuiltin the_c_Multiplicative]
-            (pyonBuiltin SystemF.The_RemainderDict)
-            (pyonBuiltin SystemF.The_remainderDict)
+            (coreBuiltin SystemF.The_RemainderDict)
+            (coreBuiltin SystemF.The_remainderDict)
             [divide, remainder]
             [int_instance, float_instance]
       divide <- mkClassMethod cls 0 "__floordiv__" divScheme
@@ -1087,16 +1087,16 @@ mkRemainderClass = do
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_int)
             [ InstanceMethod $
-              pyonBuiltin $ SystemF.The_RemainderDict_int_floordiv
+              coreBuiltin $ SystemF.The_RemainderDict_int_floordiv
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_RemainderDict_int_mod]
+              coreBuiltin $ SystemF.The_RemainderDict_int_mod]
           float_instance =
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
             [ InstanceMethod $
-              pyonBuiltin $ SystemF.The_RemainderDict_float_floordiv
+              coreBuiltin $ SystemF.The_RemainderDict_float_floordiv
             , InstanceMethod $
-              pyonBuiltin $ SystemF.The_RemainderDict_float_mod]
+              coreBuiltin $ SystemF.The_RemainderDict_float_mod]
 
   return cls
 
@@ -1106,8 +1106,8 @@ mkFractionalClass = do
                   functionType [ConTy a, ConTy a] (ConTy a)
   rec let cls =
             mkClass "Fractional" a [ConTy a `IsInst` tiBuiltin the_c_Multiplicative]
-            (pyonBuiltin SystemF.The_FractionalDict)
-            (pyonBuiltin SystemF.The_fractionalDict)
+            (coreBuiltin SystemF.The_FractionalDict)
+            (coreBuiltin SystemF.The_fractionalDict)
             [divide]
             [float_instance, complex_instance]
 
@@ -1116,13 +1116,13 @@ mkFractionalClass = do
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
             [ InstanceMethod $
-              pyonBuiltin $ SystemF.The_FractionalDict_float_div]
+              coreBuiltin $ SystemF.The_FractionalDict_float_div]
 
       b <- newTyVar Star Nothing
       let complex_instance =
             polyInstance [b] [ConTy b `IsInst` cls] cls
             (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
-            [ InstanceMethod $ pyonBuiltin SystemF.The_FractionalDict_Complex_div]
+            [ InstanceMethod $ coreBuiltin SystemF.The_FractionalDict_Complex_div]
 
   return cls
 
@@ -1130,7 +1130,7 @@ mkPassableClass = do
   rec {
   a <- newTyVar Star Nothing
   ; let cls = mkClass "Repr" a []
-              (pyonBuiltin SystemF.The_Repr)
+              (coreBuiltin SystemF.The_Repr)
               (internalError "Class 'Repr' has no dictionary constructor")
               []
               [int_instance, float_instance, bool_instance, none_instance,
@@ -1151,130 +1151,130 @@ mkPassableClass = do
   
   ; let int_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_int)
-          (pyonBuiltin SystemF.The_repr_int) []
+          (coreBuiltin SystemF.The_repr_int) []
   ; let float_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_float)
-          (pyonBuiltin SystemF.The_repr_float) []
+          (coreBuiltin SystemF.The_repr_float) []
   ; let bool_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_bool)
-          (pyonBuiltin SystemF.The_repr_bool) []
+          (coreBuiltin SystemF.The_repr_bool) []
   ; let none_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_NoneType)
-          (pyonBuiltin SystemF.The_repr_NoneType) []
+          (coreBuiltin SystemF.The_repr_NoneType) []
   ; let list_dim_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_list_dim)
-          (pyonBuiltin SystemF.The_repr_list_dim) []
+          (coreBuiltin SystemF.The_repr_list_dim) []
   ; let dim1_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_dim1)
-          (pyonBuiltin SystemF.The_repr_dim1) []
+          (coreBuiltin SystemF.The_repr_dim1) []
   ; let dim2_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_dim2)
-          (pyonBuiltin SystemF.The_repr_dim2) []
+          (coreBuiltin SystemF.The_repr_dim2) []
   ; let dim3_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_dim3)
-          (pyonBuiltin SystemF.The_repr_dim3) []
+          (coreBuiltin SystemF.The_repr_dim3) []
   ; let any_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_Any)
-          (pyonBuiltin SystemF.The_repr_Any) []
+          (coreBuiltin SystemF.The_repr_Any) []
   ; let sliceobject_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_SliceObject)
-          (pyonBuiltin SystemF.The_repr_SliceObject) []
+          (coreBuiltin SystemF.The_repr_SliceObject) []
         
   ; b <- newTyVar Star Nothing
   ; c <- newTyVar Star Nothing
   ; let stuckref_instance =
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_StuckRef) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_StuckRef)
+          (coreBuiltin SystemF.The_repr_StuckRef)
           []
   ; let maybe_val_instance =
           -- We don't need a Repr instance for the contained type.  Since
           -- it's a value, it can be computed on demand.
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_MaybeVal) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_MaybeVal)
+          (coreBuiltin SystemF.The_repr_MaybeVal)
           []
   ; let maybe_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_Maybe) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_Maybe)
+          (coreBuiltin SystemF.The_repr_Maybe)
           []
   ; let list_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_list) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_list)
+          (coreBuiltin SystemF.The_repr_list)
           []
   ; let blist_instance =
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_blist) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_blist)
+          (coreBuiltin SystemF.The_repr_blist)
           []
   ; let array1_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_array1) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_array1)
+          (coreBuiltin SystemF.The_repr_array1)
           []
   ; let array2_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_array2) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_array2)
+          (coreBuiltin SystemF.The_repr_array2)
           []
   ; let array3_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_array3) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_array3)
+          (coreBuiltin SystemF.The_repr_array3)
           []
   ; let barray1_instance =
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_barray1) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_barray1)
+          (coreBuiltin SystemF.The_repr_barray1)
           []
   ; let barray2_instance =
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_barray2) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_barray2)
+          (coreBuiltin SystemF.The_repr_barray2)
           []
   ; let barray3_instance =
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_barray3) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_barray3)
+          (coreBuiltin SystemF.The_repr_barray3)
           []
   ; let iter_instance =
           polyExplicitInstance [b, c] [] cls
           (ConTy (tiBuiltin the_con_iter) @@ ConTy b @@ ConTy c)
-          (pyonBuiltin SystemF.The_repr_Stream)
+          (coreBuiltin SystemF.The_repr_Stream)
           []
   ; let view_instance =
           polyExplicitInstance [b, c] [] cls
           (ConTy (tiBuiltin the_con_view) @@ ConTy b @@ ConTy c)
-          (pyonBuiltin SystemF.The_repr_view)
+          (coreBuiltin SystemF.The_repr_view)
           []
   ; let scatter_instance =
           polyExplicitInstance [b, c] [] cls
           (ConTy (tiBuiltin the_con_Scatter) @@ ConTy b @@ ConTy c)
-          (pyonBuiltin SystemF.The_repr_Scatter)
+          (coreBuiltin SystemF.The_repr_Scatter)
           []
   ; let complex_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
-          (pyonBuiltin SystemF.The_repr_Complex)
+          (coreBuiltin SystemF.The_repr_Complex)
           []
   ; let tuple2_instance =
           polyExplicitInstance [b, c] [passable $ ConTy b, passable $ ConTy c] cls
           (TupleTy 2 @@ ConTy b @@ ConTy c)
-          (SystemF.pyonTupleReprCon 2)
+          (SystemF.tupleReprCon 2)
           []
   ; d <- newTyVar Star Nothing
   ; let tuple3_instance =
           polyExplicitInstance [b, c, d] [passable $ ConTy b, passable $ ConTy c, passable $ ConTy d] cls
           (TupleTy 3 @@ ConTy b @@ ConTy c @@ ConTy d)
-          (SystemF.pyonTupleReprCon 3)
+          (SystemF.tupleReprCon 3)
           []
   ; e <- newTyVar Star Nothing
   ; let tuple4_instance =
           polyExplicitInstance [b, c, d, e] [passable $ ConTy b, passable $ ConTy c, passable $ ConTy d, passable $ ConTy e] cls
           (TupleTy 4 @@ ConTy b @@ ConTy c @@ ConTy d @@ ConTy e)
-          (SystemF.pyonTupleReprCon 4)
+          (SystemF.tupleReprCon 4)
           []
   }
   
@@ -1869,45 +1869,45 @@ initializeTIBuiltins = do
             -- 1. Source code name
             -- 2. kind
             -- 3. system F constructor
-            [ ("int", Star, [| pyonBuiltin SystemF.The_int |])
-            , ("float", Star, [| pyonBuiltin SystemF.The_float |])
-            , ("Complex", Star :-> Star, [| pyonBuiltin SystemF.The_Complex |])
-            , ("bool", Star, [| pyonBuiltin SystemF.The_bool |])
-            , ("NoneType", Star, [| pyonBuiltin SystemF.The_NoneType |])
-            , ("StuckRef", Star :-> Star, [| pyonBuiltin SystemF.The_StuckRef |])
-            , ("Maybe", Star :-> Star, [| pyonBuiltin SystemF.The_Maybe |])
-            , ("MaybeVal", Star :-> Star, [| pyonBuiltin SystemF.The_MaybeVal |])
-            , ("SliceObject", Star, [| pyonBuiltin SystemF.The_SliceObject |])
+            [ ("int", Star, [| coreBuiltin SystemF.The_int |])
+            , ("float", Star, [| coreBuiltin SystemF.The_float |])
+            , ("Complex", Star :-> Star, [| coreBuiltin SystemF.The_Complex |])
+            , ("bool", Star, [| coreBuiltin SystemF.The_bool |])
+            , ("NoneType", Star, [| coreBuiltin SystemF.The_NoneType |])
+            , ("StuckRef", Star :-> Star, [| coreBuiltin SystemF.The_StuckRef |])
+            , ("Maybe", Star :-> Star, [| coreBuiltin SystemF.The_Maybe |])
+            , ("MaybeVal", Star :-> Star, [| coreBuiltin SystemF.The_MaybeVal |])
+            , ("SliceObject", Star, [| coreBuiltin SystemF.The_SliceObject |])
             , ("iter", Star :-> Star :-> Star,
-               [| pyonBuiltin SystemF.The_Stream |])
-            , ("list", Star :-> Star, [| pyonBuiltin SystemF.The_list |])
-            , ("array0", Star :-> Star, [| pyonBuiltin SystemF.The_array0 |])
-            , ("array1", Star :-> Star, [| pyonBuiltin SystemF.The_array1 |])
-            , ("array2", Star :-> Star, [| pyonBuiltin SystemF.The_array2 |])
-            , ("array3", Star :-> Star, [| pyonBuiltin SystemF.The_array3 |])
-            , ("blist", Star :-> Star, [| pyonBuiltin SystemF.The_blist |])
-            , ("barray1", Star :-> Star, [| pyonBuiltin SystemF.The_barray1 |])
-            , ("barray2", Star :-> Star, [| pyonBuiltin SystemF.The_barray2 |])
-            , ("barray3", Star :-> Star, [| pyonBuiltin SystemF.The_barray3 |])
+               [| coreBuiltin SystemF.The_Stream |])
+            , ("list", Star :-> Star, [| coreBuiltin SystemF.The_list |])
+            , ("array0", Star :-> Star, [| coreBuiltin SystemF.The_array0 |])
+            , ("array1", Star :-> Star, [| coreBuiltin SystemF.The_array1 |])
+            , ("array2", Star :-> Star, [| coreBuiltin SystemF.The_array2 |])
+            , ("array3", Star :-> Star, [| coreBuiltin SystemF.The_array3 |])
+            , ("blist", Star :-> Star, [| coreBuiltin SystemF.The_blist |])
+            , ("barray1", Star :-> Star, [| coreBuiltin SystemF.The_barray1 |])
+            , ("barray2", Star :-> Star, [| coreBuiltin SystemF.The_barray2 |])
+            , ("barray3", Star :-> Star, [| coreBuiltin SystemF.The_barray3 |])
             , ("view", Star :-> Star :-> Star, 
-               [| pyonBuiltin SystemF.The_view |])
-            , ("Any", Star, [| pyonBuiltin SystemF.The_Any |])
+               [| coreBuiltin SystemF.The_view |])
+            , ("Any", Star, [| coreBuiltin SystemF.The_Any |])
             , ("Scatter", Star :-> Star :-> Star,
-               [| pyonBuiltin SystemF.The_Scatter |])
-            , ("list_dim", Star, [| pyonBuiltin SystemF.The_list_dim |])
-            , ("dim0", Star, [| pyonBuiltin SystemF.The_dim0 |])
-            , ("dim1", Star, [| pyonBuiltin SystemF.The_dim1 |])
-            , ("dim2", Star, [| pyonBuiltin SystemF.The_dim2 |])
-            , ("dim3", Star, [| pyonBuiltin SystemF.The_dim3 |])
+               [| coreBuiltin SystemF.The_Scatter |])
+            , ("list_dim", Star, [| coreBuiltin SystemF.The_list_dim |])
+            , ("dim0", Star, [| coreBuiltin SystemF.The_dim0 |])
+            , ("dim1", Star, [| coreBuiltin SystemF.The_dim1 |])
+            , ("dim2", Star, [| coreBuiltin SystemF.The_dim2 |])
+            , ("dim3", Star, [| coreBuiltin SystemF.The_dim3 |])
             ]
 
           type_functions =
-            [ ("shape", [| pyonBuiltin SystemF.The_shape |], [| mkShapeTyFun |])
-            , ("index", [| pyonBuiltin SystemF.The_index |], [| mkIndexTyFun |])
-            , ("cartesianDomain", [| pyonBuiltin SystemF.The_cartesianDomain |],
+            [ ("shape", [| coreBuiltin SystemF.The_shape |], [| mkShapeTyFun |])
+            , ("index", [| coreBuiltin SystemF.The_index |], [| mkIndexTyFun |])
+            , ("cartesianDomain", [| coreBuiltin SystemF.The_cartesianDomain |],
                [| mkCartesianDomainTyFun |])
-            , ("slice", [| pyonBuiltin SystemF.The_slice |], [| mkSliceTyFun |])
-            , ("array", [| pyonBuiltin SystemF.The_array |], [| mkArrayTyFun |])
+            , ("slice", [| coreBuiltin SystemF.The_slice |], [| mkSliceTyFun |])
+            , ("array", [| coreBuiltin SystemF.The_array |], [| mkArrayTyFun |])
             ]
             
           classes =
@@ -1930,210 +1930,210 @@ initializeTIBuiltins = do
             -- All global variables
             -- Their Hindley-Milner type schemes and System F translations.
             [ ("isJust", [| mkIsJustType |]
-              , [| pyonBuiltin SystemF.The_fun_isJust |]
+              , [| coreBuiltin SystemF.The_fun_isJust |]
               ),
               ("isNothing", [| mkIsJustType |]
-              , [| pyonBuiltin SystemF.The_fun_isNothing |]
+              , [| coreBuiltin SystemF.The_fun_isNothing |]
               ),
               ("fromJust", [| mkFromJustType |]
-              , [| pyonBuiltin SystemF.The_fun_fromJust |]
+              , [| coreBuiltin SystemF.The_fun_fromJust |]
               ),
               ("list_dim", [| mkListDimType |]
-              , [| pyonBuiltin SystemF.The_fun_list_dim |]
+              , [| coreBuiltin SystemF.The_fun_list_dim |]
               ),
               ("dim1", [| mkDim1Type |]
-              , [| pyonBuiltin SystemF.The_fun_dim1 |]
+              , [| coreBuiltin SystemF.The_fun_dim1 |]
               ),
               ("map", [| mkMapType |]
-              , [| pyonBuiltin SystemF.The_fun_map |]
+              , [| coreBuiltin SystemF.The_fun_map |]
               ),
               ("filter", [| mkFilterType |]
-              , [| pyonBuiltin SystemF.The_fun_filter |]
+              , [| coreBuiltin SystemF.The_fun_filter |]
               ),
               ("reduce", [| mkReduceType |]
-              , [| pyonBuiltin SystemF.The_fun_reduce |]
+              , [| coreBuiltin SystemF.The_fun_reduce |]
               ),
               ("reduce1", [| mkReduce1Type |]
-              , [| pyonBuiltin SystemF.The_fun_reduce1 |]
+              , [| coreBuiltin SystemF.The_fun_reduce1 |]
               ),
               ("sum", [| mkSumType |]
-              , [| pyonBuiltin SystemF.The_fun_sum |]
+              , [| coreBuiltin SystemF.The_fun_sum |]
               ),
               ("indices", [| mkIndicesType |]
-              , [| pyonBuiltin SystemF.The_fun_indices |]
+              , [| coreBuiltin SystemF.The_fun_indices |]
               ),
               ("zip", [| mkZipType |]
-              , [| pyonBuiltin SystemF.The_fun_zip |]
+              , [| coreBuiltin SystemF.The_fun_zip |]
               ),
               ("zip3", [| mkZip3Type |]
-              , [| pyonBuiltin SystemF.The_fun_zip3 |]
+              , [| coreBuiltin SystemF.The_fun_zip3 |]
               ),
               ("zip4", [| mkZip4Type |]
-              , [| pyonBuiltin SystemF.The_fun_zip4 |]
+              , [| coreBuiltin SystemF.The_fun_zip4 |]
               ),
               ("count", [| mkCountType |]
-              , [| pyonBuiltin SystemF.The_count |]
+              , [| coreBuiltin SystemF.The_count |]
               ),
               ("range", [| mkRangeType |]
-              , [| pyonBuiltin SystemF.The_range |]
+              , [| coreBuiltin SystemF.The_range |]
               ),
               ("arrayRange", [| mkArrayRangeType |]
-              , [| pyonBuiltin SystemF.The_arrayRange |]
+              , [| coreBuiltin SystemF.The_arrayRange |]
               ),
               ("chain", [| mkChainType |]
-              , [| pyonBuiltin SystemF.The_chain |]
+              , [| coreBuiltin SystemF.The_chain |]
               ),
               ("singletonIter", [| mkSingletonIterType |]
-              , [| pyonBuiltin SystemF.The_singletonIter |]
+              , [| coreBuiltin SystemF.The_singletonIter |]
               ),
               ("len", [| mkLenType |]
-              , [| pyonBuiltin SystemF.The_len |]
+              , [| coreBuiltin SystemF.The_len |]
               ),
               ("width", [| mkWidthHeightType |]
-              , [| pyonBuiltin SystemF.The_width |]
+              , [| coreBuiltin SystemF.The_width |]
               ),
               ("height", [| mkWidthHeightType |]
-              , [| pyonBuiltin SystemF.The_height |]
+              , [| coreBuiltin SystemF.The_height |]
               ),
               ("outerproduct", [| mkOuterProductType |]
-              , [| pyonBuiltin SystemF.The_outerproduct |]
+              , [| coreBuiltin SystemF.The_outerproduct |]
               ),
               ("view2", [| mkView2Type |]
-              , [| pyonBuiltin SystemF.The_create_view2 |]
+              , [| coreBuiltin SystemF.The_create_view2 |]
               ),
               ("stencil2D", [| mkStencil2DType |]
-              , [| pyonBuiltin SystemF.The_stencil2D |]
+              , [| coreBuiltin SystemF.The_stencil2D |]
               ),              
               ("boxedStencil2D", [| mkBoxedStencil2DType |]
-              , [| pyonBuiltin SystemF.The_boxedStencil2D |]
+              , [| coreBuiltin SystemF.The_boxedStencil2D |]
               ),              
               ("extend2D", [| mkExtend2DType |]
-              , [| pyonBuiltin SystemF.The_extend2D |]
+              , [| coreBuiltin SystemF.The_extend2D |]
               ),              
               ("stencil3D", [| mkStencil3DType |]
-              , [| pyonBuiltin SystemF.The_stencil3D |]
+              , [| coreBuiltin SystemF.The_stencil3D |]
               ),              
               ("extend3D", [| mkExtend3DType |]
-              , [| pyonBuiltin SystemF.The_extend3D |]
+              , [| coreBuiltin SystemF.The_extend3D |]
               ),              
               ("rows", [| mkRowsColsType |]
-              , [| pyonBuiltin SystemF.The_rows |]
+              , [| coreBuiltin SystemF.The_rows |]
               ),
               ("cols", [| mkRowsColsType |]
-              , [| pyonBuiltin SystemF.The_cols |]
+              , [| coreBuiltin SystemF.The_cols |]
               ),
               ("displaceView", [| mkDisplaceViewType |]
-              , [| pyonBuiltin SystemF.The_displaceView |]
+              , [| coreBuiltin SystemF.The_displaceView |]
               ),
               ("multiplyView", [| mkDisplaceViewType |]
-              , [| pyonBuiltin SystemF.The_multiplyView |]
+              , [| coreBuiltin SystemF.The_multiplyView |]
               ),
               ("divideView", [| mkDisplaceViewType |]
-              , [| pyonBuiltin SystemF.The_divideView |]
+              , [| coreBuiltin SystemF.The_divideView |]
               ),
               ("safeIndex", [| mkSafeIndexType |]
-              , [| pyonBuiltin SystemF.The_safeIndex |]
+              , [| coreBuiltin SystemF.The_safeIndex |]
               ),
               ("safeSlice", [| mkSafeSliceType |]
-              , [| pyonBuiltin SystemF.The_safeSlice |]
+              , [| coreBuiltin SystemF.The_safeSlice |]
               ),
               ("histogram", [| mkHistogramType |]
-              , [| pyonBuiltin SystemF.The_histogram |]
+              , [| coreBuiltin SystemF.The_histogram |]
               ),
               ("floor", [| mkFloorType |]
-              , [| pyonBuiltin SystemF.The_floor |]
+              , [| coreBuiltin SystemF.The_floor |]
               ),
               ("intSumScatter", [| mkIntSumScatterType |]
-              , [| pyonBuiltin SystemF.The_intSumScatter |]
+              , [| coreBuiltin SystemF.The_intSumScatter |]
               ),
               ("floatSumScatter", [| mkFloatSumScatterType |]
-              , [| pyonBuiltin SystemF.The_floatSumScatter |]
+              , [| coreBuiltin SystemF.The_floatSumScatter |]
               ),
               ("countingScatter", [| mkCountingScatterType |]
-              , [| pyonBuiltin SystemF.The_countingScatter |]
+              , [| coreBuiltin SystemF.The_countingScatter |]
               ),
               ("boxedScatter", [| mkBoxedScatterType |]
-              , [| pyonBuiltin SystemF.The_boxedScatter |]
+              , [| coreBuiltin SystemF.The_boxedScatter |]
               ),
               ("appendScatter", [| mkAppendScatterType |]
-              , [| pyonBuiltin SystemF.The_appendScatter |]
+              , [| coreBuiltin SystemF.The_appendScatter |]
               ),
               ("listScatter", [| mkListScatterType |]
-              , [| pyonBuiltin SystemF.The_listScatter |]
+              , [| coreBuiltin SystemF.The_listScatter |]
               ),
               ("array1Scatter", [| mkArray1ScatterType |]
-              , [| pyonBuiltin SystemF.The_array1Scatter |]
+              , [| coreBuiltin SystemF.The_array1Scatter |]
               ),
               ("barray1Scatter", [| mkBArray1ScatterType |]
-              , [| pyonBuiltin SystemF.The_barray1Scatter |]
+              , [| coreBuiltin SystemF.The_barray1Scatter |]
               ),
               ("array2Scatter", [| mkArray2ScatterType |]
-              , [| pyonBuiltin SystemF.The_array2Scatter |]
+              , [| coreBuiltin SystemF.The_array2Scatter |]
               ),
               ("barray2Scatter", [| mkBArray2ScatterType |]
-              , [| pyonBuiltin SystemF.The_barray2Scatter |]
+              , [| coreBuiltin SystemF.The_barray2Scatter |]
               ),
               ("array3Scatter", [| mkArray3ScatterType |]
-              , [| pyonBuiltin SystemF.The_array3Scatter |]
+              , [| coreBuiltin SystemF.The_array3Scatter |]
               ),
               ("barray3Scatter", [| mkBArray3ScatterType |]
-              , [| pyonBuiltin SystemF.The_barray3Scatter |]
+              , [| coreBuiltin SystemF.The_barray3Scatter |]
               ),
               ("scatter", [| mkScatterType |]
-              , [| pyonBuiltin SystemF.The_fun_scatter |]
+              , [| coreBuiltin SystemF.The_fun_scatter |]
               ),
               ("matrixiter", [| mkMatrixIterType |]
-              , [| pyonBuiltin SystemF.The_fun_from_MatrixView_Stream |]
+              , [| coreBuiltin SystemF.The_fun_from_MatrixView_Stream |]
               ),
               ("__undefined__", [| mkUndefinedType |]
-              , [| pyonBuiltin SystemF.The_fun_undefined |]
+              , [| coreBuiltin SystemF.The_fun_undefined |]
               ),
               ("do", [| mkReturnType |]
-              , [| pyonBuiltin SystemF.The_Stream1_return |]
+              , [| coreBuiltin SystemF.The_Stream1_return |]
               ),
               ("guard", [| mkGuardType |]
-              , [| pyonBuiltin SystemF.The_Stream1_guard |]
+              , [| coreBuiltin SystemF.The_Stream1_guard |]
               ),
               ("iterBind", [| mkIterBindType |]
-              , [| pyonBuiltin SystemF.The_Stream1_bind |]
+              , [| coreBuiltin SystemF.The_Stream1_bind |]
               ),
               ("__and__", [| mkBinaryIntType |]
-              , [| pyonBuiltin SystemF.The_oper_BITWISEAND |]
+              , [| coreBuiltin SystemF.The_oper_BITWISEAND |]
               ),
               ("__or__", [| mkBinaryIntType |]
-              , [| pyonBuiltin SystemF.The_oper_BITWISEOR |]
+              , [| coreBuiltin SystemF.The_oper_BITWISEOR |]
               ),
               ("__xor__", [| mkBinaryIntType |]
-              , [| pyonBuiltin SystemF.The_oper_BITWISEXOR |]
+              , [| coreBuiltin SystemF.The_oper_BITWISEXOR |]
               ),
               ("and", [| mkBinaryBoolType |]
-              , [| pyonBuiltin SystemF.The_and |]
+              , [| coreBuiltin SystemF.The_and |]
               ),
               ("or", [| mkBinaryBoolType |]
-              , [| pyonBuiltin SystemF.The_or |]
+              , [| coreBuiltin SystemF.The_or |]
               ),
               ("not", [| mkNotType |]
-              , [| pyonBuiltin SystemF.The_not |]
+              , [| coreBuiltin SystemF.The_not |]
               ),
               ("make_sliceObject", [| mkMakeSliceObjectType |]
-              , [| pyonBuiltin SystemF.The_make_sliceObject |]
+              , [| coreBuiltin SystemF.The_make_sliceObject |]
               )
             ]
           datacons =
             [ ("complex", [| mkMakeComplexType |]
-              , [| pyonBuiltin SystemF.The_complex |]
+              , [| coreBuiltin SystemF.The_complex |]
               ),
               ("dim2", [| mkDim2Type |]
-              , [| pyonBuiltin SystemF.The_mk_dim2 |]
+              , [| coreBuiltin SystemF.The_mk_dim2 |]
               ),
               ("dim3", [| mkDim3Type |]
-              , [| pyonBuiltin SystemF.The_mk_dim3 |]
+              , [| coreBuiltin SystemF.The_mk_dim3 |]
               ),
               ("Just", [| mkJustType |]
-              , [| pyonBuiltin SystemF.The_just |]
+              , [| coreBuiltin SystemF.The_just |]
               ),
               ("Nothing", [| mkNothingType |]
-              , [| pyonBuiltin SystemF.The_nothing |]
+              , [| coreBuiltin SystemF.The_nothing |]
               )
             ]
           cls_members =

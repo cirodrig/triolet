@@ -1,13 +1,13 @@
 // This file defines parallelized C/C++ algorithmic skeletons of loops.
 //
-// The algorithmic skeletons are called from Pyon code.  They call back into
-// Pyon code to do the actual work.
+// The algorithmic skeletons are called from Triolet code.  They call back into
+// Triolet code to do the actual work.
 
 #include <stdio.h>
 #include <stdlib.h>
 
 extern "C" {
-#include "pyon.h"
+#include "triolet.h"
 }
 
 #ifdef USE_TBB
@@ -21,18 +21,19 @@ extern "C" {
 /*****************************************************************************/
 /* Parallelized reduction */
 
-/* Functions written in low-level pyon */
+/* Functions written in low-level triolet */
 extern "C" void *
-blocked_reduce_accumulate_range(void *data, void *acc, PyonInt start, PyonInt end);
+blocked_reduce_accumulate_range(void *data, void *acc,
+                                TrioletInt start, TrioletInt end);
 extern "C" void *
 blocked_reduce_reduce(void *data, void *x, void *y);
 
 
-/* Function exported to pyon */
+/* Function exported to triolet */
 extern "C" void *
-pyon_C_blocked_reduce(void *data,
-		      void *initial_value,
-		      PyonInt count);
+triolet_C_blocked_reduce(void *data,
+                         void *initial_value,
+                         TrioletInt count);
 
 
 
@@ -40,7 +41,7 @@ pyon_C_blocked_reduce(void *data,
 
 // No parallel implementation available; use sequential reduction
 void *
-pyon_C_blocked_reduce(void *data, void *initial_value, PyonInt count)
+triolet_C_blocked_reduce(void *data, void *initial_value, TrioletInt count)
 {
   // Perform the reduction
   return blocked_reduce_accumulate_range(data, initial_value, 0, count);
@@ -82,9 +83,9 @@ struct BlockedReducer {
 };
 
 void *
-pyon_C_blocked_reduce(void *data,
-		      void *initial_value,
-		      PyonInt count)
+triolet_C_blocked_reduce(void *data,
+                         void *initial_value,
+                         TrioletInt count)
 {
   BlockedReducePlan plan = {data, initial_value};
 
@@ -102,28 +103,28 @@ pyon_C_blocked_reduce(void *data,
 /*****************************************************************************/
 /* Parallelized 2D reduction */
 
-/* Functions written in low-level pyon */
+/* Functions written in low-level triolet */
 extern "C" void *
 blocked_reduce2_accumulate_range(void *data, void *acc,
-                                 PyonInt start_y, PyonInt end_y,
-                                 PyonInt start_x, PyonInt end_x);
+                                 TrioletInt start_y, TrioletInt end_y,
+                                 TrioletInt start_x, TrioletInt end_x);
 extern "C" void *
 blocked_reduce2_reduce(void *data, void *x, void *y);
 
 
-/* Function exported to pyon */
+/* Function exported to triolet */
 extern "C" void *
-pyon_C_blocked_reduce2(void *data,
-		       void *initial_value,
-		       PyonInt count_y,
-                       PyonInt count_x);
+triolet_C_blocked_reduce2(void *data,
+                          void *initial_value,
+                          TrioletInt count_y,
+                          TrioletInt count_x);
 
 #ifndef USE_TBB
 
 // No parallel implementation available; use sequential reduction
 void *
-pyon_C_blocked_reduce2(void *data, void *initial_value,
-                       PyonInt count_y, PyonInt count_x)
+triolet_C_blocked_reduce2(void *data, void *initial_value,
+                          TrioletInt count_y, TrioletInt count_x)
 {
   // Perform the reduction
   return blocked_reduce2_accumulate_range(data, initial_value, 0, count_y, 0, count_x);
@@ -167,10 +168,10 @@ struct BlockedReducer2 {
 };
 
 void *
-pyon_C_blocked_reduce2(void *data,
-		       void *initial_value,
-		       PyonInt count_y,
-		       PyonInt count_x)
+triolet_C_blocked_reduce2(void *data,
+                          void *initial_value,
+                          TrioletInt count_y,
+                          TrioletInt count_x)
 {
   BlockedReduce2Plan plan = {data, initial_value};
 
@@ -188,19 +189,19 @@ pyon_C_blocked_reduce2(void *data,
 /*****************************************************************************/
 /* Parallelized doall */
 
-/* Functions written in low-level pyon */
+/* Functions written in low-level triolet */
 extern "C" void
-blocked_doall_worker(void *worker_fn, PyonInt start, PyonInt end);
+blocked_doall_worker(void *worker_fn, TrioletInt start, TrioletInt end);
 
-/* Function exported to pyon */
+/* Function exported to triolet */
 extern "C" void
-pyon_C_blocked_doall(void *worker_fn, PyonInt count);
+triolet_C_blocked_doall(void *worker_fn, TrioletInt count);
 
 #ifndef USE_TBB
 
 // Sequential implementation: do everything in one thread
 extern "C" void
-pyon_C_blocked_doall(void *worker_fn, PyonInt count)
+triolet_C_blocked_doall(void *worker_fn, TrioletInt count)
 {
   blocked_doall_worker(worker_fn, 0, count);
 }
@@ -222,7 +223,7 @@ struct BlockedDoer {
 };
 
 extern "C" void
-pyon_C_blocked_doall(void *data, PyonInt count)
+triolet_C_blocked_doall(void *data, TrioletInt count)
 {
   tbb::parallel_for(tbb::blocked_range<int>(0, count),
 		    BlockedDoer(data));
@@ -233,20 +234,20 @@ pyon_C_blocked_doall(void *data, PyonInt count)
 /*****************************************************************************/
 /* Parallelized 2D doall */
 
-/* Functions written in low-level pyon */
+/* Functions written in low-level triolet */
 extern "C" void
 blocked_doall2_worker(void *worker_fn,
-                      PyonInt start_y, PyonInt end_y,
-                      PyonInt start_x, PyonInt end_x);
+                      TrioletInt start_y, TrioletInt end_y,
+                      TrioletInt start_x, TrioletInt end_x);
 
-/* Function exported to pyon */
+/* Function exported to triolet */
 extern "C" void
-pyon_C_blocked_doall2(void *worker_fn, PyonInt count_y, PyonInt count_x);
+triolet_C_blocked_doall2(void *worker_fn, TrioletInt count_y, TrioletInt count_x);
 
 #ifndef USE_TBB
 
 extern "C" void
-pyon_C_blocked_doall2(void *worker_fn, PyonInt count_y, PyonInt count_x)
+triolet_C_blocked_doall2(void *worker_fn, TrioletInt count_y, TrioletInt count_x)
 {
   blocked_doall2_worker(worker_fn, 0, count_y, 0, count_x);
 }
@@ -270,7 +271,7 @@ struct BlockedDoer2 {
 };
 
 extern "C" void
-pyon_C_blocked_doall2(void *data, PyonInt count_y, PyonInt count_x)
+triolet_C_blocked_doall2(void *data, TrioletInt count_y, TrioletInt count_x)
 {
   tbb::parallel_for(tbb::blocked_range2d<int>(0, count_y, 0, count_x),
 		    BlockedDoer2(data));

@@ -24,7 +24,7 @@ build : $(PYON_TARGET) $(RTS_TARGET) data
 bootstrap_data : $(BOOT_DATA_FILES)
 
 # Install all data files into the local build directory
-data : $(BOOT_DATA_FILES) $(DATA_BUILD_DIR)/libpyonrts.so $(INTERFACE_DATA_FILES)
+data : $(BOOT_DATA_FILES) $(DATA_BUILD_DIR)/libtrioletrts.so $(INTERFACE_DATA_FILES)
 
 ###############################################################################
 # Compilation
@@ -41,7 +41,7 @@ $(RTS_TARGET) : $(RTS_OBJECT_FILES)
 		-g $(RTS_OBJECT_FILES) -o $(RTS_TARGET) $(TARGET_LIBS)
 
 # Move the library into the data directory
-$(DATA_BUILD_DIR)/libpyonrts.so : $(RTS_TARGET)
+$(DATA_BUILD_DIR)/libtrioletrts.so : $(RTS_TARGET)
 	cp $< $@
 
 ###############################################################################

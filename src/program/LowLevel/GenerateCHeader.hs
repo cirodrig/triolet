@@ -21,19 +21,19 @@ import LowLevel.GenerateCUtils
 exportParamDeclSpecs :: ExportDataType -> [DeclSpecs]
 exportParamDeclSpecs export_type =
   case export_type
-  of ListET False _ -> [ptrDeclSpecs $ nameDeclSpecs "PyonList"]
-     ArrayET 2 False _ -> [ptrDeclSpecs $ nameDeclSpecs "PyonMatrix"]
+  of ListET False _ -> [ptrDeclSpecs $ nameDeclSpecs "TrioletList"]
+     ArrayET 2 False _ -> [ptrDeclSpecs $ nameDeclSpecs "TrioletMatrix"]
      CSizeArrayET et ->
        case exportParamDeclSpecs et
-       of [spec] -> [nameDeclSpecs "PyonInt", ptrDeclSpecs spec]
+       of [spec] -> [nameDeclSpecs "TrioletInt", ptrDeclSpecs spec]
           _ ->
             -- Cannot make an array of something that isn't one parameter
             internalError "exportParamDeclSpecs"
-     PyonNoneET -> []           -- NoneType parameters are removed
-     PyonIntET -> [nameDeclSpecs "PyonInt"]
-     PyonFloatET -> [nameDeclSpecs "PyonFloat"]
-     PyonBoolET -> [nameDeclSpecs "PyonBool"]
-     FunctionET _ _ -> [nameDeclSpecs "PyonClosure"]
+     TrioletNoneET -> []           -- NoneType parameters are removed
+     TrioletIntET -> [nameDeclSpecs "TrioletInt"]
+     TrioletFloatET -> [nameDeclSpecs "TrioletFloat"]
+     TrioletBoolET -> [nameDeclSpecs "TrioletBool"]
+     FunctionET _ _ -> [nameDeclSpecs "TrioletClosure"]
 
 -- | Get the declaration components to use to declare a function return type.
 -- The return type might occupy parameters and/or the return value.  If there's
@@ -41,19 +41,19 @@ exportParamDeclSpecs export_type =
 exportReturnDeclSpecs :: ExportDataType -> ([DeclSpecs], DeclSpecs)
 exportReturnDeclSpecs export_type =
   case export_type
-  of ListET False _ -> ([], ptrDeclSpecs $ nameDeclSpecs "PyonList")
-     ArrayET 2 False _ -> ([], ptrDeclSpecs $ nameDeclSpecs "PyonMatrix")
+  of ListET False _ -> ([], ptrDeclSpecs $ nameDeclSpecs "TrioletList")
+     ArrayET 2 False _ -> ([], ptrDeclSpecs $ nameDeclSpecs "TrioletMatrix")
      CSizeArrayET et -> 
        case exportParamDeclSpecs et
-       of [spec] -> ([nameDeclSpecs "PyonInt"], ptrDeclSpecs spec)
+       of [spec] -> ([nameDeclSpecs "TrioletInt"], ptrDeclSpecs spec)
           _ ->
             -- Cannot make an array of something that isn't one parameter
             internalError "exportReturnDeclSpecs"
-     PyonNoneET -> ([], voidDeclSpecs)
-     PyonIntET -> ([], nameDeclSpecs "PyonInt")
-     PyonFloatET -> ([], nameDeclSpecs "PyonFloat")
-     PyonBoolET -> ([], nameDeclSpecs "PyonBool")
-     FunctionET _ _ -> ([], nameDeclSpecs "PyonClosure")
+     TrioletNoneET -> ([], voidDeclSpecs)
+     TrioletIntET -> ([], nameDeclSpecs "TrioletInt")
+     TrioletFloatET -> ([], nameDeclSpecs "TrioletFloat")
+     TrioletBoolET -> ([], nameDeclSpecs "TrioletBool")
+     FunctionET _ _ -> ([], nameDeclSpecs "TrioletClosure")
 
 -- | Get the declaration components to use to declare an exported function
 exportSigDeclSpecs :: CSignature -> DeclSpecs
@@ -96,4 +96,4 @@ generateCHeader mod =
      
 cModuleHeader =
   "#include <inttypes.h>\n\
-  \#include <pyon.h>\n"
+  \#include <triolet.h>\n"

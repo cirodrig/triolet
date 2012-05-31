@@ -635,7 +635,7 @@ inferExpressionType' expression =
      TupleE {expFields = fs} -> do
        (f_exps, f_tys) <- inferExpressionTypes fs
        let -- Create the tuple expression
-           tuple_con = SystemF.pyonTupleCon $ length f_tys
+           tuple_con = SystemF.tupleCon $ length f_tys
            f_tys' = map convertHMType f_tys
            tuple_expr = mkConE pos tuple_con f_tys' [] f_exps
        return (tuple_expr, tupleType f_tys)

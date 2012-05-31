@@ -58,7 +58,7 @@ procedure apply_f32 (owned obj, float arg, pointer ret) -> () {
 
 procedure apply_dword (owned obj, pointer arg_ref, pointer ret) -> () {
   // Not implemented
-  () = () primcall pyon_db_int(int 99);
+  () = () primcall triolet_db_int(int 99);
   () primcall exit (int -1);
 };
 

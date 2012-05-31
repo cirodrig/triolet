@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Mapping over a matrix",
-  pyonSources	 = ["test.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["test.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "yes"

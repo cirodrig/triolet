@@ -57,10 +57,10 @@ isFloatableFunction v args =
   where
     floatable_op =
       isReprCon v ||
-      v `isPyonBuiltin` The_AdditiveDict_int_add ||
-      v `isPyonBuiltin` The_AdditiveDict_int_sub ||
-      v `isPyonBuiltin` The_max_int ||
-      v `isPyonBuiltin` The_min_int
+      v `isCoreBuiltin` The_AdditiveDict_int_add ||
+      v `isCoreBuiltin` The_AdditiveDict_int_sub ||
+      v `isCoreBuiltin` The_max_int ||
+      v `isCoreBuiltin` The_min_int
 
 -- | Return 'True' if it is okay to float a function call in which
 --   this expression appears as a subexpression.
@@ -139,9 +139,9 @@ isFloatableDataType tenv data_type con_type compute_field_types
            ValK ->
              -- Only allow types that are known to fit in a register
              case field_type
-             of VarT a -> a `isPyonBuiltin` The_int ||
-                          a `isPyonBuiltin` The_float ||
-                          a `isPyonBuiltin` The_bool
+             of VarT a -> a `isCoreBuiltin` The_int ||
+                          a `isCoreBuiltin` The_float ||
+                          a `isCoreBuiltin` The_bool
                 _ -> False
   where
     not_length_1 :: [a] -> Bool

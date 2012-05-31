@@ -198,7 +198,7 @@ genValWorker :: GlobalVars -> Val -> CExpr
 genValWorker gvars (VarV v)
   | v `Set.member` gvars =
       -- Take address of global variable, and cast to pointer
-      castToPyonPtr $ cUnary CAdrOp var_exp
+      castToTrioletPtr $ cUnary CAdrOp var_exp
   | otherwise = var_exp
   where
   var_exp = cVar $ varIdentScoped gvars v
@@ -624,7 +624,7 @@ genStatement returns stm =
        
 genThrow val = do
   signal_value <- genVal val
-  let code = cExprStat $ cCall (cVar (internalIdent "pyon_exit")) [signal_value]
+  let code = cExprStat $ cCall (cVar (internalIdent "triolet_exit")) [signal_value]
   return ([CCode [CBlockStmt code]], False)
 
 genSwitch returns cond cases = do
@@ -907,7 +907,7 @@ initializeBytes gvars v (RecV record_type values) =
     mk_stmt e = CBlockStmt $ CExpr (Just e) internalNode
 
 initializeField gvars base fld val =
-  -- Generate the assignment *(TYPE *)(PYON_OFF(base, fld)) = val
+  -- Generate the assignment *(TYPE *)(TRIOLET_OFF(base, fld)) = val
   let field_offset = smallIntConst (fieldOffset fld)
       field_ptr = offset base field_offset
       field_cast_ptr = case fieldType fld
@@ -979,6 +979,6 @@ makeCFileText top_level =
 cModuleHeader =
   "#include <inttypes.h>\n\
   \#include <math.h>\n\
-  \typedef void *PyonPtr;\n\
-  \#define PYON_OFF(base, offset) ((PyonPtr)((char *)(base) + (offset)))\n\
-  \extern void pyon_exit(int) __attribute__((noreturn));\n"
+  \typedef void *TrioletPtr;\n\
+  \#define TRIOLET_OFF(base, offset) ((TrioletPtr)((char *)(base)+(offset)))\n\
+  \extern void triolet_exit(int) __attribute__((noreturn));\n"

@@ -1,10 +1,8 @@
 
 #include <stdio.h>
 #include "hist_cxx.h"
-#include <pyon.h>
-#include <PyonData.h>
 
-using namespace Pyon;
+using namespace Triolet;
 
 struct Input {
   int z;
@@ -13,7 +11,7 @@ struct Input {
   float value;
 };
 
-typedef Tuple<Int, Int, Int, Float> PyonInput;
+typedef Tuple<Int, Int, Int, Float> TriInput;
 
 #define NUM_INPUTS 10
 
@@ -56,12 +54,12 @@ float expected_outputs[4][5][5] = {
     { 0,    0,    0,    0,    0 } }
 };
 
-List<PyonInput> make_inputs(void) {
-  Incomplete<List<PyonInput> > a;
+List<TriInput> make_inputs(void) {
+  Incomplete<List<TriInput> > a;
   a.create(NUM_INPUTS);
   int i;
   for (i = 0; i < NUM_INPUTS; i++) {
-    Incomplete<PyonInput> e = a.at(i);
+    Incomplete<TriInput> e = a.at(i);
     e.get<0>() = (Int)inputs[i].z;
     e.get<1>() = (Int)inputs[i].y;
     e.get<2>() = (Int)inputs[i].x;
@@ -72,9 +70,9 @@ List<PyonInput> make_inputs(void) {
 
 int main()
 {
-  GC_INIT();
+  Triolet_init();
 
-  List<PyonInput> a = make_inputs();
+  List<TriInput> a = make_inputs();
   Array3<Float> outputs = f(a);
 
   int z, y, x;

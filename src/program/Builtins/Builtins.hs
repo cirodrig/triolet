@@ -17,10 +17,10 @@ import Builtins.BuiltinsTH
 import Type.Type
 
 -- | The built-in variables are stored in an array
-type PyonBuiltins = Array Int Var
+type CoreBuiltins = Array Int Var
 
 $(do let cons = [mkName ("The_" ++ nm)
-                | nm <- pyonBuiltinTypeNames ++ pyonBuiltinVariableNames]
+                | nm <- builtinTypeNames ++ builtinVariableNames]
          num_cons = length cons
          con_decls = [return $ NormalC c [] | c <- cons]
 
@@ -32,9 +32,9 @@ $(do let cons = [mkName ("The_" ++ nm)
      initializer_decl <-
        [d| createBuiltins var_ids = do
              type_vars <-
-               mapM (mk_builtin_var TypeLevel) pyonBuiltinTypeNames
+               mapM (mk_builtin_var TypeLevel) builtinTypeNames
              obj_vars <-
-               mapM (mk_builtin_var ObjectLevel) pyonBuiltinVariableNames
+               mapM (mk_builtin_var ObjectLevel) builtinVariableNames
              return $ listArray (0, num_cons - 1) (type_vars ++ obj_vars)
              where
                mk_builtin_var lv nm = do
@@ -48,91 +48,91 @@ allBuiltinVars = elems builtins
   where
     builtins = unsafePerformIO $ do
       -- Ensure that we've already initialized these
-      bi_is_empty <- isEmptyMVar the_PyonBuiltins
-      when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+      bi_is_empty <- isEmptyMVar the_CoreBuiltins
+      when bi_is_empty $ internalError "Core builtins are uninitialized"
 
-      readMVar the_PyonBuiltins
+      readMVar the_CoreBuiltins
 
-pyonBuiltin :: BuiltinThing -> Var
+coreBuiltin :: BuiltinThing -> Var
 
--- Because 'pyonBuiltin' is normally called with a constant argument, it's 
+-- Because 'coreBuiltin' is normally called with a constant argument, it's 
 -- beneficial to inline it
-{-# INLINE pyonBuiltin #-}
-pyonBuiltin field = pyonBuiltin' (fromEnum field)
+{-# INLINE coreBuiltin #-}
+coreBuiltin field = coreBuiltin' (fromEnum field)
 
-pyonBuiltin' field_index = field_index `seq` unsafePerformIO get_value 
+coreBuiltin' field_index = field_index `seq` unsafePerformIO get_value 
   where
     get_value = do
       -- Ensure that we've already initialized these
-      bi_is_empty <- isEmptyMVar the_PyonBuiltins
-      when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+      bi_is_empty <- isEmptyMVar the_CoreBuiltins
+      when bi_is_empty $ internalError "Core builtins are uninitialized"
       
       -- Load and return the desired field
-      bi <- readMVar the_PyonBuiltins
+      bi <- readMVar the_CoreBuiltins
       return $! bi ! field_index
 
-infix 4 `isPyonBuiltin`
-isPyonBuiltin :: Var -> BuiltinThing -> Bool
-v `isPyonBuiltin` name = v == pyonBuiltin name
+infix 4 `isCoreBuiltin`
+isCoreBuiltin :: Var -> BuiltinThing -> Bool
+v `isCoreBuiltin` name = v == coreBuiltin name
 
-pyonTupleTypeCon :: Int -> Var
-pyonTupleTypeCon n | n < 0 = internalError "pyonTupleTypeCon"
-                   | n >= 5 = internalError "pyonTupleTypeCon: Unsupported size"
-                   | otherwise = cons !! n
-  where
-    cons = [ pyonBuiltin The_PyonTuple0
-           , pyonBuiltin The_PyonTuple1
-           , pyonBuiltin The_PyonTuple2
-           , pyonBuiltin The_PyonTuple3
-           , pyonBuiltin The_PyonTuple4
-           ]
-
-pyonTupleCon :: Int -> Var
-pyonTupleCon n | n < 0 = internalError "pyonTupleCon"
-               | n >= 5 = internalError $ "pyonTupleCon: Unsupported size"
+tupleTypeCon :: Int -> Var
+tupleTypeCon n | n < 0 = internalError "tupleTypeCon"
+               | n >= 5 = internalError "tupleTypeCon: Unsupported size"
                | otherwise = cons !! n
   where
-    cons = [ pyonBuiltin The_pyonTuple0
-           , pyonBuiltin The_pyonTuple1
-           , pyonBuiltin The_pyonTuple2
-           , pyonBuiltin The_pyonTuple3
-           , pyonBuiltin The_pyonTuple4
+    cons = [ coreBuiltin The_Tuple0
+           , coreBuiltin The_Tuple1
+           , coreBuiltin The_Tuple2
+           , coreBuiltin The_Tuple3
+           , coreBuiltin The_Tuple4
            ]
 
-isPyonTupleCon :: Var -> Bool
-isPyonTupleCon v = v `elem` cons
+tupleCon :: Int -> Var
+tupleCon n | n < 0 = internalError "tupleCon"
+           | n >= 5 = internalError $ "tupleCon: Unsupported size"
+           | otherwise = cons !! n
   where
-    cons = [ pyonBuiltin The_pyonTuple0
-           , pyonBuiltin The_pyonTuple1
-           , pyonBuiltin The_pyonTuple2
-           , pyonBuiltin The_pyonTuple3
-           , pyonBuiltin The_pyonTuple4
+    cons = [ coreBuiltin The_tuple0
+           , coreBuiltin The_tuple1
+           , coreBuiltin The_tuple2
+           , coreBuiltin The_tuple3
+           , coreBuiltin The_tuple4
            ]
 
-pyonTupleReprCon :: Int -> Var
-pyonTupleReprCon n | n < 0 = internalError "pyonTupleReprCon"
-                   | n >= 5 = internalError "pyonTupleReprCon: Unsupported size"
+isTupleCon :: Var -> Bool
+isTupleCon v = v `elem` cons
+  where
+    cons = [ coreBuiltin The_tuple0
+           , coreBuiltin The_tuple1
+           , coreBuiltin The_tuple2
+           , coreBuiltin The_tuple3
+           , coreBuiltin The_tuple4
+           ]
+
+tupleReprCon :: Int -> Var
+tupleReprCon n | n < 0 = internalError "tupleReprCon"
+                   | n >= 5 = internalError "tupleReprCon: Unsupported size"
                    | otherwise = cons !! n
   where
-    cons = [ pyonBuiltin The_repr_PyonTuple0
-           , pyonBuiltin The_repr_PyonTuple1
-           , pyonBuiltin The_repr_PyonTuple2
-           , pyonBuiltin The_repr_PyonTuple3
-           , pyonBuiltin The_repr_PyonTuple4
+    cons = [ coreBuiltin The_repr_Tuple0
+           , coreBuiltin The_repr_Tuple1
+           , coreBuiltin The_repr_Tuple2
+           , coreBuiltin The_repr_Tuple3
+           , coreBuiltin The_repr_Tuple4
            ]
 
 -------------------------------------------------------------------------------
 -- Initializing the builtins
 
-the_PyonBuiltins :: MVar PyonBuiltins
-{-# NOINLINE the_PyonBuiltins #-}
-the_PyonBuiltins = unsafePerformIO newEmptyMVar
+the_CoreBuiltins :: MVar CoreBuiltins
+{-# NOINLINE the_CoreBuiltins #-}
+the_CoreBuiltins = unsafePerformIO newEmptyMVar
 
 initializeBuiltins :: IdentSupply Var -> IO ()
 initializeBuiltins id_supply = do
   -- Ensure that we haven't already initialized these
-  bi_is_empty <- isEmptyMVar the_PyonBuiltins
-  unless bi_is_empty $ internalError "Attempted to re-initialize Pyon builtins"
+  bi_is_empty <- isEmptyMVar the_CoreBuiltins
+  unless bi_is_empty $ internalError "Attempted to re-initialize core builtins"
 
   bi <- createBuiltins id_supply
-  putMVar the_PyonBuiltins bi
+  putMVar the_CoreBuiltins bi

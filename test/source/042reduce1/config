@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Sequentialized reduction without an identity element",
-  pyonSources	 = ["seqreduce.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["seqreduce.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "3, 8"

@@ -7,7 +7,7 @@
 
 #if WORD_SIZE == 4
 
-unsigned char pyon_type_tag_pap_size[] = {
+unsigned char triolet_type_tag_pap_size[] = {
   1,				/* Int8Tag */
   1,				/* Int16Tag */
   1,				/* Int32Tag */
@@ -19,7 +19,7 @@ unsigned char pyon_type_tag_pap_size[] = {
 
 #elif WORD_SIZE == 8
 
-unsigned char pyon_type_tag_pap_size[] = {
+unsigned char triolet_type_tag_pap_size[] = {
   1,				/* Int8Tag */
   1,				/* Int16Tag */
   1,				/* Int32Tag */

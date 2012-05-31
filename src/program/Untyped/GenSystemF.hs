@@ -274,7 +274,7 @@ mkListE pos elt_type elts =
       -- The array type
       array_type = DelayedType $ do
         sf_elt_type <- case elt_type of DelayedType t -> t
-        return $ Type.Type.varApp (SystemF.pyonBuiltin SystemF.The_arr)
+        return $ Type.Type.varApp (SystemF.coreBuiltin SystemF.The_arr)
           [Type.Type.IntT $ fromIntegral n, sf_elt_type]
 
       -- Indexed integer 
@@ -282,13 +282,13 @@ mkListE pos elt_type elts =
                 [LitTE inf (SystemF.IntL (fromIntegral n) sf_int_type)]
       -- Array expression
       array = ArrayTE inf elt_type elts
-      array_box = mkConE pos (SystemF.pyonBuiltin SystemF.The_stuckBox)
+      array_box = mkConE pos (SystemF.coreBuiltin SystemF.The_stuckBox)
                   [array_type] [] [array]
-  in mkConE pos (SystemF.pyonBuiltin SystemF.The_make_list) [elt_type] [size]
+  in mkConE pos (SystemF.coreBuiltin SystemF.The_make_list) [elt_type] [size]
      [integer, array_box]
   where
-    sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_int)
-    fiint_con = SystemF.pyonBuiltin SystemF.The_fiInt
+    sf_int_type = Type.Type.VarT (SystemF.coreBuiltin SystemF.The_int)
+    fiint_con = SystemF.coreBuiltin SystemF.The_fiInt
 
 
 mkLitE :: SourcePos -> Untyped.Lit -> TIExp
@@ -303,18 +303,18 @@ mkLitE pos l =
     sf_literal l =
       LitTE (mkExpInfo pos) l
     sf_constructor c =
-      let con = TIConInst (SystemF.pyonBuiltin c) [] []
+      let con = TIConInst (SystemF.coreBuiltin c) [] []
       in ConTE (mkExpInfo pos) con []
 
-    sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_int)
-    sf_float_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_float)
+    sf_int_type = Type.Type.VarT (SystemF.coreBuiltin SystemF.The_int)
+    sf_float_type = Type.Type.VarT (SystemF.coreBuiltin SystemF.The_float)
 
 mkAppE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
 mkAppE pos oper ts args = AppTE (mkExpInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
-  mkAppE pos (mkVarE pos (SystemF.pyonBuiltin SystemF.The_fun_undefined)) [ty] []
+  mkAppE pos (mkVarE pos (SystemF.coreBuiltin SystemF.The_fun_undefined)) [ty] []
 
 mkCoerceE :: SourcePos -> TIType -> TIType -> TIExp -> TIExp
 mkCoerceE pos from_ty to_ty e =
@@ -323,9 +323,9 @@ mkCoerceE pos from_ty to_ty e =
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
   let true_decon =
-        TIDeConInst (SystemF.pyonBuiltin SystemF.The_True) [] []
+        TIDeConInst (SystemF.coreBuiltin SystemF.The_True) [] []
       false_decon =
-        TIDeConInst (SystemF.pyonBuiltin SystemF.The_False) [] []
+        TIDeConInst (SystemF.coreBuiltin SystemF.The_False) [] []
       true_alt = TIAlt true_decon [] tr
       false_alt = TIAlt false_decon [] fa
   in CaseTE (mkExpInfo pos) cond [true_alt, false_alt]
@@ -503,7 +503,7 @@ convertHMType' ty = do
     FunTy _ -> fail "Unexpected function type constructor"
 
     TupleTy n ->
-      return $ Type.Type.VarT $ SystemF.pyonTupleTypeCon n
+      return $ Type.Type.VarT $ SystemF.tupleTypeCon n
 
     AppTy _ _ -> do
       (operator, arguments) <- uncurryTypeApplication ty'

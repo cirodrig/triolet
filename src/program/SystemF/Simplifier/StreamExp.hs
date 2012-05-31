@@ -240,10 +240,10 @@ streamShapeType st =
      ArrViewType 1 -> dim1
      ArrViewType 2 -> dim2
   where
-    list_dim = VarT $ pyonBuiltin The_list_dim
-    dim0 = VarT $ pyonBuiltin The_dim0
-    dim1 = VarT $ pyonBuiltin The_dim1
-    dim2 = VarT $ pyonBuiltin The_dim2
+    list_dim = VarT $ coreBuiltin The_list_dim
+    dim0 = VarT $ coreBuiltin The_dim0
+    dim1 = VarT $ coreBuiltin The_dim1
+    dim2 = VarT $ coreBuiltin The_dim2
 
 -- | Return the index type of the stream, the same type that would be returned
 --   by 'index'.
@@ -255,9 +255,9 @@ streamIndexType st =
      ArrViewType 1 -> ix1
      ArrViewType 2 -> ix2
   where
-    ix0 = varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_NoneType]
-    ix1 = varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
-    ix2 = varApp (pyonBuiltin The_PyonTuple2) [ix1, ix1]
+    ix0 = varApp (coreBuiltin The_Stored) [VarT $ coreBuiltin The_NoneType]
+    ix1 = varApp (coreBuiltin The_Stored) [VarT $ coreBuiltin The_int]
+    ix2 = varApp (coreBuiltin The_Tuple2) [ix1, ix1]
 
 data ConsumerOp =
     -- | Reduce using a reducer and initial value
@@ -415,17 +415,17 @@ deconstructStreamType ty = do
   ty' <- reduceToWhnf ty
   case fromVarApp ty' of
     Just (op, [arg])
-      | op `isPyonBuiltin` The_Sequence -> return (SequenceType, arg)
+      | op `isCoreBuiltin` The_Sequence -> return (SequenceType, arg)
 
     Just (op, [shape_arg, arg])
-      | op `isPyonBuiltin` The_view -> do
+      | op `isCoreBuiltin` The_view -> do
           shp <- reduceToWhnf shape_arg
           case shp of
             VarT v
-              | v `isPyonBuiltin` The_list_dim -> return (ListViewType, arg)
-              | v `isPyonBuiltin` The_dim0 -> return (ArrViewType 0, arg)
-              | v `isPyonBuiltin` The_dim1 -> return (ArrViewType 1, arg)
-              | v `isPyonBuiltin` The_dim2 -> return (ArrViewType 2, arg)
+              | v `isCoreBuiltin` The_list_dim -> return (ListViewType, arg)
+              | v `isCoreBuiltin` The_dim0 -> return (ArrViewType 0, arg)
+              | v `isCoreBuiltin` The_dim1 -> return (ArrViewType 1, arg)
+              | v `isCoreBuiltin` The_dim2 -> return (ArrViewType 2, arg)
 
     -- Don't know how to handle other types
     _ -> internalError "deconstructStreamType"
@@ -434,16 +434,16 @@ reconstructStreamType :: StreamType -> Type -> Type
 reconstructStreamType stream_type ty =
   case stream_type
   of SequenceType ->
-       varApp (pyonBuiltin The_Sequence) [ty]
-     ListViewType -> view_type (VarT $ pyonBuiltin The_list_dim)
+       varApp (coreBuiltin The_Sequence) [ty]
+     ListViewType -> view_type (VarT $ coreBuiltin The_list_dim)
      ArrViewType n ->
        view_type $!
        case n
-       of 0 -> VarT $ pyonBuiltin The_dim0
-          1 -> VarT $ pyonBuiltin The_dim1
-          2 -> VarT $ pyonBuiltin The_dim2
+       of 0 -> VarT $ coreBuiltin The_dim0
+          1 -> VarT $ coreBuiltin The_dim1
+          2 -> VarT $ coreBuiltin The_dim2
   where
-    view_type shape_arg = varApp (pyonBuiltin The_view) [shape_arg, ty]
+    view_type shape_arg = varApp (coreBuiltin The_view) [shape_arg, ty]
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -564,11 +564,11 @@ interpretViewShape ty = do
   ty' <- reduceToWhnf ty
   case ty' of
     VarT v
-      | v `isPyonBuiltin` The_list_dim ->
+      | v `isCoreBuiltin` The_list_dim ->
           return $ Just ListViewType
-      | v `isPyonBuiltin` The_dim1 ->
+      | v `isCoreBuiltin` The_dim1 ->
           return $ Just (ArrViewType 1)
-      | v `isPyonBuiltin` The_dim2 ->
+      | v `isCoreBuiltin` The_dim2 ->
           return $ Just (ArrViewType 2)
     _ -> return Nothing
 
@@ -588,28 +588,28 @@ streamOpTable :: IntMap.IntMap StreamOpInterpreter
 streamOpTable =
   IntMap.fromList [(fromIdent $ varID v, f) | (v, f) <- list]
   where
-    list = [ (pyonBuiltin The_reduce_list_dim, interpretReduce ListViewType)
-           , (pyonBuiltin The_reduce1_list_dim, interpretReduce1 ListViewType)
-           , (pyonBuiltin The_Sequence_reduce, interpretReduce SequenceType)
-           , (pyonBuiltin The_Sequence_reduce1, interpretReduce1 SequenceType)
-           , (pyonBuiltin The_Sequence_scatter, interpretScatter SequenceType)
-           , (pyonBuiltin The_Sequence_fold, interpretFold SequenceType)
-           , (pyonBuiltin The_Sequence_generate, interpretSequenceGenerate)
-           , (pyonBuiltin The_Sequence_map, interpretSequenceZip 1)
-           , (pyonBuiltin The_Sequence_zipWith, interpretSequenceZip 2)
-           , (pyonBuiltin The_Sequence_zipWith3, interpretSequenceZip 3)
-           , (pyonBuiltin The_Sequence_zipWith4, interpretSequenceZip 4)
-           , (pyonBuiltin The_viewToSequence, interpretToSequence ListViewType)
-           , (pyonBuiltin The_Sequence_bind, interpretBind)
-           , (pyonBuiltin The_Sequence_generate_bind, interpretGenerateBind)
-           , (pyonBuiltin The_Sequence_return, interpretReturn)
-           , (pyonBuiltin The_Sequence_empty, interpretEmpty SequenceType)
-           , (pyonBuiltin The_Sequence_chain, interpretChain)
-             {-, (pyonBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
-           , (pyonBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
-           , (pyonBuiltin The_view1_empty, interpretEmptyView)
-           , (pyonBuiltin The_Sequence_array1_build, interpretBuild PolySequenceType ArrayType)
-           , (pyonBuiltin The_Sequence_list_build, interpretBuild PolySequenceType ListType) -}
+    list = [ (coreBuiltin The_reduce_list_dim, interpretReduce ListViewType)
+           , (coreBuiltin The_reduce1_list_dim, interpretReduce1 ListViewType)
+           , (coreBuiltin The_Sequence_reduce, interpretReduce SequenceType)
+           , (coreBuiltin The_Sequence_reduce1, interpretReduce1 SequenceType)
+           , (coreBuiltin The_Sequence_scatter, interpretScatter SequenceType)
+           , (coreBuiltin The_Sequence_fold, interpretFold SequenceType)
+           , (coreBuiltin The_Sequence_generate, interpretSequenceGenerate)
+           , (coreBuiltin The_Sequence_map, interpretSequenceZip 1)
+           , (coreBuiltin The_Sequence_zipWith, interpretSequenceZip 2)
+           , (coreBuiltin The_Sequence_zipWith3, interpretSequenceZip 3)
+           , (coreBuiltin The_Sequence_zipWith4, interpretSequenceZip 4)
+           , (coreBuiltin The_viewToSequence, interpretToSequence ListViewType)
+           , (coreBuiltin The_Sequence_bind, interpretBind)
+           , (coreBuiltin The_Sequence_generate_bind, interpretGenerateBind)
+           , (coreBuiltin The_Sequence_return, interpretReturn)
+           , (coreBuiltin The_Sequence_empty, interpretEmpty SequenceType)
+           , (coreBuiltin The_Sequence_chain, interpretChain)
+             {-, (coreBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
+           , (coreBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
+           , (coreBuiltin The_view1_empty, interpretEmptyView)
+           , (coreBuiltin The_Sequence_array1_build, interpretBuild PolySequenceType ArrayType)
+           , (coreBuiltin The_Sequence_list_build, interpretBuild PolySequenceType ListType) -}
            ]
 
 -- | Overloaded view operations
@@ -617,11 +617,11 @@ viewOpTable :: IntMap.IntMap StreamOpInterpreter
 viewOpTable =
   IntMap.fromList [(fromIdent $ varID v, f) | (v, f) <- list]
   where
-    list = [ (pyonBuiltin The_view_generate, interpretViewGenerate)
-           , (pyonBuiltin The_view_map, interpretViewZip 1)
-           , (pyonBuiltin The_view_zipWith, interpretViewZip 2)
-           , (pyonBuiltin The_view_zipWith3, interpretViewZip 3)
-           , (pyonBuiltin The_view_zipWith4, interpretViewZip 4)
+    list = [ (coreBuiltin The_view_generate, interpretViewGenerate)
+           , (coreBuiltin The_view_map, interpretViewZip 1)
+           , (coreBuiltin The_view_zipWith, interpretViewZip 2)
+           , (coreBuiltin The_view_zipWith3, interpretViewZip 3)
+           , (coreBuiltin The_view_zipWith4, interpretViewZip 4)
            ]
 
 interpretViewGenerate = StreamOpInterpreter check_arity interpret
@@ -949,23 +949,23 @@ embedViewOp :: Var -> StreamType -> ExpM
 embedViewOp op stream_type =
   let (shape, dict) =
         case stream_type
-        of ListViewType -> (pyonBuiltin The_list_dim,
-                            pyonBuiltin The_ShapeDict_list_dim)
-           ArrViewType 1 -> (pyonBuiltin The_dim1,
-                             pyonBuiltin The_ShapeDict_dim1)
-           ArrViewType 2 -> (pyonBuiltin The_dim2,
-                             pyonBuiltin The_ShapeDict_dim2)
+        of ListViewType -> (coreBuiltin The_list_dim,
+                            coreBuiltin The_ShapeDict_list_dim)
+           ArrViewType 1 -> (coreBuiltin The_dim1,
+                             coreBuiltin The_ShapeDict_dim1)
+           ArrViewType 2 -> (coreBuiltin The_dim2,
+                             coreBuiltin The_ShapeDict_dim2)
   in appE' (varE' op) [VarT shape] [varE' dict]
 
 -- | Convert a stream operator to a function and set of type parameters
 embedOp :: StreamOp -> (ExpM, [Type])
 embedOp (GenerateOp stream_type output_type) = let
   op = case stream_type
-       of SequenceType -> varE' (pyonBuiltin The_Sequence_generate)
+       of SequenceType -> varE' (coreBuiltin The_Sequence_generate)
           ListViewType -> view_op
           ArrViewType _ -> view_op
 
-  view_op = embedViewOp (pyonBuiltin The_view_generate) stream_type
+  view_op = embedViewOp (coreBuiltin The_view_generate) stream_type
   in (op, [output_type])
 
 embedOp (ZipOp stream_type input_types output_type) = let
@@ -973,82 +973,82 @@ embedOp (ZipOp stream_type input_types output_type) = let
   op = case stream_type
        of SequenceType ->
             case n_input_types
-            of 1 -> varE' $ pyonBuiltin The_Sequence_map
-               2 -> varE' $ pyonBuiltin The_Sequence_zipWith
-               3 -> varE' $ pyonBuiltin The_Sequence_zipWith3
-               4 -> varE' $ pyonBuiltin The_Sequence_zipWith4
+            of 1 -> varE' $ coreBuiltin The_Sequence_map
+               2 -> varE' $ coreBuiltin The_Sequence_zipWith
+               3 -> varE' $ coreBuiltin The_Sequence_zipWith3
+               4 -> varE' $ coreBuiltin The_Sequence_zipWith4
           ListViewType -> view_op
           ArrViewType _ -> view_op
   view_op = 
     let op = case n_input_types
-             of 1 -> pyonBuiltin The_view_map
-                2 -> pyonBuiltin The_view_zipWith
-                3 -> pyonBuiltin The_view_zipWith3
-                4 -> pyonBuiltin The_view_zipWith4
+             of 1 -> coreBuiltin The_view_map
+                2 -> coreBuiltin The_view_zipWith
+                3 -> coreBuiltin The_view_zipWith3
+                4 -> coreBuiltin The_view_zipWith4
     in embedViewOp op stream_type
   in (op, input_types ++ [output_type])
 
 embedOp (ToSequenceOp st ty) =
   let op = case st
-           of ListViewType -> pyonBuiltin The_viewToSequence
+           of ListViewType -> coreBuiltin The_viewToSequence
   in (varE' op, [ty])
 
 embedOp (ToView1Op st ty) =
   let op = case st
-           of SequenceType -> pyonBuiltin The_sequenceToView
+           of SequenceType -> coreBuiltin The_sequenceToView
   in (varE' op, [ty])
 
 embedOp (ReturnOp ty) =
-  (varE' $ pyonBuiltin The_Sequence_return, [ty])
+  (varE' $ coreBuiltin The_Sequence_return, [ty])
 
 embedOp (EmptyOp st ty) =
   let op = case st
-           of SequenceType -> varE' $ pyonBuiltin The_Sequence_empty
-              ListViewType -> varE' $ pyonBuiltin The_empty_list_dim_view
+           of SequenceType -> varE' $ coreBuiltin The_Sequence_empty
+              ListViewType -> varE' $ coreBuiltin The_empty_list_dim_view
   in (op, [ty])
 
 embedOp (ChainOp ty) =
-  (varE' $ pyonBuiltin The_Sequence_chain, [ty])
+  (varE' $ coreBuiltin The_Sequence_chain, [ty])
 
 embedOp (BindOp t1 t2) =
-  (varE' $ pyonBuiltin The_Sequence_bind, [t1, t2])
+  (varE' $ coreBuiltin The_Sequence_bind, [t1, t2])
 
 embedOp (GenerateBindOp t) =
-  (varE' $ pyonBuiltin The_Sequence_generate_bind, [t])
+  (varE' $ coreBuiltin The_Sequence_generate_bind, [t])
 
 embedOp (ConsumeOp st (Reduce ty)) =
   let op = case st
-           of SequenceType -> pyonBuiltin The_Sequence_reduce
-              ListViewType -> pyonBuiltin The_reduce_list_dim
-              ArrViewType 1 -> pyonBuiltin The_reduce_dim1
+           of SequenceType -> coreBuiltin The_Sequence_reduce
+              ListViewType -> coreBuiltin The_reduce_list_dim
+              ArrViewType 1 -> coreBuiltin The_reduce_dim1
   in (varE' op, [ty])
 
 embedOp (ConsumeOp st (Reduce1 ty)) =
   let op = case st
-           of SequenceType -> pyonBuiltin The_Sequence_reduce1
-              ListViewType -> pyonBuiltin The_reduce1_list_dim
-              ArrViewType 1 -> pyonBuiltin The_reduce1_dim1
+           of SequenceType -> coreBuiltin The_Sequence_reduce1
+              ListViewType -> coreBuiltin The_reduce1_list_dim
+              ArrViewType 1 -> coreBuiltin The_reduce1_dim1
   in (varE' op, [ty])
 
 embedOp (ConsumeOp st (Scatter in_ty out_ty)) =
   let op = case st
-           of SequenceType -> pyonBuiltin The_Sequence_scatter
-              ListViewType -> pyonBuiltin The_scatter_list_dim
-              ArrViewType 1 -> pyonBuiltin The_scatter_dim1
+           of SequenceType -> coreBuiltin The_Sequence_scatter
+              ListViewType -> coreBuiltin The_scatter_list_dim
+              ArrViewType 1 -> coreBuiltin The_scatter_dim1
   in (varE' op, [in_ty, out_ty])
 
 embedOp (ConsumeOp st (Fold in_ty acc_ty)) =
   let op = case st
-           of SequenceType -> pyonBuiltin The_Sequence_fold
-              ListViewType -> pyonBuiltin The_fold_list_dim
-              ArrViewType 1 -> pyonBuiltin The_fold_dim1
+           of SequenceType -> coreBuiltin The_Sequence_fold
+              ListViewType -> coreBuiltin The_fold_list_dim
+              ArrViewType 1 -> coreBuiltin The_fold_dim1
   in (varE' op, [in_ty, acc_ty])
 
 embedOp (ConsumeOp st (Build ty)) =
   let op = case st
-           of SequenceType -> pyonBuiltin The_Sequence_list_build
-              ListViewType -> pyonBuiltin The_build_list_dim_list
-              ArrViewType 1 -> pyonBuiltin The_build_dim1_array
+           of SequenceType -> coreBuiltin The_Sequence_list_build
+              ListViewType -> coreBuiltin The_build_list_dim_list
+              ArrViewType 1 -> coreBuiltin The_build_dim1_array
   in (varE' op, [ty])
 
 embedStreamExp :: ExpS -> ExpM
@@ -1282,7 +1282,7 @@ fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
            case m_transformer of
              Just (var, s) -> do
                (_, s') <- fuse_with_producer SequenceType s
-               let return_type = varApp (pyonBuiltin The_Sequence) [ty]
+               let return_type = varApp (coreBuiltin The_Sequence) [ty]
                progress $ OpSE inf (BindOp producer_ty ty) [producer_repr] []
                  [producer, mkUnaryStreamFunction defaultExpInfo var producer_ty
                             return_type s'] Nothing
@@ -1297,8 +1297,8 @@ fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
              Just (var, s) -> do
                (_, s') <- fuse_with_producer SequenceType s
                let stored_int_type =
-                     varApp (pyonBuiltin The_Stored) [VarT $ pyonBuiltin The_int]
-                   return_type = varApp (pyonBuiltin The_Sequence) [ty]
+                     varApp (coreBuiltin The_Stored) [VarT $ coreBuiltin The_int]
+                   return_type = varApp (coreBuiltin The_Sequence) [ty]
                progress $ OpSE inf (GenerateBindOp ty) [] [shp]
                  [mkUnaryStreamFunction defaultExpInfo var stored_int_type return_type s'] Nothing
              Nothing ->
@@ -1310,10 +1310,10 @@ fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
          OpSE inf (ReturnOp return_t) [_] [v] [] Nothing -> do
            -- Apply function to value
            tmpvar <- newAnonymousVar ObjectLevel
-           let boxed_value = conE' (VarCon (pyonBuiltin The_boxed) [return_t] []) [v]
+           let boxed_value = conE' (VarCon (coreBuiltin The_boxed) [return_t] []) [v]
                call = appE' map_f [] [varE' tmpvar]
                return_value = ExpM $ CaseE defaultExpInfo boxed_value
-                              [AltM $ Alt (VarDeCon (pyonBuiltin The_boxed) [return_t] [])
+                              [AltM $ Alt (VarDeCon (coreBuiltin The_boxed) [return_t] [])
                                [patM (tmpvar ::: return_t)] call]
            progress $ OpSE inf (ReturnOp ty) [repr] [return_value] [] Nothing
 
@@ -1433,16 +1433,16 @@ simplifyBindOp inf bind_op@(BindOp producer_ty transformer_ty) repr producer tra
       return $ OpSE inf bind_op [repr] [] [producer', transformer'] Nothing
 
     fuse_bind_generate gen_f ix_var trans_var trans_body = let
-      index_type = varApp (pyonBuiltin The_index) [VarT $ pyonBuiltin The_dim1]
-      boxed_decon = VarDeCon (pyonBuiltin The_boxed) [producer_ty] []
-      boxed_con = VarCon (pyonBuiltin The_boxed) [producer_ty] []
+      index_type = varApp (coreBuiltin The_index) [VarT $ coreBuiltin The_dim1]
+      boxed_decon = VarDeCon (coreBuiltin The_boxed) [producer_ty] []
+      boxed_con = VarCon (coreBuiltin The_boxed) [producer_ty] []
       case_alt = AltS $ Alt boxed_decon
                  [PatS $ patM (trans_var ::: producer_ty)] trans_body
       scr_exp = conE inf boxed_con
                 [appE inf gen_f [] [ExpM $ VarE defaultExpInfo ix_var]]
       case_exp = CaseSE inf scr_exp [case_alt]
       in mkUnaryStreamFunction inf ix_var index_type
-         (varApp (pyonBuiltin The_Sequence) [transformer_ty]) case_exp
+         (varApp (coreBuiltin The_Sequence) [transformer_ty]) case_exp
 
 -- | Check whether the given expression is an empty stream.
 --
@@ -1529,7 +1529,7 @@ sequentializeStreamExp expression =
     let_repr ty val k = do
       repr_var <- newAnonymousVar ObjectLevel
       k_expr <- k repr_var
-      let repr_pat = patM (repr_var ::: varApp (pyonBuiltin The_Repr) [ty])
+      let repr_pat = patM (repr_var ::: varApp (coreBuiltin The_Repr) [ty])
       return $ letE repr_pat val k_expr
 
 -- | Evaluate just the first element of a sequence that has list domain.
@@ -1568,7 +1568,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
 
        body_function <- make_body_function f
        failure <- empty_cont
-       return $ appE' (varE' $ pyonBuiltin The_peel_generate_bind)
+       return $ appE' (varE' $ coreBuiltin The_peel_generate_bind)
          [a_ty, ret_ty]
          [a_repr, ret_repr, shape, body_function, failure, ret_ptr]
 
@@ -1578,7 +1578,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
        -- > $(make_generate_function f) $(empty_cont) ret_ptr
        body_function <- make_generate_function f
        failure <- empty_cont
-       return $ appE' (varE' $ pyonBuiltin The_peel_generate)
+       return $ appE' (varE' $ coreBuiltin The_peel_generate)
          [a_ty, ret_ty]
          [a_repr, ret_repr, shape, body_function, failure, ret_ptr]
      
@@ -1656,7 +1656,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
 
                -- Compute (i+1)
                let add_expression =
-                     appE' (varE' $ pyonBuiltin The_AdditiveDict_int_add) []
+                     appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
                      [varE' value_i,
                       ExpM (LitE defaultExpInfo (IntL 1 int_type))]
 
@@ -1739,8 +1739,8 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
 
         -- Create expressions
         let add_expression =
-              appE' (varE' $ pyonBuiltin The_AdditiveDict_int_add) []
-              [ appE' (varE' $ pyonBuiltin The_AdditiveDict_int_add) []
+              appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
+              [ appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
                 [varE' outer_index, varE' value_i]
               , ExpM (LitE defaultExpInfo (IntL 1 int_type))
               ]
@@ -1773,15 +1773,15 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
       (conE' boxed_con [conE' stored_con [int_e]])
       [AltS $ Alt boxed_decon [PatS $ patM (int_var ::: stored_int_type)] body_s]
 
-    int_type = VarT (pyonBuiltin The_int)
-    stored_int_type = varApp (pyonBuiltin The_Stored) [int_type]
-    list_dim_type = VarT (pyonBuiltin The_list_dim)
+    int_type = VarT (coreBuiltin The_int)
+    stored_int_type = varApp (coreBuiltin The_Stored) [int_type]
+    list_dim_type = VarT (coreBuiltin The_list_dim)
     cont_type = writerType ret_ty
 
-    stored_decon = VarDeCon (pyonBuiltin The_stored) [int_type] []
-    boxed_decon = VarDeCon (pyonBuiltin The_boxed) [stored_int_type] []
-    stored_con = VarCon (pyonBuiltin The_stored) [int_type] []
-    boxed_con = VarCon (pyonBuiltin The_boxed) [stored_int_type] []
+    stored_decon = VarDeCon (coreBuiltin The_stored) [int_type] []
+    boxed_decon = VarDeCon (coreBuiltin The_boxed) [stored_int_type] []
+    stored_con = VarCon (coreBuiltin The_stored) [int_type] []
+    boxed_con = VarCon (coreBuiltin The_boxed) [stored_int_type] []
 
 
 -- | Convert a fold over a sequence to a sequential loop.
@@ -1805,7 +1805,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
   of OpSE inf (GenerateOp _ gen_ty) _ [shape, f] [] Nothing -> do
        -- Create a @for@ loop
        tenv <- getTypeEnv
-       varAppE (pyonBuiltin The_primitive_list_dim_fold)
+       varAppE (coreBuiltin The_primitive_list_dim_fold)
          [acc_ty]
          [mkVarE acc_repr_var,
           return shape,
@@ -1836,7 +1836,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
 
      OpSE inf (EmptyOp _ _) _ _ [] Nothing ->
        -- Return the accumulator
-       varAppE (pyonBuiltin The_copy) [acc_ty] [mkVarE acc_repr_var, return acc]
+       varAppE (coreBuiltin The_copy) [acc_ty] [mkVarE acc_repr_var, return acc]
 
      OpSE inf (ChainOp _) [_] [] [s1, s2] Nothing -> do
        -- Fold over the first stream, then over the second
@@ -1851,11 +1851,11 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
 
        -- Partial result goes into a temporary boxed object
        let boxed_result =
-             conE' (VarCon (pyonBuiltin The_boxed) [acc_ty] [])
+             conE' (VarCon (coreBuiltin The_boxed) [acc_ty] [])
              [partial_result]
            use_boxed_result =
              ExpM $ CaseE defaultExpInfo boxed_result
-             [AltM $ Alt (VarDeCon (pyonBuiltin The_boxed) [acc_ty] [])
+             [AltM $ Alt (VarDeCon (coreBuiltin The_boxed) [acc_ty] [])
               [patM (partial_result_var ::: acc_ty)]
               final_result]
        return use_boxed_result
@@ -1876,14 +1876,14 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
        -- Fused 'bind' and generate'
        -- Create a combiner from the transformer
        let stored_int_repr =
-             ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_int)
+             ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_int)
        t_combiner <-
          sequentializeCombiningFunction acc_ty stored_int_type
          acc_repr_var stored_int_repr combiner transformer
 
        -- Create a @for@ loop that uses the combiner
        tenv <- getTypeEnv
-       varAppE (pyonBuiltin The_primitive_list_dim_fold)
+       varAppE (coreBuiltin The_primitive_list_dim_fold)
          [acc_ty]
          [mkVarE acc_repr_var,
           return shp,
@@ -1915,9 +1915,9 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
      OtherSE _ -> mzero
      LamSE {} -> internalError "sequentializeFold: Unexpected lambda function"
   where
-    int_type = VarT (pyonBuiltin The_int)
+    int_type = VarT (coreBuiltin The_int)
     stored_int_type =
-      varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_int)]
+      varApp (coreBuiltin The_Stored) [VarT (coreBuiltin The_int)]
 
 -- Turn a one-parameter stream function into a combining function for a fold.
 --

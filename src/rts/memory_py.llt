@@ -1,14 +1,14 @@
 
-module pyon.internal.memory_py;
+module core.internal.memory_py;
 
 #include "rts.h"
 #include "memory_py.h"
 #include "apply_py.h"
 #include "new_pyasm_records.h"
 
-// Deallocate an object.  Calls 'pyon_dealloc'.
+// Deallocate an object.  Calls 'triolet_dealloc'.
 function deallocF (pointer p) -> () {
-  () = () primcall pyon_dealloc(p);
+  () = () primcall triolet_dealloc(p);
   ();
 };
 

@@ -1,14 +1,12 @@
 
 #include <stdio.h>
 #include "chain_cxx.h"
-#include <pyon.h>
-#include <PyonData.h>
 
-using namespace Pyon;
+using namespace Triolet;
 
 int main()
 {
-  GC_INIT();
+  Triolet_init();
 
   List<Int> l = f(121, 169);
   int i;

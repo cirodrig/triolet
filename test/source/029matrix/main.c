@@ -1,5 +1,5 @@
 
-#include <pyon.h>
+#include <triolet.h>
 #include <stdio.h>
 
 #include "test_interface.h"
@@ -12,13 +12,13 @@ float data[] = {
 int main()
 {
   float data2[9];
-  Pyon_init();
+  Triolet_init();
 
-  PyonMatrix *mat = pyon_Matrix_PyonFloat_FromArray(0, 3, 0, 3, data);
-  PyonMatrix *mat2 = test(mat);
-  pyon_Matrix_PyonFloat_ToArray(mat2, data2);
-  pyon_Matrix_PyonFloat_Free(mat);
-  pyon_Matrix_PyonFloat_Free(mat2);
+  TrioletMatrix *mat = triolet_Matrix_Float_FromArray(0, 3, 0, 3, data);
+  TrioletMatrix *mat2 = test(mat);
+  triolet_Matrix_Float_ToArray(mat2, data2);
+  triolet_Matrix_Float_Free(mat);
+  triolet_Matrix_Float_Free(mat2);
 
   // Check output
   int i;

@@ -59,9 +59,9 @@ evPat inf pat =
        (field_patterns, contexts) <- evPats inf ps
        let field_types = [ty | VarP _ ty <- field_patterns]
            tuple_size = length field_types
-           tuple_tycon = pyonTupleTypeCon tuple_size
+           tuple_tycon = tupleTypeCon tuple_size
            tuple_type = varApp tuple_tycon field_types
-           tuple_con = pyonTupleCon tuple_size
+           tuple_con = tupleCon tuple_size
            tuple_decon = VarDeCon tuple_con field_types []
 
        -- Create a variable to bind the tuple value.

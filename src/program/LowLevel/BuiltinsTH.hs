@@ -10,7 +10,7 @@ import Common.Error
 import Common.Label
 import Common.THRecord
 import qualified Builtins.Builtins as SystemF
-import Builtins.Builtins(pyonBuiltin)
+import Builtins.Builtins(coreBuiltin)
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.CodeTypes
@@ -72,17 +72,17 @@ data BuiltinVarName =
           , builtinVarUnqualifiedName :: String
           }
     -- | No external name
-  | PyonName { builtinVarModuleName :: ModuleName 
+  | CoreName { builtinVarModuleName :: ModuleName 
              , builtinVarUnqualifiedName :: String
              }
 
 instance Lift BuiltinVarName where
   lift (CName nm s) = [| CName nm s |]
-  lift (PyonName nm s) = [| PyonName nm s |]
+  lift (CoreName nm s) = [| CoreName nm s |]
 
 biName = CName builtinModuleName
 
-applyName = PyonName (ModuleName "pyon.internal.apply_new")
+applyName = CoreName (ModuleName "core.internal.apply_new")
 
 -- | Predefined primitive functions
 builtinPrimitives =
@@ -90,25 +90,25 @@ builtinPrimitives =
     (biName "exit",
      primFunctionType [PrimType nativeIntType] [])
     -- debug.c
-  , (biName "pyon_db_int",
+  , (biName "triolet_db_int",
      primFunctionType [PrimType nativeIntType] [])
-  , (biName "pyon_db_word",
+  , (biName "triolet_db_word",
      primFunctionType [PrimType nativeWordType] [])
-  , (biName "pyon_db_pointer",
+  , (biName "triolet_db_pointer",
      primFunctionType [PrimType PointerType] [])
     -- memory.c
-  , (biName "pyon_alloc",
+  , (biName "triolet_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
-  , (biName "pyon_alloc_nopointers",
+  , (biName "triolet_alloc_nopointers",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
-  , (biName "pyon_dealloc",
+  , (biName "triolet_dealloc",
      primFunctionType [PrimType PointerType] [])
     -- prim.pyasm
-  , (PyonName module_prim "min_fii",
+  , (CoreName module_prim "min_fii",
      primFunctionType
      [RecordType finIndexedIntRecord, RecordType finIndexedIntRecord]
      [RecordType finIndexedIntRecord])
-  , (PyonName module_prim "minus_fii",
+  , (CoreName module_prim "minus_fii",
      primFunctionType
      [RecordType finIndexedIntRecord, RecordType finIndexedIntRecord]
      [RecordType finIndexedIntRecord])
@@ -147,21 +147,21 @@ builtinPrimitives =
 
 closureBinaryFunctionType t = closureFunctionType [t, t] [t]
 
-module_prim = ModuleName "pyon.internal.prim"
-module_memory_py = ModuleName "pyon.internal.memory_py"
-module_stream = ModuleName "pyon.internal.stream"
-module_structures = ModuleName "pyon.internal.structures"
-module_effects = ModuleName "pyon.internal.effects"
-module_inplace = ModuleName "pyon.internal.inplace"
-module_complex = ModuleName "pyon.internal.complex"
-module_list = ModuleName "pyon.internal.list"
+module_prim = ModuleName "core.internal.prim"
+module_memory_py = ModuleName "core.internal.memory_py"
+module_stream = ModuleName "core.internal.stream"
+module_structures = ModuleName "core.internal.structures"
+module_effects = ModuleName "core.internal.effects"
+module_inplace = ModuleName "core.internal.inplace"
+module_complex = ModuleName "core.internal.complex"
+module_list = ModuleName "core.internal.list"
 
 -- | Predefined closure functions and the core constructor they're derived
 -- from.
 builtinFunctions =
   [ -- Functions that do not exist in Core
     -- memory_py.pyasm
-    (PyonName module_memory_py "deallocF",
+    (CoreName module_memory_py "deallocF",
      Left $ closureFunctionType [PrimType PointerType] [])
   , (CName module_memory_py "copy1F",
      Left $
@@ -174,246 +174,246 @@ builtinFunctions =
      closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
 
     -- Functions translated from Core
-  , (PyonName module_memory_py "copy",
-     Right [| pyonBuiltin (SystemF.The_copy) |])
-  , (PyonName module_prim "convertToBoxed",
-     Right [| pyonBuiltin (SystemF.The_convertToBoxed) |])
-  , (PyonName module_prim "convertToBare",
-     Right [| pyonBuiltin (SystemF.The_convertToBare) |])
-{-  , (PyonName module_structures "makeComplex",
-     Right [| pyonBuiltin (SystemF.The_makeComplex) |]) -}
-  , (PyonName module_list "repr_list",
-     Right [| pyonBuiltin SystemF.The_repr_list |])
-  , (PyonName module_list "repr_array0",
-     Right [| pyonBuiltin SystemF.The_repr_array0 |])
-  , (PyonName module_list "repr_array1",
-     Right [| pyonBuiltin SystemF.The_repr_array1 |])
-  , (PyonName module_list "repr_array2",
-     Right [| pyonBuiltin SystemF.The_repr_array2 |])
-  , (PyonName module_list "repr_array3",
-     Right [| pyonBuiltin SystemF.The_repr_array3 |])
-  --, (PyonName module_list "list_len",
-  --   Right [| pyonBuiltin SystemF.The_len |])
-  , (PyonName module_list "list_build",
-     Right [| pyonBuiltin SystemF.The_Sequence_build_list |])
-  , (PyonName module_list "array1_build",
-     Right [| pyonBuiltin SystemF.The_Sequence_array1_build |])
-  -- , (PyonName module_list "list_traverse",
-  --   Right [| pyonBuiltin SystemF.The_TraversableDict_list_traverse |])
-  {- , (PyonName module_list "safeSubscript",
-     Right [| pyonBuiltin (SystemF.The_safeSubscript) |])
-  , (PyonName module_list "list_generate",
-     Right [| pyonBuiltin (SystemF.The_fun_generateList) |])
-  , (PyonName module_list "list_vGenerate",
-     Right [| pyonBuiltin (SystemF.The_fun_vectorGenerateList) |])
-  , (PyonName module_stream "passConv_iter",
-     Right [| pyonBuiltin (SystemF.The_passConv_iter) |])
-  , (PyonName module_stream "Stream_bind",
-     Right [| pyonBuiltin (SystemF.The_oper_CAT_MAP) |])
-  , (PyonName module_stream "Stream_guard",
-     Right [| pyonBuiltin (SystemF.The_oper_GUARD) |])
-  , (PyonName module_stream "Stream_return",
-     Right [| pyonBuiltin (SystemF.The_oper_DO) |])
-  , (PyonName module_stream "Stream_empty",
-     Right [| pyonBuiltin (SystemF.The_oper_EMPTY) |])
-  , (PyonName module_stream "Stream_asList",
-     Right [| pyonBuiltin (SystemF.The_fun_asList_Stream) |])    
-  , (PyonName module_stream "generate",
-     Right [| pyonBuiltin (SystemF.The_generate) |])
-  , (PyonName module_stream "Stream_map",
-     Right [| pyonBuiltin (SystemF.The_fun_map_Stream) |])
-  , (PyonName module_stream "map",
-     Right [| pyonBuiltin (SystemF.The_fun_map) |])
-  , (PyonName module_stream "Stream_reduce",
-     Right [| pyonBuiltin (SystemF.The_fun_reduce_Stream) |])
-  , (PyonName module_stream "reduce",
-     Right [| pyonBuiltin (SystemF.The_fun_reduce) |])
-  , (PyonName module_stream "Stream_reduce1",
-     Right [| pyonBuiltin (SystemF.The_fun_reduce1_Stream) |])
-  , (PyonName module_stream "reduce1",
-     Right [| pyonBuiltin (SystemF.The_fun_reduce1) |])
-  , (PyonName module_stream "Stream_fold",
-     Right [| pyonBuiltin (SystemF.The_fun_fold_Stream) |])
-  , (PyonName module_stream "Stream_zip",
-     Right [| pyonBuiltin (SystemF.The_fun_zip_Stream) |])
-  , (PyonName module_stream "Stream_zip3",
-     Right [| pyonBuiltin (SystemF.The_fun_zip3_Stream) |])
-  , (PyonName module_stream "Stream_zip4",
-     Right [| pyonBuiltin (SystemF.The_fun_zip4_Stream) |])
-  , (PyonName module_stream "zip",
-     Right [| pyonBuiltin (SystemF.The_fun_zip) |])
-  , (PyonName module_stream "zip3",
-     Right [| pyonBuiltin (SystemF.The_fun_zip3) |])
-  , (PyonName module_stream "zip4",
-     Right [| pyonBuiltin (SystemF.The_fun_zip4) |])
-  , (PyonName module_stream "Stream_build",
-     Right [| pyonBuiltin (SystemF.The_TraversableDict_Stream_build) |])
-  , (PyonName module_stream "Stream_traverse",
-     Right [| pyonBuiltin (SystemF.The_TraversableDict_Stream_traverse) |])
-  , (PyonName module_stream "Stream_range",
-     Right [| pyonBuiltin (SystemF.The_range) |])
-  , (PyonName module_stream "Stream_rangeIndexed",
-     Right [| pyonBuiltin (SystemF.The_rangeIndexed) |])
-  , (PyonName module_stream "histogram",
-     Right [| pyonBuiltin (SystemF.The_histogram) |])-}
-  , (PyonName module_inplace "repr_append_list",
-     Right [| pyonBuiltin SystemF.The_repr_append_list |])
-  , (PyonName module_inplace "intSumScatter_make_init",
-     Right [| pyonBuiltin (SystemF.The_intSumScatter_make_init) |])
-  , (PyonName module_inplace "countingScatter_make_init",
-     Right [| pyonBuiltin (SystemF.The_countingScatter_make_init) |])
-  , (PyonName module_inplace "intUpdateInPlace_initializer",
-     Right [| pyonBuiltin (SystemF.The_intUpdateInPlace_initializer) |])
-  , (PyonName module_inplace "intUpdateInPlace_updater",
-     Right [| pyonBuiltin (SystemF.The_intUpdateInPlace_updater) |])
-  , (PyonName module_inplace "floatSumScatter_make_init",
-     Right [| pyonBuiltin (SystemF.The_floatSumScatter_make_init) |])
-  , (PyonName module_inplace "floatUpdateInPlace_initializer",
-     Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_initializer) |])
-  , (PyonName module_inplace "floatUpdateInPlace_updater",
-     Right [| pyonBuiltin (SystemF.The_floatUpdateInPlace_updater) |])
-  , (PyonName module_inplace "boxedScatter_updater",
-     Right [| pyonBuiltin (SystemF.The_boxedScatter_updater) |])
-  , (PyonName module_inplace "appendScatter_initializer",
-     Right [| pyonBuiltin (SystemF.The_appendScatter_initializer) |])
-  , (PyonName module_inplace "appendScatter_update_real",
-     Right [| pyonBuiltin (SystemF.The_appendScatter_update_real) |])
-  , (PyonName module_effects "seqEffTok",
-     Right [| pyonBuiltin (SystemF.The_seqEffTok) |])
-  , (PyonName module_effects "toEffTok",
-     Right [| pyonBuiltin (SystemF.The_toEffTok) |])
-  , (PyonName module_structures "repr_arr",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_arr |])
-  --, (PyonName module_structures "repr_Referenced",
-    --Right [| SystemF.pyonBuiltin SystemF.The_repr_Referenced |])
-  , (PyonName module_structures "repr_Maybe",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_Maybe |])
-  {-, (PyonName module_structures "complex_pass_conv",
+  , (CoreName module_memory_py "copy",
+     Right [| coreBuiltin (SystemF.The_copy) |])
+  , (CoreName module_prim "convertToBoxed",
+     Right [| coreBuiltin (SystemF.The_convertToBoxed) |])
+  , (CoreName module_prim "convertToBare",
+     Right [| coreBuiltin (SystemF.The_convertToBare) |])
+{-  , (CoreName module_structures "makeComplex",
+     Right [| coreBuiltin (SystemF.The_makeComplex) |]) -}
+  , (CoreName module_list "repr_list",
+     Right [| coreBuiltin SystemF.The_repr_list |])
+  , (CoreName module_list "repr_array0",
+     Right [| coreBuiltin SystemF.The_repr_array0 |])
+  , (CoreName module_list "repr_array1",
+     Right [| coreBuiltin SystemF.The_repr_array1 |])
+  , (CoreName module_list "repr_array2",
+     Right [| coreBuiltin SystemF.The_repr_array2 |])
+  , (CoreName module_list "repr_array3",
+     Right [| coreBuiltin SystemF.The_repr_array3 |])
+  --, (CoreName module_list "list_len",
+  --   Right [| coreBuiltin SystemF.The_len |])
+  , (CoreName module_list "list_build",
+     Right [| coreBuiltin SystemF.The_Sequence_build_list |])
+  , (CoreName module_list "array1_build",
+     Right [| coreBuiltin SystemF.The_Sequence_array1_build |])
+  -- , (CoreName module_list "list_traverse",
+  --   Right [| coreBuiltin SystemF.The_TraversableDict_list_traverse |])
+  {- , (CoreName module_list "safeSubscript",
+     Right [| coreBuiltin (SystemF.The_safeSubscript) |])
+  , (CoreName module_list "list_generate",
+     Right [| coreBuiltin (SystemF.The_fun_generateList) |])
+  , (CoreName module_list "list_vGenerate",
+     Right [| coreBuiltin (SystemF.The_fun_vectorGenerateList) |])
+  , (CoreName module_stream "passConv_iter",
+     Right [| coreBuiltin (SystemF.The_passConv_iter) |])
+  , (CoreName module_stream "Stream_bind",
+     Right [| coreBuiltin (SystemF.The_oper_CAT_MAP) |])
+  , (CoreName module_stream "Stream_guard",
+     Right [| coreBuiltin (SystemF.The_oper_GUARD) |])
+  , (CoreName module_stream "Stream_return",
+     Right [| coreBuiltin (SystemF.The_oper_DO) |])
+  , (CoreName module_stream "Stream_empty",
+     Right [| coreBuiltin (SystemF.The_oper_EMPTY) |])
+  , (CoreName module_stream "Stream_asList",
+     Right [| coreBuiltin (SystemF.The_fun_asList_Stream) |])    
+  , (CoreName module_stream "generate",
+     Right [| coreBuiltin (SystemF.The_generate) |])
+  , (CoreName module_stream "Stream_map",
+     Right [| coreBuiltin (SystemF.The_fun_map_Stream) |])
+  , (CoreName module_stream "map",
+     Right [| coreBuiltin (SystemF.The_fun_map) |])
+  , (CoreName module_stream "Stream_reduce",
+     Right [| coreBuiltin (SystemF.The_fun_reduce_Stream) |])
+  , (CoreName module_stream "reduce",
+     Right [| coreBuiltin (SystemF.The_fun_reduce) |])
+  , (CoreName module_stream "Stream_reduce1",
+     Right [| coreBuiltin (SystemF.The_fun_reduce1_Stream) |])
+  , (CoreName module_stream "reduce1",
+     Right [| coreBuiltin (SystemF.The_fun_reduce1) |])
+  , (CoreName module_stream "Stream_fold",
+     Right [| coreBuiltin (SystemF.The_fun_fold_Stream) |])
+  , (CoreName module_stream "Stream_zip",
+     Right [| coreBuiltin (SystemF.The_fun_zip_Stream) |])
+  , (CoreName module_stream "Stream_zip3",
+     Right [| coreBuiltin (SystemF.The_fun_zip3_Stream) |])
+  , (CoreName module_stream "Stream_zip4",
+     Right [| coreBuiltin (SystemF.The_fun_zip4_Stream) |])
+  , (CoreName module_stream "zip",
+     Right [| coreBuiltin (SystemF.The_fun_zip) |])
+  , (CoreName module_stream "zip3",
+     Right [| coreBuiltin (SystemF.The_fun_zip3) |])
+  , (CoreName module_stream "zip4",
+     Right [| coreBuiltin (SystemF.The_fun_zip4) |])
+  , (CoreName module_stream "Stream_build",
+     Right [| coreBuiltin (SystemF.The_TraversableDict_Stream_build) |])
+  , (CoreName module_stream "Stream_traverse",
+     Right [| coreBuiltin (SystemF.The_TraversableDict_Stream_traverse) |])
+  , (CoreName module_stream "Stream_range",
+     Right [| coreBuiltin (SystemF.The_range) |])
+  , (CoreName module_stream "Stream_rangeIndexed",
+     Right [| coreBuiltin (SystemF.The_rangeIndexed) |])
+  , (CoreName module_stream "histogram",
+     Right [| coreBuiltin (SystemF.The_histogram) |])-}
+  , (CoreName module_inplace "repr_append_list",
+     Right [| coreBuiltin SystemF.The_repr_append_list |])
+  , (CoreName module_inplace "intSumScatter_make_init",
+     Right [| coreBuiltin (SystemF.The_intSumScatter_make_init) |])
+  , (CoreName module_inplace "countingScatter_make_init",
+     Right [| coreBuiltin (SystemF.The_countingScatter_make_init) |])
+  , (CoreName module_inplace "intUpdateInPlace_initializer",
+     Right [| coreBuiltin (SystemF.The_intUpdateInPlace_initializer) |])
+  , (CoreName module_inplace "intUpdateInPlace_updater",
+     Right [| coreBuiltin (SystemF.The_intUpdateInPlace_updater) |])
+  , (CoreName module_inplace "floatSumScatter_make_init",
+     Right [| coreBuiltin (SystemF.The_floatSumScatter_make_init) |])
+  , (CoreName module_inplace "floatUpdateInPlace_initializer",
+     Right [| coreBuiltin (SystemF.The_floatUpdateInPlace_initializer) |])
+  , (CoreName module_inplace "floatUpdateInPlace_updater",
+     Right [| coreBuiltin (SystemF.The_floatUpdateInPlace_updater) |])
+  , (CoreName module_inplace "boxedScatter_updater",
+     Right [| coreBuiltin (SystemF.The_boxedScatter_updater) |])
+  , (CoreName module_inplace "appendScatter_initializer",
+     Right [| coreBuiltin (SystemF.The_appendScatter_initializer) |])
+  , (CoreName module_inplace "appendScatter_update_real",
+     Right [| coreBuiltin (SystemF.The_appendScatter_update_real) |])
+  , (CoreName module_effects "seqEffTok",
+     Right [| coreBuiltin (SystemF.The_seqEffTok) |])
+  , (CoreName module_effects "toEffTok",
+     Right [| coreBuiltin (SystemF.The_toEffTok) |])
+  , (CoreName module_structures "repr_arr",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_arr |])
+  --, (CoreName module_structures "repr_Referenced",
+    --Right [| SystemF.coreBuiltin SystemF.The_repr_Referenced |])
+  , (CoreName module_structures "repr_Maybe",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Maybe |])
+  {-, (CoreName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
                           PrimType PointerType,
                           PrimType PointerType] []) -}
-  , (PyonName module_structures "repr_PyonTuple1",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_PyonTuple1 |])
-  , (PyonName module_structures "repr_PyonTuple2",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_PyonTuple2 |])
-  , (PyonName module_structures "repr_PyonTuple3",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_PyonTuple3 |])
-  , (PyonName module_structures "repr_PyonTuple4",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_PyonTuple4 |])
+  , (CoreName module_structures "repr_Tuple1",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple1 |])
+  , (CoreName module_structures "repr_Tuple2",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple2 |])
+  , (CoreName module_structures "repr_Tuple3",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple3 |])
+  , (CoreName module_structures "repr_Tuple4",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple4 |])
   
-  , (PyonName module_prim "defineIntIndex",
-     Right [| pyonBuiltin (SystemF.The_defineIntIndex) |])
-  , (PyonName module_prim "subscript",
-     Right [| pyonBuiltin (SystemF.The_subscript) |])
-  , (PyonName module_prim "subscript_out",
-     Right [| pyonBuiltin (SystemF.The_subscript_out) |])
-  , (PyonName module_prim "min_ii",
-     Right [| pyonBuiltin (SystemF.The_min_ii) |])
-  , (PyonName module_prim "minus_ii",
-     Right [| pyonBuiltin (SystemF.The_minus_ii) |])
-  , (PyonName module_prim "not",
-     Right [| pyonBuiltin (SystemF.The_not) |])
-  , (PyonName module_prim "gcd",
-     Right [| pyonBuiltin (SystemF.The_gcd) |])
-  , (PyonName module_prim "extgcd_x",
-     Right [| pyonBuiltin (SystemF.The_extgcd_x) |])
+  , (CoreName module_prim "defineIntIndex",
+     Right [| coreBuiltin (SystemF.The_defineIntIndex) |])
+  , (CoreName module_prim "subscript",
+     Right [| coreBuiltin (SystemF.The_subscript) |])
+  , (CoreName module_prim "subscript_out",
+     Right [| coreBuiltin (SystemF.The_subscript_out) |])
+  , (CoreName module_prim "min_ii",
+     Right [| coreBuiltin (SystemF.The_min_ii) |])
+  , (CoreName module_prim "minus_ii",
+     Right [| coreBuiltin (SystemF.The_minus_ii) |])
+  , (CoreName module_prim "not",
+     Right [| coreBuiltin (SystemF.The_not) |])
+  , (CoreName module_prim "gcd",
+     Right [| coreBuiltin (SystemF.The_gcd) |])
+  , (CoreName module_prim "extgcd_x",
+     Right [| coreBuiltin (SystemF.The_extgcd_x) |])
 
-  , (PyonName module_prim "doall",
-     Right [| pyonBuiltin (SystemF.The_doall) |])
-  --, (PyonName module_prim "for",
-  --   Right [| pyonBuiltin (SystemF.The_for) |])
-  , (PyonName module_prim "blocked_1d_reduce",
-     Right [| pyonBuiltin (SystemF.The_blocked_1d_reduce) |])
-  , (PyonName module_prim "blocked_2d_reduce",
-     Right [| pyonBuiltin (SystemF.The_blocked_2d_reduce) |])
-  , (PyonName module_prim "blocked_doall",
-     Right [| pyonBuiltin (SystemF.The_blocked_doall) |])
-  , (PyonName module_prim "blocked_doall2",
-     Right [| pyonBuiltin (SystemF.The_blocked_doall2) |])
+  , (CoreName module_prim "doall",
+     Right [| coreBuiltin (SystemF.The_doall) |])
+  --, (CoreName module_prim "for",
+  --   Right [| coreBuiltin (SystemF.The_for) |])
+  , (CoreName module_prim "blocked_1d_reduce",
+     Right [| coreBuiltin (SystemF.The_blocked_1d_reduce) |])
+  , (CoreName module_prim "blocked_2d_reduce",
+     Right [| coreBuiltin (SystemF.The_blocked_2d_reduce) |])
+  , (CoreName module_prim "blocked_doall",
+     Right [| coreBuiltin (SystemF.The_blocked_doall) |])
+  , (CoreName module_prim "blocked_doall2",
+     Right [| coreBuiltin (SystemF.The_blocked_doall2) |])
 
     -- Functions that are replaced by primitive operations
-  , (PyonName module_prim "eq_int",
-     Right [| pyonBuiltin (SystemF.The_EqDict_int_eq) |])
-  , (PyonName module_prim "ne_int",
-     Right [| pyonBuiltin (SystemF.The_EqDict_int_ne) |])
-  , (PyonName module_prim "eq_float",
-     Right [| pyonBuiltin (SystemF.The_EqDict_float_eq) |])
-  , (PyonName module_prim "ne_float",
-     Right [| pyonBuiltin (SystemF.The_EqDict_float_ne) |])
-  , (PyonName module_prim "lt_int",
-     Right [| pyonBuiltin SystemF.The_OrdDict_int_lt |])
-  , (PyonName module_prim "le_int",
-     Right [| pyonBuiltin SystemF.The_OrdDict_int_le |])
-  , (PyonName module_prim "gt_int",
-     Right [| pyonBuiltin SystemF.The_OrdDict_int_gt |])
-  , (PyonName module_prim "ge_int",
-     Right [| pyonBuiltin SystemF.The_OrdDict_int_ge |])
-  , (PyonName module_prim "lt_float",
-     Right [| pyonBuiltin SystemF.The_OrdDict_float_lt |])
-  , (PyonName module_prim "le_float",
-     Right [| pyonBuiltin SystemF.The_OrdDict_float_le |])
-  , (PyonName module_prim "gt_float",
-     Right [| pyonBuiltin SystemF.The_OrdDict_float_gt |])
-  , (PyonName module_prim "ge_float",
-     Right [| pyonBuiltin SystemF.The_OrdDict_float_ge |])
+  , (CoreName module_prim "eq_int",
+     Right [| coreBuiltin (SystemF.The_EqDict_int_eq) |])
+  , (CoreName module_prim "ne_int",
+     Right [| coreBuiltin (SystemF.The_EqDict_int_ne) |])
+  , (CoreName module_prim "eq_float",
+     Right [| coreBuiltin (SystemF.The_EqDict_float_eq) |])
+  , (CoreName module_prim "ne_float",
+     Right [| coreBuiltin (SystemF.The_EqDict_float_ne) |])
+  , (CoreName module_prim "lt_int",
+     Right [| coreBuiltin SystemF.The_OrdDict_int_lt |])
+  , (CoreName module_prim "le_int",
+     Right [| coreBuiltin SystemF.The_OrdDict_int_le |])
+  , (CoreName module_prim "gt_int",
+     Right [| coreBuiltin SystemF.The_OrdDict_int_gt |])
+  , (CoreName module_prim "ge_int",
+     Right [| coreBuiltin SystemF.The_OrdDict_int_ge |])
+  , (CoreName module_prim "lt_float",
+     Right [| coreBuiltin SystemF.The_OrdDict_float_lt |])
+  , (CoreName module_prim "le_float",
+     Right [| coreBuiltin SystemF.The_OrdDict_float_le |])
+  , (CoreName module_prim "gt_float",
+     Right [| coreBuiltin SystemF.The_OrdDict_float_gt |])
+  , (CoreName module_prim "ge_float",
+     Right [| coreBuiltin SystemF.The_OrdDict_float_ge |])
     -- the_AdditiveDict_int_{add,sub} were replaced by intrinsics
-  , (PyonName module_prim "negate_int",
-     Right [| pyonBuiltin (SystemF.The_AdditiveDict_int_negate) |])
+  , (CoreName module_prim "negate_int",
+     Right [| coreBuiltin (SystemF.The_AdditiveDict_int_negate) |])
     -- zero_int was replaced by a literal value
     -- the_AdditiveDict_float_{add,sub} were replaced by intrinsics
-  , (PyonName module_prim "negate_float",
-     Right [| pyonBuiltin (SystemF.The_AdditiveDict_float_negate) |])
+  , (CoreName module_prim "negate_float",
+     Right [| coreBuiltin (SystemF.The_AdditiveDict_float_negate) |])
     -- zero_float was replaced by a literal value
-  {-, (PyonName module_complex "AdditiveDict_Complex_add",
-     Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_add) |])
-  , (PyonName module_complex "AdditiveDict_Complex_sub",
-     Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_sub) |])
-  , (PyonName module_complex "AdditiveDict_Complex_negate",
-     Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_negate) |])
-  , (PyonName module_complex "AdditiveDict_Complex_zero",
-     Right [| pyonBuiltin (SystemF.The_AdditiveDict_Complex_zero) |])-}
+  {-, (CoreName module_complex "AdditiveDict_Complex_add",
+     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_add) |])
+  , (CoreName module_complex "AdditiveDict_Complex_sub",
+     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_sub) |])
+  , (CoreName module_complex "AdditiveDict_Complex_negate",
+     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_negate) |])
+  , (CoreName module_complex "AdditiveDict_Complex_zero",
+     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_zero) |])-}
     -- the_MultiplicativeDict_int_* are intrinsics
     -- the_MultiplicativeDict_float_mul is intrinsic
-  , (PyonName module_prim "fromint_float",
-     Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_float_fromInt) |])
-  {-, (PyonName module_complex "MultiplicativeDict_Complex_mul",
-     Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_Complex_mul) |])
-  , (PyonName module_complex "MultiplicativeDict_Complex_fromInt",
-     Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_Complex_fromInt) |])
-  , (PyonName module_complex "MultiplicativeDict_Complex_one",
-     Right [| pyonBuiltin (SystemF.The_MultiplicativeDict_Complex_one) |])-}
-  , (PyonName module_prim "mod_int",
-     Right [| pyonBuiltin SystemF.The_RemainderDict_int_mod |])
-  , (PyonName module_prim "floordiv_int",
-     Right [| pyonBuiltin SystemF.The_RemainderDict_int_floordiv |])
-  , (PyonName module_prim "mod_float",
-     Right [| pyonBuiltin SystemF.The_RemainderDict_float_mod |])
-  , (PyonName module_prim "floordiv_float",
-     Right [| pyonBuiltin SystemF.The_RemainderDict_float_floordiv |])
-  , (PyonName module_prim "div_float",
-     Right [| pyonBuiltin SystemF.The_FractionalDict_float_div |])
+  , (CoreName module_prim "fromint_float",
+     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_float_fromInt) |])
+  {-, (CoreName module_complex "MultiplicativeDict_Complex_mul",
+     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_Complex_mul) |])
+  , (CoreName module_complex "MultiplicativeDict_Complex_fromInt",
+     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_Complex_fromInt) |])
+  , (CoreName module_complex "MultiplicativeDict_Complex_one",
+     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_Complex_one) |])-}
+  , (CoreName module_prim "mod_int",
+     Right [| coreBuiltin SystemF.The_RemainderDict_int_mod |])
+  , (CoreName module_prim "floordiv_int",
+     Right [| coreBuiltin SystemF.The_RemainderDict_int_floordiv |])
+  , (CoreName module_prim "mod_float",
+     Right [| coreBuiltin SystemF.The_RemainderDict_float_mod |])
+  , (CoreName module_prim "floordiv_float",
+     Right [| coreBuiltin SystemF.The_RemainderDict_float_floordiv |])
+  , (CoreName module_prim "div_float",
+     Right [| coreBuiltin SystemF.The_FractionalDict_float_div |])
     -- one_float was replaced by a literal value
-{-  , (PyonName builtinModuleName "load_int",
-     Right [| pyonBuiltin (SystemF.The_fun_load_int) |])
-  , (PyonName builtinModuleName "load_float",
-     Right [| pyonBuiltin (SystemF.The_fun_load_float) |])
-  , (PyonName module_prim "load_complexFloat",
-     Right [| pyonBuiltin SystemF.The_fun_load_complexFloat |])
-  , (PyonName builtinModuleName "load_bool",
-     Right [| pyonBuiltin (SystemF.The_fun_load_bool) |])
-  , (PyonName builtinModuleName "load_NoneType",
-     Right [| pyonBuiltin (SystemF.The_fun_load_NoneType) |])
-  , (PyonName builtinModuleName "store_int",
-     Right [| pyonBuiltin (SystemF.The_fun_store_int) |])
-  , (PyonName builtinModuleName "store_float",
-     Right [| pyonBuiltin (SystemF.The_fun_store_float) |])
-  , (PyonName module_prim "store_complexFloat",
-     Right [| pyonBuiltin SystemF.The_fun_store_complexFloat |])
-  , (PyonName builtinModuleName "store_bool",
-     Right [| pyonBuiltin (SystemF.The_fun_store_bool) |])
-  , (PyonName builtinModuleName "store_NoneType",
-     Right [| pyonBuiltin (SystemF.The_fun_store_NoneType) |])-}
+{-  , (CoreName builtinModuleName "load_int",
+     Right [| coreBuiltin (SystemF.The_fun_load_int) |])
+  , (CoreName builtinModuleName "load_float",
+     Right [| coreBuiltin (SystemF.The_fun_load_float) |])
+  , (CoreName module_prim "load_complexFloat",
+     Right [| coreBuiltin SystemF.The_fun_load_complexFloat |])
+  , (CoreName builtinModuleName "load_bool",
+     Right [| coreBuiltin (SystemF.The_fun_load_bool) |])
+  , (CoreName builtinModuleName "load_NoneType",
+     Right [| coreBuiltin (SystemF.The_fun_load_NoneType) |])
+  , (CoreName builtinModuleName "store_int",
+     Right [| coreBuiltin (SystemF.The_fun_store_int) |])
+  , (CoreName builtinModuleName "store_float",
+     Right [| coreBuiltin (SystemF.The_fun_store_float) |])
+  , (CoreName module_prim "store_complexFloat",
+     Right [| coreBuiltin SystemF.The_fun_store_complexFloat |])
+  , (CoreName builtinModuleName "store_bool",
+     Right [| coreBuiltin (SystemF.The_fun_store_bool) |])
+  , (CoreName builtinModuleName "store_NoneType",
+     Right [| coreBuiltin (SystemF.The_fun_store_NoneType) |])-}
   ]
 
 -- | Predefined global data
@@ -425,35 +425,35 @@ builtinGlobals =
      Left $ PrimType PointerType)
 
     -- Physical representations of data types
-  , (PyonName module_list "repr_barray1",
-     Right [| pyonBuiltin SystemF.The_repr_barray1 |])
-  , (PyonName module_list "repr_barray2",
-     Right [| pyonBuiltin SystemF.The_repr_barray2 |])
-  , (PyonName module_list "repr_barray3",
-     Right [| pyonBuiltin SystemF.The_repr_barray3 |])
-  , (PyonName module_structures "repr_Ref",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_Ref |])
-  , (PyonName module_structures "repr_StuckRef",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_StuckRef |])
-  , (PyonName module_structures "repr_Box",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_Box |])
-  , (PyonName module_structures "repr_Stream",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_Stream |])
-  , (PyonName module_structures "repr_EmptyReference",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_EmptyReference |])
-  , (PyonName module_structures "repr_EffTok",
-     Right [| SystemF.pyonBuiltin SystemF.The_repr_EffTok |])
-  , (PyonName module_structures "repr_int",
-     Right [| pyonBuiltin (SystemF.The_repr_int) |] )
-  , (PyonName module_structures "repr_float",
-     Right [| pyonBuiltin (SystemF.The_repr_float) |] )
-  , (PyonName module_structures "repr_bool",
-     Right [| pyonBuiltin (SystemF.The_repr_bool) |] )
-  , (PyonName module_structures "repr_NoneType",
-     Right [| pyonBuiltin (SystemF.The_repr_NoneType) |] )
+  , (CoreName module_list "repr_barray1",
+     Right [| coreBuiltin SystemF.The_repr_barray1 |])
+  , (CoreName module_list "repr_barray2",
+     Right [| coreBuiltin SystemF.The_repr_barray2 |])
+  , (CoreName module_list "repr_barray3",
+     Right [| coreBuiltin SystemF.The_repr_barray3 |])
+  , (CoreName module_structures "repr_Ref",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Ref |])
+  , (CoreName module_structures "repr_StuckRef",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_StuckRef |])
+  , (CoreName module_structures "repr_Box",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Box |])
+  , (CoreName module_structures "repr_Stream",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_Stream |])
+  , (CoreName module_structures "repr_EmptyReference",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_EmptyReference |])
+  , (CoreName module_structures "repr_EffTok",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_EffTok |])
+  , (CoreName module_structures "repr_int",
+     Right [| coreBuiltin (SystemF.The_repr_int) |] )
+  , (CoreName module_structures "repr_float",
+     Right [| coreBuiltin (SystemF.The_repr_float) |] )
+  , (CoreName module_structures "repr_bool",
+     Right [| coreBuiltin (SystemF.The_repr_bool) |] )
+  , (CoreName module_structures "repr_NoneType",
+     Right [| coreBuiltin (SystemF.The_repr_NoneType) |] )
     -- Streams
-  , (PyonName module_stream "Stream_count",
-     Right [| pyonBuiltin (SystemF.The_count) |])
+  , (CoreName module_stream "Stream_count",
+     Right [| coreBuiltin (SystemF.The_count) |])
   ]
 
 builtinVarPrimName nm = "the_biprim_" ++ builtinVarUnqualifiedName nm

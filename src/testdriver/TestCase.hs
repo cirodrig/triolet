@@ -46,8 +46,8 @@ data TestSpec =
 data TestConfig =
   TestConfig
   { synopsis :: !String
-  , pyonSources :: ![FilePath]
-  , llpyonSources :: ![FilePath]
+  , trioletSources :: ![FilePath]
+  , lltrioletSources :: ![FilePath]
   , cSources :: ![FilePath]
   , cxxSources :: ![FilePath]
   , expectedResult :: !ExpectedResult
@@ -58,11 +58,11 @@ testSynopsis = synopsis . testConfig
 
 testConfigName = takeFileName . testDirectory
 
-testPyonSources tc = 
-  [testDirectory tc </> file | file <- pyonSources $ testConfig tc]
+testTrioletSources tc = 
+  [testDirectory tc </> file | file <- trioletSources $ testConfig tc]
   
-testLLPyonSources tc = 
-  [testDirectory tc </> file | file <- llpyonSources $ testConfig tc]
+testLLTrioletSources tc =
+  [testDirectory tc </> file | file <- lltrioletSources $ testConfig tc]
 
 testCSources tc =
   [testDirectory tc </> file | file <- cSources $ testConfig tc]
@@ -124,7 +124,7 @@ withEnv key alter_value m = Tester $ \cfg ->
     reset_env (Just old_value) = setEnv key old_value True
 
 -- | Set up the environment so that the dynamic library loader knows where to
---   find the RTS library (libpyonrts.so)
+--   find the RTS library (libtrioletrts.so)
 withLdPath :: Tester a -> Tester a
 withLdPath m = do
   build_dir <- asks buildDir
@@ -258,10 +258,10 @@ runTestHelper temporary_path test_case = (return . TestFailed) `handleTester`
 
   where
     compile_and_link = do
-      mapM_ (compilePyonFile temporary_path test_case) $
-        testPyonSources test_case
-      mapM_ (compileLLPyonFile temporary_path test_case) $
-        testLLPyonSources test_case
+      mapM_ (compileTrioletFile temporary_path test_case) $
+        testTrioletSources test_case
+      mapM_ (compileLLTrioletFile temporary_path test_case) $
+        testLLTrioletSources test_case
       mapM_ (compileCFile temporary_path test_case) $
         testCSources test_case
       mapM_ (compileCxxFile temporary_path test_case) $
@@ -295,32 +295,32 @@ runCompileCommand fail_message program opts stdin = do
   when (rc /= ExitSuccess) $
     liftIO $ throwIO $ CompileFailed (fail_message err)
 
--- | Compile a file using the 'pyon' compiler.  Used for both pyon and
---   llpyon code.
-compileUsingPyonCompiler fail_message compile_flags = do
+-- | Compile a file using the 'triolet' compiler.  Used for both triolet and
+--   lltriolet code.
+compileUsingTrioletCompiler fail_message compile_flags = do
   build_dir <- asks buildDir
-  let pyon_program_path = build_dir </> "pyon" </> "pyon"
+  let triolet_program_path = build_dir </> "triolet" </> "triolet"
       build_data_path = build_dir </> "data"
       flags = ["-B", build_data_path] -- Link to the local library files
               ++ compile_flags
 
-  runCompileCommand fail_message pyon_program_path flags ""
+  runCompileCommand fail_message triolet_program_path flags ""
 
-compilePyonFile test_path test_case file_path = do
+compileTrioletFile test_path test_case file_path = do
   let obj_path = objectPath test_path file_path
-      flags = ["-x", "pyon",    -- Compile in pyon mode
+      flags = ["-x", "triolet",    -- Compile in triolet mode
                file_path, "-o", obj_path]
       fail_message err = "File: " ++ file_path ++ "\n" ++ err
 
-  compileUsingPyonCompiler fail_message flags
+  compileUsingTrioletCompiler fail_message flags
 
-compileLLPyonFile test_path test_case file_path = do
+compileLLTrioletFile test_path test_case file_path = do
   let obj_path = objectPath test_path file_path
-      flags = ["-x", "pyonasm",    -- Compile in low-level pyon mode
+      flags = ["-x", "lltriolet",    -- Compile in low-level triolet mode
                file_path, "-o", obj_path]
       fail_message err = "File: " ++ file_path ++ "\n" ++ err
 
-  compileUsingPyonCompiler fail_message flags
+  compileUsingTrioletCompiler fail_message flags
 
 compileCFile test_path test_case file_path = do
   build_dir <- asks buildDir
@@ -328,7 +328,7 @@ compileCFile test_path test_case file_path = do
   let obj_path = objectPath test_path file_path
       opts = platform_opts ++
              ["-I", test_path,   -- Include files in the output directory
-              "-I", build_dir </> "data" </> "include", -- Pyon library
+              "-I", build_dir </> "data" </> "include", -- Triolet library
               "-c", file_path,
               "-o", obj_path]
       fail_message err = "File: " ++ file_path ++ "\n" ++ err
@@ -341,7 +341,7 @@ compileCxxFile test_path test_case file_path = do
   let obj_path = objectPath test_path file_path
       opts = platform_opts ++
              ["-I", test_path,   -- Include files in the output directory
-              "-I", build_dir </> "data" </> "include", -- Pyon library
+              "-I", build_dir </> "data" </> "include", -- Triolet library
               "-c", file_path,
               "-o", obj_path]
       fail_message err = "File: " ++ file_path ++ "\n" ++ err
@@ -353,14 +353,14 @@ linkTest test_path test_case = do
   platform_opts <- asks platformLinkOpts
   let c_file_paths = map (objectPath test_path) $ testCSources test_case
       cxx_file_paths = map (objectPath test_path) $ testCxxSources test_case
-      llpyon_file_paths = map (objectPath test_path) $
-                          testLLPyonSources test_case
-      pyon_file_paths = map (objectPath test_path) $ testPyonSources test_case
+      lltriolet_file_paths = map (objectPath test_path) $
+                             testLLTrioletSources test_case
+      triolet_file_paths = map (objectPath test_path) $ testTrioletSources test_case
       link_opts = platform_opts ++ 
                   ["-o", testExecutableName] ++
-                  cxx_file_paths ++ c_file_paths ++ llpyon_file_paths ++ pyon_file_paths ++
+                  cxx_file_paths ++ c_file_paths ++ lltriolet_file_paths ++ triolet_file_paths ++
                   ["-L" ++ build_dir </> "rts",
-                   "-lpyonrts", "-lgc", "-lm", "-lstdc++"]
+                   "-ltrioletrts", "-lgc", "-lm", "-lstdc++"]
       fail_message err = err
 
   runCompileCommand fail_message "gcc" link_opts ""

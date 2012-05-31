@@ -1,5 +1,5 @@
 
-module pyon.internal.structures;
+module core.internal.structures;
 
 #include "rts.h"
 #include "prim.h"
@@ -14,9 +14,9 @@ import procedure exit (int) -> ();
 // Allocate some memory.  Use the flag to determine what kind of allocation.
 procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   if (is_pointerless) {
-    pointer primcall pyon_alloc_nopointers (size);
+    pointer primcall triolet_alloc_nopointers (size);
   } else {
-    pointer primcall pyon_alloc (size);
+    pointer primcall triolet_alloc (size);
   };
 };
 
@@ -105,7 +105,7 @@ function inline Box_convert_to_bare (owned src, pointer dst) -> unit {
 
 // A referenced object is just a pointer to the object
 function inline repr_Referenced (owned elt_repr) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  ret = (pointer primcall triolet_alloc (sizeof Repr)) as owned;
   ret @! Repr.sizealign = SA {sizeof pointer, alignof pointer};
   ret @! Repr.is_pointerless = NOT_POINTERLESS;
 
@@ -155,7 +155,7 @@ function inline repr_arr
   typedef elt_type = bytes(value repr_size, value repr_align);
   typedef array_type = const_array(value size, elt_type);
 
-  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  ret = (pointer primcall triolet_alloc (sizeof Repr)) as owned;
   ret @! Repr.sizealign = SA {sizeof array_type, alignof array_type};
   ret @! Repr.is_pointerless = elt_repr @! Repr.is_pointerless;
 
@@ -257,7 +257,7 @@ data owned repr_EffTok = Repr {
 };
 
 function inline repr_Maybe (owned repr_arg) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  ret = (pointer primcall triolet_alloc (sizeof Repr)) as owned;
 
   SA {arg_size, arg_align} = repr_arg @! Repr.sizealign;
   typedef arg = bytes(value arg_size, value arg_align);
@@ -287,18 +287,18 @@ function copy_Maybe (owned copy_arg, uint arg_size, uint arg_align,
   };
 };
 
-function inline repr_PyonTuple1 (owned rep) -> owned {
+function inline repr_Tuple1 (owned rep) -> owned {
   SA {size, align} = rep @! Repr.sizealign;
-  typedef tuple = PyonTuple1(bytes(value size, value align));
+  typedef tuple = Tuple1(bytes(value size, value align));
 
-  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  ret = (pointer primcall triolet_alloc (sizeof Repr)) as owned;
   ret @! Repr.sizealign = SA {size, align};
 
   copy_field = rep @! Repr.copy;
   letrec {
     function copy (pointer src, pointer ret) -> unit {
-      unit call copy_field (src @ PyonTuple1(bytes(value size, value align)).member,
-                            ret @ PyonTuple1(bytes(value size, value align)).member);
+      unit call copy_field (src @ Tuple1(bytes(value size, value align)).member,
+                            ret @ Tuple1(bytes(value size, value align)).member);
     }
   };
   ret @! Repr.copy = copy;
@@ -311,18 +311,18 @@ function inline repr_PyonTuple1 (owned rep) -> owned {
   ret;
 };
 
-function inline repr_PyonTuple2 (owned repr1, owned repr2) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+function inline repr_Tuple2 (owned repr1, owned repr2) -> owned {
+  ret = (pointer primcall triolet_alloc (sizeof Repr)) as owned;
   SA {size1, align1} = repr1 @! Repr.sizealign;
   SA {size2, align2} = repr2 @! Repr.sizealign;
-  typedef tuple = PyonTuple2(bytes(value size1, value align1),
+  typedef tuple = Tuple2(bytes(value size1, value align1),
   	  	             bytes(value size2, value align2));
 
   ret @! Repr.sizealign = SA {sizeof tuple, alignof tuple};
   ret @! Repr.is_pointerless =
     repr1 @! Repr.is_pointerless &&
     repr2 @! Repr.is_pointerless;
-  copy = owned call copy_PyonTuple2
+  copy = owned call copy_Tuple2
     (repr1 @! Repr.copy, repr2 @! Repr.copy,
      size1, align1, size2, align2);
   ret @! Repr.copy = copy;
@@ -335,20 +335,20 @@ function inline repr_PyonTuple2 (owned repr1, owned repr2) -> owned {
   ret;
 };
 
-function inline copy_PyonTuple2(owned copy1, owned copy2,
+function inline copy_Tuple2(owned copy1, owned copy2,
                          uint size1, uint align1, uint size2, uint align2,
                          pointer src, pointer dst) -> unit {
-  typedef tuple = PyonTuple2(bytes(value size1, value align1), bytes(value size2, value align2));
+  typedef tuple = Tuple2(bytes(value size1, value align1), bytes(value size2, value align2));
   _ = unit call copy1 (src @ tuple.member1, dst @ tuple.member1);
   unit call copy2 (src @ tuple.member2, dst @ tuple.member2);
 };
 
-function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+function inline repr_Tuple3 (owned repr1, owned repr2, owned repr3) -> owned {
+  ret = (pointer primcall triolet_alloc (sizeof Repr)) as owned;
   SA {size1, align1} = repr1 @! Repr.sizealign;
   SA {size2, align2} = repr2 @! Repr.sizealign;
   SA {size3, align3} = repr3 @! Repr.sizealign;
-  typedef tuple = PyonTuple3(bytes(value size1, value align1),
+  typedef tuple = Tuple3(bytes(value size1, value align1),
   	  	             bytes(value size2, value align2),
 			     bytes(value size3, value align3));
 
@@ -357,7 +357,7 @@ function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned
     repr1 @! Repr.is_pointerless &&
     repr2 @! Repr.is_pointerless &&
     repr3 @! Repr.is_pointerless;
-  copy = owned call copy_PyonTuple3
+  copy = owned call copy_Tuple3
     (repr1 @! Repr.copy, repr2 @! Repr.copy,
      repr3 @! Repr.copy,
      size1, align1, size2, align2, size3, align3);
@@ -370,11 +370,11 @@ function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned
   ret;
 };
 
-function inline copy_PyonTuple3(owned copy1, owned copy2, owned copy3,
+function inline copy_Tuple3(owned copy1, owned copy2, owned copy3,
                          uint size1, uint align1, uint size2, uint align2,
 			 uint size3, uint align3,
                          pointer src, pointer dst) -> unit {
-  typedef tuple = PyonTuple3(bytes(value size1, value align1),
+  typedef tuple = Tuple3(bytes(value size1, value align1),
   	  	  	     bytes(value size2, value align2),
   	  	  	     bytes(value size3, value align3));
   _ = unit call copy1 (src @ tuple.member1, dst @ tuple.member1);
@@ -382,14 +382,14 @@ function inline copy_PyonTuple3(owned copy1, owned copy2, owned copy3,
   unit call copy3 (src @ tuple.member3, dst @ tuple.member3);
 };
 
-function inline repr_PyonTuple4
+function inline repr_Tuple4
     (owned repr1, owned repr2, owned repr3, owned repr4) -> owned {
-  ret = (pointer primcall pyon_alloc (sizeof Repr)) as owned;
+  ret = (pointer primcall triolet_alloc (sizeof Repr)) as owned;
   SA {size1, align1} = repr1 @! Repr.sizealign;
   SA {size2, align2} = repr2 @! Repr.sizealign;
   SA {size3, align3} = repr3 @! Repr.sizealign;
   SA {size4, align4} = repr4 @! Repr.sizealign;
-  typedef tuple = PyonTuple4(bytes(value size1, value align1),
+  typedef tuple = Tuple4(bytes(value size1, value align1),
   	  	             bytes(value size2, value align2),
 			     bytes(value size3, value align3),
 			     bytes(value size4, value align4));
@@ -400,7 +400,7 @@ function inline repr_PyonTuple4
     repr2 @! Repr.is_pointerless &&
     repr3 @! Repr.is_pointerless &&
     repr4 @! Repr.is_pointerless;
-  copy = owned call copy_PyonTuple4
+  copy = owned call copy_Tuple4
     (repr1 @! Repr.copy, repr2 @! Repr.copy,
      repr3 @! Repr.copy, repr4 @! Repr.copy,
      size1, align1, size2, align2, size3, align3, size4, align4);
@@ -412,12 +412,12 @@ function inline repr_PyonTuple4
   ret;
 };
 
-function inline copy_PyonTuple4(owned copy1, owned copy2, owned copy3,
+function inline copy_Tuple4(owned copy1, owned copy2, owned copy3,
                          owned copy4,
                          uint size1, uint align1, uint size2, uint align2,
 			 uint size3, uint align3, uint size4, uint align4,
                          pointer src, pointer dst) -> unit {
-  typedef tuple = PyonTuple4(bytes(value size1, value align1),
+  typedef tuple = Tuple4(bytes(value size1, value align1),
   	  	  	     bytes(value size2, value align2),
   	  	  	     bytes(value size3, value align3),
   	  	  	     bytes(value size4, value align4));

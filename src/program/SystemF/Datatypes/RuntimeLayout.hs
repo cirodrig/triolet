@@ -20,9 +20,9 @@ import Type.Environment
 import qualified LowLevel.Types as LL
 
 {-# INLINE primFunApp #-}
-primFunApp name tys es = appE' (varE' (pyonBuiltin name)) tys es
+primFunApp name tys es = appE' (varE' (coreBuiltin name)) tys es
 
-uintType = VarT $ pyonBuiltin The_uint
+uintType = VarT $ coreBuiltin The_uint
 
 -------------------------------------------------------------------------------
 
@@ -118,14 +118,14 @@ adtStructureOnly =
   Algorithm
   { lcNewEvidence = \_ _ -> return ()
   , lcUseEvidence = \k t _ -> unitTypedData k t
-  , lcIntType     = return $ TVal (VarT $ pyonBuiltin The_int) dummy
-  , lcUintType    = return $ TVal (VarT $ pyonBuiltin The_uint) dummy
-  , lcFloatType   = return $ TVal (VarT $ pyonBuiltin The_float) dummy
-  , lcBoolType    = return $ TVal (VarT $ pyonBuiltin The_bool) dummy
+  , lcIntType     = return $ TVal (VarT $ coreBuiltin The_int) dummy
+  , lcUintType    = return $ TVal (VarT $ coreBuiltin The_uint) dummy
+  , lcFloatType   = return $ TVal (VarT $ coreBuiltin The_float) dummy
+  , lcBoolType    = return $ TVal (VarT $ coreBuiltin The_bool) dummy
   , lcUnitType    = \t -> return $ TVal t dummy
   , lcUninhabited = \k t -> return $! unitTypedData k t
   , lcBox         = \t -> return $ TBox t
-  , lcArrType     = \s e -> let t = varApp (pyonBuiltin The_arr)
+  , lcArrType     = \s e -> let t = varApp (coreBuiltin The_arr)
                                     [trType s, trType e]
                             in return $ TBare t dummy
   , lcTag         = tagData
@@ -137,7 +137,7 @@ adtStructureOnly =
   where
     -- Expressions aren't actually used
     dummy = internalError "adtStructureOnly does not compute expressions"
-    -- dummy = ExpM $ ExceptE defaultExpInfo (VarT $ pyonBuiltin The_int)
+    -- dummy = ExpM $ ExceptE defaultExpInfo (VarT $ coreBuiltin The_int)
 
     unitTypedData :: BaseKind -> Type -> TypedData ()
     unitTypedData BareK     t = TBare t dummy
@@ -159,11 +159,11 @@ adtSizeAlign =
   Algorithm
   { lcNewEvidence = \_ _ -> newAnonymousVar ObjectLevel
   , lcUseEvidence = useEvidence
-  , lcIntType     = return $ sizeAlignForVal (VarT $ pyonBuiltin The_int) LL.pyonIntType
-  , lcUintType    = return $ sizeAlignForVal (VarT $ pyonBuiltin The_uint) LL.pyonUintType
-  , lcFloatType   = return $ sizeAlignForVal (VarT $ pyonBuiltin The_float) LL.pyonFloatType
-  , lcBoolType    = return $ sizeAlignForVal (VarT $ pyonBuiltin The_bool) LL.pyonBoolType
-  , lcUnitType    = \t -> return $ sizeAlignForVal t LL.pyonNoneType
+  , lcIntType     = return $ sizeAlignForVal (VarT $ coreBuiltin The_int) LL.trioletIntType
+  , lcUintType    = return $ sizeAlignForVal (VarT $ coreBuiltin The_uint) LL.trioletUintType
+  , lcFloatType   = return $ sizeAlignForVal (VarT $ coreBuiltin The_float) LL.trioletFloatType
+  , lcBoolType    = return $ sizeAlignForVal (VarT $ coreBuiltin The_bool) LL.trioletBoolType
+  , lcUnitType    = \t -> return $ sizeAlignForVal t LL.trioletNoneType
   , lcUninhabited = \k t -> case k
                             of BoxK  -> return $ TBox t
                                BareK -> return $ sizeAlignForBare t LL.UnitType
@@ -213,7 +213,7 @@ sizeAlignForBare ty ll_ty =
   in TBare ty (uintPairValue sz al)
 
 arraySizeAlign (TInt n length_exp) (TBare elt elt_exp) =
-  let array_type = varApp (pyonBuiltin The_arr) [n, elt]
+  let array_type = varApp (coreBuiltin The_arr) [n, elt]
       array_exp = primFunApp The_sizealign_arr [n] [length_exp, elt_exp]
   in return $ TBare array_type array_exp
 
@@ -339,7 +339,7 @@ algebraicSizeAlign k ty sa = do
 
 sizeAlignObjectType k ty =
   case k
-  of IntIndexK -> varApp (pyonBuiltin The_IInt) [ty]
+  of IntIndexK -> varApp (coreBuiltin The_IInt) [ty]
      BareK     -> uint_pair_type
      ValK      -> uint_pair_type
      BoxK      -> uint_pair_type
@@ -359,17 +359,17 @@ runSizeAlign m = runSubcomputation derive_premise create_result m
           -- Convert a @SizeAlignVal t@ to a @(uint, uint)@
           tenv <- getTypeEnv
           expr <- caseE (mkVarE premise_v)
-                  [mkAlt tenv (pyonBuiltin The_sizeAlignVal) [ty]
+                  [mkAlt tenv (coreBuiltin The_sizeAlignVal) [ty]
                    (\ [] [x, y] -> return $ uintPairValue (varE' x) (varE' y))]
           return $ TVal ty expr
         BareK -> do
           -- Convert a @Repr t@ to a @(uint, uint)@
           tenv <- getTypeEnv
           expr <- caseE (mkVarE premise_v)
-                  [mkAlt tenv (pyonBuiltin The_repr) [ty]
+                  [mkAlt tenv (coreBuiltin The_repr) [ty]
                    (\ [] [sa, _, _, _, _] ->
                      caseE (mkVarE sa)
-                     [mkAlt tenv (pyonBuiltin The_sizeAlign) [ty]
+                     [mkAlt tenv (coreBuiltin The_sizeAlign) [ty]
                       (\ [] [x, y] ->
                         return $ uintPairValue (varE' x) (varE' y))])]
           return $ TBare ty expr
@@ -399,10 +399,10 @@ adtCopy =
   Algorithm
   { lcNewEvidence = \_ _ -> newAnonymousVar ObjectLevel
   , lcUseEvidence = useEvidence
-  , lcIntType     = dummyCopyValue (VarT $ pyonBuiltin The_int)
-  , lcUintType    = dummyCopyValue (VarT $ pyonBuiltin The_uint)
-  , lcFloatType   = dummyCopyValue (VarT $ pyonBuiltin The_float)
-  , lcBoolType    = dummyCopyValue (VarT $ pyonBuiltin The_bool)
+  , lcIntType     = dummyCopyValue (VarT $ coreBuiltin The_int)
+  , lcUintType    = dummyCopyValue (VarT $ coreBuiltin The_uint)
+  , lcFloatType   = dummyCopyValue (VarT $ coreBuiltin The_float)
+  , lcBoolType    = dummyCopyValue (VarT $ coreBuiltin The_bool)
   , lcUnitType    = dummyCopyValue
   , lcUninhabited = \k t -> case k
                             of BareK -> return $ dynamicCopyError t
@@ -429,7 +429,7 @@ dynamicCopyError ty =
 
 arrayCopy :: CopyData -> CopyData -> CopyCompute CopyData
 arrayCopy (TInt size_ty size_val) (TBare elt_ty elt_val) =
-  let arr_ty = varApp (pyonBuiltin The_arr) [size_ty, elt_ty]
+  let arr_ty = varApp (coreBuiltin The_arr) [size_ty, elt_ty]
       arr_exp = primFunApp The_copyArray [size_ty, elt_ty] [size_val, elt_val]
   in return $ TBare arr_ty arr_exp
 
@@ -447,8 +447,8 @@ algebraicCopy BareK ty deriv = do
     make_expr :: CopyCompute ExpM 
     make_expr =
       lamE $ mkFun []
-      (\ [] -> return ([ty, varApp (pyonBuiltin The_OutPtr) [ty]],
-                       VarT $ pyonBuiltin The_Store))
+      (\ [] -> return ([ty, varApp (coreBuiltin The_OutPtr) [ty]],
+                       VarT $ coreBuiltin The_Store))
       (\ [] [src, ret] -> do
           -- Look up the data constructors for this type
           tenv <- getTypeEnv
@@ -481,10 +481,10 @@ algebraicCopy BareK ty deriv = do
 
 copyObjectType k ty =
   case k
-  of IntIndexK -> varApp (pyonBuiltin The_IInt) [ty]
-     BareK     -> ty `FunT` varApp (pyonBuiltin The_OutPtr) [ty] `FunT`
-                  VarT (pyonBuiltin The_Store)
-     ValK      -> varApp (pyonBuiltin The_SizeAlignVal) [ty]
+  of IntIndexK -> varApp (coreBuiltin The_IInt) [ty]
+     BareK     -> ty `FunT` varApp (coreBuiltin The_OutPtr) [ty] `FunT`
+                  VarT (coreBuiltin The_Store)
+     ValK      -> varApp (coreBuiltin The_SizeAlignVal) [ty]
 
 runCopy :: CopyCompute CopyData -> ReprCompute ExpM
 runCopy m = runSubcomputation derive_premise create_result m
@@ -502,7 +502,7 @@ runCopy m = runSubcomputation derive_premise create_result m
           -- Convert a @Repr t@ to a copy method
           tenv <- getTypeEnv
           expr <- caseE (mkVarE premise_v)
-                  [mkAlt tenv (pyonBuiltin The_repr) [ty]
+                  [mkAlt tenv (coreBuiltin The_repr) [ty]
                    (\ [] [_, copy, _, _, _] -> mkVarE copy)]
           return $ TBare ty expr
         IntIndexK ->
@@ -541,10 +541,10 @@ adtRepr =
   Algorithm
   { lcNewEvidence = \_ _ -> newAnonymousVar ObjectLevel
   , lcUseEvidence = useEvidence
-  , lcIntType     = valueRepr (VarT $ pyonBuiltin The_int)
-  , lcUintType    = valueRepr (VarT $ pyonBuiltin The_uint)
-  , lcFloatType   = valueRepr (VarT $ pyonBuiltin The_float)
-  , lcBoolType    = valueRepr (VarT $ pyonBuiltin The_bool)
+  , lcIntType     = valueRepr (VarT $ coreBuiltin The_int)
+  , lcUintType    = valueRepr (VarT $ coreBuiltin The_uint)
+  , lcFloatType   = valueRepr (VarT $ coreBuiltin The_float)
+  , lcBoolType    = valueRepr (VarT $ coreBuiltin The_bool)
   , lcUnitType    = valueRepr
   , lcUninhabited = \k t -> case k
                             of BareK -> internalError "lcUninhabited: Not implemented"
@@ -570,20 +570,20 @@ valueRepr ty = do
             [patM (s ::: uintType), patM (a ::: uintType)]
             body
       body = ExpM $ ConE defaultExpInfo
-             (VarCon (pyonBuiltin The_SizeAlignVal) [ty] [])
+             (VarCon (coreBuiltin The_SizeAlignVal) [ty] [])
              [varE' s, varE' a]
   return $ TVal ty expr
 
 arrayRepr (TInt size_ty size_val) (TBare elt_ty elt_val) =
-  let arr_ty = varApp (pyonBuiltin The_arr) [size_ty, elt_ty]
+  let arr_ty = varApp (coreBuiltin The_arr) [size_ty, elt_ty]
       arr_val = primFunApp The_repr_arr_2 [size_ty, elt_ty] [size_val, elt_val]
   in return $ TBare arr_ty arr_val
 
 -- | Get the type of the expression encoded in a TypedRepr object
 reprType k ty =
   case k
-  of BareK -> varApp (pyonBuiltin The_Repr) [ty]
-     ValK  -> varApp (pyonBuiltin The_SizeAlignVal) [ty]
+  of BareK -> varApp (coreBuiltin The_Repr) [ty]
+     ValK  -> varApp (coreBuiltin The_SizeAlignVal) [ty]
 
 algebraicRepr ValK ty _ = valueRepr ty
 
@@ -602,7 +602,7 @@ algebraicRepr BareK ty _ = traceShow (text "algebraicRepr" <+> pprType ty) $ do
               [patM (s ::: uintType), patM (a ::: uintType)]
               body
         body = ExpM $ ConE defaultExpInfo
-               (VarCon (pyonBuiltin The_SizeAlign) [ty] [])
+               (VarCon (coreBuiltin The_SizeAlign) [ty] [])
                [varE' s, varE' a]
     return expr
 
@@ -611,61 +611,61 @@ algebraicRepr BareK ty _ = traceShow (text "algebraicRepr" <+> pprType ty) $ do
 
   -- Create conversion methods.  'StoredBox' has a special conversion method.
   (to_boxed, from_boxed) <-
-    if (data_con `isPyonBuiltin` The_Ref)
+    if (data_con `isCoreBuiltin` The_Ref)
     then conversionMethods_StoredBox ty_args
     else conversionMethods ty copy
 
   let false =
-        ExpM $ ConE defaultExpInfo (VarCon (pyonBuiltin The_False) [] []) []
+        ExpM $ ConE defaultExpInfo (VarCon (coreBuiltin The_False) [] []) []
   let repr_exp =
         ExpM $ ConE defaultExpInfo
-        (VarCon (pyonBuiltin The_repr) [ty] [])
+        (VarCon (coreBuiltin The_repr) [ty] [])
         [sizealign, copy, to_boxed, from_boxed, false]
 
   return $ TBare ty repr_exp
 
 -- | Create the code for converting between boxed and bare types
 conversionMethods ty copy = do
-  let boxed_type = varApp (pyonBuiltin The_Boxed) [ty]
-      ret_type = varApp (pyonBuiltin The_OutPtr) [ty]
-      writer_type = ret_type `FunT` VarT (pyonBuiltin The_Store)
+  let boxed_type = varApp (coreBuiltin The_Boxed) [ty]
+      ret_type = varApp (coreBuiltin The_OutPtr) [ty]
+      writer_type = ret_type `FunT` VarT (coreBuiltin The_Store)
   from_boxed <-
     lamE $ mkFun [] (\ [] -> return ([boxed_type, ret_type],
-                                     VarT (pyonBuiltin The_Store)))
+                                     VarT (coreBuiltin The_Store)))
     (\ [] [x, r] -> do
         tenv <- getTypeEnv
         caseE (mkVarE x)
-          [mkAlt tenv (pyonBuiltin The_boxed) [ty]
+          [mkAlt tenv (coreBuiltin The_boxed) [ty]
            (\ [] [y] -> return $ appE' copy [] [varE' y, varE' r])])
   to_boxed <-
     lamE $ mkFun [] (\ [] -> return ([writer_type], boxed_type))
     (\ [] [x] ->
-      let con = VarCon (pyonBuiltin The_boxed) [ty] []
+      let con = VarCon (coreBuiltin The_boxed) [ty] []
       in return $ ExpM $ ConE defaultExpInfo con [varE' x])
   return (to_boxed, from_boxed)
 
 -- | Create the code for converting a 'StoredBox' between
 --   boxed and bare types.
 conversionMethods_StoredBox [arg_ty] = do
-  let bare_type = varApp (pyonBuiltin The_Ref) [arg_ty]
-      ret_type = varApp (pyonBuiltin The_OutPtr) [bare_type]
-      writer_type = ret_type `FunT` VarT (pyonBuiltin The_Store)
+  let bare_type = varApp (coreBuiltin The_Ref) [arg_ty]
+      ret_type = varApp (coreBuiltin The_OutPtr) [bare_type]
+      writer_type = ret_type `FunT` VarT (coreBuiltin The_Store)
   -- Convert from @StoredBox t@ to @t@
   tenv <- getTypeEnv
   from_boxed <-
     lamE $ mkFun [] (\ [] -> return ([arg_ty, ret_type],
-                                     VarT (pyonBuiltin The_Store)))
+                                     VarT (coreBuiltin The_Store)))
     (\ [] [x, r] ->
-        let con = VarCon (pyonBuiltin The_ref) [arg_ty] []
+        let con = VarCon (coreBuiltin The_ref) [arg_ty] []
         in return $ ExpM $ ConE defaultExpInfo con [varE' x, varE' r])
   to_boxed <-
     lamE $ mkFun [] (\ [] -> return ([writer_type], arg_ty))
     (\ [] [w] ->
-      caseE (appExp (mkVarE $ pyonBuiltin The_StuckBox) [bare_type] [mkVarE w])
-      [mkAlt tenv (pyonBuiltin The_stuckBox) [bare_type]
+      caseE (appExp (mkVarE $ coreBuiltin The_StuckBox) [bare_type] [mkVarE w])
+      [mkAlt tenv (coreBuiltin The_stuckBox) [bare_type]
        (\ [] [x] ->
          caseE (mkVarE x)
-         [mkAlt tenv (pyonBuiltin The_ref) [arg_ty]
+         [mkAlt tenv (coreBuiltin The_ref) [arg_ty]
           (\ [] [y] -> mkVarE y)])])
   return (to_boxed, from_boxed)
 

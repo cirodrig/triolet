@@ -1,7 +1,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pyon.h>
+#include <triolet.h>
 #include "downsample_interface.h"
 
 int arr[] = {
@@ -13,17 +13,17 @@ int arr[] = {
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
 
-  PyonMatrix *mat = pyon_Matrix_PyonInt_FromArray(0, 4, 0, 6, arr);
-  PyonMatrix *mat2 = downsample(mat);
+  TrioletMatrix *mat = triolet_Matrix_Int_FromArray(0, 4, 0, 6, arr);
+  TrioletMatrix *mat2 = downsample(mat);
 
   int w, h;
   int *data;
-  h = pyon_Matrix_PyonInt_Height(mat2);
-  w = pyon_Matrix_PyonInt_Width(mat2);
+  h = triolet_Matrix_Int_Height(mat2);
+  w = triolet_Matrix_Int_Width(mat2);
   data = malloc(w * h * sizeof(int));
-  pyon_Matrix_PyonInt_ToArray(mat2, data);
+  triolet_Matrix_Int_ToArray(mat2, data);
 
   int y, x;
   for (y = 0; y < h; y++) {

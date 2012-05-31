@@ -128,7 +128,7 @@ withForallAnnotation ann m = withMany with_ann ann m
       -- Create a type variable
       let lab = case varName v
                 of "" -> Nothing
-                   nm -> Just $ pyonLabel (ModuleName "pyonfile") nm
+                   nm -> Just $ plainLabel (ModuleName "trioletfile") nm
       tyvar <- liftIO $ U.newRigidTyVar kind lab
 
       -- Add to environment
@@ -147,8 +147,8 @@ newVariable name = do
     (u_label, p_label) =
       if null name
       then (Nothing, Nothing)
-      else (Just $ pyonLabel (ModuleName "pyonfile") name,
-            Just $ pyonLabel (ModuleName "pyonfile") name)
+      else (Just $ plainLabel (ModuleName "trioletfile") name,
+            Just $ plainLabel (ModuleName "trioletfile") name)
 
 -------------------------------------------------------------------------------
 

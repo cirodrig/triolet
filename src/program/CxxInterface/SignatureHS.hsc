@@ -28,10 +28,10 @@ foreign import ccall "PyonType_List" pyonType_List :: CInt -> Ptr ExportDataType
 foreign import ccall "PyonType_Array" pyonType_Array :: CInt -> CInt -> Ptr ExportDataType -> IO (Ptr ExportDataType)
 
 sendExportDataType :: ExportDataType -> IO (Ptr ExportDataType)
-sendExportDataType PyonNoneET = pyonType_NoneType
-sendExportDataType PyonIntET = pyonType_Int
-sendExportDataType PyonFloatET = pyonType_Float
-sendExportDataType PyonBoolET = pyonType_Bool
+sendExportDataType TrioletNoneET = pyonType_NoneType
+sendExportDataType TrioletIntET = pyonType_Int
+sendExportDataType TrioletFloatET = pyonType_Float
+sendExportDataType TrioletBoolET = pyonType_Bool
 sendExportDataType (TupleET ts) = do
   let tuple_size = length ts
   ptr <- pyonType_Tuple (fromIntegral tuple_size)

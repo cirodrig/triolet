@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Pairwise comparison of members of a set",
-  pyonSources	 = ["pairwise.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["pairwise.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "ok"

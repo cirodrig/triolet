@@ -257,13 +257,13 @@ simplifyPrimCall :: Val -> [Val] -> (Atom, Maybe [Maybe Expr])
 simplifyPrimCall op_val arg_vals =
   case op_val
   of VarV op_var
-       | op_var == llBuiltin the_prim_pyon_alloc ->
+       | op_var == llBuiltin the_prim_triolet_alloc ->
            case arg_vals
            of [LitV (IntL _ _ 0)] ->
                 -- Allocation of zero bytes: return NULL
                 (ValA [LitV NullL], Just [Just $ litExpr NullL])
               _ -> rebuild_call
-       | op_var == llBuiltin the_prim_pyon_dealloc ->
+       | op_var == llBuiltin the_prim_triolet_dealloc ->
            case arg_vals
            of [LitV NullL] ->
                 -- Deallocation of NULL: do nothing

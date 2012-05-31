@@ -94,7 +94,7 @@ primTypeDeclSpecs pt =
      IntType Unsigned S64 -> nameDeclSpecs "uint64_t"
      FloatType S32 -> typeDeclSpecs (CFloatType internalNode)
      FloatType S64 -> typeDeclSpecs (CDoubleType internalNode)
-     PointerType -> nameDeclSpecs "PyonPtr"
+     PointerType -> nameDeclSpecs "TrioletPtr"
      OwnedType -> internalError "primTypeDeclSpecs: Unexpected type"
 
 varPrimType v = 

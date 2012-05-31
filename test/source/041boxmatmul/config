@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Boxed matrix multiplication",
-  pyonSources	 = ["matmul.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["matmul.pyon"],
+  lltrioletSources  = [],
   cSources	 = [],
   cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "OK"

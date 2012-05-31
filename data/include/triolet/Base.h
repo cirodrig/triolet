@@ -10,24 +10,24 @@
 
 #define NOT_IMPLEMENTED pyonError("Not implemented")
 
-namespace Pyon {
+namespace Triolet {
 
-  struct PyonBareObj {};	// Some bare object implemented in Pyon
-  struct PyonBoxObj {};	       // Some boxed object implemented in Pyon
-  typedef PyonBareObj *PyonBarePtr;
-  typedef PyonBoxObj *PyonBoxPtr;
+  struct TriBareObj {};	// Some bare object implemented in Triolet
+  struct TriBoxObj {};	       // Some boxed object implemented in Triolet
+  typedef TriBareObj *TriBarePtr;
+  typedef TriBoxObj *TriBoxPtr;
 
   static inline void
-  pyonError(const char *s) {
+  trioletError(const char *s) {
     fputs(s, stderr);
     exit(-1);
   }
 
   /****************************************************************************/
-  /* Pyon Kinds */
+  /* Triolet Kinds */
 
   // One of these tags is associated to each C++ type corresponding to
-  // a Pyon data constructor.  The tag specifies the Pyon type's kind.
+  // a Triolet data constructor.  The tag specifies the Triolet type's kind.
   struct BareKindTag {};
   struct BoxKindTag {};
   struct ValKindTag {};
@@ -51,7 +51,7 @@ namespace Pyon {
   };
 
   /* An abstract base class for bare types.  Bare types encapsulate a
-   * reference to a bare Pyon object.
+   * reference to a bare Triolet object.
    *
    * Derived classes should not define additional fields. Dervied classes
    * should define the methods specified in the signature. */
@@ -60,11 +60,11 @@ namespace Pyon {
     typedef BareKindTag kind;
 
   private:
-    PyonBarePtr const bare_data; // The pyon object
+    TriBarePtr const bare_data; // The triolet object
 
   public:
-    BareType(PyonBarePtr _bare_data) : bare_data(_bare_data) {}
-    PyonBarePtr getBareData(void) const {return bare_data;}
+    BareType(TriBarePtr _bare_data) : bare_data(_bare_data) {}
+    TriBarePtr getBareData(void) const {return bare_data;}
 
 #if BEGIN_SIGNATURE
     struct initializer {
@@ -84,7 +84,7 @@ namespace Pyon {
   };
 
   /* An abstract base class for boxed types.  Boxed types encapsulate a
-   * reference to a boxed Pyon object.
+   * reference to a boxed Triolet object.
    *
    * Derived classes should not define additional fields. */
   class BoxType {
@@ -92,11 +92,11 @@ namespace Pyon {
     typedef BoxKindTag kind;
 
   private:
-    PyonBoxPtr const box_data;
+    TriBoxPtr const box_data;
 
   public:
-    BoxType(PyonBoxPtr _box_data) : box_data(_box_data) {}
-    PyonBoxPtr getBoxData(void) const {return box_data;}
+    BoxType(TriBoxPtr _box_data) : box_data(_box_data) {}
+    TriBoxPtr getBoxData(void) const {return box_data;}
 
 #if BEGIN_SIGNATURE
     struct initializer {

@@ -1,4 +1,4 @@
-{-| System F representation of Pyon code.
+{-| System F representation of Triolet code.
 
 These data structures are used in two slightly different ways, before and  
 after representation selection.  After representation selection,
@@ -524,7 +524,7 @@ data DefAnn =
     --   definitions.
   , defAnnJoinPoint :: !Bool
     
-    -- | Whether the function is visible to pyon code outside the
+    -- | Whether the function is visible to triolet code outside the
     --   current module.  This flag doesn't indicate whether the function
     --   is exported to other languages.
   , defAnnExported :: !Bool
@@ -638,35 +638,35 @@ unpackPolymorphicCall _ = Nothing
 -- | Return True iff this is a dictionary type constructor.
 isDictionaryTypeCon :: Var -> Bool
 isDictionaryTypeCon v =
-  v `elem` [ pyonBuiltin The_Repr
-           , pyonBuiltin The_TraversableDict
-           , pyonBuiltin The_ShapeDict
-           , pyonBuiltin The_IndexableDict
-           , pyonBuiltin The_EqDict
-           , pyonBuiltin The_OrdDict
-           , pyonBuiltin The_AdditiveDict
-           , pyonBuiltin The_MultiplicativeDict
-           , pyonBuiltin The_FractionalDict
-           , pyonBuiltin The_RemainderDict
-           , pyonBuiltin The_FloatingDict
-           , pyonBuiltin The_VectorDict
+  v `elem` [ coreBuiltin The_Repr
+           , coreBuiltin The_TraversableDict
+           , coreBuiltin The_ShapeDict
+           , coreBuiltin The_IndexableDict
+           , coreBuiltin The_EqDict
+           , coreBuiltin The_OrdDict
+           , coreBuiltin The_AdditiveDict
+           , coreBuiltin The_MultiplicativeDict
+           , coreBuiltin The_FractionalDict
+           , coreBuiltin The_RemainderDict
+           , coreBuiltin The_FloatingDict
+           , coreBuiltin The_VectorDict
            ]
 
 -- | Return True iff this is a dictionary data constructor.
 isDictionaryDataCon :: Var -> Bool
 isDictionaryDataCon v =
   v `elem` [ -- There's no data constructor for "Repr" in System F
-             pyonBuiltin The_traversableDict
-           , pyonBuiltin The_shapeDict
-           , pyonBuiltin The_indexableDict
-           , pyonBuiltin The_eqDict
-           , pyonBuiltin The_ordDict
-           , pyonBuiltin The_additiveDict
-           , pyonBuiltin The_multiplicativeDict
-           , pyonBuiltin The_fractionalDict
-           , pyonBuiltin The_remainderDict
-           , pyonBuiltin The_floatingDict
-           , pyonBuiltin The_vectorDict
+             coreBuiltin The_traversableDict
+           , coreBuiltin The_shapeDict
+           , coreBuiltin The_indexableDict
+           , coreBuiltin The_eqDict
+           , coreBuiltin The_ordDict
+           , coreBuiltin The_additiveDict
+           , coreBuiltin The_multiplicativeDict
+           , coreBuiltin The_fractionalDict
+           , coreBuiltin The_remainderDict
+           , coreBuiltin The_floatingDict
+           , coreBuiltin The_vectorDict
            ]
 
 -- | Return True if this is a singleton type constructor.
@@ -679,26 +679,26 @@ isSingletonCon v = isDictionaryTypeCon v
 -- | Return True iff this is a @Repr@ dictionary constructor.
 isReprCon :: Var -> Bool
 isReprCon v =
-  v `elem` [ pyonBuiltin The_repr_int
-           , pyonBuiltin The_repr_float
-           , pyonBuiltin The_repr_bool
-           , pyonBuiltin The_repr_list
-           , pyonBuiltin The_repr_append_list
-           , pyonBuiltin The_repr_arr
-           , pyonBuiltin The_repr_array0
-           , pyonBuiltin The_repr_array1
-           , pyonBuiltin The_repr_array2
-           , pyonBuiltin The_repr_array3
-           , pyonBuiltin The_repr_blist
-           , pyonBuiltin The_repr_barray1
-           , pyonBuiltin The_repr_barray2
-           , pyonBuiltin The_repr_barray3
-           , pyonBuiltin The_repr_Complex
-           , pyonBuiltin The_repr_PyonTuple2
-           , pyonBuiltin The_repr_PyonTuple3
-           , pyonBuiltin The_repr_PyonTuple4
-           , pyonBuiltin The_repr_Box
-           , pyonBuiltin The_repr_Stream
-           , pyonBuiltin The_repr_StuckRef
-           , pyonBuiltin The_repr_Ref
+  v `elem` [ coreBuiltin The_repr_int
+           , coreBuiltin The_repr_float
+           , coreBuiltin The_repr_bool
+           , coreBuiltin The_repr_list
+           , coreBuiltin The_repr_append_list
+           , coreBuiltin The_repr_arr
+           , coreBuiltin The_repr_array0
+           , coreBuiltin The_repr_array1
+           , coreBuiltin The_repr_array2
+           , coreBuiltin The_repr_array3
+           , coreBuiltin The_repr_blist
+           , coreBuiltin The_repr_barray1
+           , coreBuiltin The_repr_barray2
+           , coreBuiltin The_repr_barray3
+           , coreBuiltin The_repr_Complex
+           , coreBuiltin The_repr_Tuple2
+           , coreBuiltin The_repr_Tuple3
+           , coreBuiltin The_repr_Tuple4
+           , coreBuiltin The_repr_Box
+           , coreBuiltin The_repr_Stream
+           , coreBuiltin The_repr_StuckRef
+           , coreBuiltin The_repr_Ref
            ]

@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "Zip functions",
-  pyonSources	 = ["zips.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["zips.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "done"

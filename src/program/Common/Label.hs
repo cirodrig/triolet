@@ -14,9 +14,9 @@ module Common.Label
         showLabel,
         labelLocalNameAsString,
         builtinLabel,
-        pyonLabel,
-        externPyonLabel,
-        anonymousPyonLabel,
+        plainLabel,
+        externLabel,
+        anonymousLabel,
         cloneLabel,
         mangleLabel,
         mangleModuleScopeLabel
@@ -107,20 +107,20 @@ labelLocalNameAsString l =
 
 -- | A label of a builtin Pyon variable
 builtinLabel :: String -> Label
-builtinLabel name = pyonLabel builtinModuleName name
+builtinLabel name = plainLabel builtinModuleName name
 
 -- | A label of a regular Pyon variable
-pyonLabel :: ModuleName -> String -> Label
-pyonLabel mod name = Label mod (Left name) NormalLabel Nothing
+plainLabel :: ModuleName -> String -> Label
+plainLabel mod name = Label mod (Left name) NormalLabel Nothing
 
 -- | A label of a Pyon variable with an external name
-externPyonLabel :: ModuleName -> String -> Maybe String -> Label
-externPyonLabel mod name ext_name =
+externLabel :: ModuleName -> String -> Maybe String -> Label
+externLabel mod name ext_name =
   Label mod (Left name) NormalLabel ext_name
 
 -- | A label of a Pyon variable with a local ID instead of a string name
-anonymousPyonLabel :: ModuleName -> LocalID -> Maybe String -> Label
-anonymousPyonLabel mod id ext_name =
+anonymousLabel :: ModuleName -> LocalID -> Maybe String -> Label
+anonymousLabel mod id ext_name =
   Label mod (Right id) NormalLabel ext_name
 
 -- | Create a label that is like the given label and can be attached to a

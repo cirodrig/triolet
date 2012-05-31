@@ -45,9 +45,9 @@ declareVariable name (type_specs, derived_declr) initializer =
                 Just e  -> Just $ CInitExpr e internalNode
   in CDecl type_specs [(Just declr, init, Nothing)] internalNode
 
--- | The type of a @PyonPtr@, used in type casts.
-pyonPointerType :: CDecl
-pyonPointerType = anonymousDecl (nameDeclSpecs "PyonPtr")
+-- | The type of a @TrioletPtr@, used in type casts.
+trioletPointerType :: CDecl
+trioletPointerType = anonymousDecl (nameDeclSpecs "TrioletPtr")
 
 -- | Generate a constant integer expression
 intConst :: Integral a => Signedness -> Size -> a -> CExpr
@@ -98,18 +98,18 @@ cPtrCast to_type expr =
   let decl = anonymousDecl $ ptrDeclSpecs $ primTypeDeclSpecs to_type
   in CCast decl expr internalNode
 
--- | Cast an expression to PyonPtr type
-castToPyonPtr :: CExpr -> CExpr
-castToPyonPtr expr = CCast pyonPointerType expr internalNode
+-- | Cast an expression to TrioletPtr type
+castToTrioletPtr :: CExpr -> CExpr
+castToTrioletPtr expr = CCast trioletPointerType expr internalNode
 
 -- | Generate a pointer offset expression.
---   The generated expression is a call to PYON_OFF (actually a macro) 
+--   The generated expression is a call to TRIOLET_OFF (actually a macro) 
 --   with the pointer and offset
 offset :: CExpr -> CExpr -> CExpr
 offset base off 
   | isZeroCExpr off = base
   | otherwise =
-      CCall (CVar (internalIdent "PYON_OFF") internalNode) [base, off]
+      CCall (CVar (internalIdent "TRIOLET_OFF") internalNode) [base, off]
       internalNode
 
 isZeroCExpr :: CExpr -> Bool

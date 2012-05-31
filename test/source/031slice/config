@@ -1,7 +1,7 @@
 TestConfig {
   synopsis	 = "List slicing",
-  pyonSources	 = ["slice.pyon"],
-  llpyonSources  = [],
+  trioletSources	 = ["slice.pyon"],
+  lltrioletSources  = [],
   cSources	 = ["main.c"],
   cxxSources	 = [],
   expectedResult = ShouldPrint "-33"

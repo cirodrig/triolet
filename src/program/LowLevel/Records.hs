@@ -104,7 +104,7 @@ passConvRecord = constStaticRecord
                  , PrimField BoolType       -- Is pointerless?
                  ]
 
--- | A closure created in C and passed to pyon code. 
+-- | A closure created in C and passed to triolet code. 
 --   The closure is a struct with two fields.  The first
 --   is a function pointer, the second is a pointer to data.
 cClosureRecord = constStaticRecord [ PrimField PointerType
@@ -237,14 +237,14 @@ streamRecord =
   , RecordField passConvRecord -- Stream data properties
   ]
 
--- | A Pyon list.
+-- | A Triolet list.
 listRecord :: StaticRecord
 listRecord = constStaticRecord
              [ RecordField finIndexedIntRecord -- Size
              , PrimField PointerType    -- Pointer to contents
              ]
 
--- | A Pyon matrix.
+-- | A Triolet matrix.
 matrixRecord :: StaticRecord
 matrixRecord = constStaticRecord
              [ RecordField finIndexedIntRecord -- Size (y)

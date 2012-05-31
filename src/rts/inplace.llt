@@ -1,5 +1,5 @@
 
-module pyon.internal.inplace;
+module core.internal.inplace;
 
 #include "rts.h"
 #include "memory_py.h"
@@ -14,7 +14,7 @@ import procedure exit (int) -> ();
 
 function repr_append_list (owned rep) -> owned
 {
-  alist_rep = pointer primcall pyon_alloc (sizeof Repr);
+  alist_rep = pointer primcall triolet_alloc (sizeof Repr);
   alist_rep @! Repr.sizealign = SA {sizeof AppendList, alignof AppendList};
   alist_rep @! Repr.copy = copy_append_list;
   alist_rep @! Repr.convert_to_boxed =
@@ -105,7 +105,7 @@ function inline appendScatter_update_real (owned rep, owned writer, unit _, poin
     // Create a new array with 'ne' elements
     ne = n_elems + n_elems + int 2;
     typedef new_arr = array(value ne, elt);
-    nc = pointer primcall pyon_alloc (sizeof new_arr) as owned;
+    nc = pointer primcall triolet_alloc (sizeof new_arr) as owned;
 
     // Copy old to new array
     () = () primcall memcpy (nc, old_contents, sizeof old_arr);

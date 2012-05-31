@@ -1,14 +1,14 @@
 
-module pyon.internal.apply_new;
+module core.internal.apply_new;
 
 #include "rts.h"
 #include "memory_py.h"
 #include "debug.h"
 
 import procedure exit (int) -> (); 
-import data pointer pyon_type_tag_pap_size "pyon_type_tag_pap_size";
+import data pointer triolet_type_tag_pap_size "triolet_type_tag_pap_size";
 
-extern data pointer pyon.internal.apply_new.PAP_info;
+extern data pointer core.internal.apply_new.PAP_info;
 
 #include "apply_py.h"
 
@@ -46,7 +46,7 @@ procedure pap_argument_size(int index, pointer type_tags) -> uint16 {
   // Look up the type tag
   type_tag = type_tags @! size_arr[index];
   // Look up the size of this type tag
-  (pyon_type_tag_pap_size @! type_arr[type_tag as int]) as uint16;
+  (triolet_type_tag_pap_size @! type_arr[type_tag as int]) as uint16;
 };
 
 // Compute the size of a PAP's argument block.
@@ -60,7 +60,7 @@ procedure pap_arguments_size (uint16 nargs, pointer type_tags) -> uint16 {
 			uint size = uint 0)
 		       (count != int 0) {
     type_tag = uint8 load type_tags;
-    arg_size = pyon_type_tag_pap_size @! size_arr[type_tag as int];
+    arg_size = triolet_type_tag_pap_size @! size_arr[type_tag as int];
     (count - int 1,
      type_tags ^+ sizeof uint8 as int,
      size + arg_size as uint);
@@ -74,7 +74,7 @@ procedure pap_arguments_size (uint16 nargs, pointer type_tags) -> uint16 {
 // Its argument block isn't initialized.
 procedure pap_new (owned fun, uint16 nargs, uint16 arg_size) -> owned {
   typedef my_pap = PAP(value arg_size as uint * PAP_WORDSIZE);
-  obj = pointer primcall pyon_alloc(sizeof my_pap);
+  obj = pointer primcall triolet_alloc(sizeof my_pap);
   obj @! my_pap.header.info = PAP_info;
   obj @! my_pap.fun = fun;
   obj @! my_pap.nargs = nargs;

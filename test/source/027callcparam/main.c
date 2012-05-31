@@ -5,12 +5,12 @@
 
 // Create a list containing
 // [exp(offset + exponent * 0) .. exp(offfset + exponent * 5)]
-PyonList *init_list(void *closure, float exponent) {
+TrioletList *init_list(void *closure, float exponent) {
   float data[6];
   int i;
   float offset = *(float *)closure;
   for (i = 0; i < 6; i++) data[i] = exp(offset + exponent * i);
-  return pyon_List_PyonFloat_FromArray(6, data);
+  return triolet_List_Float_FromArray(6, data);
 }
 
 // Test whether two floats are equal with 0.1% tolerance
@@ -19,16 +19,16 @@ int equal_tol(float f, float g) {
 }
 
 int main() {
-  Pyon_init();
+  Triolet_init();
 
   float output[6];
 
   // Create a list [init_list(0), init_list(1/6) .. init_list(5/6)]
   {
     float offset = -1.5f;
-    PyonClosure cb = {&init_list, &offset};
-    PyonList *out_list = f(cb);
-    pyon_List_PyonFloat_ToArray(out_list, output);
+    TrioletClosure cb = {&init_list, &offset};
+    TrioletList *out_list = f(cb);
+    Triolet_List_Float_ToArray(out_list, output);
   }
   
   // Check outputs

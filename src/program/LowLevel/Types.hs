@@ -116,18 +116,19 @@ nativeIntType = IntType Signed nativeIntSize
 nativeWordType = IntType Unsigned nativeIntSize
 nativeFloatType = FloatType nativeFloatSize
 
-pyonIntSize :: Size
-pyonIntSize = S32
+trioletIntSize :: Size
+trioletIntSize = S32
 
-pyonFloatSize :: Size
-pyonFloatSize = S32
+trioletFloatSize :: Size
+trioletFloatSize = S32
 
-pyonIntType, pyonUintType, pyonFloatType, pyonBoolType, pyonNoneType :: PrimType
-pyonIntType = IntType Signed pyonIntSize
-pyonUintType = IntType Unsigned pyonIntSize
-pyonFloatType = FloatType pyonFloatSize
-pyonBoolType = BoolType
-pyonNoneType = UnitType
+trioletIntType, trioletUintType, trioletFloatType,
+  trioletBoolType, trioletNoneType :: PrimType
+trioletIntType = IntType Signed trioletIntSize
+trioletUintType = IntType Unsigned trioletIntSize
+trioletFloatType = FloatType trioletFloatSize
+trioletBoolType = BoolType
+trioletNoneType = UnitType
 
 -- | A data type that has statically known memory management properties
 class HasSize a where

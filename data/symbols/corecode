@@ -45,55 +45,55 @@ copyArray @(N : intindex) @(a : bare)
   ; iNegInfty @N. except @Store
   };
 
-repr_index2 : Repr (PyonTuple2 (Stored int) (Stored int)) =
-  repr_PyonTuple2 @(Stored int) @(Stored int) repr_int repr_int;
+repr_index2 : Repr (Tuple2 (Stored int) (Stored int)) =
+  repr_Tuple2 @(Stored int) @(Stored int) repr_int repr_int;
 
-repr_slice2 : Repr (PyonTuple2 SliceObject SliceObject) =
-  repr_PyonTuple2 @SliceObject @SliceObject repr_SliceObject repr_SliceObject;
+repr_slice2 : Repr (Tuple2 SliceObject SliceObject) =
+  repr_Tuple2 @SliceObject @SliceObject repr_SliceObject repr_SliceObject;
 
-repr_index3 : Repr (PyonTuple3 (Stored int) (Stored int) (Stored int)) =
-  repr_PyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+repr_index3 : Repr (Tuple3 (Stored int) (Stored int) (Stored int)) =
+  repr_Tuple3 @(Stored int) @(Stored int) @(Stored int)
   repr_int repr_int repr_int;
 
-repr_slice3 : Repr (PyonTuple3 SliceObject SliceObject SliceObject) =
-  repr_PyonTuple3 @SliceObject @SliceObject @SliceObject
+repr_slice3 : Repr (Tuple3 SliceObject SliceObject SliceObject) =
+  repr_Tuple3 @SliceObject @SliceObject @SliceObject
   repr_SliceObject repr_SliceObject repr_SliceObject;
 
 -------------------------------------------------------------------------------
 -- Eq dictionaries
 
 EqDict_Tuple2_eq @(a b : bare)
-  (eqA : EqDict a) (eqB : EqDict b) (x : PyonTuple2 a b) (y : PyonTuple2 a b)
+  (eqA : EqDict a) (eqB : EqDict b) (x : Tuple2 a b) (y : Tuple2 a b)
   -> bool
   attribute(inline) =
   case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
   case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
-  case x of pyonTuple2 @a @b (xa : a) (xb : b).
-  case y of pyonTuple2 @a @b (ya : a) (yb : b).
+  case x of tuple2 @a @b (xa : a) (xb : b).
+  case y of tuple2 @a @b (ya : a) (yb : b).
   and (eq_a xa ya) (eq_b xb yb);
 
 
 EqDict_Tuple2_ne @(a b : bare)
-  (eqA : EqDict a) (eqB : EqDict b) (x : PyonTuple2 a b) (y : PyonTuple2 a b)
+  (eqA : EqDict a) (eqB : EqDict b) (x : Tuple2 a b) (y : Tuple2 a b)
   -> bool
   attribute(inline) =
   case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
   case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
-  case x of pyonTuple2 @a @b (xa : a) (xb : b).
-  case y of pyonTuple2 @a @b (ya : a) (yb : b).
+  case x of tuple2 @a @b (xa : a) (xb : b).
+  case y of tuple2 @a @b (ya : a) (yb : b).
   and (ne_a xa ya) (ne_b xb yb);
 
 -------------------------------------------------------------------------------
 -- Additive dictionaries
 
-AdditiveDict_PyonTuple2_add @(a b : bare)
+AdditiveDict_Tuple2_add @(a b : bare)
   (repr_a : Repr a)
   (repr_b : Repr b)
   (additive_a : AdditiveDict a)
   (additive_b : AdditiveDict b)
-  (x : PyonTuple2 a b)
-  (y : PyonTuple2 a b)
-  (ret : OutPtr (PyonTuple2 a b))
+  (x : Tuple2 a b)
+  (y : Tuple2 a b)
+  (ret : OutPtr (Tuple2 a b))
   -> Store =
 
   case additive_a of
@@ -109,19 +109,19 @@ AdditiveDict_PyonTuple2_add @(a b : bare)
     (negate_b : b -> Init b)
     (zero_b : b).
 
-  case x of pyonTuple2 @a @b (x_a : a) (x_b : b).
-  case y of pyonTuple2 @a @b (y_a : a) (y_b : b).
-  pyonTuple2 @a @b (add_a x_a y_a) (add_b x_b y_b) ret;
+  case x of tuple2 @a @b (x_a : a) (x_b : b).
+  case y of tuple2 @a @b (y_a : a) (y_b : b).
+  tuple2 @a @b (add_a x_a y_a) (add_b x_b y_b) ret;
 
 
-AdditiveDict_PyonTuple2_sub @(a b : bare)
+AdditiveDict_Tuple2_sub @(a b : bare)
   (repr_a : Repr a)
   (repr_b : Repr b)
   (additive_a : AdditiveDict a)
   (additive_b : AdditiveDict b)
-  (x : PyonTuple2 a b)
-  (y : PyonTuple2 a b)
-  (ret : OutPtr (PyonTuple2 a b))
+  (x : Tuple2 a b)
+  (y : Tuple2 a b)
+  (ret : OutPtr (Tuple2 a b))
   -> Store =
 
   case additive_a of
@@ -137,18 +137,18 @@ AdditiveDict_PyonTuple2_sub @(a b : bare)
     (negate_b : b -> Init b)
     (zero_b : b).
 
-  case x of pyonTuple2 @a @b (x_a : a) (x_b : b).
-  case y of pyonTuple2 @a @b (y_a : a) (y_b : b).
-  pyonTuple2 @a @b (sub_a x_a y_a) (sub_b x_b y_b) ret;
+  case x of tuple2 @a @b (x_a : a) (x_b : b).
+  case y of tuple2 @a @b (y_a : a) (y_b : b).
+  tuple2 @a @b (sub_a x_a y_a) (sub_b x_b y_b) ret;
 
 
-AdditiveDict_PyonTuple2_negate @(a b : bare)
+AdditiveDict_Tuple2_negate @(a b : bare)
   (repr_a : Repr a)
   (repr_b : Repr b)
   (additive_a : AdditiveDict a)
   (additive_b : AdditiveDict b)
-  (x : PyonTuple2 a b)
-  (ret : OutPtr (PyonTuple2 a b))
+  (x : Tuple2 a b)
+  (ret : OutPtr (Tuple2 a b))
   -> Store =
 
   case additive_a of
@@ -163,16 +163,16 @@ AdditiveDict_PyonTuple2_negate @(a b : bare)
     (sub_b : b -> b -> Init b)
     (negate_b : b -> Init b)
     (zero_b : b).
-  case x of pyonTuple2 @a @b (x_a : a) (x_b : b).
-  pyonTuple2 @a @b (negate_a x_a) (negate_b x_b) ret;
+  case x of tuple2 @a @b (x_a : a) (x_b : b).
+  tuple2 @a @b (negate_a x_a) (negate_b x_b) ret;
 
 
-AdditiveDict_PyonTuple2_zero @(a b : bare)
+AdditiveDict_Tuple2_zero @(a b : bare)
   (repr_a : Repr a)
   (repr_b : Repr b)
   (additive_a : AdditiveDict a)
   (additive_b : AdditiveDict b)
-  (ret : OutPtr (PyonTuple2 a b))
+  (ret : OutPtr (Tuple2 a b))
   -> Store =
 
   case additive_a of
@@ -187,7 +187,7 @@ AdditiveDict_PyonTuple2_zero @(a b : bare)
     (sub_b : b -> b -> Init b)
     (negate_b : b -> Init b)
     (zero_b : b).
-  pyonTuple2 @a @b (copy @a repr_a zero_a) (copy @b repr_b zero_b) ret;
+  tuple2 @a @b (copy @a repr_a zero_a) (copy @b repr_b zero_b) ret;
 
 -------------------------------------------------------------------------------
 -- Multiplicative dictionaries
@@ -931,14 +931,14 @@ CartesianDict_dim2_loBound
       case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
       case lb_x of {
         justVal @int (x : int).
-          just @(PyonTuple2 (Stored int) (Stored int))
-               (pyonTuple2 @(Stored int) @(Stored int)
+          just @(Tuple2 (Stored int) (Stored int))
+               (tuple2 @(Stored int) @(Stored int)
                 (stored @int y) (stored @int x)) ret
       ; nothingVal @int.
-          nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+          nothing @(Tuple2 (Stored int) (Stored int)) ret
       }
   ; nothingVal @int.
-      nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+      nothing @(Tuple2 (Stored int) (Stored int)) ret
   };
   
 
@@ -956,14 +956,14 @@ CartesianDict_dim2_hiBound
       case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
       case ub_x of {
         justVal @int (x : int).
-          just @(PyonTuple2 (Stored int) (Stored int))
-               (pyonTuple2 @(Stored int) @(Stored int)
+          just @(Tuple2 (Stored int) (Stored int))
+               (tuple2 @(Stored int) @(Stored int)
                (stored @int y) (stored @int x)) ret
       ; nothingVal @int.
-          nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+          nothing @(Tuple2 (Stored int) (Stored int)) ret
       }
   ; nothingVal @int.
-      nothing @(PyonTuple2 (Stored int) (Stored int)) ret
+      nothing @(Tuple2 (Stored int) (Stored int)) ret
   };
 
 
@@ -972,7 +972,7 @@ CartesianDict_dim2_stride
   -> Init (index dim2)
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  pyonTuple2 @(Stored int) @(Stored int)
+  tuple2 @(Stored int) @(Stored int)
   (CartesianDict_dim1_stride dom_y)
   (CartesianDict_dim1_stride dom_x);
 
@@ -983,12 +983,12 @@ CartesianDict_dim2_arrayDomain
   -> dim2
   attribute(inline) =
   case lo of
-    pyonTuple2 @(Stored int) @(Stored int)
+    tuple2 @(Stored int) @(Stored int)
                (lo_y : Stored int) (lo_x : Stored int).
   case lo_y of stored @int (lo_y_i : int).
   case lo_x of stored @int (lo_x_i : int).
   case hi of
-    pyonTuple2 @(Stored int) @(Stored int)
+    tuple2 @(Stored int) @(Stored int)
                (hi_y : Stored int) (hi_x : Stored int).
   case hi_y of stored @int (hi_y_i : int).
   case hi_x of stored @int (hi_x_i : int).
@@ -1003,7 +1003,7 @@ CartesianDict_dim2_displaceDomain
   (ix : index dim2)
   -> dim2
   attribute(inline) =
-  case ix of pyonTuple2 @(Stored int) @(Stored int)
+  case ix of tuple2 @(Stored int) @(Stored int)
              (ix_y : Stored int) (ix_x : Stored int).
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
   mk_dim2 (CartesianDict_dim1_displaceDomain dom_y ix_y)
@@ -1012,11 +1012,11 @@ CartesianDict_dim2_displaceDomain
 
 CartesianDict_dim2_multiplyDomain
   (dom : dim2)
-  (v : PyonTuple2 (Stored int) (Stored int))
+  (v : Tuple2 (Stored int) (Stored int))
   -> dim2
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  case v of pyonTuple2 @(Stored int) @(Stored int)
+  case v of tuple2 @(Stored int) @(Stored int)
     (v_y : Stored int) (v_x : Stored int).
   mk_dim2 (CartesianDict_dim1_multiplyDomain dom_y v_y)
           (CartesianDict_dim1_multiplyDomain dom_x v_x);
@@ -1024,11 +1024,11 @@ CartesianDict_dim2_multiplyDomain
   
 CartesianDict_dim2_divideDomain
   (dom : dim2)
-  (v : PyonTuple2 (Stored int) (Stored int))
+  (v : Tuple2 (Stored int) (Stored int))
   -> dim2
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  case v of pyonTuple2 @(Stored int) @(Stored int)
+  case v of tuple2 @(Stored int) @(Stored int)
     (v_y : Stored int) (v_x : Stored int).
   mk_dim2 (CartesianDict_dim1_divideDomain dom_y v_y)
           (CartesianDict_dim1_divideDomain dom_x v_x);
@@ -1052,17 +1052,17 @@ CartesianDict_dim3_loBound
           case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
           case lb_x of {
             justVal @int (x : int).
-              just @(PyonTuple3 (Stored int) (Stored int) (Stored int))
-                   (pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+              just @(Tuple3 (Stored int) (Stored int) (Stored int))
+                   (tuple3 @(Stored int) @(Stored int) @(Stored int)
                     (stored @int z) (stored @int y) (stored @int x)) ret
           ; nothingVal @int.
-              nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+              nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
           }
       ; nothingVal @int.
-          nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+          nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
       }
   ; nothingVal @int.
-      nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+      nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
   };
   
 
@@ -1084,17 +1084,17 @@ CartesianDict_dim3_hiBound
           case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
           case ub_x of {
             justVal @int (x : int).
-              just @(PyonTuple3 (Stored int) (Stored int) (Stored int))
-                   (pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+              just @(Tuple3 (Stored int) (Stored int) (Stored int))
+                   (tuple3 @(Stored int) @(Stored int) @(Stored int)
                    (stored @int z) (stored @int y) (stored @int x)) ret
           ; nothingVal @int.
-              nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+              nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
           }
       ; nothingVal @int.
-          nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+          nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
       }
   ; nothingVal @int.
-      nothing @(PyonTuple3 (Stored int) (Stored int) (Stored int)) ret
+      nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
   };
 
 
@@ -1103,7 +1103,7 @@ CartesianDict_dim3_stride
   -> Init (index dim3)
   attribute(inline) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+  tuple3 @(Stored int) @(Stored int) @(Stored int)
   (CartesianDict_dim1_stride dom_z)
   (CartesianDict_dim1_stride dom_y)
   (CartesianDict_dim1_stride dom_x);
@@ -1115,13 +1115,13 @@ CartesianDict_dim3_arrayDomain
   -> dim3
   attribute(inline) =
   case lo of
-    pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+    tuple3 @(Stored int) @(Stored int) @(Stored int)
                (lo_z : Stored int) (lo_y : Stored int) (lo_x : Stored int).
   case lo_z of stored @int (lo_z_i : int).
   case lo_y of stored @int (lo_y_i : int).
   case lo_x of stored @int (lo_x_i : int).
   case hi of
-    pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+    tuple3 @(Stored int) @(Stored int) @(Stored int)
                (hi_z : Stored int) (hi_y : Stored int) (hi_x : Stored int).
   case hi_z of stored @int (hi_z_i : int).
   case hi_y of stored @int (hi_y_i : int).
@@ -1139,7 +1139,7 @@ CartesianDict_dim3_displaceDomain
   (ix : index dim3)
   -> dim3
   attribute(inline) =
-  case ix of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+  case ix of tuple3 @(Stored int) @(Stored int) @(Stored int)
              (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
   mk_dim3 (CartesianDict_dim1_displaceDomain dom_z ix_z)
@@ -1149,11 +1149,11 @@ CartesianDict_dim3_displaceDomain
 
 CartesianDict_dim3_multiplyDomain
   (dom : dim3)
-  (v : PyonTuple3 (Stored int) (Stored int) (Stored int))
+  (v : Tuple3 (Stored int) (Stored int) (Stored int))
   -> dim3
   attribute(inline) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  case v of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+  case v of tuple3 @(Stored int) @(Stored int) @(Stored int)
     (v_z : Stored int) (v_y : Stored int) (v_x : Stored int).
   mk_dim3 (CartesianDict_dim1_multiplyDomain dom_z v_z)
           (CartesianDict_dim1_multiplyDomain dom_y v_y)
@@ -1162,11 +1162,11 @@ CartesianDict_dim3_multiplyDomain
   
 CartesianDict_dim3_divideDomain
   (dom : dim3)
-  (v : PyonTuple3 (Stored int) (Stored int) (Stored int))
+  (v : Tuple3 (Stored int) (Stored int) (Stored int))
   -> dim3
   attribute(inline) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  case v of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+  case v of tuple3 @(Stored int) @(Stored int) @(Stored int)
     (v_z : Stored int) (v_y : Stored int) (v_x : Stored int).
   mk_dim3 (CartesianDict_dim1_divideDomain dom_z v_z)
           (CartesianDict_dim1_divideDomain dom_y v_y)
@@ -1445,7 +1445,7 @@ arrScatter @(N : intindex) @(e i : bare)
   (repr_e : Repr e)
   (count : FIInt N)
   (reduction_op : Scatter e i)
-  -> Scatter (arr N e) (PyonTuple2 (Stored int) i)
+  -> Scatter (arr N e) (Tuple2 (Stored int) i)
   attribute(inline, inline_final) =
 
   case reduction_op of
@@ -1459,7 +1459,7 @@ arrScatter @(N : intindex) @(e i : bare)
     (init_f : iniF).
 
   let type arr_t = arr N e in
-  let type i2 = PyonTuple2 (Stored int) i in
+  let type i2 = Tuple2 (Stored int) i in
 
   case count of fiInt @N (u_count : int).
 
@@ -1482,7 +1482,7 @@ arrScatter @(N : intindex) @(e i : bare)
   (\ (f : updF) (index : i2) (in_tok : EffTok) (p : OutPtr (arr N s))
      -> EffTok.
      case index of
-       pyonTuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
+       tuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
      case arr_index of stored @int (u_arr_index : int).
 
      -- If index is out of bounds, do nothing
@@ -1516,7 +1516,7 @@ arrScatter @(N : intindex) @(e i : bare)
    })
    (\ (index : i2) -> updF.
       case index of
-        pyonTuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
+        tuple2 @(Stored int) @i (arr_index : Stored int) (elt_index : i).
       update_f elt_index)
    init_f;
 
@@ -1526,9 +1526,9 @@ listScatter @(e i : bare)
   (repr_e : Repr e)
   (dom : list_dim)
   (reduction_op : Scatter e i)
-  -> Scatter (list e) (PyonTuple2 (Stored int) i) =
+  -> Scatter (list e) (Tuple2 (Stored int) i) =
 
-  let type i2 = (PyonTuple2 (Stored int) i) in
+  let type i2 = (Tuple2 (Stored int) i) in
   let type ret_type = Scatter (list e) i2 in
 
   case dom of mk_list_dim (mlist_size : MaybeVal int).
@@ -1573,7 +1573,7 @@ listScatter @(e i : bare)
       make_init
 
   ; nothingVal @int.
-      except @(Scatter (list e) (PyonTuple2 (Stored int) i))
+      except @(Scatter (list e) (Tuple2 (Stored int) i))
   };
 
 
@@ -1582,9 +1582,9 @@ array1Scatter @(e i : bare)
   (repr_e : Repr e)
   (dom : dim1)
   (reduction_op : Scatter e i)
-  -> Scatter (array1 e) (PyonTuple2 (Stored int) i) =
+  -> Scatter (array1 e) (Tuple2 (Stored int) i) =
 
-  let type i2 = (PyonTuple2 (Stored int) i) in
+  let type i2 = (Tuple2 (Stored int) i) in
   let type ret_type = Scatter (array1 e) i2 in
 
   -- Compute array size
@@ -1626,14 +1626,14 @@ array1Scatter @(e i : bare)
              linearized_updater
                (f : updF) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
                -> EffTok =
-               case ix of pyonTuple2 @(Stored int) @i (arr_ix : Stored int) (val : i).
+               case ix of tuple2 @(Stored int) @i (arr_ix : Stored int) (val : i).
                case arr_ix of stored @int (u_arr_ix : int).
 
                -- Drop values whose indices are out of bounds due to alignment
                let zeroed_ix : int = u_arr_ix -# lb in
                if zeroed_ix %# stride /=# 0 then tok_in else
                let linearized_ix : int = zeroed_ix //# stride in
-               case boxed @i2 (pyonTuple2 @(Stored int) @i
+               case boxed @i2 (tuple2 @(Stored int) @i
                                (stored @int linearized_ix) (copy @i repr_i val)) of
                  boxed @i2 (new_ix : i2).
                updater f new_ix tok_in ret
@@ -1659,9 +1659,9 @@ barray1Scatter @(a i : bare)
   (repr_a : Repr a)
   (dom : dim1)
   (reduction_op : Scatter (StuckRef (BoxedType a)) i)
-  -> Scatter (barray1 a) (PyonTuple2 (Stored int) i) =
+  -> Scatter (barray1 a) (Tuple2 (Stored int) i) =
   let type boxed_a = StuckRef (BoxedType a) in
-  let type i2 = PyonTuple2 (Stored int) i in
+  let type i2 = Tuple2 (Stored int) i in
 
   -- Use array1Scatter
   case array1Scatter @boxed_a @i
@@ -1702,13 +1702,13 @@ array2Scatter @(e i : bare)
   (repr_e : Repr e)
   (dom : dim2)
   (reduction_op : Scatter e i)
-  -> Scatter (array2 e) (PyonTuple2 (index dim2) i) =
+  -> Scatter (array2 e) (Tuple2 (index dim2) i) =
 
-  let type i2 = (PyonTuple2 (index dim2) i) in
+  let type i2 = (Tuple2 (index dim2) i) in
   let type ret_type = Scatter (array2 e) i2 in
 
   let repr_i2 : Repr i2 =
-        repr_PyonTuple2 @(index dim2) @i repr_index2 repr_i in
+        repr_Tuple2 @(index dim2) @i repr_index2 repr_i in
 
   -- Compute array size
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
@@ -1722,17 +1722,17 @@ array2Scatter @(e i : bare)
               (ret : OutPtr (Ref ret_type))
               -> Store.
 
-              let type index_1d = PyonTuple2 (Stored int) i in
-              let type index_2d = PyonTuple2 (Stored int) index_1d in
+              let type index_1d = Tuple2 (Stored int) i in
+              let type index_2d = Tuple2 (Stored int) index_1d in
 
               let repr_inner_array : Repr (arr N e) =
                     repr_arr @N @e count_x repr_e in
               let repr_array : Repr (arr M (arr N e)) =
                     repr_arr @M @(arr N e) count_y repr_inner_array in
               let repr_inner_index : Repr index_1d =
-                    repr_PyonTuple2 @(Stored int) @i repr_int repr_i in
+                    repr_Tuple2 @(Stored int) @i repr_int repr_i in
               let repr_index : Repr index_2d =
-                    repr_PyonTuple2 @(Stored int) @index_1d repr_int repr_inner_index in
+                    repr_Tuple2 @(Stored int) @index_1d repr_int repr_inner_index in
 
 
               -- Create a plain array scatter reducer using two calls to
@@ -1750,17 +1750,17 @@ array2Scatter @(e i : bare)
                    repr_index repr_i2 repr_array
                    (\ (index_in : i2) (ret : OutPtr index_2d) -> Store.
                       case index_in of
-                        pyonTuple2 @(index dim2) @i
+                        tuple2 @(index dim2) @i
                         (yx : index dim2) (z : i).
                       case yx of
-                        pyonTuple2 @(Stored int) @(Stored int)
+                        tuple2 @(Stored int) @(Stored int)
                         (y : Stored int) (x : Stored int).
                       case x of stored @int (u_x : int).
                       case y of stored @int (u_y : int).
 
-                      pyonTuple2 @(Stored int) @index_1d
+                      tuple2 @(Stored int) @index_1d
                       (stored @int u_y)
-                      (pyonTuple2 @(Stored int) @i
+                      (tuple2 @(Stored int) @i
                        (stored @int u_x) (copy @i repr_i z))
                       ret)
                    xy_scatter_reduction in
@@ -1797,9 +1797,9 @@ array2Scatter @(e i : bare)
                 linearized_updater
                   (f : updF) (ix : i2) (tok_in : EffTok) (ret : OutPtr s)
                   -> EffTok =
-                  case ix of pyonTuple2 @(index dim2) @i
+                  case ix of tuple2 @(index dim2) @i
                              (arr_ix : index dim2) (val : i).
-                  case arr_ix of pyonTuple2 @(Stored int) @(Stored int)
+                  case arr_ix of tuple2 @(Stored int) @(Stored int)
                                  (ix_y : Stored int) (ix_x : Stored int).
                   case ix_y of stored @int (u_ix_y : int).
                   case ix_x of stored @int (u_ix_x : int).
@@ -1811,8 +1811,8 @@ array2Scatter @(e i : bare)
                   if zeroed_ix_x %# stride_x /=# 0 then tok_in else
                   let linearized_ix_y : int = zeroed_ix_y //# stride_y in
                   let linearized_ix_x : int = zeroed_ix_x //# stride_x in
-                  case boxed @i2 (pyonTuple2 @(index dim2) @i
-                                  (pyonTuple2 @(Stored int) @(Stored int)
+                  case boxed @i2 (tuple2 @(index dim2) @i
+                                  (tuple2 @(Stored int) @(Stored int)
                                    (stored @int linearized_ix_y) (stored @int linearized_ix_x))
                                   (copy @i repr_i val)) of
                     boxed @i2 (new_ix : i2).
@@ -1840,9 +1840,9 @@ barray2Scatter @(a i : bare)
   (repr_a : Repr a)
   (dom : dim2)
   (reduction_op : Scatter (StuckRef (BoxedType a)) i)
-  -> Scatter (barray2 a) (PyonTuple2 (index dim2) i) =
+  -> Scatter (barray2 a) (Tuple2 (index dim2) i) =
   let type boxed_a = StuckRef (BoxedType a) in
-  let type i2 = PyonTuple2 (index dim2) i in
+  let type i2 = Tuple2 (index dim2) i in
 
   -- Use array2Scatter
   case array2Scatter @boxed_a @i
@@ -1883,13 +1883,13 @@ array3Scatter @(e i : bare)
   (repr_e : Repr e)
   (dom : dim3)
   (reduction_op : Scatter e i)
-  -> Scatter (array3 e) (PyonTuple2 (index dim3) i) =
+  -> Scatter (array3 e) (Tuple2 (index dim3) i) =
 
-  let type i3 = (PyonTuple2 (index dim3) i) in
+  let type i3 = (Tuple2 (index dim3) i) in
   let type ret_type = Scatter (array3 e) i3 in
 
   let repr_i3 : Repr i3 =
-        repr_PyonTuple2 @(index dim3) @i repr_index3 repr_i in
+        repr_Tuple2 @(index dim3) @i repr_index3 repr_i in
 
   -- Compute array size
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
@@ -1907,9 +1907,9 @@ array3Scatter @(e i : bare)
                  (ret : OutPtr (Ref ret_type))
                  -> Store.
 
-                 let type index_1d = PyonTuple2 (Stored int) i in
-                 let type index_2d = PyonTuple2 (Stored int) index_1d in
-                 let type index_3d = PyonTuple2 (Stored int) index_2d in
+                 let type index_1d = Tuple2 (Stored int) i in
+                 let type index_2d = Tuple2 (Stored int) index_1d in
+                 let type index_3d = Tuple2 (Stored int) index_2d in
                  let type arr1d = arr N e in
                  let type arr2d = arr M arr1d in
                  let type arr3d = arr L arr2d in
@@ -1921,11 +1921,11 @@ array3Scatter @(e i : bare)
                  let repr_array : Repr arr3d =
                        repr_arr @L @arr2d count_z repr_plane in
                  let repr_inner_index : Repr index_1d =
-                       repr_PyonTuple2 @(Stored int) @i repr_int repr_i in
+                       repr_Tuple2 @(Stored int) @i repr_int repr_i in
                  let repr_plane_index : Repr index_2d =
-                       repr_PyonTuple2 @(Stored int) @index_1d repr_int repr_inner_index in
+                       repr_Tuple2 @(Stored int) @index_1d repr_int repr_inner_index in
                  let repr_index : Repr index_3d =
-                       repr_PyonTuple2 @(Stored int) @index_2d repr_int repr_plane_index in
+                       repr_Tuple2 @(Stored int) @index_2d repr_int repr_plane_index in
 
                  -- Create a plain array scatter reducer using three calls to
                  -- 'arrScatter'
@@ -1945,20 +1945,20 @@ array3Scatter @(e i : bare)
                       repr_index repr_i3 repr_array
                       (\ (index_in : i3) (ret : OutPtr index_3d) -> Store.
                          case index_in of
-                           pyonTuple2 @(index dim3) @i
+                           tuple2 @(index dim3) @i
                            (zyx : index dim3) (val : i).
                          case zyx of
-                           pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                           tuple3 @(Stored int) @(Stored int) @(Stored int)
                            (z : Stored int) (y : Stored int) (x : Stored int).
                          case z of stored @int (u_z : int).
                          case x of stored @int (u_x : int).
                          case y of stored @int (u_y : int).
 
-                         pyonTuple2 @(Stored int) @index_2d
+                         tuple2 @(Stored int) @index_2d
                          (stored @int u_z)
-                         (pyonTuple2 @(Stored int) @index_1d
+                         (tuple2 @(Stored int) @index_1d
                           (stored @int u_y)
-                          (pyonTuple2 @(Stored int) @i
+                          (tuple2 @(Stored int) @i
                            (stored @int u_x) (copy @i repr_i val)))
                          ret)
                       xyz_scatter_reduction in
@@ -1996,9 +1996,9 @@ array3Scatter @(e i : bare)
                    linearized_updater
                      (f : updF) (ix : i3) (tok_in : EffTok) (ret : OutPtr s)
                      -> EffTok =
-                     case ix of pyonTuple2 @(index dim3) @i
+                     case ix of tuple2 @(index dim3) @i
                                 (arr_ix : index dim3) (val : i).
-                     case arr_ix of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                     case arr_ix of tuple3 @(Stored int) @(Stored int) @(Stored int)
                                     (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
                      case ix_z of stored @int (u_ix_z : int).
                      case ix_y of stored @int (u_ix_y : int).
@@ -2014,8 +2014,8 @@ array3Scatter @(e i : bare)
                      let linearized_ix_z : int = zeroed_ix_z //# stride_z in
                      let linearized_ix_y : int = zeroed_ix_y //# stride_y in
                      let linearized_ix_x : int = zeroed_ix_x //# stride_x in
-                     case boxed @i3 (pyonTuple2 @(index dim3) @i
-                                     (pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+                     case boxed @i3 (tuple2 @(index dim3) @i
+                                     (tuple3 @(Stored int) @(Stored int) @(Stored int)
                                       (stored @int linearized_ix_z)
                                       (stored @int linearized_ix_y)
                                       (stored @int linearized_ix_x))
@@ -2046,9 +2046,9 @@ barray3Scatter @(a i : bare)
   (repr_a : Repr a)
   (dom : dim3)
   (reduction_op : Scatter (StuckRef (BoxedType a)) i)
-  -> Scatter (barray3 a) (PyonTuple2 (index dim3) i) =
+  -> Scatter (barray3 a) (Tuple2 (index dim3) i) =
   let type boxed_a = StuckRef (BoxedType a) in
-  let type i2 = PyonTuple2 (index dim3) i in
+  let type i2 = Tuple2 (index dim3) i in
 
   -- Use array3Scatter
   case array3Scatter @boxed_a @i
@@ -2268,8 +2268,8 @@ TraversableDict_array2_traverse
   view_generate @dim2 ShapeDict_dim2 @a rep
   (mk_dim2 (arrayDescToDim1 @M lo_y stride_y size_y)
            (arrayDescToDim1 @N lo_x stride_x size_x))
-  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> Store.
-     case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
+  (\ (ix : Tuple2 Sint Sint) (ret : OutPtr a) -> Store.
+     case ix of tuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
      case ix_y of stored @int (ix_y_i : int).
      case ix_x of stored @int (ix_x_i : int).
      let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
@@ -2308,10 +2308,10 @@ TraversableDict_array2_build
           (\ (y : int) (x : int) (ret : OutPtr a) -> Store.
              let logical_y : int = evalLM y linear_map_y in
              let logical_x : int = evalLM x linear_map_x in
-             case boxed @(PyonTuple2 Sint Sint)
-                  (pyonTuple2 @Sint @Sint
+             case boxed @(Tuple2 Sint Sint)
+                  (tuple2 @Sint @Sint
                    (stored @int logical_y) (stored @int logical_x)) of
-               boxed @(PyonTuple2 Sint Sint) (ix : PyonTuple2 Sint Sint).
+               boxed @(Tuple2 Sint Sint) (ix : Tuple2 Sint Sint).
 
              -- Evaluate the function
              f ix ret)))
@@ -2347,8 +2347,8 @@ TraversableDict_array3_traverse
   (mk_dim3 (arrayDescToDim1 @L lo_z stride_z size_z)
            (arrayDescToDim1 @M lo_y stride_y size_y)
            (arrayDescToDim1 @N lo_x stride_x size_x))
-  (\ (ix : PyonTuple3 Sint Sint Sint) (ret : OutPtr a) -> Store.
-     case ix of pyonTuple3 @Sint @Sint @Sint
+  (\ (ix : Tuple3 Sint Sint Sint) (ret : OutPtr a) -> Store.
+     case ix of tuple3 @Sint @Sint @Sint
                 (ix_z : Sint) (ix_y : Sint) (ix_x : Sint).
      case ix_z of stored @int (ix_z_i : int).
      case ix_y of stored @int (ix_y_i : int).
@@ -2401,12 +2401,12 @@ TraversableDict_array3_build
                 let logical_z : int = evalLM z linear_map_z in
                 let logical_y : int = evalLM y linear_map_y in
                 let logical_x : int = evalLM x linear_map_x in
-                case boxed @(PyonTuple3 Sint Sint Sint)
-                     (pyonTuple3 @Sint @Sint @Sint
+                case boxed @(Tuple3 Sint Sint Sint)
+                     (tuple3 @Sint @Sint @Sint
                       (stored @int logical_z)
                       (stored @int logical_y) (stored @int logical_x)) of
-                  boxed @(PyonTuple3 Sint Sint Sint)
-                        (ix : PyonTuple3 Sint Sint Sint).
+                  boxed @(Tuple3 Sint Sint Sint)
+                        (ix : Tuple3 Sint Sint Sint).
 
                 -- Evaluate the function
                 f ix ret)))
@@ -2519,8 +2519,8 @@ TraversableDict_barray2_traverse
   view_generate @dim2 ShapeDict_dim2 @a repr
   (mk_dim2 (arrayDescToDim1 @M lo_y stride_y size_y)
            (arrayDescToDim1 @N lo_x stride_x size_x))
-  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr a) -> Store.
-     case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
+  (\ (ix : Tuple2 Sint Sint) (ret : OutPtr a) -> Store.
+     case ix of tuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
      case ix_y of stored @int (ix_y_i : int).
      case ix_x of stored @int (ix_x_i : int).
      let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
@@ -2562,10 +2562,10 @@ TraversableDict_barray2_build
            (\ (y : int) (x : int) (ret : OutPtr boxed_a) -> Store.
               let logical_y : int = evalLM y linear_map_y in
               let logical_x : int = evalLM x linear_map_x in
-              case boxed @(PyonTuple2 Sint Sint)
-                   (pyonTuple2 @Sint @Sint
+              case boxed @(Tuple2 Sint Sint)
+                   (tuple2 @Sint @Sint
                     (stored @int logical_y) (stored @int logical_x)) of
-                boxed @(PyonTuple2 Sint Sint) (ix : PyonTuple2 Sint Sint).
+                boxed @(Tuple2 Sint Sint) (ix : Tuple2 Sint Sint).
 
               -- Evaluate the function and box its result
               stuckRef @(BoxedType a)
@@ -3134,7 +3134,7 @@ ShapeDict_dim2 : ShapeDict dim2 =
 ShapeDict_dim2_member (dom : dim2) (ix : index dim2) -> bool =
   -- Take the conjunction of x and y membership conditions
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  case ix of pyonTuple2 @(Stored int) @(Stored int)
+  case ix of tuple2 @(Stored int) @(Stored int)
              (ix_y : Stored int) (ix_x : Stored int).
   if ShapeDict_dim1_member dom_y ix_y
   then ShapeDict_dim1_member dom_x ix_x
@@ -3246,9 +3246,9 @@ ShapeDict_dim2_flatten @(a : bare)
       let dim2_i_y : int = lb_y_i +# i_y *# stride_y in 
       let dim2_i_x : int = lb_x_i +# i_x *# stride_x in 
 
-      let type index2d = PyonTuple2 (Stored int) (Stored int) in
+      let type index2d = Tuple2 (Stored int) (Stored int) in
       case boxed @index2d
-           (pyonTuple2 @(Stored int) @(Stored int)
+           (tuple2 @(Stored int) @(Stored int)
             (stored @int dim2_i_y) (stored @int dim2_i_x))
       of boxed @index2d (index_2d : index2d).
       f index_2d ret));
@@ -3311,7 +3311,7 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
 
   -- Compute the slice's domain
   case slice_argument of
-    pyonTuple2 @SliceObject @SliceObject
+    tuple2 @SliceObject @SliceObject
     (slice_y : SliceObject) (slice_x : SliceObject).
 
   let dom : dim2 = coerce @(shape t) @dim2 (get_shape @a container) in
@@ -3344,7 +3344,7 @@ ShapeDict_dim3 : ShapeDict dim3 =
 ShapeDict_dim3_member (dom : dim3) (ix : index dim3) -> bool =
   -- Take the conjunction of x, y, z membership conditions
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  case ix of pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
+  case ix of tuple3 @(Stored int) @(Stored int) @(Stored int)
              (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
   if ShapeDict_dim1_member dom_z ix_z
   then if ShapeDict_dim1_member dom_y ix_y
@@ -3517,9 +3517,9 @@ ShapeDict_dim3_flatten @(a : bare)
       let dim2_i_x : int = lb_x_i +# i_x *# stride_x in 
 
       let type Sint = Stored int in
-      let type index3d = PyonTuple3 Sint Sint Sint in
+      let type index3d = Tuple3 Sint Sint Sint in
       case boxed @index3d
-           (pyonTuple3 @Sint @Sint @Sint
+           (tuple3 @Sint @Sint @Sint
             (stored @int dim2_i_z) (stored @int dim2_i_y) (stored @int dim2_i_x))
       of boxed @index3d (index_3d : index3d).
       f index_3d ret));
@@ -3588,7 +3588,7 @@ ShapeDict_dim3_slice @(t : bare -> bare) @(a : bare)
 
   -- Compute the slice's domain
   case slice_argument of
-    pyonTuple3 @SliceObject @SliceObject @SliceObject
+    tuple3 @SliceObject @SliceObject @SliceObject
     (slice_z : SliceObject) (slice_y : SliceObject) (slice_x : SliceObject).
 
   let dom : dim3 = coerce @(shape t) @dim3 (get_shape @a container) in
@@ -3680,7 +3680,7 @@ IndexableDict_array1_get_shape @(a : bare)
 IndexableDict_array2_at_point @(a : bare)
   (repr : Repr a)
   (ay : array2 a)
-  (ix : PyonTuple2 (Stored int) (Stored int))
+  (ix : Tuple2 (Stored int) (Stored int))
   (ret : OutPtr a)
   -> Store
   attribute(inline) =
@@ -3692,7 +3692,7 @@ IndexableDict_array2_at_point @(a : bare)
   let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
 
   -- Compute real array indices
-  case ix of pyonTuple2 @(Stored int) @(Stored int)
+  case ix of tuple2 @(Stored int) @(Stored int)
              (ix_y : Stored int) (ix_x : Stored int).
   case ix_y of stored @int (ix_y_i : int).
   let real_index_y : int = (ix_y_i -# lb_y) //# stride_y in
@@ -3777,7 +3777,7 @@ IndexableDict_barray1_get_shape @(a : bare)
 IndexableDict_barray2_at_point @(a : bare)
   (repr : Repr a)
   (ay : barray2 a)
-  (ix : PyonTuple2 (Stored int) (Stored int))
+  (ix : Tuple2 (Stored int) (Stored int))
   (ret : OutPtr a)
   -> Store
   attribute(inline) =
@@ -3793,7 +3793,7 @@ IndexableDict_barray2_at_point @(a : bare)
         repr_arr @N @boxed_a size_x boxed_repr in
 
   -- Compute real array indices
-  case ix of pyonTuple2 @(Stored int) @(Stored int)
+  case ix of tuple2 @(Stored int) @(Stored int)
              (ix_y : Stored int) (ix_x : Stored int).
   case ix_y of stored @int (ix_y_i : int).
   let real_index_y : int = (ix_y_i -# lb_y) //# stride_y in
@@ -4011,7 +4011,7 @@ histogram @(sh : box)
 
   let type Sint = Stored int in
   let type SNone = Stored NoneType in
-  let sr : Scatter (array1 Sint) (PyonTuple2 Sint SNone) =
+  let sr : Scatter (array1 Sint) (Tuple2 Sint SNone) =
         array1Scatter @Sint @SNone
         repr_NoneType
         repr_int
@@ -4032,26 +4032,26 @@ histogram @(sh : box)
     boxed @(BareType (Stream sh Sint)) (b_input : Ref (Stream sh Sint)).
 
   -- For each input value x, create a tuple (x, None)
-  case boxed @(BareType (Stream sh (PyonTuple2 Sint SNone)))
+  case boxed @(BareType (Stream sh (Tuple2 Sint SNone)))
        (fun_map @(\ (a : bare). BareType (Stream sh a))
-                @Sint @(PyonTuple2 Sint SNone)
+                @Sint @(Tuple2 Sint SNone)
                 traversable
                 shape_dict
                 repr_int
-                (repr_PyonTuple2 @Sint @SNone repr_int repr_NoneType)
-                (\ (x : Sint) -> Init (PyonTuple2 Sint SNone).
-                  pyonTuple2 @Sint @SNone
+                (repr_Tuple2 @Sint @SNone repr_int repr_NoneType)
+                (\ (x : Sint) -> Init (Tuple2 Sint SNone).
+                  tuple2 @Sint @SNone
                   (copy @Sint repr_int x) (stored @NoneType None))
                 b_input)
-  of boxed @(BareType (Stream sh (PyonTuple2 Sint SNone)))
-     (b_input2 : BareType (Stream sh (PyonTuple2 Sint SNone))).
+  of boxed @(BareType (Stream sh (Tuple2 Sint SNone)))
+     (b_input2 : BareType (Stream sh (Tuple2 Sint SNone))).
 
   fun_scatter @(\ (a : bare). BareType (Stream sh a))
-  @(PyonTuple2 Sint SNone) @(array1 Sint)
+  @(Tuple2 Sint SNone) @(array1 Sint)
   shape_dict
   traversable
-  (repr_Box @(Stream sh (PyonTuple2 Sint SNone)))
-  (repr_PyonTuple2 @Sint @SNone repr_int repr_NoneType)
+  (repr_Box @(Stream sh (Tuple2 Sint SNone)))
+  (repr_Tuple2 @Sint @SNone repr_int repr_NoneType)
   (repr_array1 @(Stored int) repr_int)
   sr
   b_input2
@@ -4180,7 +4180,7 @@ fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
 	(shape_dict : ShapeDict (shape t1))
         (reprA : Repr a) (reprB : Repr b)
         (inputA : t1 a) (inputB : t2 b)
-  -> Stream (shape t1) (PyonTuple2 a b)
+  -> Stream (shape t1) (Tuple2 a b)
   attribute(inline) =
   case traversable1
   of traversableDict @t1
@@ -4223,13 +4223,13 @@ fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
 		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
 
   letfun
-    transformer (x : a) (y : b) (ret : OutPtr (PyonTuple2 a b))
+    transformer (x : a) (y : b) (ret : OutPtr (Tuple2 a b))
     		-> Store =
-      pyonTuple2 @a @b (copy @a reprA x) (copy @b reprB y) ret
+      tuple2 @a @b (copy @a reprA x) (copy @b reprB y) ret
   in
 
-  shape_zipWith @a @b @(PyonTuple2 a b)
-  reprA reprB (repr_PyonTuple2 @a @b reprA reprB)
+  shape_zipWith @a @b @(Tuple2 a b)
+  reprA reprB (repr_Tuple2 @a @b reprA reprB)
   transformer stream1 stream2;
 
 fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
@@ -4241,7 +4241,7 @@ fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
 	(shape_dict : ShapeDict (shape t1))
         (reprA : Repr a) (reprB : Repr b) (reprC : Repr c)
         (inputA : t1 a) (inputB : t2 b) (inputC : t3 c)
-  -> Stream (shape t1) (PyonTuple3 a b c)
+  -> Stream (shape t1) (Tuple3 a b c)
   attribute(inline) =
   case traversable1
   of traversableDict @t1
@@ -4291,13 +4291,13 @@ fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
 		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
 
   letfun
-    transformer (x : a) (y : b) (z : c) (ret : OutPtr (PyonTuple3 a b c))
+    transformer (x : a) (y : b) (z : c) (ret : OutPtr (Tuple3 a b c))
     		-> Store =
-      pyonTuple3 @a @b @c (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) ret
+      tuple3 @a @b @c (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) ret
   in
 
-  shape_zipWith3 @a @b @c @(PyonTuple3 a b c)
-  reprA reprB reprC (repr_PyonTuple3 @a @b @c reprA reprB reprC)
+  shape_zipWith3 @a @b @c @(Tuple3 a b c)
+  reprA reprB reprC (repr_Tuple3 @a @b @c reprA reprB reprC)
   transformer stream1 stream2 stream3;
 
 
@@ -4312,7 +4312,7 @@ fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
 	(shape_dict : ShapeDict (shape t1))
         (reprA : Repr a) (reprB : Repr b) (reprC : Repr c) (reprD : Repr d)
         (inputA : t1 a) (inputB : t2 b) (inputC : t3 c) (inputD : t4 d)
-  -> Stream (shape t1) (PyonTuple4 a b c d)
+  -> Stream (shape t1) (Tuple4 a b c d)
   attribute(inline) =
   case traversable1
   of traversableDict @t1
@@ -4369,13 +4369,13 @@ fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
 		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
 
   letfun
-    transformer (x : a) (y : b) (z : c) (w : d) (ret : OutPtr (PyonTuple4 a b c d))
+    transformer (x : a) (y : b) (z : c) (w : d) (ret : OutPtr (Tuple4 a b c d))
     		-> Store =
-      pyonTuple4 @a @b @c @d (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) (copy @d reprD w) ret
+      tuple4 @a @b @c @d (copy @a reprA x) (copy @b reprB y) (copy @c reprC z) (copy @d reprD w) ret
   in
 
-  shape_zipWith4 @a @b @c @d @(PyonTuple4 a b c d)
-  reprA reprB reprC reprD (repr_PyonTuple4 @a @b @c @d reprA reprB reprC reprD)
+  shape_zipWith4 @a @b @c @d @(Tuple4 a b c d)
+  reprA reprB reprC reprD (repr_Tuple4 @a @b @c @d reprA reprB reprC reprD)
   transformer stream1 stream2 stream3 stream4;
 
 
@@ -4402,7 +4402,7 @@ rows @(t : bare -> bare) @(a : bare)
      @a repr shape_x
      (\ (s_x : Stored int) (ret : OutPtr a) -> Store.
        case boxed @(index dim2)
-            (pyonTuple2 @(Stored int) @(Stored int)
+            (tuple2 @(Stored int) @(Stored int)
              (copy @(Stored int) repr_int s_y)
              (copy @(Stored int) repr_int s_x)) of
          boxed @(index dim2) (ix : index dim2).
@@ -4434,7 +4434,7 @@ cols @(t : bare -> bare) @(a : bare)
      ShapeDict_dim1 @a repr shape_y
      (\ (s_y : Stored int) (ret : OutPtr a) -> Store.
        case boxed @(index dim2)
-            (pyonTuple2 @(Stored int) @(Stored int)
+            (tuple2 @(Stored int) @(Stored int)
              (copy @(Stored int) repr_int s_y)
              (copy @(Stored int) repr_int s_x)) of
          boxed @(index dim2) (ix : index dim2).
@@ -4451,7 +4451,7 @@ outerproduct @(t u : bare -> bare) @(a b : bare)
   (repr_a : Repr a) (repr_b : Repr b)
   (container_t : t a)
   (container_u : u b)
-  -> Stream dim2 (PyonTuple2 a b)
+  -> Stream dim2 (Tuple2 a b)
   attribute(inline) =
 
   case traversable_t
@@ -4477,23 +4477,23 @@ outerproductStream @(a b : bare)
   (repr_a : Repr a) (repr_b : Repr b)
   (sa : Stream dim1 a)
   (sb : Stream dim1 b)
-  -> Stream dim2 (PyonTuple2 a b)
+  -> Stream dim2 (Tuple2 a b)
   attribute(inline, inline_dimensionality) =
 
   case sa of mk_view @dim1 @a (domA : dim1) (fA : Stored int -> Init a).
   case sb of mk_view @dim1 @b (domB : dim1) (fB : Stored int -> Init b).
 
   let type Sint = Stored int in
-  let type out_type = PyonTuple2 a b in
+  let type out_type = Tuple2 a b in
 
   view_generate @dim2 ShapeDict_dim2 @out_type
-  (repr_PyonTuple2 @a @b repr_a repr_b)
+  (repr_Tuple2 @a @b repr_a repr_b)
   (mk_dim2 domA domB)
-  (\ (ix : PyonTuple2 Sint Sint) (ret : OutPtr out_type) -> Store.
+  (\ (ix : Tuple2 Sint Sint) (ret : OutPtr out_type) -> Store.
 
     -- Index each view with one component of the index
-    case ix of pyonTuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
-    pyonTuple2 @a @b (fA ix_y) (fB ix_x) ret);
+    case ix of tuple2 @Sint @Sint (ix_y : Sint) (ix_x : Sint).
+    tuple2 @a @b (fA ix_y) (fB ix_x) ret);
 
 
 -------------------------------------------------------------------------------
@@ -4828,9 +4828,9 @@ extend2D @(t : bare -> bare) @(a : bare)
                 (mk_dim1 unbounded_interval x_linear_map) in
 
   mk_view @dim2 @a dom
-  (\ (ix : PyonTuple2 (Stored int) (Stored int)) (ret : OutPtr a)
+  (\ (ix : Tuple2 (Stored int) (Stored int)) (ret : OutPtr a)
      -> Store.
-     case ix of pyonTuple2 @(Stored int) @(Stored int)
+     case ix of tuple2 @(Stored int) @(Stored int)
                 (sy : Stored int) (sx : Stored int).
      case sy of stored @int (y : int).
      case sx of stored @int (x : int).
@@ -4856,11 +4856,11 @@ extend2D @(t : bare -> bare) @(a : bare)
      let real_x : int = coerce_to_bounds x lb_x ub_x stride_x in
 
      -- Create new index
-     case boxed @(PyonTuple2 (Stored int) (Stored int))
-          (pyonTuple2 @(Stored int) @(Stored int)
+     case boxed @(Tuple2 (Stored int) (Stored int))
+          (tuple2 @(Stored int) @(Stored int)
            (stored @int real_y) (stored @int real_x)) of
-       boxed @(PyonTuple2 (Stored int) (Stored int))
-             (inbounds_ix : PyonTuple2 (Stored int) (Stored int)).
+       boxed @(Tuple2 (Stored int) (Stored int))
+             (inbounds_ix : Tuple2 (Stored int) (Stored int)).
      at_index @a repr container
      (coerce @(index dim2) @(index (shape t)) inbounds_ix)
      ret);
@@ -4927,9 +4927,9 @@ extend3D @(t : bare -> bare) @(a : bare)
 
   let type Sint = Stored int in
   mk_view @dim3 @a dom
-  (\ (ix : PyonTuple3 Sint Sint Sint) (ret : OutPtr a)
+  (\ (ix : Tuple3 Sint Sint Sint) (ret : OutPtr a)
      -> Store.
-     case ix of pyonTuple3 @Sint @Sint @Sint
+     case ix of tuple3 @Sint @Sint @Sint
                 (sz : Sint) (sy : Sint) (sx : Sint).
      case sz of stored @int (z : int).
      case sy of stored @int (y : int).
@@ -4957,11 +4957,11 @@ extend3D @(t : bare -> bare) @(a : bare)
      let real_x : int = coerce_to_bounds x lb_x ub_x stride_x in
 
      -- Create new index
-     case boxed @(PyonTuple3 Sint Sint Sint)
-          (pyonTuple3 @Sint @Sint @Sint
+     case boxed @(Tuple3 Sint Sint Sint)
+          (tuple3 @Sint @Sint @Sint
            (stored @int real_z) (stored @int real_y) (stored @int real_x)) of
-       boxed @(PyonTuple3 Sint Sint Sint)
-             (inbounds_ix : PyonTuple3 Sint Sint Sint).
+       boxed @(Tuple3 Sint Sint Sint)
+             (inbounds_ix : Tuple3 Sint Sint Sint).
      at_index @a repr container
      (coerce @(index dim3) @(index (shape t)) inbounds_ix)
      ret);
@@ -4978,7 +4978,7 @@ boxedStencil2D @(t : bare -> bare) @(a b : bare)
   (input : t a)
   (ret: OutPtr (barray2 b))
   -> Store
-  attribute(inline, inline_final) =
+  attribute(inline, inline_sequential) =
 
   -- This function is defined in terms of stencil2D.
   let type boxed_b = StuckRef (BoxedType b) in
@@ -5008,7 +5008,7 @@ stencil2D @(t : bare -> bare) @(a b : bare)
   (input : t a)
   (ret: OutPtr (array2 b))
   -> Store
-  attribute(inline, inline_final) =
+  attribute(inline, inline_sequential) =
 
   case indexable of
     indexableDict @t 
@@ -5066,7 +5066,7 @@ stencil2D @(t : bare -> bare) @(a b : bare)
         view_generate @dim2 ShapeDict_dim2 @b repr_b output_dom
         (\ (ix : index dim2) (ret : OutPtr b) -> Store.
            case ix of
-             pyonTuple2 @(Stored int) @(Stored int)
+             tuple2 @(Stored int) @(Stored int)
              (ix_y : Stored int) (ix_x : Stored int).
            case ix_y of stored @int (o_y : int).
            case ix_x of stored @int (o_x : int).
@@ -5076,14 +5076,14 @@ stencil2D @(t : bare -> bare) @(a b : bare)
            (view_generate @dim2 ShapeDict_dim2 @a repr_a stencil_dom
             (\ (s_ix : index dim2) (s_ret : OutPtr a) -> Store.
                case s_ix of
-                 pyonTuple2 @(Stored int) @(Stored int)
+                 tuple2 @(Stored int) @(Stored int)
                  (s_ix_y : Stored int) (s_ix_x : Stored int).
                case s_ix_y of stored @int (s_y : int).
                case s_ix_x of stored @int (s_x : int).
 
                -- The real index is the output index plus the stencil index
                case boxed @(index dim2)
-                    (pyonTuple2 @(Stored int) @(Stored int)
+                    (tuple2 @(Stored int) @(Stored int)
                      (stored @int (o_y +# s_y))
                      (stored @int (o_x +# s_x))) of
                  boxed @(index dim2) (i_ix : index dim2).
@@ -5178,7 +5178,7 @@ stencil3D @(t : bare -> bare) @(a b : bare)
         view_generate @dim3 ShapeDict_dim3 @b repr_b output_dom
         (\ (ix : index dim3) (ret : OutPtr b) -> Store.
            case ix of
-             pyonTuple3 @Sint @Sint @Sint
+             tuple3 @Sint @Sint @Sint
              (ix_z : Sint) (ix_y : Sint) (ix_x : Sint).
            case ix_z of stored @int (o_z : int).
            case ix_y of stored @int (o_y : int).
@@ -5189,7 +5189,7 @@ stencil3D @(t : bare -> bare) @(a b : bare)
            (view_generate @dim3 ShapeDict_dim3 @a repr_a stencil_dom
             (\ (s_ix : index dim3) (s_ret : OutPtr a) -> Store.
                case s_ix of
-                 pyonTuple3 @Sint @Sint @Sint
+                 tuple3 @Sint @Sint @Sint
                  (s_ix_z : Sint) (s_ix_y : Sint) (s_ix_x : Sint).
                case s_ix_z of stored @int (s_z : int).
                case s_ix_y of stored @int (s_y : int).
@@ -5197,7 +5197,7 @@ stencil3D @(t : bare -> bare) @(a b : bare)
 
                -- The real index is the output index plus the stencil index
                case boxed @(index dim3)
-                    (pyonTuple3 @Sint @Sint @Sint
+                    (tuple3 @Sint @Sint @Sint
                      (stored @int (o_z +# s_z))
                      (stored @int (o_y +# s_y))
                      (stored @int (o_x +# s_x))) of

@@ -3,7 +3,7 @@ module Paths where
 
 import System.Environment
 import System.FilePath
-import qualified Paths_pyon
+import qualified Paths_triolet
 
 -- | Extract the data file path, if one was provided on the command line.
 -- The data file path, if provided, must be first.
@@ -18,4 +18,4 @@ getDataFileName path = do
   args <- getArgs
   case fst $ splitDataFilePath args of
     Just data_path -> return (data_path </> path)
-    Nothing        -> Paths_pyon.getDataFileName path
+    Nothing        -> Paths_triolet.getDataFileName path

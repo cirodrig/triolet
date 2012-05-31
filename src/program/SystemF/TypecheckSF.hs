@@ -323,7 +323,7 @@ typeInferArrayE inf ty es = do
 
   -- Return an array type
   let len = IntT $ fromIntegral $ length es
-  return $ varApp (pyonBuiltin The_arr) [len, ty]
+  return $ varApp (coreBuiltin The_arr) [len, ty]
 
 typeCheckEntity (FunEnt f) = void $ typeInferFun f
 

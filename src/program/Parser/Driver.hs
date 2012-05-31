@@ -16,7 +16,7 @@ import Untyped.Data(ParserVarBinding(..))
 import Globals
 import GlobalVar
 
--- | The Pyon global variables recognized by the parser.
+-- | The global variables recognized by the parser.
 parserGlobals :: InitGlobalVar [(Var Int, ParserVarBinding)]
 {-# NOINLINE parserGlobals #-}
 parserGlobals = defineInitGlobalVar ()

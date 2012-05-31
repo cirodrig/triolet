@@ -95,8 +95,8 @@ checkLiteralType l =
            -- Based on the literal, check whether the type constructor is 
            -- acceptable
            case lit
-           of IntL _ _ -> v `isPyonBuiltin` The_int
-              FloatL _ _ -> v `isPyonBuiltin` The_float
+           of IntL _ _ -> v `isCoreBuiltin` The_int
+              FloatL _ _ -> v `isCoreBuiltin` The_float
          Nothing ->
            -- Literals cannot have other types 
            False

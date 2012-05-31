@@ -75,42 +75,42 @@ incOtherLoopCount (LRW m) = LRW $ local (modifyLoopNesting inc_count) m
 
 parLoopOperator, otherLoopOperator :: Var -> Bool
 parLoopOperator v =
-  v `elem` [pyonBuiltin The_parallel_doall,
-            pyonBuiltin The_parallel_doall2,
-            pyonBuiltin The_blocked_1d_reduce,
-            pyonBuiltin The_blocked_2d_reduce,
-            pyonBuiltin The_blocked_1d_reduce1,
-            pyonBuiltin The_blocked_2d_reduce1,
-            pyonBuiltin The_blocked_doall,
-            pyonBuiltin The_blocked_doall2,
-            pyonBuiltin The_parallel_list_dim_reduce,
-            pyonBuiltin The_parallel_dim1_reduce,
-            pyonBuiltin The_parallel_dim2_reduce,
-            pyonBuiltin The_parallel_list_dim_reduce1,
-            pyonBuiltin The_parallel_dim1_reduce1,
-            pyonBuiltin The_parallel_dim2_reduce1,
-            pyonBuiltin The_parallel_list_dim_list,
-            pyonBuiltin The_parallel_dim1_array,
-            pyonBuiltin The_parallel_dim2_array
+  v `elem` [coreBuiltin The_parallel_doall,
+            coreBuiltin The_parallel_doall2,
+            coreBuiltin The_blocked_1d_reduce,
+            coreBuiltin The_blocked_2d_reduce,
+            coreBuiltin The_blocked_1d_reduce1,
+            coreBuiltin The_blocked_2d_reduce1,
+            coreBuiltin The_blocked_doall,
+            coreBuiltin The_blocked_doall2,
+            coreBuiltin The_parallel_list_dim_reduce,
+            coreBuiltin The_parallel_dim1_reduce,
+            coreBuiltin The_parallel_dim2_reduce,
+            coreBuiltin The_parallel_list_dim_reduce1,
+            coreBuiltin The_parallel_dim1_reduce1,
+            coreBuiltin The_parallel_dim2_reduce1,
+            coreBuiltin The_parallel_list_dim_list,
+            coreBuiltin The_parallel_dim1_array,
+            coreBuiltin The_parallel_dim2_array
            ] 
   
 otherLoopOperator v =
-  v `elem` [pyonBuiltin The_for,
-            pyonBuiltin The_doall,
-            pyonBuiltin The_histogram,
-            pyonBuiltin The_histogramArray,
-            pyonBuiltin The_fun_reduce,
-            pyonBuiltin The_fun_reduce1,
-            pyonBuiltin The_TraversableDict_list_build,
-            pyonBuiltin The_primitive_list_dim_reduce,
-            pyonBuiltin The_primitive_dim1_reduce,
-            pyonBuiltin The_primitive_dim2_reduce,
-            pyonBuiltin The_primitive_list_dim_reduce1,
-            pyonBuiltin The_primitive_dim1_reduce1,
-            pyonBuiltin The_primitive_dim2_reduce1,
-            pyonBuiltin The_primitive_list_dim_list,
-            pyonBuiltin The_primitive_dim1_array,
-            pyonBuiltin The_primitive_dim2_array
+  v `elem` [coreBuiltin The_for,
+            coreBuiltin The_doall,
+            coreBuiltin The_histogram,
+            coreBuiltin The_histogramArray,
+            coreBuiltin The_fun_reduce,
+            coreBuiltin The_fun_reduce1,
+            coreBuiltin The_TraversableDict_list_build,
+            coreBuiltin The_primitive_list_dim_reduce,
+            coreBuiltin The_primitive_dim1_reduce,
+            coreBuiltin The_primitive_dim2_reduce,
+            coreBuiltin The_primitive_list_dim_reduce1,
+            coreBuiltin The_primitive_dim1_reduce1,
+            coreBuiltin The_primitive_dim2_reduce1,
+            coreBuiltin The_primitive_list_dim_list,
+            coreBuiltin The_primitive_dim1_array,
+            coreBuiltin The_primitive_dim2_array
             ]
 
 -- | Use rewrite rules on an application
@@ -158,31 +158,31 @@ replaceWithParallelApp inf op_var ty_args args =
         -- True if 't' is an 'OutPtr' type
         is_out_ptr t =
           case fromVarApp t
-          of Just (op, _) -> op `isPyonBuiltin` The_OutPtr
+          of Just (op, _) -> op `isCoreBuiltin` The_OutPtr
              _ -> False
 
     parallel_function_table =
-      [ (pyonBuiltin The_primitive_list_dim_reduce,
-         ReplaceWith $ pyonBuiltin The_parallel_list_dim_reduce)
-      , (pyonBuiltin The_primitive_dim1_reduce,
-         ReplaceWith $ pyonBuiltin The_parallel_dim1_reduce)
-      , (pyonBuiltin The_primitive_dim2_reduce,
-         ReplaceWith $ pyonBuiltin The_parallel_dim2_reduce)
-      , (pyonBuiltin The_primitive_list_dim_reduce1,
-         ReplaceWith $ pyonBuiltin The_parallel_list_dim_reduce1)
-      , (pyonBuiltin The_primitive_dim1_reduce1,
-         ReplaceWith $ pyonBuiltin The_parallel_dim1_reduce1)
-      , (pyonBuiltin The_primitive_dim2_reduce1,
-         ReplaceWith $ pyonBuiltin The_parallel_dim2_reduce1)
-      , (pyonBuiltin The_primitive_list_dim_list,
-         ReplaceWith $ pyonBuiltin The_parallel_list_dim_list)
-      , (pyonBuiltin The_primitive_dim1_array,
-         ReplaceWith $ pyonBuiltin The_parallel_dim1_array)
-      , (pyonBuiltin The_primitive_dim2_array,
-         ReplaceWith $ pyonBuiltin The_parallel_dim2_array)
-      , (pyonBuiltin The_doall,
-         ReplaceWith $ pyonBuiltin The_parallel_doall)
-      , (pyonBuiltin The_Sequence_reduce,
+      [ (coreBuiltin The_primitive_list_dim_reduce,
+         ReplaceWith $ coreBuiltin The_parallel_list_dim_reduce)
+      , (coreBuiltin The_primitive_dim1_reduce,
+         ReplaceWith $ coreBuiltin The_parallel_dim1_reduce)
+      , (coreBuiltin The_primitive_dim2_reduce,
+         ReplaceWith $ coreBuiltin The_parallel_dim2_reduce)
+      , (coreBuiltin The_primitive_list_dim_reduce1,
+         ReplaceWith $ coreBuiltin The_parallel_list_dim_reduce1)
+      , (coreBuiltin The_primitive_dim1_reduce1,
+         ReplaceWith $ coreBuiltin The_parallel_dim1_reduce1)
+      , (coreBuiltin The_primitive_dim2_reduce1,
+         ReplaceWith $ coreBuiltin The_parallel_dim2_reduce1)
+      , (coreBuiltin The_primitive_list_dim_list,
+         ReplaceWith $ coreBuiltin The_parallel_list_dim_list)
+      , (coreBuiltin The_primitive_dim1_array,
+         ReplaceWith $ coreBuiltin The_parallel_dim1_array)
+      , (coreBuiltin The_primitive_dim2_array,
+         ReplaceWith $ coreBuiltin The_parallel_dim2_array)
+      , (coreBuiltin The_doall,
+         ReplaceWith $ coreBuiltin The_parallel_doall)
+      , (coreBuiltin The_Sequence_reduce,
          Rewrite rewriteSequenceReduce)
       ]
 
@@ -193,7 +193,7 @@ replaceWithParallelApp inf op_var ty_args args =
 rewriteSequenceReduce inf [ty] (repr : reducer : init : source : other_args) =
   case unpackVarAppM source
   of Just (op, [_], [range, transformer])
-       | op `isPyonBuiltin` The_Sequence_generate_bind -> do
+       | op `isCoreBuiltin` The_Sequence_generate_bind -> do
          -- Pattern was matched
          parallel_app range transformer
      _ -> return Nothing
@@ -201,7 +201,7 @@ rewriteSequenceReduce inf [ty] (repr : reducer : init : source : other_args) =
     parallel_app range transformer =
       return $ Just $
       appE defaultExpInfo (ExpM $ VarE defaultExpInfo
-                           (pyonBuiltin The_Sequence_parallel_reduce))
+                           (coreBuiltin The_Sequence_parallel_reduce))
       [ty]
       (repr : range : reducer : init : transformer : other_args)
 

@@ -1,5 +1,5 @@
 
-#include <pyon.h>
+#include <triolet.h>
 #include <stdio.h>
 
 #include "test_interface.h"
@@ -11,11 +11,11 @@ int data[] = {
 
 int main()
 {
-  Pyon_init();
+  Triolet_init();
 
-  PyonMatrix *mat = pyon_Matrix_PyonInt_FromArray(0, 3, 0, 3, data);
+  TrioletMatrix *mat = triolet_Matrix_Int_FromArray(0, 3, 0, 3, data);
   int sum = test(mat);
-  pyon_Matrix_PyonInt_Free(mat);
+  triolet_Matrix_Int_Free(mat);
 
   // Check output
   printf("%d", sum);
