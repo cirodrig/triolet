@@ -1,3 +1,6 @@
+Triolet is a high-level programming language with a syntax like
+Python.  It compiles to parallel code that often rivals C in
+performance.
 
 Building
 --------
@@ -9,13 +12,3 @@ ghc --make Setup
 ./Setup build
 ./Setup install
 
-Using
------
-
-After building, some environment variables need to be set up.
-Add the 'bin' subdirectory of the install path to PATH.
-
-Hacking
--------
-
-See the coding guidelines in HACKING.
