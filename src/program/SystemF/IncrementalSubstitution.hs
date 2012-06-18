@@ -151,6 +151,8 @@ deferInnerTerms (ExpM expression) =
        ExceptE inf ty
      CoerceE inf t1 t2 e ->
        CoerceE inf t1 t2 (deferExp e)
+     ArrayE inf ty es ->
+       ArrayE inf ty (map deferExp es)
 
 -- | Substitute the head term
 freshenHead :: EvalMonad m => ExpSM -> m (BaseExp SM)
@@ -303,6 +305,8 @@ freshenFullyExp' expression = do
     ExceptE inf ty -> return $ ExpM $ ExceptE inf ty
     CoerceE inf t1 t2 e ->
       ExpM <$> (CoerceE inf t1 t2 <$> freshenFullyExp' e)
+    ArrayE inf t es ->
+      ExpM <$> (ArrayE inf t <$> mapM freshenFullyExp' es)
   where
     recurse e = freshenFullyExp' e
 
