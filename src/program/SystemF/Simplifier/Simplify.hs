@@ -566,6 +566,7 @@ expSize (ExpM expression) =
      CaseE _ scr alts -> expSize scr `mappend` alt_sizes alts
      ExceptE {} -> codeSize 1
      CoerceE _ _ _ b -> codeSize 1 `mappend` expSize b
+     ArrayE _ _ es -> codeSize 1 `mappend` expSizes es
   where
     alt_sizes xs = mconcat $ map alt_size xs
     alt_size (AltM (Alt decon params body)) =
