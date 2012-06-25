@@ -1,9 +1,18 @@
-Triolet is a high-level programming language with a syntax like
-Python.  It compiles to parallel code that often rivals C in
-performance.
+Triolet is a high-level programming language designed to allow software
+developers to write compute-intensive loops in a clear, concise style while
+still getting the performance you would expect from carefully written C code.
+As a research project, Triolet is being used to explore language and compiler
+design issues at the intersection of high-level languages and high-performance
+parallel algorithms.  This is an early release of Triolet; expect some bugs
+and performance issues.
 
-Building
---------
+By downloading and using this software, you agree to the terms of the
+Illinois Open Source License.  See LICENSE for details.
+
+Getting Started
+---------------
+
+A website with a programming tutorial will be up soon.
 
 This is a Cabal package.  The typical build process is
 
