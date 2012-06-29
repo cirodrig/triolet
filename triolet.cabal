@@ -19,13 +19,13 @@ Data-Files:
   include/TrioletData.h
   include/triolet/Layout.h
   include/triolet/Base.h
-  interfaces/memory_py.pi
-  interfaces/effects.pi
-  interfaces/prim.pi
-  interfaces/inplace.pi
-  interfaces/structures.pi
-  interfaces/list.pi
-  interfaces/stream.pi
+  interfaces/memory_py.ti
+  interfaces/effects.ti
+  interfaces/prim.ti
+  interfaces/inplace.ti
+  interfaces/structures.ti
+  interfaces/list.ti
+  interfaces/stream.ti
   libtrioletrts.so
 
 Executable triolet 
