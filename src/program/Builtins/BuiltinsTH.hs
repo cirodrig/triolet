@@ -46,6 +46,7 @@ builtinTypeNames =
   , "Pf"
   , "UpdateInPlaceFinalizer"
   , "Scatter"
+  , "PBTree"
 
     -- Representation coercions
   , "Stored"
@@ -165,6 +166,9 @@ builtinVariableNames =
   , "mutateInPlace"
   , "mutateAndCopy"
   , "mk_scatter"
+  , "pbBranch"
+  , "pbLeaf"
+  , "pbEmpty"
 
     -- Class constructors
   , "sizeAlign"
@@ -652,6 +656,7 @@ builtinVariableNames =
   , "Sequence_scatter"
   , "Sequence_fold"
   , "Sequence_parallel_reduce"
+  , "Sequence_parallel_build"
 
     -- Fold-like functions
   , "build_dim1_array"
@@ -745,6 +750,7 @@ builtinVariableNames =
   , "blocked_2d_reduce1"
   , "blocked_doall"
   , "blocked_doall2"
+  , "blocked_PBTree_doall"
   , "emptyEffTok"
   , "toEffTok"
   , "seqEffTok"

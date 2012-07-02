@@ -126,3 +126,35 @@ import procedure triolet_C_blocked_doall2
 
 extern procedure core.internal.prim.blocked_doall2_worker
   "blocked_doall2_worker" (owned, int, int, int, int) -> ();
+
+extern function core.internal.prim.blocked_PBTree_doall
+  (owned, owned) -> unit;
+
+import procedure triolet_C_blocked_PBTree_doall
+  (owned, owned) -> ();
+
+extern procedure core.internal.prim.blocked_doall_PBTree_worker
+  "blocked_doall_PBTree_worker" (owned, int, owned) -> ();
+
+// Test whether tree is splittable.
+// Return 'true' if splittable.
+extern procedure core.internal.prim.PBTree_splittable
+  "triolet_PBTree_splittable" (owned) -> bool;
+
+// Split the tree.
+// If splittable, write children into a 2-element array and return true.
+// Else, write 'NULL' into array and return false.
+extern procedure core.internal.prim.PBTree_split
+  "triolet_PBTree_split" (owned, pointer) -> bool;
+
+// Construct a leaf from an array.
+extern procedure core.internal.prim.PBTree_leaf
+  "triolet_PBTree_leaf" (pointer) -> owned;
+
+// Construct a branch from two tree nodes.
+extern procedure core.internal.prim.PBTree_branch
+  "triolet_PBTree_branch" (owned, owned) -> owned;
+
+// Construct an empty tree.
+extern procedure core.internal.prim.PBTree_empty
+  "triolet_PBTree_empty" () -> owned;

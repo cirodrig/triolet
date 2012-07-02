@@ -278,3 +278,37 @@ triolet_C_blocked_doall2(void *data, TrioletInt count_y, TrioletInt count_x)
 }
 
 #endif // USE_TBB
+
+/*****************************************************************************/
+/* Parallelized tree-of-array doall */
+
+typedef void *PBTree;
+
+/* Functions written in low-level triolet */
+extern "C" void
+blocked_doall_PBTree_worker(void *worker_fn, TrioletInt i, PBTree tree);
+
+extern "C" int
+triolet_PBTree_splittable(PBTree tree);
+
+extern "C" int
+triolet_PBTree_split(PBTree tree, PBTree (*children)[2]);
+
+#ifdef USE_TBB
+
+extern "C" void
+triolet_C_blocked_PBTree_doall(PBTree tree, void *worker_fn)
+{
+  blocked_doall_PBTree_worker (worker_fn, 0, tree);
+}
+
+#else 
+
+extern "C" void
+triolet_C_blocked_PBTree_doall(PBTree tree, void *worker_fn)
+{
+  fprintf(stderr, "triolet_C_blocked_PBTree_doall: Not implemented\n");
+  exit(-1);
+}
+
+#endif  // USE_TBB

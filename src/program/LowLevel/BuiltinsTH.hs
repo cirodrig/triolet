@@ -331,6 +331,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_blocked_doall) |])
   , (CoreName module_prim "blocked_doall2",
      Right [| coreBuiltin (SystemF.The_blocked_doall2) |])
+  , (CoreName module_prim "blocked_PBTree_doall",
+     Right [| coreBuiltin (SystemF.The_blocked_PBTree_doall) |])
 
     -- Functions that are replaced by primitive operations
   , (CoreName module_prim "eq_int",

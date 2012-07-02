@@ -184,6 +184,8 @@ replaceWithParallelApp inf op_var ty_args args =
          ReplaceWith $ coreBuiltin The_parallel_doall)
       , (coreBuiltin The_Sequence_reduce,
          Rewrite rewriteSequenceReduce)
+      , (coreBuiltin The_Sequence_build_list,
+         Rewrite rewriteSequenceBuildList)
       ]
 
 -- | Attempt to rewrite a reduction over a sequence.
@@ -204,6 +206,29 @@ rewriteSequenceReduce inf [ty] (repr : reducer : init : source : other_args) =
                            (coreBuiltin The_Sequence_parallel_reduce))
       [ty]
       (repr : range : reducer : init : transformer : other_args)
+
+-- | Attempt to rewrite a list construction from a sequence.
+--
+--   Assume that the sequence produces an irregular number of outputs.
+--   Sequences producing a regular number of outputs should have been 
+--   converted to lists.
+--
+--   Try to match the pattern @build (generate_bind d f) g@ and
+--   replace it with @parallel_build d f g@.
+rewriteSequenceBuildList inf [ty] (repr : source : other_args) =
+  case unpackVarAppM source
+  of Just (op, [_], [range, transformer])
+       | op `isCoreBuiltin` The_Sequence_generate_bind -> do
+         -- Pattern was matched
+         parallel_app range transformer
+     _ -> return Nothing
+  where
+    parallel_app range transformer =
+      return $ Just $
+      appE defaultExpInfo (ExpM $ VarE defaultExpInfo
+                           (coreBuiltin The_Sequence_parallel_build))
+      [ty]
+      (repr : range : transformer : other_args)
 
 -------------------------------------------------------------------------------
 -- Traversal

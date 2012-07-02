@@ -373,7 +373,8 @@ function inline blocked_doall
 };
 
 procedure blocked_doall_worker (owned f, int start, int end) -> () {
-  () call f (start, FinIndInt {end - start});
+  _ = unit call f (start, FinIndInt {end - start});
+  ();
 };
 
 function blocked_doall2
@@ -388,6 +389,72 @@ function blocked_doall2
 
 procedure blocked_doall2_worker
   (owned f, int start_y, int end_y, int start_x, int end_x) -> () {
-  () call f (start_y, FinIndInt {end_y - start_y},
-             start_x, FinIndInt {end_x - start_x});
+  _ = unit call f (start_y, FinIndInt {end_y - start_y},
+                   start_x, FinIndInt {end_x - start_x});
+  nil;
+};
+
+function blocked_PBTree_doall (owned range, owned worker) -> unit {
+  () = () primcall triolet_C_blocked_PBTree_doall (range, worker);
+  nil;
+};
+
+procedure blocked_doall_PBTree_worker (owned f, int i, owned t) -> () {
+  _ = unit call f (i, t);
+  ();
+};
+
+procedure PBTree_size (owned tree) -> int {
+  t = tree @! PBTree.tag;
+  if (t == PBTree_LEAF) {
+    FinIndInt {n} = tree @! PBTreeLeaf.members.nelems;
+    n;
+  }
+  else if (t == PBTree_BRANCH) {
+    tree @! PBTreeBranch.size;
+  }
+  else {
+    int 0;
+  };
+};
+
+procedure PBTree_split (owned tree, pointer ret) -> bool {
+  tag = tree @! PBTree.tag;
+  (is_splittable, left, right) =
+    if (tag == PBTree_BRANCH) {
+      (tree @! PBTreeBranch.left, tree @! PBTreeBranch.right, true);
+    }
+    else {
+      (null as owned, null as owned, false);
+    };
+  ret @! array(value int 2, owned)[int 0] = left;
+  ret @! array(value int 2, owned)[int 1] = right;
+  is_splittable;
+};
+
+procedure PBTree_leaf (pointer list) -> owned {
+  p = pointer primcall triolet_alloc (sizeof PBTreeLeaf);
+  p @! PBTreeLeaf.tag = PBTree_LEAF;
+  p @! PBTreeLeaf.members = List load list;
+  p as owned;
+};
+
+procedure PBTree_branch (owned left, owned right) -> owned {
+  // If either child is empty, return the other
+  if (left @! PBTree.tag == PBTree_EMPTY) {
+    right;
+  }
+  else if (right @! PBTree.tag == PBTree_EMPTY) {
+    left;
+  }
+  else {
+    s1 = int primcall PBTree_size (left);
+    s2 = int primcall PBTree_size (right);
+    p = pointer primcall triolet_alloc (sizeof PBTreeBranch);
+    p @! PBTreeBranch.tag = PBTree_BRANCH;
+    p @! PBTreeBranch.size = s1 + s2;
+    p @! PBTreeBranch.left = left;
+    p @! PBTreeBranch.right = right;
+    p as owned;
+  };
 };

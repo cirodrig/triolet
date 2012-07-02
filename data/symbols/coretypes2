@@ -604,6 +604,22 @@ barray3Scatter : (a i : bare)
               -> Scatter (barray3 a) (Tuple2 (index dim3) i);
 
 -------------------------------------------------------------------------------
+-- Trees of lists
+
+-- Trees of lists.  These are used as temporary data structures
+-- when constructing irregular arrays.
+--
+-- Invariant: 'pbBranch' never contains 'pbEmpty'.
+data PBTree : bare -> box
+{
+  -- A branch with two children.
+  -- The 'int' is the total number of list elements in its leaves.
+  pbBranch (a : bare) () (int, PBTree a, PBTree a);
+  pbLeaf (a : bare) () (list a);
+  pbEmpty (a : bare) () ();
+};
+
+-------------------------------------------------------------------------------
 -- Streams
 
 -- A dynamically computed sequence of values, possibly with run-time
@@ -1943,6 +1959,12 @@ Sequence_parallel_reduce : (a : bare)
                         -> (Stored int -> Sequence a)
                         -> Init a;
 
+Sequence_parallel_build : (a : bare)
+                       -> Repr a
+                       -> list_dim
+                       -> (Stored int -> Sequence a)
+                       -> Init (list a);
+
 -------------------------------------------------------------------------------
 -- High-level stream and container functions
 
@@ -2575,4 +2597,11 @@ blocked_doall2 :
  -> FIInt M
  -> FIInt N
  -> ((M N : intindex) -> int -> FIInt M -> int -> FIInt N -> Store)
+ -> Store;
+
+-- Blocked parallel loop over a PBTree
+blocked_PBTree_doall :
+    (a b : bare)
+ -> PBTree a
+ -> (int -> PBTree a -> Store)
  -> Store;

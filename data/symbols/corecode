@@ -6347,6 +6347,19 @@ Sequence_parallel_reduce @(a : bare)
       except @Store
   };
 
+
+Sequence_parallel_build @(a : bare)
+  (rep : Repr a) (dom : list_dim) (f : Stored int -> Sequence a)
+  (ret : OutPtr (list a))
+  -> Store
+  attribute(inline) =
+
+  -- Construct a tree of arrays using parallel reduction
+
+  -- Create an array
+
+  except @Store;
+
 -------------------------------------------------------------------------------
 -- Helper functions over the basic loop layer
 

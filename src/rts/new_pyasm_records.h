@@ -264,6 +264,26 @@ record Array3 {
   const owned contents;		// Pointer to matrix contents
 };
 
+#define PBTree_BRANCH uint8 0
+#define PBTree_LEAF   uint8 1
+#define PBTree_EMPTY  uint8 2
+/* A tree for parallel list construction. */
+record PBTree {
+  const uint8 tag;              // {BRANCH, LEAF, EMPTY}
+};
+
+record PBTreeBranch {
+  const uint8 tag;              // BRANCH
+  const int size;
+  const owned left;
+  const owned right;
+};
+
+record PBTreeLeaf {
+  const uint8 tag;              // LEAF
+  const List members;
+};
+
 /* This data structure is used by 'blocked_reduce' to store data that's
  * used in C
  */
