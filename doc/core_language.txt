@@ -1,0 +1,216 @@
+
+The core language is intended for compiler developers to extend the
+set of built-in functions.  It is not particularly user-friendly, and
+only advanced users should consider touching it.
+
+This file documents the core language syntax.
+
+Line comments begin with two hyphens, like this: --
+
+Multi-line comments are written inside {- -} brackets.
+
+Global Declarations
+===================
+
+A file consists of a sequence of global declarations.  Each global
+declaration ends with a semicolon.  Global declarations may be
+a data declaration, a type declaration, a variable declaration,
+a variable definition, or a function definition.
+
+A variable declaration has the form
+
+  NAME : TYPE;
+
+and declares the variable NAME which has type TYPE.
+
+A data declaration has the form
+
+  data NAME : TYPE { CONDECLS };
+
+and declares the data type constructor NAME which has kind TYPE
+and constructors given by CONDECLS.  CONDECLS is a semicolon-separated
+list.  A CONDECL is
+
+  NAME (BINDERS) (BINDERS) (TYPES);
+
+where the first group of binders is the universal type parameters,
+the second group of binders is the existential type parameters, and
+the group of types is the field types.
+
+A type declaration has the form
+
+  type NAME : TYPE;
+
+and declares a type function NAME which has kind TYPE.
+
+A variable definition has the form
+
+  NAME : TYPE = EXPR;
+
+and defines a global variable NAME, with type TYPE, whose value is
+given by EXPR.
+
+A function definition is similar to a variable definition.  It
+has the form
+
+  NAME TYPARAMS PARAMS -> TYPE ATTRIBUTES = EXPR;
+
+and defines a function NAME that takes the given type parameters
+TYPARAMS and parameters PARAMS, has return type TYPE, is annotated
+with ATTRIBUTES, and whose body is EXPR.  For example:
+
+  f @(a : box) (x : a) -> int attribute(inline) = 0;
+
+
+Binders and parameters
+======================
+
+In most places where a variable is introduced, the variable is
+annotated with a type.  The syntax for introducing a variable at
+the current level is
+
+  NAME : TYPE
+
+where NAME is the name and TYPE is the type.  The syntax for introducing
+a variable at the next level up is
+
+  @(NAME : TYPE)
+
+where the '@' should be read as a type application operator.
+
+A parameter list is a list of binders, in parentheses.
+
+  (BINDER) (BINDER) ...
+
+Similarly, a type parameter list is a list of type binders.
+Each TYBINDER has parentheses as part of its syntax.
+
+  TYBINDER TYBINDER ...
+
+In parameter lists, a sequence of binders having the same type or
+kind can be abbreviated by listing the bound variables in a single
+binder.  For instance, @(a : box) @(b : box) @(c : box) is
+abbreviated @(a b c : box).  (x : T) (y : T) (z : T) is abbreviated
+(x y z : T).
+
+
+Types
+=====
+
+Types consist of identifiers, integers, type applications, function
+types, universally quantified types, type functions, and coercion
+types.  Identifiers include type variables, type functions, and type
+constructors. Note that a type-level integer is not the same as an
+integer value.  Kinds use the same syntax as types, but may only
+consist of variables and function types.
+
+Application of types is juxtaposition.  It is left-associative.
+
+  TYPE TYPE
+
+Function types are written with an arrow.
+
+  TYPE -> TYPE
+
+Universally quantified types have a binder on the left, which binds
+a type variable.  The binder must be parenthesized.  Multiple
+variables are permitted in the binder as an abbreviation.
+
+  (BINDER) -> TYPE
+
+Type functions use the following lambda syntax.  Note that the
+result type is not given explicitly.  In most contexts, type functions
+must be put in parentheses to avoid syntactic ambiguity.
+
+  \ PARAMS. TYPE
+
+A coercion type is introduced with the 'coerce' keyword.
+
+  coerce @TYPE TYPE TYPE
+
+The first TYPE is the kind described by the coercion.
+The coercion itself coerces from the second TYPE to the third TYPE.
+
+For instance, the polymorphic identity function on boxed objects has type
+
+  (a : box) -> a -> a
+
+
+Expressions
+===========
+
+Expressions are the largest syntactic class.  Some expressions begin
+with one of the keywords 'case', 'if', 'let', 'letfun', 'except', or
+'coerce'.  Other expressions are identifier, integer, float, lambda,
+type application, application, and infix operator expressions.
+
+A case expression deconstructs a value.
+
+  case EXPR of ALTS
+
+If there is more than one alternative in ALTS, the alternatives need to
+be surrounded by braces and separated with semicolons. An alternative
+has the syntax
+
+  IDENTIFIER TYARGS TYPARAMS PARAMS. EXPR
+
+Where TYARGS is a list of universal type arguments, TYPARAMS is a
+list of existential type parameters, and PARAMS is a list of value
+parameters.
+
+An if expression is a special case of 'case' for booleans.
+
+  if EXPR then EXPR else EXPR
+
+A let expression binds a local variable.
+
+  let BINDER = EXPR in EXPR
+
+There is also a type-let expression to define a local type synonym.
+
+  let type IDENTIFIER = TYPE in EXPR
+
+You should think of this as a sort of macro expression.  The parser
+substitutes TYPE for IDENTIFIER in EXPR.
+
+A letfun expression defines a group of mutually recursive functions.
+If there is more than one function in the group, the group needs to be
+enclosed in braces and the functions separated with semicolons.  A
+function definition has the same syntax as a global function definition,
+except that it does not end with a semicolon (there is no semicolon
+at the end of the last definition).
+
+  letfun FDEFS in EXPR
+
+An except expression terminates the program.
+
+  except @TYPE
+
+The expression's return type is TYPE.  The expression does not return.
+
+A coerce expression coerces a value from one type to another without
+modifying the value.
+
+  coerce @TYPE @TYPE EXPR
+
+A lambda expression is written in lambda syntax.
+
+  \ TYPARAMS PARAMS -> TYPE. EXPR
+
+Value application is written with juxtaposition.
+
+  EXPR EXPR
+
+In type application, the type is prefixed by an '@' symbol.
+
+  EXPR @TYPE
+
+The parser supports a few infix operators.
+
+  EXPR OP EXPR
+
+You should think of these operators as macros that are rewritten to
+a binary function application (IDENTIFIER EXPR EXPR).
+The infix operators +#, -#, <#, >#, <=#, >=#, ==#, /=#, //#, %#, and *#
+all perform binary integer arithmetic.
+
