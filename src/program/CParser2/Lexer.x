@@ -20,7 +20,7 @@ $e		= [eE]
 $digit		= 0-9
 $alpha		= [a-zA-Z_]
 $alnum		= [a-zA-Z_0-9]
-$eol		= [\n\0]		-- line terminators
+$eol		= [\n]			-- line terminators
 $notml          = [^\-\{]               -- not the start of a meaningful token
                                         -- inside a multiline comment
 
@@ -50,10 +50,6 @@ rules :- ----------------------------------------------------------------------
 
 	$white+			;
 <mlc>	@multlinecom+		;
-
--- Treat the null character as whitespace.
--- A null character is inserted at the end of a file by the lexical analyzer.
-	\0			;
 
 <0>	\-\- @line $eol		;
 
@@ -148,11 +144,11 @@ alexGetChar inp =
 
 -- The main routine, which gets a stream of tokens.
 -- On error, it throws an exception.
--- For lexing to work properly, the file needs to end with a non-identifier,
--- non-whitespace character, so we append a null character to the stream.
+-- For lexing to work properly, the file needs to end with a non-identifier
+-- character, so we append a newline to the stream.
 lexify :: FilePath -> String -> [Token]
 lexify path text =
-    let initialState = AlexInput (fileSourcePos path 1 1) ' ' (text ++ "\0")
+    let initialState = AlexInput (fileSourcePos path 1 1) ' ' (text ++ "\n")
     in scan initialState [0]
 
 scan inp scs@(sc : scs') =
