@@ -10,6 +10,7 @@ module LLParser.LexCode
         fileInput,
         AlexInput,
         alexGetChar,
+        alexGetByte,
         alexInputPrevChar,
         idTok, intTok, floatTok, stringTok, tok,
         lineDirective
@@ -17,6 +18,7 @@ module LLParser.LexCode
 where
 
 import Data.Char
+import Data.Word
 import Common.SourcePos
 
 -- | A token produced by lexical analysis
@@ -210,12 +212,20 @@ advancePosition c pos =
 
 type AlexInput = Input
 
+-- Used by Alex 2.2 and earlier
 alexGetChar input = 
   case inputString input
   of (c:cs) ->
        let pos' = advancePosition c (inputPos input)
        in Just (c, Input cs c pos')
      [] -> Nothing
+
+-- Used by Alex 3.0 and later
+alexGetByte :: AlexInput -> Maybe (Word8, AlexInput)
+alexGetByte input =
+  case alexGetChar input
+  of Nothing -> Nothing
+     Just (c, i) -> Just (fromIntegral $ fromEnum c, i)
 
 alexInputPrevChar input = inputPrevChar input
 

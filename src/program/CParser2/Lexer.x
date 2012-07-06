@@ -8,6 +8,7 @@ module CParser2.Lexer
 where
 
 import Control.Exception
+import Data.Word
 
 import Common.SourcePos
 import CParser2.LexData
@@ -138,6 +139,13 @@ alexGetChar inp =
 
       fj (Just x) = x
       fj Nothing  = error "Lost source information in lexer"
+
+-- Used by Alex 3.0 and later
+alexGetByte :: AlexInput -> Maybe (Word8, AlexInput)
+alexGetByte inp =
+    case alexGetChar inp
+    of Nothing -> Nothing
+       Just (c, i) -> Just (fromIntegral $ fromEnum c, i)
 
 -------------------------------------------------------------------------------
 -- Main Alex hooks
