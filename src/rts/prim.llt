@@ -364,6 +364,35 @@ procedure blocked_reduce2_reduce (pointer dat, owned x, owned y) -> owned {
   owned call (dat @! BlockedReduceData.reducer) (x, y);
 };
 
+// A parallel reduction.  The iteration space is partitioned at run time
+// and 'generator' is called on a single member of the iteration space.
+function blocked_1d_reduceip
+  (FinIndInt size, owned reducer, owned generator) -> owned
+{
+  data BlockedReduceIPData reduce_data;
+  reduce_data @! BlockedReduceIPData.generator = generator;
+  reduce_data @! BlockedReduceIPData.reducer = reducer;
+  FinIndInt {count} = size;
+
+  // Main computation is written in C++
+  owned primcall triolet_C_blocked_reduceip(reduce_data, count);
+};
+
+procedure blocked_reduceip_generate_range
+  (pointer dat, int start, int end) -> owned {
+
+  // Given the current accumulator value and the range to process,
+  // compute and accumulate the reduction value over this range.
+  // The range is [start, end).
+  lsize = FinIndInt {end - start};
+  owned call (dat @! BlockedReduceIPData.generator) (start, lsize);
+};
+
+procedure blocked_reduceip_reduce
+  (pointer dat, owned x, owned y) -> owned {
+  owned call (dat @! BlockedReduceIPData.reducer) (x, y);
+};
+
 function inline blocked_doall
   (FinIndInt size, owned worker) -> unit {
   FinIndInt {count} = size;

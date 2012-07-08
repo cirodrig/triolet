@@ -81,12 +81,15 @@ extern function core.internal.prim.doall
 extern function core.internal.prim.for
   (owned, FinIndInt, pointer, owned, pointer) -> unit;
 
+///////////////////////////////////////////////////////////////////////////////
+// Blocked 1D reduction
+
 extern function core.internal.prim.blocked_1d_reduce
   (FinIndInt, owned, owned, owned) -> owned;
 
 // C implementation of blocked_reduce
 import procedure triolet_C_blocked_reduce
-  (owned, owned, owned, int) -> pointer;
+  (pointer, owned, int) -> owned;
 
 // Functions called from the C side of the library
 extern procedure core.internal.prim.blocked_reduce_accumulate_range
@@ -94,18 +97,40 @@ extern procedure core.internal.prim.blocked_reduce_accumulate_range
 extern procedure core.internal.prim.blocked_reduce_reduce
   "blocked_reduce_reduce" (pointer, owned, owned) -> owned;
 
+///////////////////////////////////////////////////////////////////////////////
+// Blocked 2D reduction
+
 extern function core.internal.prim.blocked_2d_reduce
   (FinIndInt, FinIndInt, owned, owned, owned) -> owned;
 
 // C implementation of blocked_reduce
 import procedure triolet_C_blocked_reduce2
-  (owned, owned, owned, int, int) -> pointer;
+  (pointer, owned, int, int) -> owned;
 
 // Functions called from the C side of the library
 extern procedure core.internal.prim.blocked_reduce2_accumulate_range
   "blocked_reduce2_accumulate_range" (pointer, owned, int, int, int, int) -> owned;
 extern procedure core.internal.prim.blocked_reduce2_reduce
   "blocked_reduce2_reduce" (pointer, owned, owned) -> owned;
+
+///////////////////////////////////////////////////////////////////////////////
+// Blocked 1D reduction with in-place generate
+
+extern function core.internal.prim.blocked_1d_reduceip
+  (FinIndInt, owned, owned) -> owned;
+
+// C implementation of blocked_reduce
+import procedure triolet_C_blocked_reduceip
+  (pointer, int) -> owned;
+
+// Functions called from the C side of the library
+extern procedure core.internal.prim.blocked_reduceip_generate_range
+  "blocked_reduceip_generate_range" (pointer, int, int) -> owned;
+extern procedure core.internal.prim.blocked_reduceip_reduce
+  "blocked_reduceip_reduce" (pointer, owned, owned) -> owned;
+
+///////////////////////////////////////////////////////////////////////////////
+// Blocked 1D doall
 
 extern function core.internal.prim.blocked_doall
   (FinIndInt, owned) -> unit;
@@ -117,6 +142,9 @@ import procedure triolet_C_blocked_doall
 extern procedure core.internal.prim.blocked_doall_worker
   "blocked_doall_worker" (owned, int, int) -> ();
 
+///////////////////////////////////////////////////////////////////////////////
+// Blocked 2D doall
+
 extern function core.internal.prim.blocked_doall2
   (FinIndInt, FinIndInt, owned) -> unit;
 
@@ -126,6 +154,9 @@ import procedure triolet_C_blocked_doall2
 
 extern procedure core.internal.prim.blocked_doall2_worker
   "blocked_doall2_worker" (owned, int, int, int, int) -> ();
+
+///////////////////////////////////////////////////////////////////////////////
+// Blocked build-tree reduction
 
 extern function core.internal.prim.blocked_PBTree_doall
   (owned, owned) -> unit;

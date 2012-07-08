@@ -625,6 +625,9 @@ builtinVariableNames =
   , "array1Scatter"
   , "array2Scatter"
   , "array3Scatter"
+  , "Sequence_partial_scatter"
+  , "partial_list_dim_scatter"
+  , "finish_scatter"
 
     -- Inserted by rewrites or inlining
   , "sequenceToView"
@@ -657,6 +660,7 @@ builtinVariableNames =
   , "Sequence_fold"
   , "Sequence_parallel_reduce"
   , "Sequence_parallel_build"
+  , "Sequence_parallel_scatter"
 
     -- Fold-like functions
   , "build_dim1_array"
@@ -684,6 +688,7 @@ builtinVariableNames =
   , "primitive_dim2_reduce1"
   , "primitive_list_dim_fold"
   , "primitive_dim1_fold"
+  , "primitive_list_dim_scatter"
   , "primitive_list_dim_list"
   , "primitive_dim1_array"
   , "primitive_dim2_array"
@@ -694,6 +699,7 @@ builtinVariableNames =
   , "parallel_list_dim_reduce1"
   , "parallel_dim1_reduce1"
   , "parallel_dim2_reduce1"
+  , "parallel_list_dim_scatter"
   , "parallel_list_dim_list"
   , "parallel_dim1_array"
   , "parallel_dim2_array"
@@ -746,8 +752,7 @@ builtinVariableNames =
   , "parallel_doall2"
   , "blocked_1d_reduce"
   , "blocked_2d_reduce"
-  , "blocked_1d_reduce1"
-  , "blocked_2d_reduce1"
+  , "blocked_1d_reduceip"
   , "blocked_doall"
   , "blocked_doall2"
   , "blocked_PBTree_doall"

@@ -187,6 +187,107 @@ triolet_C_blocked_reduce2(void *data,
 #endif	// USE_TBB
 
 /*****************************************************************************/
+/* Parallelized reduction with in-place generator */
+
+/* Functions written in low-level triolet */
+extern "C" void *
+blocked_reduceip_generate_range(void *data, TrioletInt start, TrioletInt end);
+extern "C" void *
+blocked_reduceip_reduce(void *data, void *x, void *y);
+
+/* Function exported to triolet */
+extern "C" void *
+triolet_C_blocked_reduceip(void *data, TrioletInt count);
+
+#ifndef USE_TBB
+
+// No parallel implementation available; use sequential reduction
+void *
+triolet_C_blocked_reduceip(void *data, TrioletInt count)
+{
+  // Perform the reduction
+  return blocked_reduceip_generate_range(data, 0, count);
+}
+
+#else  // USE_TBB
+
+// Parallel reduction using TBB
+
+// Data that are constant over an invocation of 'blocked_reduceip'.
+struct BlockedReduceIPPlan {
+  void *data;
+};
+
+// A partial reduction computation, together with methods for computing a
+// partial reduction and updating the result.
+//
+// Contents are NULL until operator() is called.  This operator must be
+// called before join().
+//
+// Implements the parallel_reduce Body concept.
+struct BlockedInPlaceReducer {
+  BlockedReduceIPPlan *const plan;
+  bool has_value;
+  void *value;
+
+  BlockedInPlaceReducer(BlockedReduceIPPlan *_plan) :
+    plan(_plan), has_value(false), value(NULL) {};
+
+  BlockedInPlaceReducer(BlockedReducer &other, tbb::split) :
+    plan(other.plan), has_value(false), value(NULL) {};
+
+  void operator()(const tbb::blocked_range<int> &range) {
+    int start = range.begin();
+    int end = range.end();
+
+    /* Compute result over this range */
+    void *new_value = blocked_reduceip_generate_range(plan->data, start, end);
+
+    if (has_value) {
+      /* Merge new value with existing value */
+      value = blocked_reduceip_reduce(plan->data, value, new_value);
+    }
+    else {
+      /* Store value */
+      value = new_value;
+      has_value = true;
+    }
+  };
+
+  void join (BlockedInPlaceReducer &other) {
+    /* Combine with the old value */
+    if (!has_value || !other.has_value) {
+      fprintf(stderr, "triolet_C_blocked_reduceip: "
+              "Unexpected uninitialized value\n");
+      exit(-1);
+    }
+
+    value = blocked_reduceip_reduce(plan->data, value, other.value);
+  };
+};
+
+void *
+triolet_C_blocked_reduceip(void *data, TrioletInt count)
+{
+  BlockedReduceIPPlan plan = {data_value};
+
+  // Use TBB's parallel_reduce template
+  tbb::blocked_range<int> range(0, count);
+  BlockedReducer body(&plan);
+  tbb::parallel_reduce(range, body);
+
+  // Return the result
+  if (!body.has_value) {
+    fprintf(stderr, "triolet_C_blocked_reduceip: "
+            "Unexpected uninitialized value\n");
+    exit(-1);
+  }
+  return body.value;
+}
+
+#endif	// USE_TBB
+
+/*****************************************************************************/
 /* Parallelized doall */
 
 /* Functions written in low-level triolet */

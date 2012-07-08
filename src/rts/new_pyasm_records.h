@@ -293,6 +293,14 @@ record BlockedReduceData {
   owned reducer;		// Function that reduces two values
 };
 
+/* This data structure is used by 'blocked_reduceip' to store data that's
+ * used in C
+ */
+record BlockedReduceIPData {
+  owned generator;		// Function that generates and reduces values
+  owned reducer;		// Function that reduces two values
+};
+
 /* A stream of values.  Stream elements are computed on demand.
  *
  * next : state -> StreamNext

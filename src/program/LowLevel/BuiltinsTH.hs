@@ -327,6 +327,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_blocked_1d_reduce) |])
   , (CoreName module_prim "blocked_2d_reduce",
      Right [| coreBuiltin (SystemF.The_blocked_2d_reduce) |])
+  , (CoreName module_prim "blocked_1d_reduceip",
+     Right [| coreBuiltin (SystemF.The_blocked_1d_reduceip) |])
   , (CoreName module_prim "blocked_doall",
      Right [| coreBuiltin (SystemF.The_blocked_doall) |])
   , (CoreName module_prim "blocked_doall2",

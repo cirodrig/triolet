@@ -603,6 +603,34 @@ barray3Scatter : (a i : bare)
               -> Scatter (StuckRef (BoxedType a)) i
               -> Scatter (barray3 a) (Tuple2 (index dim3) i);
 
+-- Using the contents of a 'Scatter' object, perform part of a scatter
+-- operation sequentially on a list_dim.  Return the scatter state.
+Sequence_partial_scatter : (i s : bare) -> (iniF updF : box)
+                        -> Repr i -> Repr s
+                        -> (iniF -> OutPtr s -> EffTok)
+                        -> (updF -> i -> EffTok -> OutPtr s -> EffTok)
+                        -> (i -> updF)
+                        -> iniF
+                        -> Sequence i
+                        -> Init s;
+
+-- Using the contents of a 'Scatter' object, perform part of a scatter
+-- operation sequentially on a list_dim.  Return the scatter state.
+partial_list_dim_scatter : (i s : bare) -> (iniF updF : box)
+                        -> Repr i -> Repr s
+                        -> (iniF -> OutPtr s -> EffTok)
+                        -> (updF -> i -> EffTok -> OutPtr s -> EffTok)
+                        -> (i -> updF)
+                        -> iniF
+                        -> list_dim
+                        -> (Stored int -> Init i)
+                        -> Init s;
+
+
+finish_scatter : (r s : bare)
+              -> Repr r -> Repr s -> UpdateInPlaceFinalizer s r
+              -> Init s -> Init r;
+
 -------------------------------------------------------------------------------
 -- Trees of lists
 
@@ -1965,6 +1993,13 @@ Sequence_parallel_build : (a : bare)
                        -> (Stored int -> Sequence a)
                        -> Init (list a);
 
+Sequence_parallel_scatter : (i r : bare)
+                         -> Repr i -> Repr r
+                         -> list_dim
+                         -> Scatter r i
+                         -> (Stored int -> Sequence i)
+                         -> Init r;
+
 -------------------------------------------------------------------------------
 -- High-level stream and container functions
 
@@ -2133,6 +2168,20 @@ parallel_list_dim_reduce1 : (a : bare)
   -> (Stored int -> Init a)
   -> (a -> a -> Init a)
   -> Init a;
+
+primitive_list_dim_scatter : (i r : bare)
+  -> Repr i -> Repr r
+  -> list_dim
+  -> Scatter r i
+  -> (Stored int -> Init i)
+  -> Init r;
+
+parallel_list_dim_scatter : (i r : bare)
+  -> Repr i -> Repr r
+  -> list_dim
+  -> Scatter r i
+  -> (Stored int -> Init i)
+  -> Init r;
 
 primitive_list_dim_fold : (acc : bare)
   -> Repr acc
@@ -2579,6 +2628,17 @@ blocked_2d_reduce :
  -> (acc -> acc -> acc) -- Reducer
  -> acc			-- Initial value
  -> ((M N : intindex) -> int -> FIInt M -> int -> FIInt N -> acc -> acc)
+    -- ^ Generate and combine a value on a part of the domain
+ -> acc;
+
+-- Blocked parallel in-place reduction, implemented in low-level.
+
+blocked_1d_reduceip :
+    (N : intindex)
+ -> (acc : box)
+ -> FIInt N		-- Size of range
+ -> (acc -> acc -> acc) -- Reducer
+ -> ((M : intindex) -> int -> FIInt M -> acc)
     -- ^ Generate and combine a value on a part of the domain
  -> acc;
 

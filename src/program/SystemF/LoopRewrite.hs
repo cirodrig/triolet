@@ -79,8 +79,7 @@ parLoopOperator v =
             coreBuiltin The_parallel_doall2,
             coreBuiltin The_blocked_1d_reduce,
             coreBuiltin The_blocked_2d_reduce,
-            coreBuiltin The_blocked_1d_reduce1,
-            coreBuiltin The_blocked_2d_reduce1,
+            coreBuiltin The_blocked_1d_reduceip,
             coreBuiltin The_blocked_doall,
             coreBuiltin The_blocked_doall2,
             coreBuiltin The_parallel_list_dim_reduce,
@@ -89,9 +88,13 @@ parLoopOperator v =
             coreBuiltin The_parallel_list_dim_reduce1,
             coreBuiltin The_parallel_dim1_reduce1,
             coreBuiltin The_parallel_dim2_reduce1,
+            coreBuiltin The_parallel_list_dim_scatter,
             coreBuiltin The_parallel_list_dim_list,
             coreBuiltin The_parallel_dim1_array,
-            coreBuiltin The_parallel_dim2_array
+            coreBuiltin The_parallel_dim2_array,
+            coreBuiltin The_Sequence_parallel_reduce,
+            coreBuiltin The_Sequence_parallel_build,
+            coreBuiltin The_Sequence_parallel_scatter            
            ] 
   
 otherLoopOperator v =
@@ -108,6 +111,7 @@ otherLoopOperator v =
             coreBuiltin The_primitive_list_dim_reduce1,
             coreBuiltin The_primitive_dim1_reduce1,
             coreBuiltin The_primitive_dim2_reduce1,
+            coreBuiltin The_primitive_list_dim_scatter,
             coreBuiltin The_primitive_list_dim_list,
             coreBuiltin The_primitive_dim1_array,
             coreBuiltin The_primitive_dim2_array
@@ -174,6 +178,8 @@ replaceWithParallelApp inf op_var ty_args args =
          ReplaceWith $ coreBuiltin The_parallel_dim1_reduce1)
       , (coreBuiltin The_primitive_dim2_reduce1,
          ReplaceWith $ coreBuiltin The_parallel_dim2_reduce1)
+      , (coreBuiltin The_primitive_list_dim_scatter,
+         ReplaceWith $ coreBuiltin The_parallel_list_dim_scatter)
       , (coreBuiltin The_primitive_list_dim_list,
          ReplaceWith $ coreBuiltin The_parallel_list_dim_list)
       , (coreBuiltin The_primitive_dim1_array,
@@ -186,6 +192,8 @@ replaceWithParallelApp inf op_var ty_args args =
          Rewrite rewriteSequenceReduce)
       , (coreBuiltin The_Sequence_build_list,
          Rewrite rewriteSequenceBuildList)
+      , (coreBuiltin The_Sequence_scatter,
+         Rewrite rewriteSequenceScatter)
       ]
 
 -- | Attempt to rewrite a reduction over a sequence.
@@ -209,7 +217,7 @@ rewriteSequenceReduce inf [ty] (repr : reducer : init : source : other_args) =
 
 -- | Attempt to rewrite a list construction from a sequence.
 --
---   Assume that the sequence produces an irregular number of outputs.
+--   Assume that the Sequence produces an irregular number of outputs.
 --   Sequences producing a regular number of outputs should have been 
 --   converted to lists.
 --
@@ -229,6 +237,29 @@ rewriteSequenceBuildList inf [ty] (repr : source : other_args) =
                            (coreBuiltin The_Sequence_parallel_build))
       [ty]
       (repr : range : transformer : other_args)
+
+-- | Attempt to rewrite a scatter from a sequence.
+--
+--   Assume that the Sequence produces an irregular number of outputs.
+--   Sequences producing a regular number of outputs should have been 
+--   converted to lists.
+--
+--   Try to match the pattern @scatter s (generate_bind d f) g@ and
+--   replace it with @parallel_scatter d s f g@.
+rewriteSequenceScatter inf [t1, t2] (repr1 : repr2 : scatterer : source : other_args) =
+  case unpackVarAppM source
+  of Just (op, [_], [range, transformer])
+       | op `isCoreBuiltin` The_Sequence_generate_bind -> do
+         -- Pattern was matched
+         parallel_app range transformer
+     _ -> return Nothing
+  where
+    parallel_app range transformer =
+      return $ Just $
+      appE defaultExpInfo (ExpM $ VarE defaultExpInfo
+                           (coreBuiltin The_Sequence_parallel_scatter))
+      [t1, t2]
+      (repr1 : repr2 : range : scatterer : transformer : other_args)
 
 -------------------------------------------------------------------------------
 -- Traversal

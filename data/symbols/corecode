@@ -2084,6 +2084,94 @@ barray3Scatter @(a i : bare)
   barray_finalizer make_updater make_init;
 
 
+Sequence_partial_scatter @(i s : bare) @(iniF updF : box)
+  (repr_i : Repr i) (repr_s : Repr s)
+  (initializer : iniF -> OutPtr s -> EffTok)
+  (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
+  (make_updater : i -> updF)
+  (make_init : iniF)
+  (src : Sequence i)
+  (ret : OutPtr s)
+  -> Store
+  attribute(inline, inline_sequential) =
+
+  let type SEff = Stored EffTok in
+
+   -- Initialize the output
+   case boxed @SEff (stored @EffTok (initializer make_init ret)) of
+     boxed @SEff (init_eff_tok : SEff).
+
+   case boxed @SEff
+        (Sequence_fold @i @SEff
+         repr_i repr_EffTok
+         (\ (x : SEff) (y : i) (loop_ret : OutPtr SEff) -> Store.
+            case x of stored @EffTok (x_u : EffTok).
+            stored @EffTok (updater (make_updater y) y x_u ret) loop_ret)
+            init_eff_tok
+            src) of
+     boxed @SEff (s_final_eff_tok : SEff).
+
+   -- Translate to a return value
+   case s_final_eff_tok of stored @EffTok (final_eff_tok : EffTok).
+   fromEffTok @s final_eff_tok;
+
+
+partial_list_dim_scatter @(i s : bare) @(iniF updF : box)
+  (repr_i : Repr i) (repr_s : Repr s)
+  (initializer : iniF -> OutPtr s -> EffTok)
+  (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
+  (make_updater : i -> updF)
+  (make_init : iniF)
+  (dom : list_dim)
+  (f : Stored int -> Init i)
+  (ret : OutPtr s)
+  -> Store
+  attribute(inline, inline_sequential) =
+
+  let type SEff = Stored EffTok in
+
+  -- Initialize the output
+  case boxed @SEff (stored @EffTok (initializer make_init ret)) of
+     boxed @SEff (init_eff_tok : SEff).
+
+   -- Sequential in-place update
+   case boxed @SEff
+        (primitive_list_dim_fold @SEff
+         repr_EffTok dom
+         (\ (index : Stored int) (x : SEff) (loop_ret : OutPtr SEff) -> Store.
+            case x of stored @EffTok (x_u : EffTok).
+
+            -- Compute a value
+            case stuckBox @i (f index) of stuckBox @i (y : i).
+
+            -- Perform an update
+            stored @EffTok (updater (make_updater y) y x_u ret) loop_ret)
+         init_eff_tok) of
+     boxed @SEff (s_final_eff_tok : Stored EffTok).
+
+   -- Translate to a return value
+   case s_final_eff_tok of stored @EffTok (final_eff_tok : EffTok).
+   fromEffTok @s final_eff_tok;
+
+
+finish_scatter @(r s : bare) 
+  (rep_r : Repr r)
+  (rep_s : Repr s)
+  (finalizer : UpdateInPlaceFinalizer s r)
+  (w : Init s)
+  (ret : OutPtr r)
+  -> Store
+  attribute(inline, inline_sequential) =
+
+  case finalizer of {
+    mutateInPlace @s @r (co : coerce @bare s r).
+      (coerce @(Init s) @(Init r) w) ret
+
+  ; mutateAndCopy @s @r (f : s -> Init r).
+      case boxed @s w of boxed @s (tmp : s).
+      f tmp ret
+  };
+
 -------------------------------------------------------------------------------
 -- Traversable methods
 
@@ -5929,53 +6017,12 @@ scatter_list_dim @(i r : bare)
   (src : view list_dim i)
   (ret : OutPtr r)
   -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
-  case op of
-    mk_scatter @r @i @(s : bare) @(iniF : box) @(updF : box)
-    (repr_s : Repr s)
-    (initializer : iniF -> OutPtr s -> EffTok)
-    (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
-    (combiner : s -> s -> Init s)
-    (finalizer : UpdateInPlaceFinalizer s r)
-    (make_updater : i -> updF)
-    (make_init : iniF).
+  case src of
+    mk_view @list_dim @i (dom : list_dim) (gen : Stored int -> Init i).
 
-  letfun
-    use_finalizer (w : Init s) (ret : OutPtr r) -> Store =
-      case finalizer of {
-        mutateInPlace @s @r (co : coerce @bare s r).
-          (coerce @(Init s) @(Init r) w) ret
-
-      ; mutateAndCopy @s @r (f : s -> Init r).
-          case boxed @s w of boxed @s (tmp : s).
-          f tmp ret
-      } in
-
-  -- Perform the computation; copy to output if required
-  use_finalizer
-  (\ (local_ret : OutPtr s) -> Store.
-   -- Initialize the output
-   case boxed @(Stored EffTok)
-        (stored @EffTok (initializer make_init local_ret)) of
-     boxed @(Stored EffTok) (init_eff_tok : Stored EffTok).
-
-   -- Sequential in-place update
-   case boxed @(Stored EffTok)
-        (fold_list_dim @i @(Stored EffTok)
-         repr_i repr_EffTok
-         (\ (x : Stored EffTok) (y : i) (loop_ret : OutPtr (Stored EffTok))
-            -> Store.
-            case x of stored @EffTok (x_u : EffTok).
-            stored @EffTok (updater (make_updater y) y x_u local_ret) loop_ret)
-         init_eff_tok
-         src) of
-     boxed @(Stored EffTok) (s_final_eff_tok : Stored EffTok).
-
-   -- Translate to a return value
-   case s_final_eff_tok of stored @EffTok (final_eff_tok : EffTok).
-     fromEffTok @s final_eff_tok)
-  ret;
+  primitive_list_dim_scatter @i @r repr_i repr_r dom op gen ret;
 
 
 fold_list_dim @(a acc : bare)
@@ -6123,38 +6170,9 @@ Sequence_scatter @(i r : bare)
     (make_updater : i -> updF)
     (make_init : iniF).
 
-  letfun
-    use_finalizer (w : Init s) (ret : OutPtr r) -> Store =
-      case finalizer of {
-        mutateInPlace @s @r (co : coerce @bare s r).
-          (coerce @(Init s) @(Init r) w) ret
-
-      ; mutateAndCopy @s @r (f : s -> Init r).
-          case boxed @s w of boxed @s (tmp : s).
-          f tmp ret
-      } in
-
-  use_finalizer
-  (\ (local_ret : OutPtr s) -> Store.
-   -- Initialize the output
-   case boxed @(Stored EffTok)
-        (stored @EffTok (initializer make_init local_ret)) of
-     boxed @(Stored EffTok) (init_eff_tok : Stored EffTok).
-
-       case boxed @(Stored EffTok)
-            (Sequence_fold @i @(Stored EffTok)
-             repr_i repr_EffTok
-             (\ (x : Stored EffTok) (y : i) (loop_ret : OutPtr (Stored EffTok))
-                -> Store.
-                case x of stored @EffTok (x_u : EffTok).
-                stored @EffTok (updater (make_updater y) y x_u local_ret) loop_ret)
-             init_eff_tok
-             src) of
-         boxed @(Stored EffTok) (s_final_eff_tok : Stored EffTok).
-
-   -- Translate to a return value
-   case s_final_eff_tok of stored @EffTok (final_eff_tok : EffTok).
-     fromEffTok @s final_eff_tok)
+  finish_scatter @r @s repr_r repr_s finalizer
+  (Sequence_partial_scatter @i @s @iniF @updF
+   repr_i repr_s initializer updater make_updater make_init src)
   ret;
 
 
@@ -6360,6 +6378,71 @@ Sequence_parallel_build @(a : bare)
 
   except @Store;
 
+
+Sequence_parallel_scatter @(i r : bare)
+  (rep_i : Repr i) (rep_r : Repr r)
+  (dom : list_dim)
+  (scatter : Scatter r i)
+  (f : Stored int -> Sequence i)
+  (ret : OutPtr r)
+  -> Store
+  attribute(inline) =
+
+  case scatter of
+    mk_scatter @r @i @(s : bare) @(iniF : box) @(updF : box)
+    (rep_s : Repr s)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Init s)
+    (finalizer : UpdateInPlaceFinalizer s r)
+    (update_func : i -> updF)
+    (init_func : iniF).
+
+  let type bs = StuckBox s in
+
+  letfun
+    -- Version of 'combiner' for boxed objects
+    boxed_combiner (x : bs) (y : bs) -> bs =
+      case x of stuckBox @s (ux : s).
+      case y of stuckBox @s (uy : s).
+      stuckBox @s (combiner ux uy)
+  in
+
+  case dom of mk_list_dim (maybe_size : MaybeVal int).
+
+  case maybe_size of {
+    justVal @int (count : int).
+      case defineIntIndex count of someIInt @(N : intindex) (size : FIInt N).
+
+      -- Perform a parallel reduction over this range
+      case blocked_1d_reduceip @N @bs size
+           boxed_combiner
+           (\ @(M : intindex) (start : int) (range_size : FIInt M) -> bs.
+              -- Sequential reduction over this sub-range
+              case range_size of fiInt @M (range_count : int).
+              let subdom : list_dim = mk_list_dim (justVal @int range_count) in
+                    
+              stuckBox @s
+              (Sequence_partial_scatter @i @s @iniF @updF rep_i rep_s
+               initializer updater update_func init_func
+               (Sequence_generate_bind @i subdom
+                (\ (sindex : Stored int) -> Sequence i.
+                   -- Add 'start' to the index
+                   case sindex of stored @int (uindex : int).
+                   case stuckBox @(Stored int)
+                        (stored @int (uindex +# start)) of
+                     stuckBox @(Stored int) (sindex2 : Stored int).
+                     f sindex2)))) of
+        stuckBox @s (final_state : s).
+
+      -- Create the final object
+      finish_scatter @r @s rep_r rep_s finalizer
+      (copy @s rep_s final_state) ret
+
+  ; nothingVal @int.
+      except @Store
+  };
+
 -------------------------------------------------------------------------------
 -- Helper functions over the basic loop layer
 
@@ -6518,6 +6601,32 @@ primitive_list_dim_reduce1 @(a : bare)
       -- Can't evaluate on an infinite domain
       except @Store
   };
+
+
+primitive_list_dim_scatter @(i r : bare)
+  (repr_i : Repr i)
+  (repr_r : Repr r)
+  (dom : list_dim)
+  (op : Scatter r i)
+  (src : Stored int -> Init i)
+  (ret : OutPtr r)
+  -> Store
+  attribute(inline, inline_sequential) =
+
+  case op of
+    mk_scatter @r @i @(s : bare) @(iniF : box) @(updF : box)
+    (repr_s : Repr s)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Init s)
+    (finalizer : UpdateInPlaceFinalizer s r)
+    (make_updater : i -> updF)
+    (make_init : iniF).
+
+  finish_scatter @r @s repr_r repr_s finalizer
+  (partial_list_dim_scatter @i @s @iniF @updF repr_i repr_s
+   initializer updater make_updater make_init dom src)
+  ret;
 
 
 primitive_list_dim_fold @(acc : bare)
@@ -6793,6 +6902,69 @@ parallel_list_dim_reduce1 @(a : bare)
       except @Store
   };
 
+
+parallel_list_dim_scatter @(i r : bare)
+  (repr_i : Repr i) (repr_r : Repr r)
+  (dom : list_dim)
+  (op : Scatter r i)
+  (f : Stored int -> Init i)
+  (ret : OutPtr r)
+  -> Store
+  attribute(inline) =
+
+  case op of
+    mk_scatter @r @i @(s : bare) @(iniF : box) @(updF : box)
+    (rep_s : Repr s)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Init s)
+    (finalizer : UpdateInPlaceFinalizer s r)
+    (update_func : i -> updF)
+    (init_func : iniF).
+
+  let type bs = StuckBox s in
+
+  letfun
+    -- Version of 'combiner' for boxed objects
+    boxed_combiner (x : bs) (y : bs) -> bs =
+      case x of stuckBox @s (ux : s).
+      case y of stuckBox @s (uy : s).
+      stuckBox @s (combiner ux uy)
+  in
+
+  case dom of mk_list_dim (maybe_size : MaybeVal int).
+
+  case maybe_size of {
+    justVal @int (count : int).
+      case defineIntIndex count of someIInt @(N : intindex) (size : FIInt N).
+
+      -- Perform a parallel reduction over this range
+      case blocked_1d_reduceip @N @bs size
+           boxed_combiner
+           (\ @(M : intindex) (start : int) (range_size : FIInt M) -> bs.
+              -- Sequential reduction over this sub-range
+              case range_size of fiInt @M (range_count : int).
+              let subdom : list_dim = mk_list_dim (justVal @int range_count) in
+                    
+              stuckBox @s
+              (partial_list_dim_scatter @i @s @iniF @updF repr_i rep_s
+               initializer updater update_func init_func subdom
+               (\ (sindex : Stored int) (local_ret : OutPtr i) -> Store.
+                  -- Add 'start' to the index
+                  case sindex of stored @int (uindex : int).
+                  case stuckBox @(Stored int)
+                       (stored @int (uindex +# start)) of
+                    stuckBox @(Stored int) (sindex2 : Stored int).
+                  f sindex2 local_ret))) of
+        stuckBox @s (final_state : s).
+
+      -- Create the final object
+      finish_scatter @r @s repr_r rep_s finalizer
+      (copy @s rep_s final_state) ret
+
+  ; nothingVal @int.
+      except @Store
+  };
 
 -------------------------------------------------------------------------------
 -- Sequential loops
