@@ -233,7 +233,7 @@ struct BlockedInPlaceReducer {
   BlockedInPlaceReducer(BlockedReduceIPPlan *_plan) :
     plan(_plan), has_value(false), value(NULL) {};
 
-  BlockedInPlaceReducer(BlockedReducer &other, tbb::split) :
+  BlockedInPlaceReducer(BlockedInPlaceReducer &other, tbb::split) :
     plan(other.plan), has_value(false), value(NULL) {};
 
   void operator()(const tbb::blocked_range<int> &range) {
@@ -267,13 +267,13 @@ struct BlockedInPlaceReducer {
 };
 
 void *
-triolet_C_blocked_reduceip(void *data, TrioletInt count)
+triolet_C_blocked_reduceip(void *data_value, TrioletInt count)
 {
   BlockedReduceIPPlan plan = {data_value};
 
   // Use TBB's parallel_reduce template
   tbb::blocked_range<int> range(0, count);
-  BlockedReducer body(&plan);
+  BlockedInPlaceReducer body(&plan);
   tbb::parallel_reduce(range, body);
 
   // Return the result
