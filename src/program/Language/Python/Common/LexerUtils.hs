@@ -189,6 +189,12 @@ alexGetChar (loc, input)
    rest = tail input 
    nextLoc = moveChar nextChar loc
 
+alexGetByte :: AlexInput -> Maybe (Word8, AlexInput)
+alexGetByte inp =
+  case alexGetChar inp
+  of Nothing -> Nothing
+     Just (c, i) -> Just (fromIntegral $ fromEnum c, i)
+
 moveChar :: Char -> SrcLocation -> SrcLocation 
 moveChar '\n' = incLine 1 
 moveChar '\t' = incTab 
