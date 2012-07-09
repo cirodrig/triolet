@@ -52,7 +52,7 @@ Executable triolet
   Extensions:
     ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
     EmptyDataDecls, TypeOperators, TypeFamilies, DeriveDataTypeable,
-    FlexibleInstances
+    FlexibleInstances, BangPatterns, NoMonomorphismRestriction
   Ghc-Options: -auto
   Include-Dirs:
     src/program

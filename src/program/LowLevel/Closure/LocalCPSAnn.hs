@@ -30,7 +30,6 @@ import Data.Traversable
 import qualified Data.IntMap as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe
-import Data.Monoid
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error

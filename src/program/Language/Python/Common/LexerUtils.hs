@@ -16,7 +16,8 @@ module Language.Python.Common.LexerUtils where
 import Control.Monad (liftM)
 import Control.Monad.Error.Class (throwError)
 import Data.List (foldl')
-import Data.Map as Map hiding (null, map)
+import qualified Data.Map as Map
+import Data.Word
 import Numeric (readHex, readOct)
 import Language.Python.Common.Token as Token 
 import Language.Python.Common.ParserMonad hiding (location)

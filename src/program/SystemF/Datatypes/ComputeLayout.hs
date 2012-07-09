@@ -424,6 +424,8 @@ computeObjectLayout lc kind ty = do
   -- Freshen and normalize head before inspecting
   computeObjectLayout' lc tenv kind =<< freshen ty'
 
+computeObjectLayout' :: Algorithm e d -> TypeEnv -> BaseKind -> Type
+                     -> Compute e d d
 computeObjectLayout' lc tenv kind ty =
   case fromTypeApp ty
   of (VarT con, args)

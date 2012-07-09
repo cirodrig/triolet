@@ -63,7 +63,7 @@ import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
 import Data.Maybe
-import Data.Monoid
+import Data.Monoid(Monoid(..))
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 

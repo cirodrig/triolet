@@ -23,7 +23,7 @@ import Control.Monad.State hiding(mapM, sequence)
 import qualified Data.IntMap as IntMap
 import Data.List
 import Data.Maybe
-import Data.Monoid
+import Data.Monoid hiding((<>))
 import Data.Traversable
 import qualified Data.Set as Set
 import Debug.Trace
@@ -532,6 +532,8 @@ packParameterWrite (FlatArg pat flat_arg) =
 
 packParameterWrite (DummyArg _) = return Nothing
   
+packParameterWrite' :: (ReprDictMonad m, EvalMonad m) =>
+                       PatM -> Decomp -> m ExpM
 packParameterWrite' pat flat_arg =
   case flat_arg
   of IdDecomp -> copy_expr (patMType pat) (var_exp $ patMVar pat)

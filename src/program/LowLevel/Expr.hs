@@ -28,12 +28,10 @@ where
 import Prelude hiding(lookup)
 
 import Control.Monad
-import Control.Monad.Writer
 import qualified Data.List as List
 import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
 import Data.Maybe
-import Data.Monoid
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ hiding(empty)
 

@@ -50,7 +50,7 @@ trioletPointerType :: CDecl
 trioletPointerType = anonymousDecl (nameDeclSpecs "TrioletPtr")
 
 -- | Generate a constant integer expression
-intConst :: Integral a => Signedness -> Size -> a -> CExpr
+intConst :: (Show a, Integral a) => Signedness -> Size -> a -> CExpr
 intConst sgn sz n =
   let sign_flag = case sgn
                   of Signed -> ""
