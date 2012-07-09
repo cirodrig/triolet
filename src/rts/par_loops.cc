@@ -389,11 +389,18 @@ typedef void *PBTree;
 extern "C" void
 blocked_doall_PBTree_worker(void *worker_fn, TrioletInt i, PBTree tree);
 
+/* Return nonzero if tree is splittable */
 extern "C" int
 triolet_PBTree_splittable(PBTree tree);
 
+/* If tree is splittable, return nonzero, put left child in (*children)[0],
+   and put right child in (*children)[1].  Otherwise, return zero. */
 extern "C" int
 triolet_PBTree_split(PBTree tree, PBTree (*children)[2]);
+
+/* Return size of tree */
+extern "C" int
+triolet_PBTree_size(PBTree tree);
 
 #ifndef USE_TBB
 

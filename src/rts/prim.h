@@ -178,6 +178,10 @@ extern procedure core.internal.prim.PBTree_splittable
 extern procedure core.internal.prim.PBTree_split
   "triolet_PBTree_split" (owned, pointer) -> bool;
 
+// Get the number of array elements contained in this tree's leaves.
+extern procedure core.internal.prim.PBTree_size
+  "triolet_PBTree_size" (owned) -> int;
+
 // Construct a leaf from an array.
 extern procedure core.internal.prim.PBTree_leaf
   "triolet_PBTree_leaf" (pointer) -> owned;
