@@ -395,7 +395,7 @@ triolet_PBTree_splittable(PBTree tree);
 extern "C" int
 triolet_PBTree_split(PBTree tree, PBTree (*children)[2]);
 
-#ifdef USE_TBB
+#ifndef USE_TBB
 
 extern "C" void
 triolet_C_blocked_PBTree_doall(PBTree tree, void *worker_fn)
