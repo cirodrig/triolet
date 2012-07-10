@@ -23,7 +23,7 @@ import Control.Monad.State hiding(mapM, sequence)
 import qualified Data.IntMap as IntMap
 import Data.List
 import Data.Maybe
-import Data.Monoid hiding((<>))
+import Data.Monoid(Monoid(..), Any(..))
 import Data.Traversable
 import qualified Data.Set as Set
 import Debug.Trace
@@ -1074,7 +1074,7 @@ deadValue t = do
                -- Get types of data constructor parameters
                let Just datacon_type =
                      lookupType (coreBuiltin The_fiInt) tenv
-               Just monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
+               TypeAppOk monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
                let (dom, _) = fromFunType monotype
 
                -- Create arguments to data constructor
@@ -1085,7 +1085,7 @@ deadValue t = do
                -- Use 'iInt' as the data constructor
                let Just datacon_type =
                      lookupType (coreBuiltin The_iInt) tenv
-               Just monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
+               TypeAppOk monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
                let (dom, _) = fromFunType monotype
 
                -- Create arguments to data constructor

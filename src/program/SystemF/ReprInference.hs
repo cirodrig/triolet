@@ -889,7 +889,7 @@ type TypeArgument = (Type, Kind)
 --   TODO: Get rid of this data structure.
 --   We should just apply arguments and type arguments one by one, without
 --   jumping through hoops.
-data AppResult =
+data InfAppResult =
     -- | An application of a function or data constructor to arguments 
     FunAppResult
     { -- | The applied expression, except for value arguments which must be
@@ -922,7 +922,7 @@ data AppResult =
     , appliedReturnType      :: Type
     }
 
-appResult :: ExpM -> Type -> AppResult
+appResult :: ExpM -> Type -> InfAppResult
 appResult e ty = FunAppResult { appliedExpr           = mk_expr
                               , appliedReturnType     = ty
                               , appliedCoercions      = []
@@ -931,7 +931,7 @@ appResult e ty = FunAppResult { appliedExpr           = mk_expr
     mk_expr [] = return e
     mk_expr _  = internalError "appResult: Wrong number of arguments"
 
-conAppResult :: Var -> DataConType -> Type -> AppResult
+conAppResult :: Var -> DataConType -> Type -> InfAppResult
 conAppResult v data_type ty
   | num_args == 0 =
       -- No type parameters required
@@ -959,10 +959,10 @@ conAppResult v data_type ty
     mk_expr [] = return $ conE defaultExpInfo (VarCon v [] []) []
     mk_expr _  = internalError "conAppResult: Wrong number of arguments"
 
--- | Coerce the result type of an 'AppResult'.
+-- | Coerce the result type of an 'InfAppResult'.
 --   The parameter @from_type@ must be the same as the return type of
 --   @app_result@, and it must be coercible to @to_type@.
-resultOfCoercion :: Type -> Type -> AppResult -> AppResult
+resultOfCoercion :: Type -> Type -> InfAppResult -> InfAppResult
 resultOfCoercion from_type to_type app_result =
   app_result { appliedExpr = coerce $ appliedExpr app_result
              , appliedReturnType = to_type
@@ -1003,10 +1003,10 @@ resultOfCoercion from_type to_type app_result =
             -- Should not happen in a well-typed program
             go _ _ _ = internalError "resultOfCoercion"
 
--- | Apply a type to an 'AppResult', producing a new 'AppResult'.
+-- | Apply a type to an 'InfAppResult', producing a new 'InfAppResult'.
 --   Applying to @arg_type@ must produce a result with type @result_type@.
 --   Type correctness is not verified.
-resultOfTypeApp :: Type -> Type -> AppResult -> AppResult
+resultOfTypeApp :: Type -> Type -> InfAppResult -> InfAppResult
 resultOfTypeApp result_type type_arg (FunAppResult base_exp _ co _) =
   FunAppResult (app base_exp) result_type co Nothing
   where
@@ -1041,7 +1041,7 @@ resultOfTypeApp result_type type_arg (VarConExpectingTypes con ty_args univ_arit
       in return $ conE defaultExpInfo (VarCon con u_args e_args) []
     mk_expr _  = internalError "resultOfTypeApp: Wrong number of arguments"
 
-resultOfApp :: Type -> Coercion -> AppResult -> AppResult
+resultOfApp :: Type -> Coercion -> InfAppResult -> InfAppResult
 resultOfApp _ _ (VarConExpectingTypes {}) = 
   internalError "resultOfApp: Expecting type arguments"
 
@@ -1077,7 +1077,7 @@ resultOfApp result_type co app_result =
         apply_expr arg e =
           ExpM (AppE defaultExpInfo e [] [arg])
 
-applyResultToValues :: AppResult -> [ExpM] -> RI (ExpM, Type)
+applyResultToValues :: InfAppResult -> [ExpM] -> RI (ExpM, Type)
 applyResultToValues app_result arguments =
   let coercions = reverse $ appliedCoercions app_result
   in coerceExps coercions arguments $ \co_arguments -> do
@@ -1090,7 +1090,7 @@ reprTypeOfApp :: ExpM           -- ^ Operator
               -> Type           -- ^ Operator type
               -> [TypeArgument] -- ^ Type arguments
               -> [Type]         -- ^ Types of value arguments
-              -> RI AppResult
+              -> RI InfAppResult
 reprTypeOfApp op op_type ty_args arg_types = do
   instantiated_result <- foldM applyToTypeArg (appResult op op_type) ty_args
   foldM applyToArg instantiated_result arg_types
@@ -1133,7 +1133,7 @@ reprApplyCon op ty_args args = do
 
 -- | Compute the result of a type application.
 --   The operator and argument are coerced as needed, then applied.
-applyToTypeArg :: AppResult -> (Type, Kind) -> RI AppResult
+applyToTypeArg :: InfAppResult -> (Type, Kind) -> RI InfAppResult
 applyToTypeArg operator (arg_t, g_kind) =
   case appliedReturnType operator
   of AllT (a ::: e_kind) rng -> do
@@ -1157,7 +1157,7 @@ applyToTypeArg operator (arg_t, g_kind) =
 
 -- | Compute the result of an application, given the type of
 --   the argument.
-applyToArg :: AppResult -> Type -> RI AppResult
+applyToArg :: InfAppResult -> Type -> RI InfAppResult
 applyToArg operator arg_type =
   case appliedReturnType operator
   of FunT expected_type rng -> do

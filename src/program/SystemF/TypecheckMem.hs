@@ -15,6 +15,7 @@ import Control.Applicative(Const(..))
 import Control.Exception
 import Control.Monad hiding(mapM)
 import Control.Monad.Reader hiding(mapM)
+import qualified Data.List as List
 import Data.Traversable(mapM)
 import Data.Typeable(Typeable)
 import Data.Maybe
@@ -111,20 +112,20 @@ typeInferLitE inf l = do
 
 typeInferConE :: ExpM -> ExpInfo -> ConInst -> [ExpM] -> TCM Type
 typeInferConE orig_exp inf con args = do
-  (field_types, result_type) <- typeInferCon con
+  (field_types, result_type) <- typeInferCon (getSourcePos inf) con
 
   -- Verify that argument types match
   forM_ (zip3 [1..] args field_types) $ \(index, arg, field_type) -> do
     arg_type <- typeInferExp arg
-    let message = text "Constructor field" <+> int index <+> text "has wrong type"
-    checkType message (getSourcePos inf) field_type arg_type
+    let source_pos = getSourcePos inf
+    checkType (conFieldTypeMismatch source_pos index) field_type arg_type
 
   return result_type
 
 -- | Infer the type of a constructor instance.  Return the parameter types
 --   and return type.
-typeInferCon :: EvalMonad m => ConInst -> m ([Type], Type)
-typeInferCon con@(VarCon op ty_args ex_types) = do
+typeInferCon :: EvalMonad m => SourcePos -> ConInst -> m ([Type], Type)
+typeInferCon pos con@(VarCon op ty_args ex_types) = do
   env <- getTypeEnv
   let Just data_con = lookupDataCon op env
   let Just type_con = lookupDataType (dataConTyCon data_con) env
@@ -144,14 +145,15 @@ typeInferCon con@(VarCon op ty_args ex_types) = do
       varApp (coreBuiltin The_OutPtr) [ty] `FunT` VarT (coreBuiltin The_Store)
     make_initializer _ ty = ty
 
-typeInferCon con@(TupleCon types) = do
+typeInferCon pos con@(TupleCon types) = do
   kinds <- liftTypeEvalM $ mapM typeCheckType types
 
-  -- All fields must have value or boxed type 
-  let valid_kind (VarT v) = v == valV || v == boxV
-      valid_kind _ = False
-  unless (all valid_kind kinds) $
-    typeError "typeInferCon: Wrong kind in field of unboxed tuple"
+  -- All fields must have value or boxed type
+  let check_kind i k@(VarT v)
+        | v == valV || v == boxV = Nothing -- No error
+        | otherwise = Just $ badUnboxedTupleField pos i k
+
+  maybe (return ()) typeError $ msum $ zipWith check_kind [1..] kinds
 
   let tuple_type = typeApp (UTupleT $ map toBaseKind kinds) types
   return (types, tuple_type)
@@ -171,16 +173,19 @@ typeInferAppE orig_expr inf op ty_args args = do
 -- | Compute the type of the result of applying an operator to some
 --   type arguments.
 computeInstantiatedType :: SourcePos -> Type -> [(Kind, Type)] -> TCM Type
-computeInstantiatedType inf op_type args_ = go op_type args_
+computeInstantiatedType inf op_type args_ = go 1 op_type args_
   where
-    go op_type ((arg_kind, arg) : args) = do
-      app_type <- typeOfTypeApp op_type arg_kind arg
-      case app_type of
-        Just result_type -> go result_type args
-        Nothing -> -- traceShow (text "CIT" <+> (pprType op_type $$ vcat (map (pprType . fromTypM) args_))) $
-                   typeError $ "Error in type application at " ++ show inf
+    go index op_type ((arg_kind, arg) : args) = do
+      app_result <- typeOfTypeApp op_type arg_kind arg
+      case app_result of
+        TypeAppOk result_type -> go (index+1) result_type args
+        KindMismatchErr e a   -> kind_mismatch index e a
+        NotAForallErr         -> not_a_forall op_type arg_kind
 
-    go op_type [] = return op_type
+    go _ op_type [] = return op_type
+
+    kind_mismatch i e a = typeError $ typeArgKindMismatch inf i e a
+    not_a_forall op_type arg_kind = typeError $ BadTyApp inf op_type arg_kind
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
@@ -190,21 +195,19 @@ computeAppliedType :: Maybe ExpM
                    -> [Type]
                    -> TCM Type
 computeAppliedType orig_expr pos op_type_ arg_types =
-  apply op_type_ arg_types
+  apply 1 op_type_ arg_types
   where
-    apply op_type (arg_t:arg_ts) = do
+    apply index op_type (arg_t:arg_ts) = do
       result <- typeOfApp op_type arg_t
       case result of
-        Just op_type' -> apply op_type' arg_ts
-        Nothing -> traceShow debug_message $
-                      typeError $ "Error in application at " ++ show pos
+        AppOk op_type'      -> apply (index + 1) op_type' arg_ts
+        TypeMismatchErr e a -> type_mismatch index e a
+        NotAFunctionErr     -> not_a_function op_type arg_t
     
-    apply op_type [] = return op_type
+    apply _ op_type [] = return op_type
     
-    debug_message = text "CAT" <+>
-                    (maybe empty pprExp orig_expr $$
-                     pprType op_type_ $$
-                     vcat [text ">" <+> pprType t | t <- arg_types])
+    type_mismatch i e a = typeError $ argTypeMismatch pos i e a
+    not_a_function op_type arg_type = typeError $ BadApp pos op_type arg_type
 
 typeInferFun :: FunM -> TCM Type
 typeInferFun fun@(FunM (Fun { funInfo = info
@@ -218,13 +221,13 @@ typeInferFun fun@(FunM (Fun { funInfo = info
     ti_body <- typeInferExp body
 
     -- Inferred type must match return type
-    new_ret_type <- typeInferType return_type
-    checkType (text "Return type mismatch") (getSourcePos info)
-      return_type ti_body
+    ret_kind <- typeInferType return_type
+    checkType (returnTypeMismatch source_pos) return_type ti_body
     
   -- Create the function's type
   return $ functionType fun
   where
+    source_pos = getSourcePos info
     assumeTyParams m = foldr assumeAndAnnotateTyPat m ty_params
 
 typeInferLetE :: ExpInfo -> PatM -> ExpM -> ExpM -> TCM Type
@@ -232,8 +235,9 @@ typeInferLetE inf pat expression body = do
   rhs_type <- typeInferExp expression
 
   -- Expression type must match pattern type
-  checkType (text "Let binder doesn't match type of right-hand side") (getSourcePos inf)
-    rhs_type (patMType pat)
+  let source_pos = getSourcePos inf
+      pat_var = patMVar pat
+  checkType (binderTypeMismatch source_pos pat_var) (patMType pat) rhs_type
 
   -- Assume the pattern while inferring the body; result is the body's type
   assumeAndAnnotatePat pat $ typeInferExp body
@@ -248,18 +252,18 @@ typeInferCaseE inf scr alts = do
 
   -- Get the scrutinee's type
   scr_type <- typeInferExp scr
-  
-  when (null alts) $ typeError "Empty case statement"
 
   -- Match against each alternative
-  alt_types <- mapM (typeCheckAlternative pos scr_type) alts
+  when (null alts) $ typeError (emptyCaseError pos)
+  (first_alt_type : other_alt_types) <-
+    mapM (typeCheckAlternative pos scr_type) alts
 
-  -- All alternatives must match
-  let msg = text "Case alternatives return different types"
-  zipWithM (checkType msg pos) alt_types (tail alt_types)
+  -- All alternatives must have the same type
+  forM_ (zip [2..] other_alt_types) $ \(i, t) ->
+    checkType (inconsistentCaseAlternatives pos i) first_alt_type t
   
   -- The expression's type is the type of an alternative
-  return $! head alt_types
+  return first_alt_type
 
 -- | Typecheck a pattern match.
 --   Return the field types that should be matched and the expected
@@ -282,10 +286,11 @@ typeInferDeCon pos decon@(TupleDeCon types) = do
   kinds <- mapM typeCheckType types
 
   -- All fields must have value or boxed type 
-  let valid_kind (VarT v) = v == valV || v == boxV
-      valid_kind _ = False
-  unless (all valid_kind kinds) $
-    typeError "typeInferDeCon: Wrong kind in field of unboxed tuple"
+  let check_kind i k@(VarT v)
+        | v == valV || v == boxV = Nothing -- No error
+        | otherwise = Just $ badUnboxedTupleField pos i k
+
+  maybe (return ()) typeError $ msum $ zipWith check_kind [1..] kinds
 
   let tuple_type = typeApp (UTupleT $ map toBaseKind kinds) types
   return (types, tuple_type)
@@ -304,15 +309,11 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
   when invalid_type $ internalError "typeCheckAlternative: Invalid pattern"
 
   -- Verify that applied type matches constructor type
-  let mismatch_message =
-        hang (text "Pattern type doesn't match scrutinee type") 4
-        (text "Pattern type:" <+> pprType expected_scr_type $$
-         text "Scrutinee type:" <+> pprType scr_type)
-  checkType mismatch_message pos scr_type expected_scr_type
+  checkType (scrutineeTypeMismatch pos) expected_scr_type scr_type
 
   -- Add existential variables to environment
   assumeBinders (deConExTypes con) $ do
-    
+
     -- Verify that fields have the expected types
     check_number_of_fields field_types fields
     zipWithM_ check_arg field_types (zip [1..] fields)
@@ -326,23 +327,23 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
       -- Make sure existential types don't escape 
       let ex_vars = [v | v ::: _ <- deConExTypes con]
       when (ret_type `typeMentionsAny` Set.fromList ex_vars) $
-        typeError "Existential type variable escapes"
+        -- Choose one escaping variable to report with the error message
+        let Just v = List.find (ret_type `typeMentions`) ex_vars
+        in typeError $ typeVariableEscapes pos v
 
       return ret_type
   where
     check_number_of_fields atypes fs
       | length atypes /= length fields =
-        let expected = show (length atypes)
-            got = show (length fields)
-            location = show pos
-        in internalError $ location ++ ": Wrong number of fields in pattern (expected " ++ expected
-           ++ ", got " ++ got ++ ")"
+        let expected = length atypes
+            got = length fields
+        in typeError $ wrongPatternBinderCount pos expected got
       | otherwise = return ()
 
     check_arg expected_rtype (pat_index, pat) =
       let given_type = patMType pat
-          msg = text "Wrong type in field" <+> int pat_index <+> text "of pattern"
-      in checkType msg pos expected_rtype given_type
+          pat_var = patMVar pat
+      in checkType (binderTypeMismatch pos pat_var) expected_rtype given_type
 
 -- | Verify that the given parameter matches the expected parameter
 checkAltParam pos expected_type pattern = do 
@@ -356,9 +357,8 @@ typeInferCoerceE inf from_t to_t body = do
   body_type <- typeInferExp body
   
   -- Body type must match the coercion's input type
-  checkType (text "Argument of coercion has wrong type")
-    (getSourcePos inf) from_t body_type
-  
+  checkType (coercionTypeMismatch (getSourcePos inf)) from_t body_type
+
   return to_t
 
 typeInferArray inf ty es = do
@@ -367,9 +367,9 @@ typeInferArray inf ty es = do
   -- Expressions must have an initializer type
   let init_type = 
         varApp (coreBuiltin The_OutPtr) [ty] `FunT` VarT (coreBuiltin The_Store)
-  let message = text "Expecting array element to have type " <+> pprType init_type
 
-  forM_ e_tys $ \g_ty -> checkType message (getSourcePos inf) init_type g_ty
+  forM_ (zip [0..] e_tys) $ \(i, g_ty) ->
+    checkType (arrayConTypeMismatch (getSourcePos inf) i) init_type g_ty
 
   return $ arrayInitializerType (length es) ty
 
@@ -377,8 +377,7 @@ checkConstant :: Constant Mem -> TCM ()
 checkConstant (Constant inf ty e) = do
   typeCheckType ty
   g_type <- typeInferExp e
-  checkType (text "Constant annotated with wrong type") (getSourcePos inf)
-    ty g_type
+  checkType (constantTypeMismatch (getSourcePos inf)) ty g_type
 
 typeCheckDefGroup :: DefGroup (FDef Mem) -> TCM b -> TCM b
 typeCheckDefGroup defgroup do_body = do
@@ -473,8 +472,8 @@ inferAppTypeQuickly op ty_args args = do
       let kind = typeKind tenv arg
       m_app_type <- typeOfTypeApp op_type kind arg
       case m_app_type of
-        Nothing -> err
-        Just t  -> apply_types tenv t args
+        TypeAppOk t -> apply_types tenv t args
+        _           -> err
     
     apply_types _ t [] = return t
   
@@ -535,7 +534,7 @@ inferAppType op_type ty_args arg_types =
 
 -- | Get the parameter types and result type of a data constructor application.
 conInstType :: EvalMonad m => ConInst -> m ([Type], Type)
-conInstType c = typeInferCon c
+conInstType c = typeInferCon noSourcePos c
 
 -- | Get the type described by a 'DeConInst'.
 deConInstType :: EvalMonad m => DeConInst -> m Type

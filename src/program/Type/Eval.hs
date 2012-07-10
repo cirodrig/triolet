@@ -4,7 +4,9 @@ module Type.Eval
         normalize,
         typeKind,
         typeCheckType,
+        TypeAppResult(..),
         typeOfTypeApp,
+        AppResult(..),
         typeOfApp,
         dataConFieldKinds,
         unboxedTupleTyCon,
@@ -105,8 +107,8 @@ typeCheckType ty =
        -- Get type of application
        applied <- typeOfApp op_k arg_k
        case applied of
-         Nothing -> internalError ("typeCheckType: Error in type application:\n" ++ show (pprType ty))
-         Just result_t -> return result_t
+         AppOk result_t -> return result_t
+         _ -> internalError ("typeCheckType: Error in type application:\n" ++ show (pprType ty))
 
      FunT dom rng -> do
        -- Check that types are valid
@@ -148,36 +150,50 @@ typeCheckType ty =
     valid_unboxed_tuple_field BoxK = True
     valid_unboxed_tuple_field _ = False
 
+-- | The result of a type application is a new type or a type error
+data TypeAppResult =
+    TypeAppOk Type              -- ^ Result of successful type application
+  | KindMismatchErr Type Type   -- ^ Mismatch between expected and given kinds
+  | NotAForallErr               -- ^ Applied a non-forall term to an argument 
+
 -- | Compute the type produced by applying a value of type @op_type@ to
 --   the type argument @arg@.  Verify that the application is well-typed.
 typeOfTypeApp :: Type               -- ^ Operator type
               -> Kind               -- ^ Argument kind
               -> Type               -- ^ Argument
-              -> TypeEvalM (Maybe Type)
+              -> TypeEvalM TypeAppResult
 typeOfTypeApp op_type arg_kind arg = do
   whnf_op_type <- reduceToWhnf op_type
   case whnf_op_type of
     AllT (x ::: dom) rng -> do
       type_ok <- compareTypes dom arg_kind
       if type_ok
-        then fmap Just $ Substitute.substituteVar x arg rng
-        else return Nothing
-    _ -> return Nothing
+        then fmap TypeAppOk $ Substitute.substituteVar x arg rng
+        else return $ KindMismatchErr dom arg_kind
+    _ -> return NotAForallErr
+
+-- | Computing the type of an application results in a type or a type error
+data AppResult =
+    AppOk Type                  -- ^ Type of a valid application
+  | TypeMismatchErr Type Type   -- ^ Mismatch between expected and given types
+  | NotAFunctionErr             -- ^ Applied a non-function value to an argument 
 
 -- | Compute the type produced by applying a value of type @op_type@ to
---   a value of type @arg_type@.  Verify that the application is well-typed.
+--   a value of type @arg_type@, or a type of kind @op_type@ to a type of
+--   kind @arg_type@.  Verify that the application is well-typed or
+--   well-kinded.
 typeOfApp :: Type               -- ^ Operator type
           -> Type               -- ^ Argument type
-          -> TypeEvalM (Maybe Type)
+          -> TypeEvalM AppResult
 typeOfApp op_type arg_type = do
   whnf_op_type <- reduceToWhnf op_type
   case whnf_op_type of
     FunT dom rng -> do
       type_ok <- compareTypes dom arg_type
       if type_ok
-        then return (Just rng)
-        else return Nothing
-    _ -> return Nothing
+        then return $ AppOk rng
+        else return $ TypeMismatchErr dom arg_type
+    _ -> return NotAFunctionErr
 
 -- | Get the kinds of a data constructor's fields.
 dataConFieldKinds :: TypeEnv -> DataConType -> [BaseKind]

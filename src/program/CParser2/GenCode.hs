@@ -117,13 +117,13 @@ expType (L pos expression) =
        arg' <- translateType arg
        tenv <- lift getTypeEnv
        let arg_kind = Type.Eval.typeKind tenv arg'
-       Just rt <- lift $ Type.Eval.typeOfTypeApp op_type arg_kind arg'
+       Type.Eval.TypeAppOk rt <- lift $ Type.Eval.typeOfTypeApp op_type arg_kind arg'
        return rt
      AppE op arg -> do
        -- Compute the applied type
        op_type <- expType op
        arg_type <- expType arg
-       Just rt <- lift $ Type.Eval.typeOfApp op_type arg_type
+       Type.Eval.AppOk rt <- lift $ Type.Eval.typeOfApp op_type arg_type
        return rt
      LamE f -> translateType $ funType pos f
      CaseE _ (L _ alt:_) -> do
