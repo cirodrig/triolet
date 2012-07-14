@@ -32,6 +32,7 @@ module SystemF.Lowering.Datatypes2
         getLayout,
         AlgLayout,
         getAlgLayout,
+        pprAlgLayout,
 
         -- * Code generation
         layoutSize,
@@ -59,7 +60,7 @@ import Builtins.Builtins
 import LowLevel.Build
 import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
-import LowLevel.CodeTypes((!!:))
+import LowLevel.CodeTypes((!!:), Mutability)
 import qualified LowLevel.Print as LL
 import LowLevel.Records
 import SystemF.Syntax
@@ -314,11 +315,11 @@ discardStructure (AlgMemLayout ml) = MemLayout (discardMemStructure ml)
 discardStructure (AlgValLayout vl) = ValLayout (discardValStructure vl)
 
 -- | Read the contents of a structure field
-readField :: Layout -> LL.Val -> GenLower LL.Val
-readField (MemLayout mem_member) ptr = return ptr
+readField :: Mutability -> Layout -> LL.Val -> GenLower LL.Val
+readField _ (MemLayout mem_member) ptr = return ptr
 
-readField (ValLayout val_member) ptr =
-  primLoadMutable (valLayoutValueType val_member) ptr
+readField m (ValLayout val_member) ptr =
+  primLoad m (valLayoutValueType val_member) ptr
 
 memStaticObjectType :: MemLayout -> LL.ValueType
 memStaticObjectType (StaticMemLayout vt) = vt
@@ -385,22 +386,28 @@ staticFieldType (ValLayout (VLayout t)) =
   Just (LL.valueToFieldType t, LL.pointerlessness t)
 
 -- | Compute the layout of a record type consisting of the specified fields 
-dynamicRecordLayout :: [Layout] -> GenLower (LL.DynamicRecord, LL.Val)
-dynamicRecordLayout layouts
+dynamicRecordLayout :: Mutability
+                    -> [Layout]
+                    -> GenLower (LL.DynamicRecord, LL.Val)
+dynamicRecordLayout mutable layouts
   | any is_dynamic layouts = do
       -- Cannot create a static record layout.  Compute dynamic layout
       -- for each field.
       field_info <- sequence $ mapMaybe dynamicFieldType layouts
       let (fields, pointerlesss) = unzip field_info
-      recd <- createMutableDynamicRecord fields
+      recd <- case mutable
+              of LL.Mutable -> createMutableDynamicRecord fields
+                 LL.Constant -> createConstDynamicRecord fields
       pointerless <- foldM primAnd (boolV True) pointerlesss
       return (recd, pointerless)
   | otherwise =
       -- Create a static record layout
       let (field_types, pointerlesss) =
             unzip $ mapMaybe staticFieldType layouts
-      in return (toDynamicRecord $ LL.mutableStaticRecord field_types,
-                 boolV $ or pointerlesss)
+          record_type = case mutable
+                        of LL.Mutable -> LL.mutableStaticRecord field_types
+                           LL.Constant -> LL.constStaticRecord field_types
+      in return (toDynamicRecord record_type, boolV $ or pointerlesss)
   where
     is_dynamic (MemLayout (DynamicMemLayout _)) = True
     is_dynamic _ = False
@@ -780,21 +787,32 @@ productMemLayout :: LayoutCon -> [Layout] -> MemProd
 productMemLayout con fields =
   MemProd con layout fields builder writer reader
   where
-    layout = memRecordLayout $ dynamicRecordLayout fields
+    -- This is somewhat of a hack.  For some data types, we generate
+    -- 'const' memory operations to help out the low-level optimizer.
+    -- The low-level optimizer assumes 'const' stores are never overwritten.
+    is_const_con = case con 
+                   of VarTag c -> c `isCoreBuiltin` The_repr
+                      TupleTag -> False
+    mutable = if is_const_con then LL.Constant else LL.Mutable
+
+    layout = memRecordLayout $ dynamicRecordLayout mutable fields
 
     builder _ args
       | length args /= length fields = 
           internalError "productMemLayout: Wrong number of field initializers"
       | otherwise = do
-          let record_type =
-                LL.mutableStaticRecord $ map (LL.valueToFieldType . LL.valType) args
+          let arg_types = map (LL.valueToFieldType . LL.valType) args
+              record_type =
+                if is_const_con
+                then LL.constStaticRecord arg_types
+                else LL.mutableStaticRecord arg_types
           return (LL.RecV record_type args, [])
 
     writer initializers dst 
       | length initializers /= length fields = 
           internalError "productMemLayout: Wrong number of field initializers"
       | otherwise = do
-          (recd, _) <- dynamicRecordLayout fields
+          (recd, _) <- dynamicRecordLayout mutable fields
           let record_fields = LL.recordFields recd
           forM_ (zip record_fields initializers) $ \(fld, initializer) -> do
             field_ptr <- referenceField fld dst
@@ -802,10 +820,10 @@ productMemLayout con fields =
             asWriter initializer field_ptr
 
     reader src = do
-      (record_type, _) <- dynamicRecordLayout fields
+      (record_type, _) <- dynamicRecordLayout mutable fields
       let record_fields = LL.recordFields record_type
       forM (zip record_fields fields) $ \(fld, member) -> do
-        readField member =<< referenceField fld src
+        readField (LL.fieldMutable fld) member =<< referenceField fld src
 
 -- | The layout of a type that's not a sum type.
 nonSumMemLayout :: MemProd -> AlgMemLayout
@@ -939,7 +957,8 @@ objectLayout mem_layout =
 
     mk_object_record layout = do
       (payload, _) <- case memDynamicFieldType layout of Just m -> m
-      createMutableDynamicRecord [LL.RecordField objectHeaderRecord', payload]
+      -- The header is never modified.  The payload may or may not change.
+      createConstDynamicRecord [LL.RecordField objectHeaderRecord', payload]
     
 -------------------------------------------------------------------------------
 -- Using layouts

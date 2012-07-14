@@ -87,6 +87,7 @@ data BinOp =
 data UnOp =
     LoadOp !ValueType
   | CastZOp !Signedness !Signedness !Size
+  | CastFromOwnedOp
   | NegateZOp !Signedness !Size
     deriving(Eq, Ord)
 
@@ -157,6 +158,7 @@ pprBinOp AddPOp = text "addp"
 
 pprUnOp (LoadOp t) = text "load" <+> pprValueType t
 pprUnOp (CastZOp _ _ _) = text "cast"
+pprUnOp CastFromOwnedOp = text "castfromowned"
 pprUnOp (NegateZOp _ _) = text "negate"
 
 pprExprParens (VarExpr v) = pprVar v
@@ -443,6 +445,7 @@ isReducible expression =
      UnExpr op _    -> case op
                        of LoadOp {} -> False
                           CastZOp {} -> False
+                          CastFromOwnedOp {} -> True
                           NegateZOp {} -> True
      GetFramePExpr -> False
 
@@ -491,6 +494,7 @@ interpretPrim env op args = fmap (simplify env) $
      PrimAnd         -> Just $ ca AndOp
      PrimOr          -> Just $ ca OrOp
      PrimCastZ ss ds sz -> Just $ unary (CastZOp ss ds sz)
+     PrimCastFromOwned -> Just $ unary CastFromOwnedOp
      -- Only constant loads can become expressions
      PrimLoad Constant ty -> Just $ load_op ty
      PrimGetFrameP -> Just GetFramePExpr
@@ -828,8 +832,17 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
       | otherwise =
           BinExpr (CmpZOp sgn sz CmpLE) larg rarg
 
+-- Pointer addition.
+-- Eliminate add of 0.
+-- Reassociate pointer addition.
+-- Remove casting from the base address.
+
+-- FIXME: The pointer argument may be owned, but the result is always 
+-- non-owned.  When eliminating an add, how do we know whether to cast?
 simplifyBinary AddPOp larg rarg
   | isIntLitExpr 0 rarg = larg
+  | UnExpr CastFromOwnedOp larg' <- larg =
+      simplifyBinary AddPOp larg' rarg
   | BinExpr AddPOp larg' larg2 <- larg =
       let rarg' = simplify' $
                   CAExpr (AddZOp Signed nativeIntSize) [larg2, rarg]
@@ -845,12 +858,15 @@ simplifyUnary op arg =
             let n' = negate n
             in LitExpr $ coercedIntL sgn sz n'
           _ -> UnExpr op arg
+     CastFromOwnedOp -> UnExpr op arg
      CastZOp from_sgn to_sgn sz ->
        case arg
        of LitExpr (IntL _ _ n) -> LitExpr $ coercedIntL to_sgn sz n
           _ -> UnExpr op arg
-     LoadOp ty ->
-       UnExpr op arg
+     LoadOp ty
+       -- Remove 'castfromowned' from the argument
+       | UnExpr CastFromOwnedOp arg' <- arg -> UnExpr op arg'
+       | otherwise -> UnExpr op arg
   where
     -- Double negation cancels
     negateE (UnExpr (NegateZOp _ _) arg) = arg
