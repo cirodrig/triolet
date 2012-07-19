@@ -1008,6 +1008,10 @@ namespace Triolet {
         return T_Bare(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
       }
 
+      int len(void) {
+        return triolet_List_get_length(getBareData());
+      }
+
   };
 
 
@@ -1075,6 +1079,10 @@ namespace Triolet {
                                                sizeof(TriBoxPtr),
                                                __alignof__(TriBoxPtr));
         return T_Box(list_contents[index]);
+      }
+
+      int len(void) {
+        return triolet_List_get_length(getBareData());
       }
   };
 
