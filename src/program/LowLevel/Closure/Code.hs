@@ -197,9 +197,13 @@ populateClosure captured captured_record clo_record ptr = do
 allocateClosureByCCInfo :: (Var, CCInfo) -> GenM (Var, Maybe Val, CCInfo)
 allocateClosureByCCInfo (fun_name, inf) =
   case inf
-  of LocalClosure {_cEntryPoints = ep, _cRecord = recd} -> do
+  of LocalClosure { _cEntryPoints = ep
+                  , _cRecord = recd
+                  , _cWantClosure = True} -> do
        x <- allocateClosure ep recd fun_name
        return (fun_name, Just x, inf)
+     LocalClosure {_cWantClosure = False} ->
+       return (fun_name, Nothing, inf)
      LocalPrim {} ->
        return (fun_name, Nothing, inf)
      -- Other terms cannot occur for local variables
@@ -212,11 +216,14 @@ populateClosureByCCInfo (fun_name, m_closure_ptr, inf) =
   case inf
   of LocalClosure { _cRecord = recd
                   , _cClosureCaptured = cap
-                  , _cClosureCapturedRecord = cap_recd} ->
+                  , _cClosureCapturedRecord = cap_recd
+                  , _cWantClosure = True} ->
        case m_closure_ptr
        of Just closure_ptr ->
             populateClosure cap cap_recd recd closure_ptr
           Nothing -> internalError "populateClosureByCCInfo"
+     LocalClosure {_cWantClosure = False} ->
+       return ()
      LocalPrim {} ->
        return ()
      -- Other terms cannot occur for local variables
@@ -432,11 +439,12 @@ genClosureCall return_types fun args = do
     Just cc@(GlobalPrim {}) -> check_args cc $ prim_call fun cc
     Just cc@(LocalPrim {_cEntryPoint = ep}) -> check_args cc $ join_call ep cc
   where
-    arity cc = length (ftParamTypes $ ccType cc)
-
     closure_call cc =
-      case length args `compare` arity cc
-      of LT -> do               -- Undersaturated
+      case length args `compare` ccArity cc
+      of LT | not (ccWantClosure cc) ->
+           -- A closure record was not created for this function
+           internalError "genClosureCall: Did not generate a closure"
+         LT -> do               -- Undersaturated
            let call_captured = ccCallCaptured cc
            indirect_call (map VarV call_captured)
          EQ -> do               -- Saturated
@@ -444,7 +452,7 @@ genClosureCall return_types fun args = do
          GT -> do               -- Oversaturated
            -- Generate a direct call with the correct number of arguments.
            -- Then, call the return value with remaining arguments.
-           let (direct_args, indir_args) = splitAt (arity cc) args
+           let (direct_args, indir_args) = splitAt (ccArity cc) args
            app <- emitAtom1 (PrimType OwnedType) =<<
                   genDirectCall cc direct_args
 
@@ -454,7 +462,7 @@ genClosureCall return_types fun args = do
       genIndirectCall return_types (VarV fun) (call_captured ++ args)
 
     check_args cc k
-      | length args /= (arity cc) =
+      | length args /= (ccArity cc) =
           -- Error to call with the wrong number of arguments
           internalError "genClosureCall: Procedure call has wrong number of arguments"
       | otherwise = k
@@ -516,6 +524,9 @@ genVarRef fun = do
     Just cc | not $ ccIsClosure cc ->
       -- Cannot reference procedures except as the callee of a primcall
       internalError "genVarRef: Invalid procedure reference"
+    Just cc | not $ ccWantClosure cc ->
+      -- A closure record was not created for this function
+      internalError "genVarRef: Did not generate a closure"
     Just cc ->
       case ccCallCaptured cc
       of [] -> return (VarV fun)

@@ -128,6 +128,10 @@ data ScanInputs =
     -- | The set of global variables.  Globals are excluded from the analysis 
     --   because they are never captured.
   , scanGlobals :: !(Set.Set Var)
+
+    -- | The set of local functions that (if hoisted) need closures.
+  , scanClosureBuilders :: !(Set.Set Var)
+
     -- | The variables that are defined in the current function and are
     --   in scope at the current program point.  Variables defined in an
     --   enclosing function are not in this list.
@@ -159,6 +163,13 @@ extendContext defs si =
     insert_def (Def v f) m =
       let info = FunInfo (length $ funParams f)
       in Map.insert v info m
+
+-- | Check whether a variable is a local function.
+--   The variable is checked against the in-scope functions defined by
+--   'letfun' and against the set of continuations.
+contextHasLocalFunction :: ScanInputs -> Var -> Bool
+contextHasLocalFunction si v =
+  v `Map.member` scanFunMap si || v `Set.member` scanContinuations si
 
 -------------------------------------------------------------------------------
 
@@ -273,7 +284,10 @@ defineGroup fdefs (Scan f) =
 capture :: Var -> ScanExp
 capture v = Scan $ \env ->
   let captured =
-        if v `Set.member` scanGlobals env
+        -- Globals are not captured.
+        -- Local functions that don't have closures are not captured.
+        if v `Set.member` scanGlobals env ||
+           (contextHasLocalFunction env v && not (v `Set.member` scanClosureBuilders env))
         then mempty
         else (Set.singleton v, mempty)
       result = ScanResult captured mempty
@@ -308,6 +322,16 @@ called' v = Scan $ \env ->
         case m_finfo
         of Just _ -> FreeInherit (Map.singleton v locals)
            _ -> mempty
+      global_constraints = GlobalConstraints mempty
+      result = ScanResult (mempty, c_cst) global_constraints
+  in c_cst `seq` return result
+
+calledCont :: Var -> ScanExp
+calledCont v = capture v `mappend` calledCont' v
+
+calledCont' v = Scan $ \env ->
+  let locals = scanLocals env
+      c_cst = FreeInherit (Map.singleton v locals)
       global_constraints = GlobalConstraints mempty
       result = ScanResult (mempty, c_cst) global_constraints
   in c_cst `seq` return result
@@ -375,15 +399,15 @@ generateConstraint fun_name free inherits = do
   -- This function always inherits free variables from its continuation
   -- as if there were a direct call to the continuation.
   rconts <- getRConts
-  let (free_k, inherits_k) =
-        case LocalCPS.lookupCont fun_name rconts
-        of Just (LocalCPS.RCont k _) ->
-             (Set.insert k free,
-              inherits `captInheritUnion` FreeInherit (Map.singleton k []))
-           _ -> (free, inherits)
+  (free_k, inherits_k) <-
+    case LocalCPS.lookupCont fun_name rconts
+    of Just (LocalCPS.RCont k _) -> calledCont k
+       _                         -> mempty
+  let free' = free `mappend` free_k
+      inherits' = inherits `mappend` inherits_k
 
   -- Create an UnsolvedFunction
-  putFun fun_name =<< liftIO (newFunctionDescr inherits_k free_k)
+  putFun fun_name =<< liftIO (newFunctionDescr inherits' free')
  
 -- | Scan the functions in a definition group and create placeholders for
 --   constraint solving.
@@ -421,12 +445,13 @@ scanGroup group scan_body =
 -- | Scan a top-level function, generating a set of constraints
 scanTopLevelDef :: LocalCPS.RConts -- ^ Return continuations
                 -> Set.Set Var     -- ^ Global variables that are in scope
+                -> Set.Set Var     -- ^ Functions that may need closures
                 -> Set.Set Var     -- ^ Continuation funtions in the @LFunDef@
                 -> LFunDef
                 -> IO (Map.Map Var UnsolvedFunction)
-scanTopLevelDef rconts globals conts (Def v f) = do
+scanTopLevelDef rconts globals closure_builders conts (Def v f) = do
   let initial_context =
-        ScanInputs Map.empty rconts conts undefined globals []
+        ScanInputs Map.empty rconts conts undefined globals closure_builders []
   ScanResult (free, inherits) (GlobalConstraints ufuncs) <-
     runScan (scanDef (Def v f)) initial_context
 
@@ -544,14 +569,15 @@ printUnsolvedFunction (v, ufun) = do
 --   including continuation funtions.
 findCapturedVariables :: LocalCPS.RConts -- ^ Return continuations
                       -> Set.Set Var     -- ^ Global variables in scope here
+                      -> Set.Set Var     -- ^ Functions that may need closures
                       -> Set.Set Var     -- ^ Continuations
                       -> LFunDef         -- ^ A global function definition
                       -> IO (Map.Map Var Free)
                       -- ^ Computes the free variables of each local function
                       --   and continuation
-findCapturedVariables return_continuations global_vars conts ann_def = do
+findCapturedVariables return_continuations global_vars closure_builders conts ann_def = do
   -- Create constraints
-  ufuns <- scanTopLevelDef return_continuations global_vars conts ann_def
+  ufuns <- scanTopLevelDef return_continuations global_vars closure_builders conts ann_def
 
   -- Debugging
   when debug $ do

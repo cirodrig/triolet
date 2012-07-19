@@ -86,6 +86,7 @@ data CCInfo =
     , _cCallCaptured :: [Var]
     , _cClosureCaptured :: [Var]
     , _cClosureCapturedRecord :: StaticRecord
+    , _cWantClosure :: !Bool
     }
     -- | A global function that must be direct-called
   | GlobalPrim
@@ -158,6 +159,13 @@ ccJumpTarget _ = internalError "ccDirectEntry: Not a local function or procedure
 ccEntryPoints cc = _cEntryPoints cc
 
 ccArity cc = length $ ftParamTypes $ ccType cc
+
+-- | Should a closure be constructed for this variable?
+--
+--   It only makes sense to test this for closure-call functions.
+ccWantClosure (GlobalClosure {}) = True
+ccWantClosure (LocalClosure {_cWantClosure = b}) = b
+ccWantClosure _ = internalError "ccWantClosure"
 
 -- | Get the variables captured by a function at closure definition time
 ccClosureCaptured :: CCInfo -> [Var]
@@ -247,6 +255,9 @@ data FunAnalysisResults =
   FunAnalysisResults
   { -- | Whether the function will be hoisted
     funHoisted :: !Bool
+    -- | Whether the function (if hoisted) needs a closure record and
+    --   indirect entry point
+  , funBuildsClosure :: !Bool
     -- | The set of local variables used by the function but not defined in
     --   the function
   , funCaptured :: Set.Set Var
@@ -258,8 +269,8 @@ type LocalsInScope = [Var]
 -------------------------------------------------------------------------------
 
 groupCCInfo :: (Var -> FunAnalysisResults) -- ^ Hoisting and capture information
-            -> [Var]
-            -> Set.Set Var
+            -> [Var]                       -- ^ The variables defined in this group
+            -> Set.Set Var                  -- ^ The in-scope local variables
             -> Group FunDef                 -- ^ The definition group
             -> FreshVarM [(Var, CCInfo)]
 groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
@@ -268,12 +279,12 @@ groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
         let v = definiendum member
             conv = funConvention $ definiens member
             ftype = funType $ definiens member
-            FunAnalysisResults hoisted captured  = get_capture v
-        return (hoisted, (v, conv, ftype, captured))
+            FunAnalysisResults hoisted closure captured = get_capture v
+        return (hoisted, (v, conv, ftype, closure, captured))
 
       -- Find the hoisted and unhoisted functions in the group
-      hoisted   :: [(Var, CallConvention, FunctionType, Set.Set Var)]
-      unhoisted :: [(Var, CallConvention, FunctionType, Set.Set Var)]
+      hoisted   :: [(Var, CallConvention, FunctionType, Bool, Set.Set Var)]
+      unhoisted :: [(Var, CallConvention, FunctionType, Bool, Set.Set Var)]
       (hoisted, unhoisted) = partition_h [] [] capture_info
         where
           partition_h h u ((True,  x):xs) = partition_h (x : h) u xs
@@ -285,24 +296,26 @@ groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
       -- Identify the captured variable set, which is a subset of the
       -- variables in scope at the defgroup.
       shared_set = in_scope_set `Set.intersection`
-                   Set.unions [s | (_, _, _, s) <- hoisted ++ unhoisted]
+                   Set.unions [s | (_, _, _, _, s) <- hoisted ++ unhoisted]
       shared_list = Set.toList shared_set
       shared_record = variablesRecord shared_list
       closure_record = localClosureRecord shared_record
       
-      create_hoisted_closure (v, call_conv, ftype, captured_set) = do
+      create_hoisted_closure (v, call_conv, ftype, want_closure, captured_set) = do
         let call_captured = Set.toList (captured_set Set.\\ shared_set)
         entry_points <-
           case call_conv
           of ClosureCall -> mkEntryPoints NeverDeallocate False ftype v
              JoinCall -> do
+               -- This function has the wrong type, so create a new variable
                v' <- newVar (varName v) (PrimType OwnedType)
                let ftype' = closureFunctionType (ftParamTypes ftype) (ftReturnTypes ftype)
                mkEntryPoints NeverDeallocate False ftype' v'
                
-        return (v, LocalClosure entry_points closure_record call_captured shared_list shared_record)
+        return (v, LocalClosure entry_points closure_record call_captured
+                   shared_list shared_record want_closure)
 
-      create_unhoisted_closure (v, conv, ftype, captured_set) = do
+      create_unhoisted_closure (v, conv, ftype, _, captured_set) = do
         let call_captured_set1 = captured_set Set.\\ shared_set
             -- Don't capture the definition group members
             call_captured_set2 = foldr Set.delete call_captured_set1 defined_here

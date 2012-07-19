@@ -512,14 +512,17 @@ findFunctionsToHoist var_ids global_vars def = do
            | (f, k) <- Map.toList caller_map]
 
   -- Compute hoisting
-  (hoisted_set, fun_to_group) <- findHoistedGroups ann_def rconts
+  (hoisted_set, closure_builders, fun_to_group) <-
+    findHoistedGroups ann_def rconts
 
   -- Compute free variables
-  captures <- findCapturedVariables rconts global_vars conts_set ann_def
+  captures <- findCapturedVariables rconts global_vars closure_builders
+              conts_set ann_def
   
   -- Debugging
   when debug $ do
     putStrLn $ "Hoisted set: " ++ show hoisted_set
+    putStrLn $ "Closure-using functions: " ++ show closure_builders
     putStrLn "Free variables:"
     print captures
   
@@ -531,7 +534,8 @@ findFunctionsToHoist var_ids global_vars def = do
   -- Construct closure conversion info
   let lookup_function f =
         FunAnalysisResults
-        { funHoisted  = f `Set.member` hoisted_set
+        { funHoisted = f `Set.member` hoisted_set
+        , funBuildsClosure = f `Set.member` closure_builders
         , funCaptured = fromMaybe Set.empty $ Map.lookup f captures
         }
   cc_info <- runFreshVarM var_ids $
