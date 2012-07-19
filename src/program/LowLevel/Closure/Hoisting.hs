@@ -71,8 +71,6 @@ data FunInfo =
   FunInfo { -- | The function's arity.  The arity is used to decide whether
             --   a given function call is saturated.
             arity :: {-# UNPACK #-}!Int
-            -- | Whether the function is defined in a recursive group 
-          , isRec :: !Bool
             -- | The group where the function is defined
           , defGroup :: !GroupID
             -- | Context in which a function is used.  The context consists
@@ -154,7 +152,7 @@ extendContext gid is_rec defs si =
     insert_defs m = foldr insert_def m defs
 
     insert_def (Def v f) m =
-      let info = FunInfo (length $ funParams f) is_rec gid []
+      let info = FunInfo (length $ funParams f) gid []
       in Map.insert v info m
 
 -------------------------------------------------------------------------------
@@ -235,7 +233,6 @@ putGroup g = Scan $ \_ ->
   return (ScanResult () (GlobalConstraints mempty mempty [g] mempty))
 
 -- | Add a list of functions to the closure builder list.
---   This is used when a recursive group is encountered.
 putClosureBuilders :: [Var] -> Scan ()
 putClosureBuilders vs = Scan $ \_ ->
   return (ScanResult () (GlobalConstraints mempty mempty mempty (Set.fromList vs)))
@@ -321,10 +318,10 @@ called is_tail v num_args = Scan $ \env ->
       closure_builder =
         case m_finfo
         of Just finfo
-             | not (isRec finfo) && num_args >= arity finfo ->
-               -- Saturated or oversaturated call to a nonrecursive
-               -- function.  If callee is hoisted, it will be direct-called
-               -- after closure conversion.
+             | num_args >= arity finfo ->
+               -- Saturated or oversaturated call.  If callee is
+               -- hoisted, it will be direct-called after closure
+               -- conversion.
                mempty
              | otherwise ->
                -- If callee is hoisted, a closure will be built
@@ -428,9 +425,6 @@ scanGroup group_id group scan_body = do
   enterGroup group_id $
     case group
     of Rec group_members -> do
-         -- If hoisted, these functions need closures
-         putClosureBuilders $ map definiendum $ groupMembers group
-
          in_group_scope $ mapM_ scanFunDef group_members
        NonRec fdef -> scanFunDef fdef
 

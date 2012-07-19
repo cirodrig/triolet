@@ -276,6 +276,14 @@ defineGroup fdefs (Scan f) =
       let inherits' = foldr Map.delete inherits definienda
       return $ ScanResult (captured, FreeInherit inherits') global_csts
 
+-- | If @v@ is a function defined by a local @letfun@, then run the
+--   scan.  Otherwise do nothing.
+ifLocalFunction :: Var -> ScanExp -> ScanExp
+ifLocalFunction v m = Scan $ \env ->
+  if v `Map.member` scanFunMap env
+  then runScan m env
+  else runScan mempty env
+
 -- | Scan a reference to a variable, other than a tail call.
 --
 --   If it's not a global variable, the variable will be added to the
@@ -285,7 +293,8 @@ capture :: Var -> ScanExp
 capture v = Scan $ \env ->
   let captured =
         -- Globals are not captured.
-        -- Local functions that don't have closures are not captured.
+        -- Local functions and continuations
+        -- that don't have closures are not captured.
         if v `Set.member` scanGlobals env ||
            (contextHasLocalFunction env v && not (v `Set.member` scanClosureBuilders env))
         then mempty
@@ -313,23 +322,14 @@ defines vs (Scan s) = Scan $ \i -> do
 --   Otherwise, if a function enclosing this call is hoisted, the callee
 --   must also be hoisted.
 called :: Var -> ScanExp
-called v = capture v `mappend` called' v
+called v = capture v `mappend` ifLocalFunction v (called' v)
+
+-- | This function does the same thing as 'called', except that the
+--   function is an implicit continuation call.
+calledCont :: Var -> ScanExp
+calledCont v = capture v `mappend` called' v
 
 called' v = Scan $ \env ->
-  let locals = scanLocals env
-      m_finfo = Map.lookup v $ scanFunMap env
-      c_cst =
-        case m_finfo
-        of Just _ -> FreeInherit (Map.singleton v locals)
-           _ -> mempty
-      global_constraints = GlobalConstraints mempty
-      result = ScanResult (mempty, c_cst) global_constraints
-  in c_cst `seq` return result
-
-calledCont :: Var -> ScanExp
-calledCont v = capture v `mappend` calledCont' v
-
-calledCont' v = Scan $ \env ->
   let locals = scanLocals env
       c_cst = FreeInherit (Map.singleton v locals)
       global_constraints = GlobalConstraints mempty

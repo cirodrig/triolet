@@ -402,12 +402,15 @@ emitClosureGlobalData ccinfo =
        mkInfoTable ccinfo
        mkExactEntry ccinfo
        mkInexactEntry ccinfo
-     LocalClosure {_cEntryPoints = ep} -> do
+     LocalClosure {_cEntryPoints = ep, _cWantClosure = True} -> do
        mkInfoTable ccinfo
        mkExactEntry ccinfo
        mkInexactEntry ccinfo
      
-     -- Primitive functions or jump targets don't have any global data
+     -- Primitive functions, direct-called hoisted functions, and 
+     -- jump targets don't have any global data
+     LocalClosure {_cEntryPoints = ep, _cWantClosure = False} ->
+       return ()
      GlobalPrim {} ->
        return ()
      LocalPrim {} ->
