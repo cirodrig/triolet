@@ -3,9 +3,6 @@ extern function core.internal.list.repr_list (owned) -> owned;
 
 extern function core.internal.list.repr_array2 (owned) -> owned;
 
-extern function core.internal.list.list_build
-  (owned, owned, pointer) -> unit;
-
 // Exported to C
 extern data pointer core.internal.list.triolet_List_size "triolet_List_size";
 extern data pointer core.internal.list.triolet_List_alignment "triolet_List_alignment";

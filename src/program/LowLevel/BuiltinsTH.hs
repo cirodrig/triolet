@@ -194,8 +194,6 @@ builtinFunctions =
      Right [| coreBuiltin SystemF.The_repr_array3 |])
   --, (CoreName module_list "list_len",
   --   Right [| coreBuiltin SystemF.The_len |])
-  , (CoreName module_list "list_build",
-     Right [| coreBuiltin SystemF.The_Sequence_build_list |])
   , (CoreName module_list "array1_build",
      Right [| coreBuiltin SystemF.The_Sequence_array1_build |])
   -- , (CoreName module_list "list_traverse",
@@ -256,6 +254,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_rangeIndexed) |])
   , (CoreName module_stream "histogram",
      Right [| coreBuiltin (SystemF.The_histogram) |])-}
+  , (CoreName module_inplace "append_build_list",
+     Right [| coreBuiltin SystemF.The_append_build_list |])
   , (CoreName module_inplace "repr_append_list",
      Right [| coreBuiltin SystemF.The_repr_append_list |])
   , (CoreName module_inplace "intSumScatter_make_init",

@@ -6151,6 +6151,43 @@ Sequence_reduce1 @(a : bare)
   };
 
 
+Sequence_build_list @(a : bare)
+  (repr : Repr a) (sq : Sequence a) (ret : OutPtr (list a))
+  -> Store
+  attribute(inline, inline_sequential) =
+
+  let type acc = Stored (ListBuilder a) in
+  let repr_acc : Repr acc = repr_ListBuilder @a in
+
+  -- Build a list by repeatedly appending to it
+  append_build_list @a repr
+  (\ (writer : Init a -> ListBuilder a -> ListBuilder a)
+     (init_state : ListBuilder a)
+     -> ListBuilder a.
+     case stuckBox @acc (stored @(ListBuilder a) init_state) of
+       stuckBox @acc (stored_init_state : acc).
+
+     -- The list-building process is a fold
+     case stuckBox @acc
+          (Sequence_fold @a @acc repr repr_acc
+           (\ (local_state : acc) (item : a) (ret : OutPtr acc) -> Store.
+              case local_state of
+                stored @(ListBuilder a) (u_local_state : ListBuilder a).
+
+              -- Call the writer to save this value to the list
+              let u_new_state : ListBuilder a =
+                    writer (copy @a repr item) u_local_state in
+
+              stored @(ListBuilder a) u_new_state ret)
+           stored_init_state
+           sq) of
+       stuckBox @acc (stored_final_state : acc).
+       case stored_final_state of
+         stored @(ListBuilder a) (final_state : ListBuilder a).
+       final_state)
+  ret;
+
+
 Sequence_scatter @(i r : bare)
   (repr_i : Repr i)
   (repr_r : Repr r)

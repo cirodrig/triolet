@@ -199,8 +199,7 @@ record SliceObject {
  * list, but rather passed to functions that operate on the list.
  */
 record List {
-  FinIndInt nelems;	// Number of elements in the list.
-                                // Actual allocated size may be larger.
+  FinIndInt nelems;             // Number of elements in the list
   owned contents;		// Pointer to list contents
 };
 
@@ -210,6 +209,18 @@ record List {
  */
 record AppendList {
   FinIndInt nelems;             // Number of elements allocated for the list
+  int used;                     // Number of elements in use
+  owned contents;               // Pointer to list contents
+};
+
+/* List builders
+ *
+ * A list-like data structure that supports mutable append.
+ * Almost identical to 'AppendList', but it's used by a different part of the
+ * library.
+ */
+record ListBuilder {
+  int nelems;                   // Number of elements allocated for the list
   int used;                     // Number of elements in use
   owned contents;               // Pointer to list contents
 };

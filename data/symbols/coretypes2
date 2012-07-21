@@ -413,6 +413,26 @@ seqEffTok : EffTok -> EffTok -> EffTok;
 
 fromEffTok : (a : bare) -> EffTok -> Store;
 
+-- An opaque reference to mutable data.
+data OpaqueRef : box
+  attribute(abstract, nonalgebraic)
+{};
+
+-- The state of a list-building computation.
+-- This is used when constructing a list from a sequence.
+data ListBuilder : bare -> val
+{
+  listBuilder (a : bare) () (int, int, OpaqueRef);
+};
+
+-- Primitive function for building a list by appending to it.
+-- Defined in low-level.
+append_build_list : (a : bare)
+                 -> Repr a
+                 -> ((Init a -> ListBuilder a -> ListBuilder a) ->
+                     ListBuilder a -> ListBuilder a)
+                 -> Init (list a);
+
 -- The finalizer of an in-place update operation.
 -- A finalizer performs a one-time computation to convert the updatable
 -- data structure to a read-only data structure.  In some cases, a finalizer
@@ -897,6 +917,7 @@ repr_slice3 : Repr (Tuple3 SliceObject SliceObject SliceObject);
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_append_list : (a : bare) -> Repr a -> Repr (append_list a);
+repr_ListBuilder : (a : bare) -> Repr (Stored (ListBuilder a));
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
 repr_array1 : (a : bare) -> Repr a -> Repr (array1 a);
 repr_array2 : (a : bare) -> Repr a -> Repr (array2 a);

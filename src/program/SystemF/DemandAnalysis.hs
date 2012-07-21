@@ -294,7 +294,7 @@ dmdConE inf con args = do
 --   multiple uses so that they don't get inlined.
 dmdAppE inf op ty_args args = do
   op' <- dmdExp Used op
-  args' <- zipWithM dmdExp use_modes args
+  args' <- sequence $ zipWith3 dmdExpWorker call_modes use_modes args
   return $ ExpM $ AppE inf op' ty_args args'
   where
     -- How the function arguments are used.
@@ -306,6 +306,19 @@ dmdAppE inf op ty_args args = do
            | op_var `isCoreBuiltin` The_copy && length args == 3 ->
                [Used, Copied, Used]
          _ -> repeat Used
+
+    -- This is a hack to allow inlining beneath the function argument
+    -- of 'append_build_list'.  This is important to inline stream 
+    -- expressions and enable stream rewriting.
+    -- We really should generalize this to all 'called-at-most-once'
+    -- functions.
+    call_modes =
+      case op
+      of ExpM (VarE _ op_var)
+           | op_var `isCoreBuiltin` The_append_build_list && length args >= 2 ->
+               [False, True, False]
+         _ -> repeat False
+
 
     {-
     -- Determine which parameters should be floated.

@@ -609,7 +609,7 @@ streamOpTable =
            , (coreBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
            , (coreBuiltin The_view1_empty, interpretEmptyView)
            , (coreBuiltin The_Sequence_array1_build, interpretBuild PolySequenceType ArrayType)
-           , (coreBuiltin The_Sequence_list_build, interpretBuild PolySequenceType ListType) -}
+           , (coreBuiltin The_Sequence_list_build, interpretBuild SequenceType) -}
            ]
 
 -- | Overloaded view operations
@@ -809,32 +809,23 @@ interpretChain = StreamOpInterpreter check_arity interpret
       s2' <- interpretStreamSubExp s2
       return $ Just $ OpSE inf (ChainOp ty) [repr] [] [s1', s2'] Nothing
 
-{-
-
-interpretBuild stream_type container_type =
+interpretBuild stream_type =
   StreamOpInterpreter check_arity interpret
   where
     -- There is one optional argument for the output pointer
-    check_arity ty_args args =
-      ty_args == n_ty_args && (args == n_args || args == n_args + 1)
+    check_arity 1 2 = True
+    check_arity 1 3 = True
+    check_arity _ _ = False
 
-    interpret inf ty_args args = do
-      let Just (shape_indices, ty_args') = takeShapeIndices stream_type ty_args
-          Just (shape_args, args') = takeShapeArguments stream_type args
-          [ty] = ty_args'
-          repr : source : args'' = args'
-          maybe_return_arg = case args''
-                             of [] -> Nothing
-                                [x] -> Just x
-          op = ConsumeOp (applyShapeIndices shape_indices stream_type)
-               (Build container_type ty)
+    interpret inf [ty] (repr : s : other_args) = do
+      s' <- interpretStreamSubExp s
+      let op = ConsumeOp stream_type (Build ty)
+          ret_arg = case other_args
+                    of [] -> Nothing
+                       [e] -> Just e
+      return $ Just $ OpSE inf op [repr] [] [s'] ret_arg
 
-      stream_exp <- interpretStreamSubExp source
-      return $ OpSE inf op shape_args [repr] [] [stream_exp] maybe_return_arg
-
-    n_shape_indices = numShapeIndices stream_type
-    n_ty_args = n_shape_indices + 1
-    n_args = n_shape_indices + 2
+{-
 
 interpretEmptyView = StreamOpInterpreter check_arity interpret
   where
@@ -1523,6 +1514,7 @@ sequentializeStreamExp expression =
                   sequentializeFold acc_ty in_ty repr_acc_var
                   (varE' repr_in_var) init reducer src
                 return $ appE inf fold_exp [] (maybeToList ret_arg)
+
      _ -> return Nothing
   where
     -- Bind a Repr value to a temporary variable
