@@ -60,9 +60,10 @@ namespace Triolet {
     typedef BareKindTag kind;
 
   private:
-    TriBarePtr const bare_data; // The triolet object
+    TriBarePtr bare_data; // The triolet object
 
   public:
+  BareType() : bare_data(NULL) {}
     BareType(TriBarePtr _bare_data) : bare_data(_bare_data) {}
     TriBarePtr getBareData(void) const {return bare_data;}
 
@@ -92,9 +93,10 @@ namespace Triolet {
     typedef BoxKindTag kind;
 
   private:
-    TriBoxPtr const box_data;
+    TriBoxPtr box_data;
 
   public:
+  BoxType() : box_data(NULL) {}
     BoxType(TriBoxPtr _box_data) : box_data(_box_data) {}
     TriBoxPtr getBoxData(void) const {return box_data;}
 
