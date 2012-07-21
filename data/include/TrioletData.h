@@ -588,6 +588,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      Tuple<T1, T2, T3, T4>(void) : BareType() {}
       Tuple<T1, T2, T3, T4>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
@@ -748,6 +749,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      Tuple<T1, T2, T3>(void) : BareType() {}
       Tuple<T1, T2, T3>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
@@ -878,6 +880,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      Tuple<T1, T2>(void) : BareType() {}
       Tuple<T1,T2>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
@@ -967,6 +970,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      List<T>(void) : BareType() {}
       List<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
@@ -1035,6 +1039,7 @@ namespace Triolet {
       // no definition of defaultInitializer
     public:
       // Constructors
+      BList<T>(void) : BareType() {}
       BList<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
@@ -1108,6 +1113,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      Array1<T>(void) : BareType() { }
       Array1<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
@@ -1188,6 +1194,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      BArray1<T>(void) : BareType() { }
       BArray1<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
@@ -1272,6 +1279,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      Array2<T>(void) : BareType() { }
       Array2<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
@@ -1366,6 +1374,7 @@ namespace Triolet {
       // no definition of defaultInitializer
     public:
       // Constructors
+      BArray2<T>(void) : BareType() { }
       BArray2<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
@@ -1465,6 +1474,7 @@ namespace Triolet {
       };
     public:
       // Constructors
+      Array3<T>(void) : BareType() { }
       Array3<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
@@ -1575,6 +1585,7 @@ namespace Triolet {
       // no definition of defaultInitializer
     public:
       // Constructors
+      BArray3<T>(void) : BareType() { }
       BArray3<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
       
       // Static Member Functions
@@ -1672,6 +1683,7 @@ namespace Triolet {
       };
 
       // Constructors
+      Stored<T>(void) : BareType() {}
       Stored<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
