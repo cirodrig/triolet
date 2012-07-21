@@ -5066,7 +5066,7 @@ boxedStencil2D @(t : bare -> bare) @(a b : bare)
   (input : t a)
   (ret: OutPtr (barray2 b))
   -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   -- This function is defined in terms of stencil2D.
   let type boxed_b = StuckRef (BoxedType b) in
@@ -5096,7 +5096,7 @@ stencil2D @(t : bare -> bare) @(a b : bare)
   (input : t a)
   (ret: OutPtr (array2 b))
   -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   case indexable of
     indexableDict @t 
@@ -5935,7 +5935,7 @@ Sequence_zipWith4
 build_list_dim_list @(a : bare)
   (repr : Repr a) (vw : view list_dim a) (ret : OutPtr (list a))
   -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
   case vw of
     mk_view @list_dim @a (dom : list_dim) (f : Stored int -> Init a).
   case dom of mk_list_dim (m_size : MaybeVal int).
@@ -5962,7 +5962,7 @@ build_dim1_array @(a : bare)
   (repr : Repr a) (vw : view dim1 a)
   (ret : OutPtr (array1 a))
   -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_dimensionality) =
 
   case vw of mk_view @dim1 @a (dom : dim1) (f : Stored int -> Init a).
   dim1ToArrayDesc @(array1 a) dom
