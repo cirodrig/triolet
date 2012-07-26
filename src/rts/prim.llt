@@ -461,6 +461,16 @@ procedure PBTree_split (owned tree, pointer ret) -> bool {
   is_splittable;
 };
 
+procedure PBTree_splittable (owned tree) -> bool {
+  tag = tree @! PBTree.tag;
+  if (tag == PBTree_BRANCH) {
+    true;
+  }
+  else {
+    false;
+  };
+};
+
 procedure PBTree_leaf (pointer list) -> owned {
   p = pointer primcall triolet_alloc (sizeof PBTreeLeaf);
   p @! PBTreeLeaf.tag = PBTree_LEAF;
