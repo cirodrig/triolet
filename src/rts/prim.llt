@@ -11,6 +11,18 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+// Print an int.  Return another int.
+function inline traceInt_int (int t, int n) -> int {
+  () = () primcall triolet_db_int (t as int32);
+  n;
+};
+
+// Print an int.  Return a boxed object.
+function inline traceInt_box (int t, owned o) -> owned {
+  () = () primcall triolet_db_int (t as int32);
+  o;
+};
+
 procedure inline finite_IndInt (int n) -> IndInt {
   IndInt {FINITE, IndIntData {FinIndInt {n}}};
 };

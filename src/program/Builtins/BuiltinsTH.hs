@@ -588,6 +588,8 @@ builtinVariableNames =
   , "unsafeMakeCoercion"
   , "unsafeMakeBareCoercion"
   , "unsafeMakeViewCoercion"
+  , "traceInt_int"
+  , "traceInt_box"
 
     -- In-place update
   , "intUpdateInPlace_int_coercion"

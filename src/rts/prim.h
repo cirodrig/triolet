@@ -1,4 +1,7 @@
 
+extern function core.internal.prim.traceInt_int (int, int) -> int;
+extern function core.internal.prim.traceInt_box (int, owned) -> owned;
+
 extern procedure core.internal.prim.finite_IndInt (int) -> IndInt;
 extern procedure core.internal.prim.from_finite_IndInt (IndInt) -> int;
 

@@ -302,6 +302,10 @@ builtinFunctions =
   , (CoreName module_structures "repr_Tuple4",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple4 |])
   
+  , (CoreName module_prim "traceInt_int",
+     Right [| coreBuiltin (SystemF.The_traceInt_int) |])
+  , (CoreName module_prim "traceInt_box",
+     Right [| coreBuiltin (SystemF.The_traceInt_box) |])
   , (CoreName module_prim "defineIntIndex",
      Right [| coreBuiltin (SystemF.The_defineIntIndex) |])
   , (CoreName module_prim "subscript",

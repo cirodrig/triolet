@@ -1833,6 +1833,12 @@ unsafeMakeViewCoercion : (d : box)
                       -> coerce @(bare -> box) (Stream d) (view d);
 
 -------------------------------------------------------------------------------
+-- Debugging
+
+traceInt_int : int -> int -> int;
+traceInt_box : (a : box) -> int -> a -> a;
+
+-------------------------------------------------------------------------------
 -- Domain functions
 
 fun_list_dim : Maybe (Stored int) -> list_dim;
