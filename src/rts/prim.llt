@@ -451,10 +451,10 @@ procedure PBTree_split (owned tree, pointer ret) -> bool {
   tag = tree @! PBTree.tag;
   (is_splittable, left, right) =
     if (tag == PBTree_BRANCH) {
-      (tree @! PBTreeBranch.left, tree @! PBTreeBranch.right, true);
+      (true, tree @! PBTreeBranch.left, tree @! PBTreeBranch.right);
     }
     else {
-      (null as owned, null as owned, false);
+      (false, null as owned, null as owned);
     };
   ret @! array(value int 2, owned)[int 0] = left;
   ret @! array(value int 2, owned)[int 1] = right;
