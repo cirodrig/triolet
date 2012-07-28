@@ -18,11 +18,7 @@ procedure inline allocate_list_contents (owned rep, int nelems) -> owned {
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef array_type = array(value nelems, elem_type);
 
-  if (rep @! Repr.is_pointerless) {
-    pointer primcall triolet_alloc_nopointers (sizeof Boxed(array_type)) as owned;
-  } else {
-    pointer primcall triolet_alloc (sizeof Boxed(array_type)) as owned;
-  };
+  pointer primcall triolet_alloc (sizeof Boxed(array_type)) as owned;
 };
 
 // Increase the size of a list's contents array.
@@ -78,7 +74,7 @@ function inline append_build_list (owned rep, owned f, pointer ret) -> unit
 
       // Write to the new member
       typedef array_type = Boxed(array(value new_nelems, elem_type));
-      _ = unit call initializer (contents @ array_type.member[used]);
+      _ = unit call initializer (new_contents @ array_type.member[used]);
 
       // Return new state
       ListBuilder {new_nelems, used + int 1, new_contents};
