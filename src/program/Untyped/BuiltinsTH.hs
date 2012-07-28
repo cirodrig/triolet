@@ -118,6 +118,8 @@ pyonSourceGlobals =
   , "__mod__"
   , "__floordiv__"
   , "__div__"
+  , "__lshift__"
+  , "__rshift__"
   , "scale"
   , "magnitude"
   , "dot"

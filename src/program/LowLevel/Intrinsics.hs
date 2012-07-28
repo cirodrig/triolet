@@ -42,6 +42,10 @@ lowerIntrinsicOp v
          binary_int (PrimOrZ Signed S32))
       , (coreBuiltin The_oper_BITWISEXOR,
          binary_int (PrimXorZ Signed S32))
+      , (coreBuiltin The_lshift,
+         binary_int (PrimShiftL Signed S32))
+      , (coreBuiltin The_rshift,
+         binary_int (PrimShiftR Signed S32))
       , (coreBuiltin The_AdditiveDict_int_add,
          binary_int (PrimAddZ Signed S32))
       , (coreBuiltin The_AdditiveDict_int_sub,

@@ -536,6 +536,8 @@ builtinVariableNames =
   , "or"
   , "and"
   , "not"
+  , "lshift"
+  , "rshift"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
   , "oper_BITWISEXOR"

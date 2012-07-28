@@ -101,6 +101,8 @@ data Prim =
   | PrimAndZ !Signedness !Size  -- ^ Bitwise and
   | PrimOrZ !Signedness !Size   -- ^ Bitwise or
   | PrimXorZ !Signedness !Size  -- ^ Bitwise xor
+  | PrimShiftL !Signedness !Size      -- ^ Shift left by a signed int value
+  | PrimShiftR !Signedness !Size      -- ^ Shift right by a signed int value
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
   | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
   | PrimSelect !ValueType             -- ^ Boolean value select
@@ -178,6 +180,8 @@ primReturnType prim =
      PrimAndZ sgn sz          -> int sgn sz
      PrimOrZ sgn sz           -> int sgn sz
      PrimXorZ sgn sz          -> int sgn sz
+     PrimShiftL sgn sz        -> int sgn sz
+     PrimShiftR sgn sz        -> int sgn sz
      PrimCmpZ _ _ _           -> bool
      PrimCmpP _               -> bool
      PrimSelect t             -> [t]

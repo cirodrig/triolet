@@ -1701,6 +1701,9 @@ oper_BITWISEAND : int -> int -> int;
 oper_BITWISEOR : int -> int -> int;
 oper_BITWISEXOR : int -> int -> int;
 
+lshift : int -> int -> int;
+rshift : int -> int -> int;
+
 or : bool -> bool -> bool;
 and : bool -> bool -> bool;
 not : bool -> bool;

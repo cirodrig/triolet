@@ -431,6 +431,8 @@ genPrimOp prim args =
      PrimAndZ _ _ -> binary CAndOp args
      PrimOrZ _ _ -> binary COrOp args
      PrimXorZ _ _ -> binary CXorOp args
+     PrimShiftL _ _ -> binary CShlOp args
+     PrimShiftR _ _ -> binary CShrOp args
      PrimCmpZ _ _ CmpEQ -> binary CEqOp args
      PrimCmpZ _ _ CmpNE -> binary CNeqOp args
      PrimCmpZ _ _ CmpLT -> binary CLeOp args

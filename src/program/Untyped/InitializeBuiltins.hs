@@ -2106,6 +2106,12 @@ initializeTIBuiltins = do
               ("__xor__", [| mkBinaryIntType |]
               , [| coreBuiltin SystemF.The_oper_BITWISEXOR |]
               ),
+              ("__lshift__", [| mkBinaryIntType |]
+              , [| coreBuiltin SystemF.The_lshift |]
+              ),
+              ("__rshift__", [| mkBinaryIntType |]
+              , [| coreBuiltin SystemF.The_rshift |]
+              ),
               ("and", [| mkBinaryBoolType |]
               , [| coreBuiltin SystemF.The_and |]
               ),

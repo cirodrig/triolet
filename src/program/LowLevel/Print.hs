@@ -153,10 +153,13 @@ pprInfixPrim prim =
      PrimMulZ _ _ -> Just $ text "*"
      PrimModZ _ _ -> Just $ text "%"
      PrimDivZ _ _ -> Just $ text "/"
+     PrimAndZ _ _ -> Just $ text "&"
      PrimCmpZ _ _ c -> Just $ comparison c
      PrimCmpP c -> Just $ comparison c
      PrimAnd -> Just $ text "&&"
      PrimOr -> Just $ text "||"
+     PrimShiftL _ _ -> Just $ text "<<"
+     PrimShiftR _ _ -> Just $ text ">>"
      PrimAddP -> Just $ text "^+"
      PrimCmpF _ c -> Just $ comparison c
      PrimAddF _ -> Just $ text "+"
@@ -194,12 +197,16 @@ pprPrim prim =
            PrimDivZ _ _ -> "div"
            PrimMaxZ _ _ -> "max"
            PrimMinZ _ _ -> "min"
+           PrimAndZ _ _ -> "and"
+           PrimOrZ _ _  -> "or"
+           PrimShiftL _ _ -> "shiftl"
+           PrimShiftR _ _ -> "shiftr"
            PrimCmpZ _ _ c -> comparison c
            PrimCmpP c -> comparison c
            PrimSelect _ -> "select"
-           PrimAnd -> "and"
-           PrimOr -> "or"
-           PrimNot -> "not"
+           PrimAnd -> "and_b"
+           PrimOr -> "or_b"
+           PrimNot -> "not_b"
            PrimAddP   -> "ptradd"
            PrimLoad Mutable _ -> "load"
            PrimLoad Constant _ -> "load const"

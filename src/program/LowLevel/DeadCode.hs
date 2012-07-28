@@ -187,6 +187,8 @@ primHasSideEffect prim =
      PrimAndZ {}          -> False
      PrimOrZ {}           -> False
      PrimXorZ {}          -> False
+     PrimShiftL {}        -> False
+     PrimShiftR {}        -> False
      PrimCmpZ {}          -> False
      PrimCmpP {}          -> False
      PrimSelect {}        -> False

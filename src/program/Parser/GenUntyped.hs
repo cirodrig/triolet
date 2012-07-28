@@ -559,6 +559,8 @@ convertBinaryOperator op =
      Python.Divide {}            -> tiBuiltin the_v___div__
      Python.FloorDivide {}       -> tiBuiltin the_v___floordiv__
      Python.Modulo {}            -> tiBuiltin the_v___mod__
+     Python.ShiftLeft {}         -> tiBuiltin the_v___lshift__
+     Python.ShiftRight {}        -> tiBuiltin the_v___rshift__
      _ -> internalError "convertBinaryOperator: Unrecognized operator"
 
 convertModule :: Module SSAID -> Cvt U.Module
