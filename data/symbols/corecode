@@ -2253,7 +2253,7 @@ TraversableDict_list_build @(a : bare)
   -> Store attribute(inline) =
   case s of {
     sequenceStream @a (sq : Sequence a).
-      Sequence_build_list @a repr sq ret
+      Sequence_list_build @a repr sq ret
   ; viewStream @a (vw : view list_dim a).
       build_list_dim_list @a repr vw ret
   };
@@ -2518,7 +2518,7 @@ TraversableDict_blist_build @(a : bare)
         s in 
   case s2 of {
     sequenceStream @boxed_a (sq : Sequence boxed_a).
-      make_blist @a (Sequence_build_list @boxed_a repr_boxed sq) ret
+      make_blist @a (Sequence_list_build @boxed_a repr_boxed sq) ret
   ; viewStream @boxed_a (vw : view list_dim boxed_a).
       make_blist @a (build_list_dim_list @boxed_a repr_boxed vw) ret
   };
@@ -6151,7 +6151,7 @@ Sequence_reduce1 @(a : bare)
   };
 
 
-Sequence_build_list @(a : bare)
+Sequence_list_build @(a : bare)
   (repr : Repr a) (sq : Sequence a) (ret : OutPtr (list a))
   -> Store
   attribute(inline, inline_sequential) =
@@ -6454,7 +6454,7 @@ Sequence_parallel_build @(a : bare)
           let count_i : int = count_new in
           let outLeaf : PBTree a =
                 pbLeaf @a
-                (Sequence_build_list @a rep
+                (Sequence_list_build @a rep
                  (Sequence_generate_bind @a (mk_list_dim (justVal @int count_i))
                   (\ (si : Stored int) -> Sequence a.
                      -- Add 'start' to the index

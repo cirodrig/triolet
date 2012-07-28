@@ -2007,8 +2007,6 @@ Sequence_fold : (a acc : bare)
 	      -> Sequence a
 	      -> Init acc;
 
-Sequence_build_list : (a : bare) -> Repr a -> Sequence a -> Init (list a);
-
 Sequence_parallel_reduce : (a : bare)
                         -> Repr a
                         -> list_dim

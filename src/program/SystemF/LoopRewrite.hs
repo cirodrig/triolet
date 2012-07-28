@@ -190,7 +190,7 @@ replaceWithParallelApp inf op_var ty_args args =
          ReplaceWith $ coreBuiltin The_parallel_doall)
       , (coreBuiltin The_Sequence_reduce,
          Rewrite rewriteSequenceReduce)
-      , (coreBuiltin The_Sequence_build_list,
+      , (coreBuiltin The_Sequence_list_build,
          Rewrite rewriteSequenceBuildList)
       , (coreBuiltin The_Sequence_scatter,
          Rewrite rewriteSequenceScatter)

@@ -655,7 +655,6 @@ builtinVariableNames =
   , "Stream1_return"
   , "Stream1_guard"
   , "Stream1_bind"
-  , "Sequence_build_list"
   , "Sequence_empty"
   , "Sequence_return"
   , "Sequence_chain"
