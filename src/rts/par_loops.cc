@@ -385,6 +385,7 @@ triolet_C_blocked_doall2(void *data, TrioletInt count_y, TrioletInt count_x)
 
 typedef void *PBTree;
 
+
 /* Functions written in low-level triolet */
 extern "C" void
 blocked_doall_PBTree_worker(void *worker_fn, TrioletInt i, PBTree tree);
@@ -410,13 +411,57 @@ triolet_C_blocked_PBTree_doall(PBTree tree, void *worker_fn)
   blocked_doall_PBTree_worker (worker_fn, 0, tree);
 }
 
-#else 
+#else
+
+
+struct PBTreeIntegerRange
+{
+  TrioletInt startRange;
+  PBTree tree;
+
+  PBTreeIntegerRange(PBTree t) : startRange(0), tree(t) {};
+
+  bool empty() const { return triolet_PBTree_size(tree) == 0; }
+  bool is_divisible() const { return triolet_PBTree_splittable(tree); }
+  PBTreeIntegerRange(PBTreeIntegerRange& r, tbb::split)
+  {
+    PBTree children[2];
+    int tree_size = triolet_PBTree_size(r.tree);
+    int splittable = triolet_PBTree_split(r.tree, &children);
+
+    if (!splittable)
+    {
+      fprintf(stderr, "triolet_C_blocked_PBtree_doall: Cannot split range\n");
+      exit(-1);
+    }
+
+    //r.startRange = startRange;
+
+    r.tree = children[0];
+
+    startRange = r.startRange + triolet_PBTree_size(children[0]);
+    tree = children[1];
+  }
+};
+
+struct PBTreeRangeDoer
+{
+  void *worker_fn;
+  
+  PBTreeRangeDoer(void *_worker_fn) : worker_fn(_worker_fn) {};
+
+  void operator()(PBTreeIntegerRange &range) const
+  {
+    TrioletInt start = range.startRange;
+    blocked_doall_PBTree_worker(worker_fn, start, range.tree);
+  }
+};
+
 
 extern "C" void
 triolet_C_blocked_PBTree_doall(PBTree tree, void *worker_fn)
 {
-  fprintf(stderr, "triolet_C_blocked_PBTree_doall: Not implemented\n");
-  exit(-1);
+  tbb::parallel_for(PBTreeIntegerRange(tree), PBTreeRangeDoer(worker_fn));
 }
 
 #endif  // USE_TBB

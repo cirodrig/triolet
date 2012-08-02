@@ -447,12 +447,13 @@ procedure blocked_doall_PBTree_worker (owned f, int i, owned t) -> () {
 
 procedure PBTree_size (owned tree) -> int {
   t = tree @! PBTree.tag;
+  
   if (t == PBTree_LEAF) {
     FinIndInt {n} = tree @! PBTreeLeaf.members.nelems;
     n;
   }
   else if (t == PBTree_BRANCH) {
-    tree @! PBTreeBranch.size;
+    tree @! PBTreeBranch.other.size;
   }
   else {
     int 0;
@@ -463,7 +464,7 @@ procedure PBTree_split (owned tree, pointer ret) -> bool {
   tag = tree @! PBTree.tag;
   (is_splittable, left, right) =
     if (tag == PBTree_BRANCH) {
-      (true, tree @! PBTreeBranch.left, tree @! PBTreeBranch.right);
+      (true, tree @! PBTreeBranch.other.left, tree @! PBTreeBranch.other.right);
     }
     else {
       (false, null as owned, null as owned);
@@ -503,9 +504,9 @@ procedure PBTree_branch (owned left, owned right) -> owned {
     s2 = int primcall PBTree_size (right);
     p = pointer primcall triolet_alloc (sizeof PBTreeBranch);
     p @! PBTreeBranch.tag = PBTree_BRANCH;
-    p @! PBTreeBranch.size = s1 + s2;
-    p @! PBTreeBranch.left = left;
-    p @! PBTreeBranch.right = right;
+    p @! PBTreeBranch.other.size = s1 + s2;
+    p @! PBTreeBranch.other.left = left;
+    p @! PBTreeBranch.other.right = right;
     p as owned;
   };
 };

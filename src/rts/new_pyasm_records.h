@@ -280,17 +280,24 @@ record Array3 {
 #define PBTree_EMPTY  uint8 2
 /* A tree for parallel list construction. */
 record PBTree {
+  const ObjectHeader header;
   const uint8 tag;              // {BRANCH, LEAF, EMPTY}
 };
 
 record PBTreeBranch {
+  const ObjectHeader header;
   const uint8 tag;              // BRANCH
+  const PBTreeBranch_other other;
+};
+
+record PBTreeBranch_other {
   const int size;
   const owned left;
   const owned right;
 };
 
 record PBTreeLeaf {
+  const ObjectHeader header;
   const uint8 tag;              // LEAF
   const List members;
 };
