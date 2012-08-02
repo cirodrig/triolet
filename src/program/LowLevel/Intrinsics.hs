@@ -98,8 +98,6 @@ lowerIntrinsicOp v
          fin_indexed_int_constant 1)
       , (coreBuiltin The_emptyEffTok,
          empty_eff_tok)
-      , (coreBuiltin The_fromEffTok,
-         from_eff_tok)
       , (coreBuiltin The_eqZ_refl,
          proof_object)
       , (coreBuiltin The_deadRef,
@@ -147,7 +145,7 @@ float_to_int round_mode =
     int_type = PrimType (IntType Signed S32)
     float_type = PrimType (FloatType S32)
   
-id_float, id_int, empty_eff_tok, from_eff_tok, dead_reference, dead_box, proof_object ::
+id_float, id_int, empty_eff_tok, dead_reference, dead_box, proof_object ::
   (Monad m, Supplies m (Ident Var)) => [Val] -> Gen m [Val]
 
 -- | This is the identity function on floats.
@@ -173,12 +171,6 @@ fin_indexed_int_constant n [] =
 
 -- | Create an effect token.
 empty_eff_tok [] = return [LitV UnitL]
-
--- | Convert an effect token to a side effect.  The effect token is simply
---   discarded.
-from_eff_tok =
-  genLambdaOrCall [PrimType UnitType] [] $ \_ -> do
-    emitAtom [] $ ValA []
 
 -- | Initialize an object that's dead.  Since it's dead, we don't have to  
 --   initialize it.

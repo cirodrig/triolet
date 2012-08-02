@@ -282,6 +282,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_seqEffTok) |])
   , (CoreName module_effects "toEffTok",
      Right [| coreBuiltin (SystemF.The_toEffTok) |])
+  , (CoreName module_effects "fromEffTok",
+     Right [| coreBuiltin (SystemF.The_fromEffTok) |])
   , (CoreName module_structures "repr_arr",
      Right [| SystemF.coreBuiltin SystemF.The_repr_arr |])
   --, (CoreName module_structures "repr_Referenced",

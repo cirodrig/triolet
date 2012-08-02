@@ -21,3 +21,7 @@ function inline seqEffTok (unit _, unit _) -> unit {
 function inline toEffTok (unit x) -> unit {
   x;
 };
+
+function inline fromEffTok (unit x) -> unit {
+  x;
+};
