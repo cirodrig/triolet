@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Boolean scatter operations",
+  trioletSources = ["divtest.tri"],
+  lltrioletSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
+  expectedResult = ShouldPrint "1,0,1,0,"
+}

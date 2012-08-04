@@ -272,6 +272,10 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_floatUpdateInPlace_initializer) |])
   , (CoreName module_inplace "floatUpdateInPlace_updater",
      Right [| coreBuiltin (SystemF.The_floatUpdateInPlace_updater) |])
+  , (CoreName module_inplace "boolUpdateInPlace_initializer",
+     Right [| coreBuiltin (SystemF.The_boolUpdateInPlace_initializer) |])
+  , (CoreName module_inplace "boolUpdateInPlace_updater",
+     Right [| coreBuiltin (SystemF.The_boolUpdateInPlace_updater) |])
   , (CoreName module_inplace "boxedScatter_updater",
      Right [| coreBuiltin (SystemF.The_boxedScatter_updater) |])
   , (CoreName module_inplace "appendScatter_initializer",

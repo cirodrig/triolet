@@ -1,0 +1,19 @@
+
+def divisibility_check(numbers, columns):
+  def test(n, c):
+    if c == 0:   divisor = 2
+    elif c == 1: divisor = 3
+    elif c == 2: divisor = 5
+    else:        divisor = 7
+    return n % divisor == 0
+
+  sc = listScatter(list_dim(Just(4)),
+                   boolScatter(lambda x, y: x and y,
+                               lambda x, y: x and y,
+                               True))
+
+  divisibilities = ((c, test(n, c)) for (n, c) in zip(numbers, columns))
+
+  return scatter(sc, divisibilities)
+
+export cplusplus divisibility_check : list(int) * list(int) -> list(bool)

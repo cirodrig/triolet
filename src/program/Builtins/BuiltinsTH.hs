@@ -604,7 +604,14 @@ builtinVariableNames =
   , "floatUpdateInPlace_initializer"
   , "floatUpdateInPlace_updater"
   , "floatUpdateInPlace_combiner"
-    
+  , "boolUpdateInPlace_bool_coercion"
+  , "boolUpdateInPlace_finalizer"
+  , "boolUpdateInPlace_initializer"
+  , "boolUpdateInPlace_updater"
+
+  , "intScatter"
+  , "floatScatter"
+  , "boolScatter"
   , "intSumScatter"
   , "intSumScatter_updater"
   , "intSumScatter_make_update"

@@ -1209,6 +1209,81 @@ floatUpdateInPlace_combiner (x : Stored float) (y : Stored float)
   stored @float (AdditiveDict_float_add ux uy) ret;
 
 
+boolUpdateInPlace_bool_coercion : coerce @bare (Stored bool) (Stored bool) =
+  idBareCoercion @(Stored bool);
+
+
+boolUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored bool) (Stored bool) =
+  mutateInPlace @(Stored bool) @(Stored bool)
+  boolUpdateInPlace_bool_coercion;
+
+
+intScatter @(a : bare) (rep : Repr a)
+  (f : a -> int -> int)
+  (g : int -> int -> int)
+  (init : int)
+  -> Scatter (Stored int) a
+  attribute(inline) =
+  let type Sint = Stored int in
+  mk_scatter @Sint @a @Sint @(NoneType -> int) @(int -> int)
+  repr_int
+  intUpdateInPlace_initializer
+  (\ (modify : int -> int) (ix : a)
+     (tok_in : EffTok) (ret : OutPtr Sint) -> EffTok.
+     intUpdateInPlace_updater modify tok_in ret)
+  (\ (x : Sint) (y : Sint) (r : OutPtr (Sint)) -> Store.
+    case x of stored @int (ux : int).
+    case y of stored @int (uy : int).
+    stored @int (g ux uy) r)
+  intUpdateInPlace_finalizer
+  f
+  (\ (dummy : NoneType) -> int. init);
+
+
+floatScatter @(a : bare) (rep : Repr a)
+  (f : a -> float -> float)
+  (g : float -> float -> float)
+  (init : float)
+  -> Scatter (Stored float) a
+  attribute(inline) =
+  let type Sfloat = Stored float in
+  mk_scatter @Sfloat @a @Sfloat @(NoneType -> float) @(float -> float)
+  repr_float
+  floatUpdateInPlace_initializer
+  (\ (modify : float -> float) (ix : a)
+     (tok_in : EffTok) (ret : OutPtr Sfloat) -> EffTok.
+     floatUpdateInPlace_updater modify tok_in ret)
+  (\ (x : Sfloat) (y : Sfloat) (r : OutPtr (Sfloat)) -> Store.
+    case x of stored @float (ux : float).
+    case y of stored @float (uy : float).
+    stored @float (g ux uy) r)
+  floatUpdateInPlace_finalizer
+  f
+  (\ (dummy : NoneType) -> float. init);
+
+
+boolScatter @(a : bare) (rep : Repr a)
+  (f : a -> bool -> bool)
+  (g : bool -> bool -> bool)
+  (init : bool)
+  -> Scatter (Stored bool) a
+  attribute(inline) =
+  let type Sbool = Stored bool in
+  mk_scatter @Sbool @a @Sbool @(NoneType -> bool) @(bool -> bool)
+  repr_bool
+  boolUpdateInPlace_initializer
+  (\ (modify : bool -> bool) (ix : a)
+     (tok_in : EffTok) (ret : OutPtr Sbool) -> EffTok.
+     boolUpdateInPlace_updater modify tok_in ret)
+  (\ (x : Sbool) (y : Sbool) (r : OutPtr (Sbool)) -> Store.
+    case x of stored @bool (ux : bool).
+    case y of stored @bool (uy : bool).
+    stored @bool (g ux uy) r)
+  boolUpdateInPlace_finalizer
+  f
+  (\ (dummy : NoneType) -> bool. init);
+
+
 intSumScatter : Scatter (Stored int) (Stored int) =
   let type Sint = Stored int in
   mk_scatter @Sint @Sint @Sint @(NoneType -> int) @(int -> int)
@@ -1246,7 +1321,8 @@ floatSumScatter : Scatter (Stored float) (Stored float) =
   floatSumScatter_make_init;
 
 
-floatSumScatter_updater (modify : float -> float) (ix : Stored float)
+floatSumScatter_updater
+  (modify : float -> float) (ix : Stored float)
   (tok_in : EffTok) (ret : OutPtr (Stored float)) -> EffTok =
   floatUpdateInPlace_updater modify tok_in ret;
 

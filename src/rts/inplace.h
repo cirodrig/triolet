@@ -19,6 +19,10 @@ extern function core.internal.inplace.floatUpdateInPlace_initializer
     (owned, pointer) -> unit;
 extern function core.internal.inplace.floatUpdateInPlace_updater
     (owned, unit, pointer) -> unit;
+extern function core.internal.inplace.boolUpdateInPlace_initializer
+    (owned, pointer) -> unit;
+extern function core.internal.inplace.boolUpdateInPlace_updater
+    (owned, unit, pointer) -> unit;
 
 extern function core.internal.inplace.boxedScatter_updater
     (owned, unit, pointer) -> unit;

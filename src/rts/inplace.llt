@@ -155,6 +155,18 @@ function inline floatUpdateInPlace_updater (owned f, unit _, pointer ret) -> uni
   nil;
 };
 
+function inline boolUpdateInPlace_initializer (owned f, pointer ret) -> unit
+{
+  !ret = bool call f (nil);
+  nil;
+};
+
+function inline boolUpdateInPlace_updater (owned f, unit _, pointer ret) -> unit
+{
+  !ret = bool call f (bool load ret);
+  nil;
+};
+
 function inline boxedScatter_updater (owned f, unit _, pointer ret) -> unit
 {
   // Function 'f' has type (a -> a) for some boxed type 'a'

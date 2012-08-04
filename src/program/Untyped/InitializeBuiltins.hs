@@ -1617,6 +1617,17 @@ mkHistogramType =
                     ConTy (tiBuiltin the_con_iter) @@ ConTy sh @@ int_type]
       (ConTy (tiBuiltin the_con_array1) @@ int_type))
 
+mkScalarScatterType aT =
+  forallType [Star] $ \[b] ->
+  let bT = ConTy b
+  in ([passable bT],
+      functionType [functionType [bT, aT] aT, functionType [aT, aT] aT, aT]
+      (ConTy (tiBuiltin the_con_Scatter) @@ aT @@ bT))
+
+mkIntScatterType = mkScalarScatterType (ConTy $ tiBuiltin the_con_int)
+mkFloatScatterType = mkScalarScatterType (ConTy $ tiBuiltin the_con_float)
+mkBoolScatterType = mkScalarScatterType (ConTy $ tiBuiltin the_con_bool)
+
 mkIntSumScatterType =
   let int_type = ConTy $ tiBuiltin the_con_int
   in return $ monomorphic $
@@ -2042,6 +2053,15 @@ initializeTIBuiltins = do
               ),
               ("floor", [| mkFloorType |]
               , [| coreBuiltin SystemF.The_floor |]
+              ),
+              ("intScatter", [| mkIntScatterType |]
+              , [| coreBuiltin SystemF.The_intScatter |]
+              ),
+              ("floatScatter", [| mkFloatScatterType |]
+              , [| coreBuiltin SystemF.The_floatScatter |]
+              ),
+              ("boolScatter", [| mkBoolScatterType |]
+              , [| coreBuiltin SystemF.The_boolScatter |]
               ),
               ("intSumScatter", [| mkIntSumScatterType |]
               , [| coreBuiltin SystemF.The_intSumScatter |]

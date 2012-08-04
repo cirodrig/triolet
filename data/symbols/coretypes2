@@ -492,6 +492,12 @@ floatUpdateInPlace_initializer : (NoneType -> float)
 floatUpdateInPlace_updater : (float -> float) -> EffTok
                           -> OutPtr (Stored float)
                           -> EffTok;
+boolUpdateInPlace_initializer : (NoneType -> bool)
+                              -> OutPtr (Stored bool)
+                              -> EffTok;
+boolUpdateInPlace_updater : (bool -> bool) -> EffTok
+                          -> OutPtr (Stored bool)
+                          -> EffTok;
 
 -- Helper functions for scatter reductions
 intUpdateInPlace_combiner : Stored int -> Stored int -> Init (Stored int);
@@ -502,7 +508,32 @@ floatUpdateInPlace_combiner : Stored float -> Stored float -> Init (Stored float
 floatUpdateInPlace_float_coercion : coerce @bare (Stored float) (Stored float);
 floatUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored float) (Stored float);
 
+boolUpdateInPlace_bool_coercion : coerce @bare (Stored bool) (Stored bool);
+boolUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored bool) (Stored bool);
+
 -- Scatter reduction algorithms
+
+intScatter : (a : bare)
+          -> Repr a
+          -> (a -> int -> int)
+          -> (int -> int -> int)
+          -> int
+          -> Scatter (Stored int) a;
+
+floatScatter : (a : bare)
+            -> Repr a
+            -> (a -> float -> float)
+            -> (float -> float -> float)
+            -> float
+            -> Scatter (Stored float) a;
+
+boolScatter : (a : bare)
+           -> Repr a
+           -> (a -> bool -> bool)
+           -> (bool -> bool -> bool)
+           -> bool
+           -> Scatter (Stored bool) a;
+
 intSumScatter : Scatter (Stored int) (Stored int);
 intSumScatter_updater : (int -> int)
                               -> Stored int -> EffTok -> OutPtr (Stored int)
@@ -512,8 +543,8 @@ intSumScatter_make_init : NoneType -> int;
 
 floatSumScatter : Scatter (Stored float) (Stored float);
 floatSumScatter_updater : (float -> float)
-                              -> Stored float -> EffTok -> OutPtr (Stored float)
-                              -> EffTok;
+                       -> Stored float -> EffTok -> OutPtr (Stored float)
+                       -> EffTok;
 floatSumScatter_make_update : Stored float -> float -> float;
 floatSumScatter_make_init : NoneType -> float;
 
