@@ -6555,7 +6555,9 @@ Sequence_parallel_build @(a : bare)
         storeTreeVal (new_ind : int) (t : PBTree a) (ret_p : OutPtr (arr n a) ) -> Store =
           let ind : int = new_ind in
           case t of {
-            pbEmpty @a. except @Store
+            pbEmpty @a.
+              fromEffTok @a emptyEffTok
+
           ; pbBranch @a (e_i : int) (ta : PBTree a) (tb : PBTree a).
               let store_a : EffTok = toEffTok @a (storeTreeVal new_ind ta ret_p) in
               let ta_sz : int = treeSz ta in
