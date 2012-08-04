@@ -145,7 +145,7 @@ function inline floatSumScatter_make_init (unit dummy) -> float
 
 function inline floatUpdateInPlace_initializer (owned f, pointer ret) -> unit
 {
-  !ret = int call f (nil);
+  !ret = float call f (nil);
   nil;
 };
 
