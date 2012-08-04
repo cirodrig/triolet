@@ -89,13 +89,13 @@ nullPtr =
 -- | Cast an expression to the C equivalent of the given type
 cCast :: PrimType -> CExpr -> CExpr
 cCast to_type expr =
-  let decl = anonymousDecl $ primTypeDeclSpecs to_type
+  let decl = anonymousDecl $ variablePrimTypeDeclSpecs to_type
   in CCast decl expr internalNode
 
 -- | Cast an expression to the C equivalent of a pointer to the given type
 cPtrCast :: PrimType -> CExpr -> CExpr
 cPtrCast to_type expr =
-  let decl = anonymousDecl $ ptrDeclSpecs $ primTypeDeclSpecs to_type
+  let decl = anonymousDecl $ ptrDeclSpecs $ memoryPrimTypeDeclSpecs to_type
   in CCast decl expr internalNode
 
 -- | Cast an expression to TrioletPtr type

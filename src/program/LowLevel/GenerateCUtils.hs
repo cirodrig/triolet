@@ -78,12 +78,22 @@ structDeclSpecs field_types =
     field_names = map (internalIdent . return) ['a' .. 'z'] ++ too_many_fields
     too_many_fields = [internalError "structDeclSpecs: Too many fields"]
 
--- | Get the type specificer for a non-pointer primitive type
-primTypeDeclSpecs :: PrimType -> DeclSpecs
-primTypeDeclSpecs pt =
+memoryPrimTypeDeclSpecs :: PrimType -> DeclSpecs
+memoryPrimTypeDeclSpecs pt = primTypeDeclSpecs True pt
+
+variablePrimTypeDeclSpecs :: PrimType -> DeclSpecs
+variablePrimTypeDeclSpecs pt = primTypeDeclSpecs False pt
+
+-- | Get the type specificer for a non-pointer primitive type.
+--   'Bool' is represented by a different type in memory versus in a 
+--   local variable.  The unit type cannot be represented in memory.
+primTypeDeclSpecs :: Bool -> PrimType -> DeclSpecs
+primTypeDeclSpecs is_memory pt =
   case pt
-  of BoolType -> typeDeclSpecs (CIntType internalNode)
-     UnitType -> typeDeclSpecs (CIntType internalNode)
+  of BoolType | is_memory -> typeDeclSpecs (CCharType internalNode)
+              | otherwise -> typeDeclSpecs (CIntType internalNode)
+     UnitType | is_memory -> internalError "primTypeDeclSpecs: Cannot represent a unit type stored in memory"
+              | otherwise -> typeDeclSpecs (CIntType internalNode)
      IntType Signed S8 -> nameDeclSpecs "int8_t"
      IntType Signed S16 -> nameDeclSpecs "int16_t"
      IntType Signed S32 -> nameDeclSpecs "int32_t"

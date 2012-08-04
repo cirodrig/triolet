@@ -143,7 +143,7 @@ getStructName types = GenC $ \env st ->
 -- Declarations
 
 valueTypeDeclSpecs :: ValueType -> GenC DeclSpecs
-valueTypeDeclSpecs (PrimType pt) = return $ primTypeDeclSpecs pt
+valueTypeDeclSpecs (PrimType pt) = return $ variablePrimTypeDeclSpecs pt
 valueTypeDeclSpecs (RecordType r) =
   fmap identDeclSpecs $ getStructName field_types
   where
@@ -218,7 +218,7 @@ genAssignVar v e = cAssign (CVar (localVarIdent v) internalNode) e
 -- | Get the C type used for this return type.
 returnTypeDecl :: [PrimType] -> GenC DeclSpecs
 returnTypeDecl []  = return voidDeclSpecs
-returnTypeDecl [t] = return $ primTypeDeclSpecs t
+returnTypeDecl [t] = return $ variablePrimTypeDeclSpecs t
 returnTypeDecl ts  = fmap identDeclSpecs $ getStructName ts
 
 -------------------------------------------------------------------------------
@@ -400,7 +400,7 @@ genPrimCall return_types op args = do
   return_type <- returnTypeDecl $ map valueToPrimType return_types
 
   let param_types =
-        map (anonymousDecl . primTypeDeclSpecs . valPrimType) args
+        map (anonymousDecl . variablePrimTypeDeclSpecs . valPrimType) args
       fn_type =
         ptrDeclSpecs $ funDeclSpecs param_types return_type
 
@@ -477,12 +477,12 @@ genPrimOp prim args =
      PrimCastZToF from_size to_size ->
        case args
        of [val] ->
-            let decl = anonymousDecl $ primTypeDeclSpecs (FloatType to_size) 
+            let decl = anonymousDecl $ variablePrimTypeDeclSpecs (FloatType to_size) 
             in CCast decl val internalNode
      PrimCastFToZ from_size to_size ->
        case args
        of [val] ->
-            let decl = anonymousDecl $ primTypeDeclSpecs (IntType Signed to_size) 
+            let decl = anonymousDecl $ variablePrimTypeDeclSpecs (IntType Signed to_size) 
             in CCast decl val internalNode
      PrimGetFrameP ->
        CVar (internalIdent "frame_ptr") internalNode
@@ -841,14 +841,14 @@ genFun exported_vars (Def v fun)
             case funFrameSize fun
             of 0 -> []
                sz -> let specs = arrayDeclSpecs (smallIntConst sz) $
-                                 primTypeDeclSpecs (IntType Signed S8)
+                                 memoryPrimTypeDeclSpecs (IntType Signed S8)
                      in [declareVariable data_name specs Nothing]
           ptr_expr =
             if funFrameSize fun == 0
             then nullPtr
             else cUnary CAdrOp $ cVar data_name
           ptr_def =
-            let specs = primTypeDeclSpecs PointerType
+            let specs = variablePrimTypeDeclSpecs PointerType
             in [declareVariable ptr_name specs (Just ptr_expr)]
           defs = data_def ++ ptr_def
       in CCompound llabs (map CBlockDecl defs ++ block_items) info
@@ -953,9 +953,10 @@ generateCFile (Module { moduleImports = imports
     withTheLLVarIdentSupply $ \var_supply ->
     let gen_c_env = Env global_vars Map.empty ident_supply var_supply
     in runGenC (mapAndUnzipM (genFun defined_vars) funs) gen_c_env Map.empty
-       
+
+  -- Structures used for parameter and return passing
   let struct_decls =
-        [declareStruct name (map primTypeDeclSpecs fields)
+        [declareStruct name (map variablePrimTypeDeclSpecs fields)
         | (fields, name) <- Map.toList structs]
   
   let top_level = map CDeclExt struct_decls ++
