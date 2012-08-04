@@ -768,16 +768,21 @@ polymorphicLayout ty =
     is_pointerless <- selectPassConvIsPointerless dict
     return (size, align, is_pointerless)
 
+-- | Get an array layout, given the array size and element layout.
+--   The array size generates code to get the number of elements, in the
+--   form of a finite indexed int (a record containing an int).
 arrayLayout :: GenLower LL.Val -> MemLayout -> MemLayout 
 arrayLayout get_count element =
   memBytesLayout $ do
     count <- get_count
+    [size_var] <- unpackRecord finIndexedIntRecord count
+
     (elt_size, elt_align, elt_pointerless) <- memDynamicObjectType element
 
     -- Array size = count * (pad (alignment element) (size element)
     int_size <- primCastZ (LL.PrimType LL.nativeIntType) elt_size
     padded_elt_size <- addRecordPadding int_size elt_align
-    array_size <- nativeMulZ count padded_elt_size
+    array_size <- nativeMulZ (LL.VarV size_var) padded_elt_size
     array_uint_size <- primCastZ (LL.PrimType LL.nativeWordType) array_size
     
     return (array_uint_size, elt_align, elt_pointerless)
