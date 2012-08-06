@@ -14,7 +14,7 @@ import procedure exit "exit" (int) -> ();
 
 #include "new_pyasm_records.h"
 
-function repr_list (owned elem_repr) -> owned {
+function inline repr_list (owned elem_repr) -> owned {
   repr = pointer primcall triolet_alloc (sizeof Repr);
 
   // FIXME: Initialize repr header
