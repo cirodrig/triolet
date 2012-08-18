@@ -9,7 +9,6 @@
 module Parser.ParserSyntax where
 
 import Data.IORef
-import Foreign.Ptr
 import {-# SOURCE #-} Parser.SSA
 
 import qualified Language.Python.Common.AST as Python
@@ -39,19 +38,18 @@ data Var id =
     Var
     { varName           :: String
     , varID             :: !id
-    , varPythonPtr      :: {-# UNPACK #-} !(Ptr ())
     }
     deriving(Eq, Ord, Show)
 
 makeVar :: String -> Int -> PVar
-makeVar name id = Var name id nullPtr            
+makeVar name id = Var name id            
 
 -- | Create global variables recognized by the parser.  The variables are 
 -- assigned consecutive IDs starting at the given ID.
 createParserGlobals :: Int -> [(Var Int, ParserVarBinding)]
 createParserGlobals n = zipWith predefined_var [n..] predefinedBindings
   where
-    predefined_var n (name, binding) = (Var name n nullPtr, binding)
+    predefined_var n (name, binding) = (Var name n, binding)
 
 data Literal =
     IntLit !Integer

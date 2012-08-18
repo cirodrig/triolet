@@ -55,7 +55,7 @@ type SSAComprehension = Comprehension SSAID
 type SSAStmt = Stmt SSAID
 
 setVersion :: PVar -> SSAVersion -> SSAVar
-setVersion (Var nm id p) ver = Var nm (id, ver) p
+setVersion (Var nm id) ver = Var nm (id, ver)
 
 type StmtID = Int
 
@@ -163,10 +163,10 @@ newAnonymousSSAVar :: SSA SSAVar
 newAnonymousSSAVar = do
   id <- newVarID
   ssa <- newSSAID
-  return $ Var "" (id, ssa) nullPtr
+  return $ Var "" (id, ssa)
 
 predefinedSSAVar :: PVar -> SSAVar
-predefinedSSAVar v = Var (varName v) (varID v, NotSSA) nullPtr
+predefinedSSAVar v = Var (varName v) (varID v, NotSSA)
 
 newStmtID :: SSA Int
 newStmtID = SSA $ \ctx defs w -> do
