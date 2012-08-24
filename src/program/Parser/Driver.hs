@@ -6,18 +6,112 @@
 module Parser.Driver(parserGlobals, parseFile) where
 
 import Control.Monad
+import Data.IORef
 import System.IO
+
+import Common.Label
+import qualified Parser.Control as CF
+import qualified Parser.Dataflow as CF
+import qualified Parser.GenUntyped2 as CF
+import qualified Parser.SSA2 as CF
+import qualified Parser.MakeCFG as CF
+import Parser.Dataflow
 import Parser.Parser
 import Parser.ParserSyntax
-import Parser.SSA
-import Parser.GenUntyped
 import Untyped.Syntax
 import Untyped.Data(ParserVarBinding(..))
 import Globals
 import GlobalVar
 
+newtype Pipeline group group' export export' =
+  Pipeline (IO (group -> IO group', export -> IO export', IO ()))
+
+catPipeline :: Pipeline g  g'  e  e'
+            -> Pipeline g' g'' e' e''
+            -> Pipeline g  g'' e  e''
+catPipeline (Pipeline f) (Pipeline g) = Pipeline $ do
+  (f1, f2, f3) <- f
+  (g1, g2, g3) <- g
+  return (f1 >=> g1, f2 >=> g2, f3 >> g3)
+
+runPipeline :: [g] -> [e] -> Pipeline g g' e e' -> IO ([g'], [e'])
+runPipeline groups exports (Pipeline m) = do
+  (do_group, do_export, do_finish) <- m
+  groups' <- mapM do_group groups
+  exports' <- mapM do_export exports
+  do_finish
+  return (groups', exports')
+
+statelessPipeline :: (group -> IO group') -> (export -> IO export')
+                  -> Pipeline group group' export export'
+statelessPipeline f g = Pipeline $ return (f, g, return ())
+
+controlFlowStage :: Pipeline [PFunc] [CF.LFunc AST] (ExportItem AST) (ExportItem AST)
+controlFlowStage = statelessPipeline (mapM do_func) do_export
+  where
+    do_func f = do f' <- CF.buildControlFlow f
+                   let !(f'', _) = CF.analyzeLivenessInLFunc f'
+                   return f''
+    do_export e = return e
+
+ssaStage :: Pipeline [CF.LFunc AST] [CF.LFunc CF.SSAID] (ExportItem AST) (ExportItem CF.SSAID)
+ssaStage = Pipeline $ do
+  id_supply <- CF.newSSAIDSupply
+  scope_ref <- newIORef external_vars
+
+  let withScope :: (CF.SSAScope -> IO (a, CF.SSAScope)) -> IO a
+      withScope f = do
+        s <- readIORef scope_ref
+        (x, s') <- f s
+        writeIORef scope_ref s'
+        return x
+
+  let do_group fs = withScope $ \scope -> do
+        CF.ssaGlobalGroup id_supply scope fs
+  let do_export e = withScope $ \scope -> do
+        CF.ssaExportItem id_supply scope e
+
+  return (do_group, do_export, return ())
+  where
+    -- Create an SSA scope containing externally defined variables
+    external_vars =
+      CF.externSSAScope $ map fst $ readInitGlobalVar parserGlobals
+
+genUntypedStage :: Pipeline [CF.LFunc CF.SSAID] DefGroup (ExportItem CF.SSAID) Export
+genUntypedStage = Pipeline $ do
+  scope_ref <- newIORef external_vars
+
+  let withScope :: (CF.GenScope -> IO (a, CF.GenScope)) -> IO a
+      withScope f =  do
+        s <- readIORef scope_ref
+        (x, s') <- f s
+        writeIORef scope_ref s'
+        return x
+
+  let do_group fs =
+        withScope $ \scope ->
+        withTheNewVarIdentSupply $ \supply ->
+        CF.genGroup supply scope fs
+  let do_export e =
+        withScope $ \scope ->
+        withTheNewVarIdentSupply $ \supply ->
+        CF.genExport supply scope e
+
+  return (do_group, do_export, return ())  
+  where
+    -- Create an SSA scope containing externally defined variables
+    external_vars =
+      CF.externUntypedScope [(CF.externSSAVar v, b)
+                            | (v, b) <- readInitGlobalVar parserGlobals]
+
+generateCFG :: [[PFunc]] -> [ExportItem AST] -> IO ([DefGroup], [Export])
+generateCFG fs es = do
+  let pipeline =
+        controlFlowStage `catPipeline` ssaStage `catPipeline` genUntypedStage
+  runPipeline fs es pipeline
+
 -- | The global variables recognized by the parser.
-parserGlobals :: InitGlobalVar [(Var Int, ParserVarBinding)]
+parserGlobals :: InitGlobalVar [(PVar, ParserVarBinding)]
 {-# NOINLINE parserGlobals #-}
 parserGlobals = defineInitGlobalVar ()
 
@@ -26,36 +120,25 @@ varBindingLevel (KindBinding _) = KindLevel
 varBindingLevel (TypeBinding _) = TypeLevel
 varBindingLevel (ObjectBinding _) = ValueLevel
 
-ssaGlobals :: [(SSAVar, ParserVarBinding)]
-ssaGlobals =
-  [(predefinedSSAVar v, b) | (v, b) <- readInitGlobalVar parserGlobals]
-
 -- | Parse a file.  Generates an untyped module.
 parseFile :: FilePath -> String -> IO Untyped.Syntax.Module
 parseFile file_path text = do
-  -- Parse and generate an AST
   pglobals <- readInitGlobalVarIO parserGlobals
-  (nextStm, parse_mod) <-
+  let predefined_vars :: [(PVar, Level)]
+      predefined_vars = [(v, varBindingLevel b) | (v, b) <- pglobals]
+
+  -- Parse and generate an AST
+  parse_mod <-
     modifyStaticGlobalVar the_nextParserVarID $ \nextID -> do
-      let predefined_vars :: [(Var Int, Level)]
-          predefined_vars = [(v, varBindingLevel b) | (v, b) <- pglobals]
       mast <- parseModule text file_path predefined_vars nextID
       case mast of
         Left errs -> do
           mapM_ putStrLn errs  
           fail "Parsing failed" 
-        Right (nextStm, nextID', mod) ->
-          return (nextID', (nextStm, mod))
+        Right (nextID', mod) ->
+          return (nextID', mod)
 
-  -- Generate SSA form
-  ssa_mod <-
-    modifyStaticGlobalVar the_nextSSAVarID $ \nextSSAID -> do
-      modifyStaticGlobalVar the_nextParserVarID $ \nextID -> do
-        (nextStm', nextID', nextSSAID', ssa_mod) <-
-          computeSSA nextStm nextID nextSSAID pglobals parse_mod
-        return (nextID', (nextSSAID', ssa_mod))
-
-  -- Convert to untyped functional form
-  untyped_mod <- convertToUntyped ssaGlobals ssa_mod
-
-  return untyped_mod
+  -- Convert the AST to untyped expressions
+  let Parser.ParserSyntax.Module module_name groups exports = parse_mod
+  (groups', exports') <- generateCFG groups exports
+  return $ Untyped.Syntax.Module (ModuleName module_name) groups' exports'

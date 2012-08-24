@@ -4,7 +4,7 @@
 
 {-# LANGUAGE TemplateHaskell, DoRec #-}
 module Untyped.InitializeBuiltins
-       (initializeTIBuiltins, printTIBuiltinGlobals)
+       (initializeTIBuiltins)
 where
 
 import Control.Concurrent.MVar
@@ -2226,9 +2226,9 @@ initializeTIBuiltins = do
   putMVar the_TIBuiltins bi
 
 -- | Print the names and types of all built-in variables
-printTIBuiltinGlobals = do
+{-printTIBuiltinGlobals = do
   forM_ $(TH.listE [TH.tupE [TH.varE $ TH.mkName $ 'v':'_':name, TH.litE (TH.stringL name)]
                     | name <- pyonSourceGlobals]) $ \(x, name) -> do
     ass <- readMVar $ varTranslation $ tiBuiltin x
     putStrLn name
-    print =<< runPpr (pprTyScheme $ _typeAssignmentScheme ass)
+    print =<< runPpr (pprTyScheme $ typeAssignmentScheme ass)-}

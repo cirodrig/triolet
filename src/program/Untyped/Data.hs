@@ -302,6 +302,24 @@ data Derivation =
 -- | A variable's type assignment, containing information about how to create 
 -- its corresponding expression in System F
 data TypeAssignment =
+    -- | A term with a first-order type.
+    --   The term is constructed by the given function.
+    FirstOrderAssignment HMType (SourcePos -> TIExp)
+
+    -- | A term with a polymorphic type.
+    --   The term is constructed by the given function.
+  | PolymorphicAssignment TyScheme (SourcePos -> TIExp)
+
+    -- | A data constructor with the given type scheme.
+  | DataConAssignment TyScheme SF.Var
+
+    -- | A recursively defined variable whose definition hasn't been processed.
+    --   A unifiable type variable is created to stand for its type.
+  | RecursiveAssignment Variable TyCon
+
+    -- | A class method
+  | MethodAssignment Class Int TyScheme
+{-
   TypeAssignment
   { -- | Get a type assignment's free type variables
     _typeAssignmentFreeVariables :: !(IO TyVarSet)
@@ -311,7 +329,7 @@ data TypeAssignment =
   , _typeAssignmentScheme :: TyScheme
     -- | Instantiate a type assignment
   , _instantiateTypeAssignment :: !(SourcePos -> IO (Placeholders, TyVarSet, Constraint, HMType, TIExp))
-  }
+  }-}
 
 -------------------------------------------------------------------------------
 -- Type-inferred code.

@@ -255,7 +255,11 @@ generalize env constraint inferred_types = do
       -- Which type variables should be quantified over?  This will be a subset
       -- of 'local_tyvars'.
       ftv <- freeTypeVariables fot
-      dtv <- dependentTypeVariables retained ftv
+      dtv1 <- dependentTypeVariables retained ftv
+
+      -- Must not quantify over type variables bound in the surrounding
+      -- environment
+      let dtv = dtv1 `Set.intersection` local_tyvars
 
       -- Ensure that we respect user-specified 'forall' annotations
       case explicit_qvars of
@@ -340,6 +344,12 @@ generalizeDefGroup is_top_level
   (deferred, bound_vars, retained, schemes) <- 
     generalize env (constraint_1 ++ constraint) inferred_types
 
+  -- DEBUG: Print generalized types
+  when debug_generalize $ do
+    schemes_doc <- runPpr $ mapM pprTyScheme schemes
+    putStrLn "Generalized type schemes:"
+    print $ nest 2 $ vcat schemes_doc
+
   -- If this is a top-level definition group,
   -- deferred constraints aren't allowed
   when (is_top_level && not (null deferred)) $ do
@@ -378,7 +388,7 @@ generalizeDefGroup is_top_level
   when (is_top_level && not (null unresolved_placeholders)) $ do
     printUnresolvedPlaceholders unresolved_placeholders
     fail "Unresolved placeholders in top-level binding"
-
+  
   -- Run body of computation in the extended environment
   (body_cst, body_unbound_vars, body_placeholders, x) <-
     runInf (use_defgroup functions) body_env
@@ -391,6 +401,7 @@ generalizeDefGroup is_top_level
 
   return (ret_cst, ret_unbound_vars, ret_placeholders, x)
   where
+    debug_generalize = False
     unify_inferred_types inferred_types assumed_vars =
       liftM concat $
       zipWithM (unify source_pos) inferred_types (map ConTy assumed_vars)
@@ -429,6 +440,10 @@ resolvePlaceholders proof_env rec_env placeholders =
         resolveRecVar variable tyvar =
           case Map.lookup variable rec_env
           of Nothing  -> defer
+             Just (RecursiveAssignment {}) ->
+               -- Recursive variable has not been resolved yet
+               defer
+
              Just ass -> do
                -- Instantiate the assignment.
                --

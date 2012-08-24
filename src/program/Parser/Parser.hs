@@ -40,7 +40,6 @@ import qualified Language.Python.Common.SrcLocation as Py
 import Language.Python.Common.PrettyAST()
 import Export
 import Parser.ParserSyntax
-import {-# SOURCE #-} Parser.SSA
 
 import Common.Error
 import Common.SourcePos(SourcePos, fileSourcePos)
@@ -229,7 +228,7 @@ identName id = Py.ident_string id
 -- Computation may fail.
 -- Computation may also lazily generate errors, which are stored in a list.
 
-data CvtState = S !Int !Int !Scopes Errors
+data CvtState = S !Int !Scopes Errors
 
 newtype Cvt a = Cvt {run :: CvtState -> IO (Cvt' a)}
 
@@ -311,14 +310,14 @@ enter_ isGlobalScope m = Cvt $ \initialState -> do
     where
       -- Put a new scope on the stack.  The new scope contains the final value
       -- of its dictionary.
-      addNewScope finalScope (S ms ns scopes errs) =
-          S ms ns (Scope finalScope emptyBindings : scopes) errs
+      addNewScope finalScope (S ns scopes errs) =
+          S ns (Scope finalScope emptyBindings : scopes) errs
 
       -- Remove the scope at the top of the stack.
       -- Save its final dictionary, which will be inserted when the scope was
       -- created.
-      removeNewScope (S ms ns (Scope _ finalScope : scopes) errs) =
-          (finalScope, S ms ns scopes errs)
+      removeNewScope (S ns (Scope _ finalScope : scopes) errs) =
+          (finalScope, S ns scopes errs)
 
       localBindingName _ (Local _ v) = True
       localBindingName _ (Param _ v) = True
@@ -334,24 +333,21 @@ enter = enter_ False
 enterGlobal = enter_ True
 
 withScopes :: (Scopes -> (a, Errors)) -> Cvt a
-withScopes f = Cvt $ \(S ms ns scopes errs) ->
+withScopes f = Cvt $ \(S ns scopes errs) ->
                          let (x, errs') = f scopes
-                         in ok (S ms ns scopes (errs' . errs)) x
+                         in ok (S ns scopes (errs' . errs)) x
 
 updateScopes :: (Scopes -> (Scopes, Errors)) -> Cvt ()
-updateScopes f = Cvt $ \(S ms ns scopes errs) ->
+updateScopes f = Cvt $ \(S ns scopes errs) ->
                            let (scopes', errs') = f scopes
-                           in ok (S ms ns scopes' (errs' . errs)) ()
+                           in ok (S ns scopes' (errs' . errs)) ()
 
 newID :: Cvt Int
-newID = Cvt $ \(S ms n s errs) -> ok (S ms (n+1) s errs) n
-
-newStmtID :: Cvt Int
-newStmtID = Cvt $ \(S m ns s errs) -> ok (S (m+1) ns s errs) m
+newID = Cvt $ \(S n s errs) -> ok (S (n+1) s errs) n
 
 logErrors :: Errors -> Cvt ()
-logErrors es = Cvt $ \(S ms ns scopes errs) ->
-  ok (S ms ns scopes (es . errs)) ()
+logErrors es = Cvt $ \(S ns scopes errs) ->
+  ok (S ns scopes (es . errs)) ()
 
 logError :: Maybe Err -> Cvt ()
 logError e = logErrors (toErrors e)
@@ -359,21 +355,15 @@ logError e = logErrors (toErrors e)
       toErrors Nothing  = noError
       toErrors (Just e) = oneError e
 
-runAndGetErrors :: Cvt a -> Int -> IO (Int, Int, Either [String] a)
+runAndGetErrors :: Cvt a -> Int -> IO (Int, Either [String] a)
 runAndGetErrors m nextName = do
-  x <- run m (S 0 nextName emptyScope noError)
+  x <- run m (S nextName emptyScope noError)
   return $! case x
-            of Fail msg -> (0, nextName, Left [msg])
-               OK (S nextSName' nextName' _ errs) _ _ x ->
+            of Fail msg -> (nextName, Left [msg])
+               OK (S nextName' _ errs) _ _ x ->
                  case errs []
-                 of [] -> (nextSName', nextName', Right x)
-                    xs -> (nextSName', nextName', Left xs)
-
-newJoinNodeRef :: Cvt (IORef (Maybe JoinNode))
-newJoinNodeRef = Cvt $ \s -> do
-  x <- newIORef Nothing
-  ok s x
-
+                 of [] -> (nextName', Right x)
+                    xs -> (nextName', Left xs)
 
 -------------------------------------------------------------------------------
 -- Low-level editing of bindings
@@ -531,30 +521,37 @@ type PyComp a = Py.ComprehensionSpan a
 -- | Parse an expression.  The level parameter indicates whether the
 --   expression is a value or a type.  Values and types use different subsets 
 --   of the same AST syntax.
-expression :: Level -> PyExpr -> Cvt (Expr Int)
+expression :: Level -> PyExpr -> Cvt PExpr
 expression lv expr =
+  case expr
+  of Py.Paren {Py.paren_expr = e} -> expression lv e
+     _ -> liftM (Loc pos) $ expression' pos lv expr
+  where
+    pos = toSourcePos $ Py.expr_annot expr
+
+expression' source_pos lv expr =
     case expr
     of Py.Var {Py.var_ident = ident} -> 
-         Variable source_pos <$> use lv ident
+         Variable <$> use lv ident
        Py.Int {Py.int_value = n} -> 
-         pure (Literal source_pos (IntLit n))
+         pure (Literal (IntLit n))
        Py.Float {Py.float_value = d} ->
          assert_value_level $
-         pure (Literal source_pos (FloatLit d))
+         pure (Literal (FloatLit d))
        Py.Imaginary {Py.imaginary_value = d} ->
          assert_value_level $
-         pure (Literal source_pos (ImaginaryLit d))
+         pure (Literal (ImaginaryLit d))
        Py.Bool {Py.bool_value = b} ->
          assert_value_level $
-         pure (Literal source_pos (BoolLit b))
+         pure (Literal (BoolLit b))
        Py.None {} -> 
-         pure(Literal source_pos NoneLit)
+         pure(Literal NoneLit)
        Py.Tuple {Py.tuple_exprs = es} -> 
-         Tuple source_pos <$> traverse subexpression es
+         Tuple <$> traverse subexpression es
        Py.List {Py.list_exprs = es} -> 
-         List source_pos <$> traverse subexpression es
+         List <$> traverse subexpression es
        Py.Call {Py.call_fun = f, Py.call_args = xs} -> 
-         Call source_pos <$> subexpression f <*> traverse (argument lv) xs
+         Call <$> subexpression f <*> traverse (argument lv) xs
        Py.LetExpr { Py.let_target = ts
                   , Py.let_rhs = rhs
                   , Py.let_body = body} -> assert_value_level $ do
@@ -565,17 +562,17 @@ expression lv expr =
          enter $ do
            t' <- exprToParam t 
            body' <- subexpression body 
-           return $ Let source_pos t' rhs' body'
+           return $ Let t' rhs' body'
        Py.CondExpr { Py.ce_true_branch = tr
                    , Py.ce_condition = c
                    , Py.ce_false_branch = fa} -> 
          assert_value_level $
-         let mkCond tr c fa = Cond source_pos c tr fa
+         let mkCond tr c fa = Cond c tr fa
          in mkCond <$> subexpression tr <*> subexpression c <*> subexpression fa
        Py.BinaryOp { Py.operator = op
                    , Py.left_op_arg = l
                    , Py.right_op_arg = r} -> 
-         Binary source_pos op <$> subexpression l <*> subexpression r
+         Binary op <$> subexpression l <*> subexpression r
        Py.Subscript {Py.subscriptee = base, Py.subscript_expr = ind} ->
          -- If subscript expression is a tuple expression, decompose it
          let indices =
@@ -583,27 +580,26 @@ expression lv expr =
                of Py.Tuple {Py.tuple_exprs = xs} -> xs
                   _ -> [ind]
          in assert_value_level $
-            Subscript source_pos <$> subexpression base <*>
+            Subscript <$> subexpression base <*>
             traverse subexpression indices
        Py.SlicedExpr {Py.slicee = base, Py.slices = slices} ->
          assert_value_level $
-         Slicing source_pos <$> subexpression base <*> traverse slice slices
+         Slicing <$> subexpression base <*> traverse slice slices
        Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 
-         Unary source_pos op <$> subexpression arg
+         Unary op <$> subexpression arg
        Py.Lambda {Py.lambda_args = args, Py.lambda_body = body} -> 
          assert_value_level $
-         enter $ Lambda source_pos <$> traverse parameter args 
-                                   <*> subexpression body
+         enter $ Lambda <$> traverse parameter args 
+                        <*> subexpression body
 
        -- Generators and list comprehensions have a separate scope
        Py.Generator {Py.gen_comprehension = comp} -> 
          assert_value_level $
-         enter $ Generator source_pos <$> comprehension subexpression comp
+         enter $ Generator <$> comprehension subexpression comp
        Py.ListComp {Py.list_comprehension = comp} -> 
          assert_value_level $
-         enter $ ListComp source_pos <$> comprehension subexpression comp
-                            
-       Py.Paren {Py.paren_expr = e} -> subexpression e
+         enter $ ListComp <$> comprehension subexpression comp
+
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
     where
       assert_value_level m = 
@@ -611,15 +607,16 @@ expression lv expr =
         of ValueLevel -> m
            TypeLevel -> error $ show source_pos ++ ": Invalid type expression"
            KindLevel -> error $ show source_pos ++ ": Invalid kind expression"
+
+      subexpression :: PyExpr -> Cvt PExpr
       subexpression e = expression lv e
-      source_pos = toSourcePos $ Py.expr_annot expr
 
 -- Convert an optional expression into an expression or None
-maybeExpression :: Level -> SourcePos -> Maybe PyExpr -> Cvt (Expr Int)
+maybeExpression :: Level -> SourcePos -> Maybe PyExpr -> Cvt PExpr
 maybeExpression lv _   (Just e) = expression lv e
 maybeExpression _  pos Nothing  = pure (noneExpr pos)
 
-slice :: PySlice -> Cvt (Slice Int)
+slice :: PySlice -> Cvt PSlice
 slice sl =
   case sl
   of Py.SliceProper l u s _ ->
@@ -632,7 +629,7 @@ slice sl =
   where
     source_pos = toSourcePos $ Py.slice_annot sl
 
-comprehension :: (a -> Cvt (b Int)) -> PyComp a -> Cvt (IterFor Int b)
+comprehension :: (a -> Cvt PExpr) -> PyComp a -> Cvt (IterFor AST)
 comprehension convertBody comprehension =
     compFor $ Py.comprehension_for comprehension
     where
@@ -665,9 +662,9 @@ comprehension convertBody comprehension =
       compIter (Just (Py.IterLet {Py.comp_iter_let = cl})) =
         CompLet <$> compLet cl
 
-noneExpr pos = Literal pos NoneLit
+noneExpr pos = Loc pos $ Literal NoneLit
 
-argument :: Level -> Py.ArgumentSpan -> Cvt (Expr Int)
+argument :: Level -> Py.ArgumentSpan -> Cvt PExpr
 argument _ (Py.ArgExpr {Py.arg_py_annotation = Just _}) = 
   error "Type annotation not allowed here"
 argument lv (Py.ArgExpr {Py.arg_expr = e, Py.arg_py_annotation = Nothing}) = 
@@ -675,7 +672,7 @@ argument lv (Py.ArgExpr {Py.arg_expr = e, Py.arg_py_annotation = Nothing}) =
 argument _ _ = error "Unsupported argument type"
 
 -- | Parse a value-level parameter variable declaration.
-parameter :: Py.ParameterSpan -> Cvt (Parameter Int)
+parameter :: Py.ParameterSpan -> Cvt (Parameter AST)
 parameter (Py.Param {Py.param_name = name, Py.param_py_annotation = ann}) =
   Parameter <$>
   parameterDefinition ValueLevel name <*>
@@ -683,7 +680,7 @@ parameter (Py.Param {Py.param_name = name, Py.param_py_annotation = ann}) =
 
 parameters xs = traverse parameter xs
 
-exprToParam :: PyExpr -> Cvt (Parameter Int)
+exprToParam :: PyExpr -> Cvt (Parameter AST)
 exprToParam e@(Py.Var name _) =
   Parameter <$> parameterDefinition ValueLevel name <*> pure Nothing
 exprToParam e@(Py.Tuple es _) =
@@ -691,14 +688,14 @@ exprToParam e@(Py.Tuple es _) =
 exprToParam (Py.Paren e _) = exprToParam e
 exprToParam _ = error "Unsupported variable binding"
 
-exprToLHS :: PyExpr -> Cvt (Parameter Int)
+exprToLHS :: PyExpr -> Cvt (Parameter AST)
 exprToLHS e@(Py.Var name _) = Parameter <$> definition ValueLevel name <*> pure Nothing
 exprToLHS e@(Py.Tuple es _) = TupleParam <$> traverse exprToLHS es
 exprToLHS (Py.Paren e _) = exprToLHS e
 exprToLHS _                 = error "Unsupported assignment target"
 
 -- Convert a single statement.
-singleStatement :: PyStmt -> Cvt [Stmt Int]
+singleStatement :: PyStmt -> Cvt [Stmt]
 singleStatement stmt =
     case stmt
     of {- Py.For targets generator bodyClause _ ->
@@ -720,9 +717,7 @@ singleStatement stmt =
          assignments (reverse dsts) (expression ValueLevel src)
        Py.Return {Py.return_expr = me} ->
          -- Process, then discard statements after the return
-         singleton <$> (Return source_pos <$> newStmtID
-                                          <*> newJoinNodeRef 
-                                          <*> maybeExpression ValueLevel source_pos me)
+         singleton <$> (Return source_pos <$> maybeExpression ValueLevel source_pos me)
        Py.Pass {} -> pure []
        Py.NonLocal {Py.nonLocal_vars = xs} -> 
          [] <$ mapM_ (nonlocalDeclaration ValueLevel) xs
@@ -735,12 +730,11 @@ singleStatement stmt =
       ifelse (guard, ifTrue) ifFalse = 
           singleton <$> (If source_pos <$> expression ValueLevel guard
                                        <*> suite ifTrue
-                                       <*> ifFalse
-                                       <*> pure Nothing)
+                                       <*> ifFalse)
 
       singleton x = [x]
 
-defStatements :: [PyStmt] -> Cvt (Stmt Int)
+defStatements :: [PyStmt] -> Cvt Stmt
 defStatements stmts =
   let pos = toSourcePos $ Py.stmt_annot (head stmts)
   in DefGroup pos <$> traverse funDefinition stmts
@@ -748,7 +742,7 @@ defStatements stmts =
 -- For each assignment in a multiple-assignment statement,
 -- assign to one variable, then use that variable as the source value
 -- for the next assignment.
-assignments :: [PyExpr] -> Cvt (Expr Int) -> Cvt [Stmt Int]
+assignments :: [PyExpr] -> Cvt PExpr -> Cvt [Stmt]
 assignments (v:vs) src = (:) <$> assign v src
                              <*> assignments vs (expression ValueLevel v)
     where
@@ -759,7 +753,7 @@ assignments (v:vs) src = (:) <$> assign v src
 assignments [] src = pure []
 
 -- Convert a suite of statements.  A suite must have at least one statement.
-suite :: [PyStmt] -> Cvt (Suite Int)
+suite :: [PyStmt] -> Cvt Suite
 suite ss = let groups = groupBy ((==) `on` isDefStatement) ss
            in concat <$> traverse suiteComponent groups
     where
@@ -774,7 +768,7 @@ isDefStatement _           = False
 isExportStatement (Py.Export {}) = True
 isExportStatement _ = False
 
-topLevel :: [PyStmt] -> Cvt ([Func Int], [ExportItem Int])
+topLevel :: [PyStmt] -> Cvt ([PFunc], [ExportItem AST])
 topLevel xs = do
   items <- traverse topLevelFunction xs
   return $ partitionEither items
@@ -794,7 +788,7 @@ topLevel xs = do
           fail "Only functions and exports permitted at global scpoe"
 
 -- Process an export statement
-exportStatement :: PyStmt -> Cvt (ExportItem Int)
+exportStatement :: PyStmt -> Cvt (ExportItem AST)
 exportStatement stmt@(Py.Export {Py.export_lang = lang,
                                  Py.export_name = name,
                                  Py.export_item = item,
@@ -833,7 +827,7 @@ exportStatement stmt@(Py.Export {Py.export_lang = lang,
     is_c_alnum c = isAlphaNum c || c == '_'
 
 -- Unpack a function definition into decorator and real definition
-funDefinition :: PyStmt -> Cvt (Func Int)
+funDefinition :: PyStmt -> Cvt PFunc
 funDefinition stmt@(Py.Fun {}) = funDefinition' [] stmt
 funDefinition (Py.Decorated { Py.decorated_decorators = decorators
                             , Py.decorated_def = stmt@(Py.Fun {})}) = 
@@ -842,7 +836,7 @@ funDefinition (Py.Decorated { Py.decorated_decorators = decorators
 -- A function can be decorated with a list of type variable parameters,
 -- specified with a 'forall' annotation. 
 -- Each parameter consists of a variable and an optional kind expression.
-data Decorators = Decorators (Maybe [(PyIdent, Maybe (Expr Int))])
+data Decorators = Decorators (Maybe [(PyIdent, Maybe PExpr)])
 
 funDefinition' decorators (Py.Fun { Py.fun_name = name
                                   , Py.fun_args = params
@@ -857,8 +851,7 @@ funDefinition' decorators (Py.Fun { Py.fun_name = name
     params' <- parameters params
     result' <- traverse (expression TypeLevel) result
     body' <- suite body
-    return $ Func pos nameVar qvars params' result' body' Nothing
-    
+    return $ Loc pos $ Func nameVar qvars params' result' Nothing body'
   where
     qvarDefinition (qvar_name, qvar_kind) = do
       qvar <- parameterDefinition TypeLevel qvar_name
@@ -898,16 +891,16 @@ extractDecorators decorators =
 -- Partition the top-level definitions into a sequence of definition groups.
 -- A definition may only refer to other definitions in its group and to
 -- definitions in previous definition groups.  Basically, we search for SCCs.
-definitionGroups :: [Func Int] -> [[Func Int]]
+definitionGroups :: [PFunc] -> [[PFunc]]
 definitionGroups fs =
     -- Find strongly-connected components of the reference graph.
     -- The root belongs at the head of the list.
-    let g = Graph.mkGraph nodes edges :: Graph.Gr (Func Int) ()
+    let g = Graph.mkGraph nodes edges :: Graph.Gr PFunc ()
         components = reverse $ Graph.scc g
     -- Build the list of functions
     in map (map labelOf) components
     where
-      nodes :: [Graph.LNode (Func Int)]
+      nodes :: [Graph.LNode PFunc]
       nodes = zip [0..] fs
 
       labelMap = Map.fromList nodes
@@ -915,7 +908,7 @@ definitionGroups fs =
 
       -- Map from function name to graph node ID
       nodeMap :: Map Int Int
-      nodeMap = Map.fromList [(varID (funcName f), n) | (n, f) <- nodes]
+      nodeMap = Map.fromList [(varID (funcName $ unLoc f), n) | (n, f) <- nodes]
 
       nodeOf varID = Map.lookup varID nodeMap
 
@@ -935,59 +928,62 @@ class MentionsVars a where
 instance MentionsVars a => MentionsVars [a] where
     mentionedVars xs = Set.unions $ map mentionedVars xs
 
-instance MentionsVars (Stmt Int) where
+instance MentionsVars a => MentionsVars (Loc a) where
+  mentionedVars x = mentionedVars $ unLoc x
+
+instance MentionsVars Stmt where
     mentionedVars s =
         case s
-        of ExprStmt _ e   -> mentionedVars e
-           Assign _ _ e   -> mentionedVars e
-           Assert _ es    -> mentionedVars es
-           Require _ v e  -> Set.singleton (varID v)
-           Return _ _ _ e -> mentionedVars e
-           If _ e s1 s2 _ -> mentionedVars e `Set.union`
-                             mentionedVars s1 `Set.union`
-                             mentionedVars s2
-           DefGroup _ fs  -> mentionedVars fs
+        of ExprStmt _ e  -> mentionedVars e
+           Assign _ _ e  -> mentionedVars e
+           Assert _ es   -> mentionedVars es
+           Require _ v e -> Set.singleton (varID v)
+           Return _ e    -> mentionedVars e
+           If _ e s1 s2  -> mentionedVars e `Set.union`
+                            mentionedVars s1 `Set.union`
+                            mentionedVars s2
+           DefGroup _ fs -> mentionedVars fs
 
-instance MentionsVars (Func Int) where
+instance MentionsVars (Func AST) where
     mentionedVars f = mentionedVars $ funcBody f
 
-instance MentionsVars (Expr Int) where
+instance MentionsVars (Expr AST) where
     mentionedVars e =
         case e
-        of Variable _ v -> Set.singleton (varID v)
-           Literal _ _ -> Set.empty
-           Tuple _ es -> mentionedVars es
-           List _ es -> mentionedVars es
-           Unary _ _ e -> mentionedVars e
-           Binary _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
-           Subscript _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
-           Slicing _ e ss -> mentionedVars e `Set.union` mentionedVars ss
-           ListComp _ it -> mentionedVars it
-           Generator _ it -> mentionedVars it
-           Call _ e es -> mentionedVars (e:es)
-           Cond _ e1 e2 e3 -> mentionedVars [e1, e2, e3]
-           Lambda _ _ e -> mentionedVars e
-           Let _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+        of Variable v -> Set.singleton (varID v)
+           Literal _ -> Set.empty
+           Tuple es -> mentionedVars es
+           List es -> mentionedVars es
+           Unary _ e -> mentionedVars e
+           Binary _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+           Subscript e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+           Slicing e ss -> mentionedVars e `Set.union` mentionedVars ss
+           ListComp it -> mentionedVars it
+           Generator it -> mentionedVars it
+           Call e es -> mentionedVars (e:es)
+           Cond e1 e2 e3 -> mentionedVars [e1, e2, e3]
+           Lambda _ e -> mentionedVars e
+           Let _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
 
-instance MentionsVars (Slice Int) where
+instance MentionsVars (Slice AST) where
   mentionedVars (SliceSlice _ e1 e2 e3) =
     Set.unions [maybe Set.empty mentionedVars e1,
                 maybe Set.empty mentionedVars e2,
                 maybe Set.empty mentionedVars (join e3)]
 
-instance MentionsVars (IterFor Int Expr) where
+instance MentionsVars (IterFor AST) where
     mentionedVars (IterFor _ _ e c) =
       mentionedVars e `Set.union` mentionedVars c
 
-instance MentionsVars (IterIf Int Expr) where
+instance MentionsVars (IterIf AST) where
     mentionedVars (IterIf _ e c) =
       mentionedVars e `Set.union` mentionedVars c
 
-instance MentionsVars (IterLet Int Expr) where
+instance MentionsVars (IterLet AST) where
     mentionedVars (IterLet _ _ e c) =
       mentionedVars e `Set.union` mentionedVars c
 
-instance MentionsVars (Comprehension Int Expr) where
+instance MentionsVars (Comprehension AST) where
     mentionedVars (CompFor it) = mentionedVars it
     mentionedVars (CompIf it) = mentionedVars it
     mentionedVars (CompLet it) = mentionedVars it
@@ -998,19 +994,19 @@ instance MentionsVars (Comprehension Int Expr) where
 
 -- | Convert a Python statement to a triolet expression.
 -- The lowest unassigned variable ID is returned.
-convertStatement :: PyStmt -> Int -> IO (Either [String] (Int, Int, [Stmt Int]))
+convertStatement :: PyStmt -> Int -> IO (Either [String] (Int, [Stmt]))
 convertStatement stmt names =
     let computation = singleStatement stmt
     in do x <- runAndGetErrors computation names
-          return $! case x of (ms, ns, Left errs)    -> Left errs
-                              (ms, ns, Right result) -> Right (ms, ns, result)
+          return $! case x of (ns, Left errs)    -> Left errs
+                              (ns, Right result) -> Right (ns, result)
 
 -- | Convert a Python module to a triolet module.
 -- The lowest unassigned variable ID is returned.
-convertModule :: [(Var Int, Level)] -- ^ Predefined global variables
+convertModule :: [(PVar, Level)] -- ^ Predefined global variables
               -> Py.ModuleSpan   -- ^ Module to scan
               -> Int             -- ^ First unique variable ID to use
-              -> IO (Either [String] (Int, Int, ([Func Int], [ExportItem Int])))
+              -> IO (Either [String] (Int, ([PFunc], [ExportItem AST])))
 convertModule globals mod names =
     let computation =
             case mod
@@ -1018,23 +1014,23 @@ convertModule globals mod names =
                  enterGlobal $ do defineGlobals globals
                                   topLevel statements
     in do x <- runAndGetErrors computation names
-          return $! case x of (ms, ns, Left errs)    -> Left errs
-                              (ms, ns, Right result) -> Right (ms, ns, result)
+          return $! case x of (ns, Left errs)    -> Left errs
+                              (ns, Right result) -> Right (ns, result)
 
 -- | Parse a Python module.
 -- The lowest unassigned variable ID is returned.
 parseModule :: String           -- ^ File contents
             -> String           -- ^ File name
-            -> [(Var Int, Level)]  -- ^ Predefined global variables
+            -> [(PVar, Level)]  -- ^ Predefined global variables
             -> Int              -- ^ First unique variable ID to use
-            -> IO (Either [String] (Int, Int, Module Int))
+            -> IO (Either [String] (Int, Module AST))
 parseModule stream path globals nextID =
     case Py.parseModule stream path
     of Left err  -> return $ Left [show err]
        Right (mod, _) -> do
          x <- convertModule globals mod nextID
          return $! case x of Left err -> Left err
-                             Right (m, n, (defs, exps)) ->
+                             Right (n, (defs, exps)) ->
                                let groups = definitionGroups defs
                                    module_name = takeBaseName path
-                               in Right (m, n, Module module_name groups exps)
+                               in Right (n, Module module_name groups exps)

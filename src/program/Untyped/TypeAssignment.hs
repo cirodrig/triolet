@@ -1,6 +1,7 @@
 
 module Untyped.TypeAssignment
        (TypeAssignment,
+        pprTypeAssignment,
         assignedFreeVariables,
         instantiateTypeAssignment,
         firstOrderAssignment,
@@ -25,98 +26,67 @@ import Untyped.Unification
 import Type.Var
 
 assignedFreeVariables :: TypeAssignment -> IO TyVarSet
-assignedFreeVariables = _typeAssignmentFreeVariables
+assignedFreeVariables (FirstOrderAssignment ty _) =
+  freeTypeVariables ty
+
+assignedFreeVariables (PolymorphicAssignment ty _) =
+  freeTypeVariables ty
+
+assignedFreeVariables (DataConAssignment ty _) =
+  freeTypeVariables ty
+  
+assignedFreeVariables (RecursiveAssignment _ tyvar) =
+  freeTypeVariables (ConTy tyvar)
+
+assignedFreeVariables (MethodAssignment cls _ ty) =  do
+  ftvs <- freeTypeVariables ty
+  return $ Set.insert (clsParam $ clsSignature cls) ftvs
+
+typeAssignmentScheme :: TypeAssignment -> TyScheme
+typeAssignmentScheme (FirstOrderAssignment ty _) = monomorphic ty
+typeAssignmentScheme (PolymorphicAssignment scm _) = scm
+typeAssignmentScheme (DataConAssignment scm _) = scm
+typeAssignmentScheme (RecursiveAssignment _ _) =
+  internalError "Can't get type scheme of recursive variable" 
+typeAssignmentScheme (MethodAssignment cls index scm) =
+  case scm
+  of TyScheme scm_params scm_cst scm_fot ->
+       let cls_param = clsParam $ clsSignature cls
+           params = cls_param : scm_params
+           cst = ConTy cls_param `IsInst` cls : scm_cst
+       in TyScheme params cst scm_fot
 
 instantiateTypeAssignment :: SourcePos
                           -> TypeAssignment
                           -> IO (Placeholders, TyVarSet, Constraint, HMType, TIExp)
-instantiateTypeAssignment pos ass = _instantiateTypeAssignment ass pos
+instantiateTypeAssignment pos ass = 
+  case ass
+  of FirstOrderAssignment ty mk_exp -> do
+       free_vars <- unifiableTypeVariables ty
+       return ([], free_vars, [], ty, mk_exp pos)
+       
+     PolymorphicAssignment ty mk_exp -> do
+       (ty_vars, constraint, fot) <- instantiate ty
+       (placeholders, exp) <-
+         instanceExpression pos (map ConTy ty_vars) constraint (mk_exp pos)
+       free_vars <- unifiableTypeVariables fot
+       return (placeholders, free_vars, constraint, fot, exp)
 
-firstOrderAssignment :: HMType  -- ^ First-order type
-                     -> (SourcePos -> TIExp) 
-                        -- ^ Factory for an expression of this type 
-                     -> TypeAssignment
-firstOrderAssignment ty value =
-  TypeAssignment (freeTypeVariables ty) (monomorphic ty) instantiate_function
-  where
-    instantiate_function pos = do
-      free_vars <- unifiableTypeVariables ty
-      return ([], free_vars, [], ty, value pos)
+     DataConAssignment ty con -> do
+       (ty_vars, constraint, fot) <- instantiate ty
+       (placeholders, exp) <-
+         conInstanceExpression pos (map ConTy ty_vars) constraint con fot
+       free_vars <- unifiableTypeVariables fot
+       return (placeholders, free_vars, constraint, fot, exp)
 
-polymorphicAssignment :: TyScheme -- ^ Polymorphic type
-                      -> (SourcePos -> TIExp) 
-                         -- ^ Factory for an expression of this type
-                      -> TypeAssignment
-polymorphicAssignment ty mk_value =
-  TypeAssignment (freeTypeVariables ty) ty instantiate_function
-  where
-    instantiate_function pos = do
-      (ty_vars, constraint, fot) <- instantiate ty
-      (placeholders, exp) <-
-        instanceExpression pos (map ConTy ty_vars) constraint (mk_value pos)
-      free_vars <- unifiableTypeVariables fot
-      return (placeholders, free_vars, constraint, fot, exp)
+     RecursiveAssignment var tyvar -> do
+       -- Create a placeholder expression
+       let ty = ConTy tyvar
+       placeholder <- mkRecVarPlaceholder pos var tyvar
+       free_vars <- unifiableTypeVariables ty
+       return ([placeholder], free_vars, [], ty, placeholder)
 
-constructorAssignment :: TyScheme -- ^ Polymorphic type
-                      -> Var      -- ^ Data constructor
-                      -> TypeAssignment
-constructorAssignment ty con =
-  TypeAssignment (freeTypeVariables ty) ty instantiate_con
-  where
-    instantiate_con pos = do
-      (ty_vars, constraint, fot) <- instantiate ty
-      (placeholders, exp) <-
-        conInstanceExpression pos (map ConTy ty_vars) constraint con fot
-      free_vars <- unifiableTypeVariables fot
-      return (placeholders, free_vars, constraint, fot, exp)
-
--- | Create a type assignment for a recursively defined variable.  The variable
--- is assumed to have an unknown monotype represented by a new type variable.
--- A placeholder expression is inserted wherever the variable is used.
-recursiveAssignment :: Variable -- ^ Recursively defined variable
-                    -> IO (TypeAssignment, TyCon)
-recursiveAssignment var = do
-  -- Create a new type variable representing the variable's unknown type
-  tyvar <- newTyVar Star Nothing
-  
-  let ty = ConTy tyvar
-  let instantiate_function pos = do
-        -- Create a placeholder expression
-        placeholder <- mkRecVarPlaceholder pos var tyvar
-        free_vars <- unifiableTypeVariables ty
-        return ([placeholder], free_vars, [], ty, placeholder)
-
-      scheme = internalError "Cannot get type scheme of recursive variable"
-  return ( TypeAssignment (freeTypeVariables ty) scheme instantiate_function
-         , tyvar)
-
--- | Create a class method assignment.  A class method is really a piece of
---   code that retrieves and calls a function from the class dictionary.
---
---   The class method's type scheme is made from the method's type signature.
---   It has one extra type parameter, which is the class's type parameter, 
---   and one extra predicate, which is the class instance.  The parameter and
---   predicate always come before other parameters and predicates.
-methodAssignment :: Class -> Int -> TyScheme -> TypeAssignment
-methodAssignment cls index scm =
-  let get_free_variables = do
-        ftvs <- freeTypeVariables scm
-        return $ Set.insert cls_param ftvs
-  in TypeAssignment get_free_variables visible_method_scheme instantiate_function
-  where
-    cls_param = clsParam $ clsSignature cls
-
-    -- Add the class parameter and the class constraint to the method's scheme.
-    -- This is equivalent to the method's type, but doesn't let us keep
-    -- track of which parts come from the class versus the method.
-    visible_method_scheme =
-      case scm
-      of TyScheme scm_params scm_cst scm_fot ->
-           let params = cls_param : scm_params
-               cst = ConTy cls_param `IsInst` cls : scm_cst
-           in TyScheme params cst scm_fot
-
-    instantiate_function pos = do
+     MethodAssignment cls index scm -> do
       -- Instantiate the method's type
       (inst_var, cls_cst, cls_prd, inst_vars, inst_cst, fot) <-
         instantiateClassMethod cls scm
@@ -139,18 +109,47 @@ methodAssignment cls index scm =
       -- printMethodAssignmentResult placeholders free_vars constraint fot
       return (placeholders, free_vars, constraint, fot, expr)
 
-printMethodAssignmentResult placeholders free_vars constraint fot = do
-  (ph_doc, fv_doc, cst_doc, fot_doc) <- runPpr $ do
-    ph_docs <- forM placeholders $ \(DictPH {phExpPredicate = pred}) -> do
-      uShow pred
+firstOrderAssignment = FirstOrderAssignment
 
-    fv_doc <- mapM pprTyCon $ Set.toList free_vars
-    cst_doc <- mapM uShow constraint
-    fot_doc <- uShow fot
-    return (vcat ph_docs, fv_doc, fsep $ punctuate (text ",") cst_doc, fot_doc)
+polymorphicAssignment = PolymorphicAssignment
 
-  print "Instantiated method assignment"
-  print ph_doc
-  print fv_doc
-  print cst_doc
-  print fot_doc
+constructorAssignment = DataConAssignment
+
+-- | Create a type assignment for a recursively defined variable.  The variable
+-- is assumed to have an unknown monotype represented by a new type variable.
+-- A placeholder expression is inserted wherever the variable is used.
+recursiveAssignment :: Variable -> IO (TypeAssignment, TyCon)
+recursiveAssignment var = do
+  -- Create a new type variable representing the variable's unknown type
+  tyvar <- newTyVar Star Nothing
+  return (RecursiveAssignment var tyvar, tyvar)
+
+-- | Create a class method assignment.  A class method is really a piece of
+--   code that retrieves and calls a function from the class dictionary.
+--
+--   The class method's type scheme is made from the method's type signature.
+--   It has one extra type parameter, which is the class's type parameter, 
+--   and one extra predicate, which is the class instance.  The parameter and
+--   predicate always come before other parameters and predicates.
+methodAssignment = MethodAssignment
+
+pprTypeAssignment :: TypeAssignment -> Ppr Doc
+pprTypeAssignment (FirstOrderAssignment ty _) = do
+  doc <- uShow ty
+  return $ text "(monotype)" <+> doc
+  
+pprTypeAssignment (PolymorphicAssignment ty _) = do
+  doc <- pprTyScheme ty
+  return $ text "(polytype)" <+> doc
+
+pprTypeAssignment (DataConAssignment ty _) = do
+  doc <- pprTyScheme ty
+  return $ text "(datacon)" <+> doc
+
+pprTypeAssignment (RecursiveAssignment v ty) = do
+  doc <- uShow (ConTy ty)
+  return $ text "(rectype)" <+> doc
+
+pprTypeAssignment (MethodAssignment _ _ ty) = do
+  doc <- pprTyScheme ty
+  return $ text "(method)" <+> doc

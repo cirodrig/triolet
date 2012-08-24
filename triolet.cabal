@@ -34,6 +34,7 @@ Executable triolet
     base >= 4 && < 5,
     array,
     bytestring,
+    hoopl == 3.8.*,
     template-haskell,
     directory,
     filepath,
@@ -104,11 +105,14 @@ Executable triolet
     Language.Python.Version3.Parser.Parser
     Language.Python.Version3.Parser.Lexer
     CxxInterface.SignatureHS
+    Parser.Control
+    Parser.Dataflow
     Parser.Driver
+    Parser.MakeCFG
     Parser.Parser
     Parser.ParserSyntax
-    Parser.SSA
-    Parser.GenUntyped
+    Parser.SSA2
+    Parser.GenUntyped2
     Untyped.Builtins
     Untyped.BuiltinsTH
     Untyped.InitializeBuiltins
