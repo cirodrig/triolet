@@ -12,7 +12,7 @@ import Control.Monad.Identity
 import Control.Monad.Trans
 import Compiler.Hoopl
 import Compiler.Hoopl.Passes.Dominator
-import Data.List(elemIndex, nub, intercalate)
+import Data.List(foldl', elemIndex, nub, intercalate)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Typeable
@@ -273,9 +273,9 @@ analyzeLocalFunctionLiveness graph = mapGraph compute_liveness graph
 --
 --   Return a function body annotated with local liveness information,
 --   the live-in set of each block, and the function's live-in set.
-analyzeLiveness :: PVar -> SourcePos -> Label -> CFG AST C C
+analyzeLiveness :: PVar -> SourcePos -> [Parameter AST] -> Label -> CFG AST C C
                 -> (CFG AST C C, Livenesses, Liveness)
-analyzeLiveness func_name func_pos entry graph = let
+analyzeLiveness func_name func_pos params entry graph = let
   -- Analyze local function definitions first
   def_annotated_graph = analyzeLocalFunctionLiveness graph
 
@@ -284,9 +284,12 @@ analyzeLiveness func_name func_pos entry graph = let
     runDFM $ analyzeAndRewriteBwd
              livenessAnalysis (JustC entry) def_annotated_graph
              mapEmpty
-  live_ins = case mapLookup entry live_in_map
-             of Just l  -> l
-                Nothing -> internalError "analyzeLiveness"
+  body_live_ins = case mapLookup entry live_in_map
+                  of Just l  -> l
+                     Nothing -> internalError "analyzeLiveness"
+
+  -- Remove function parameters from the live-in set
+  live_ins = kill params body_live_ins
 
   -- Find undefined uses of local variables
   local_defs = locallyDefinedVariables graph
@@ -305,19 +308,19 @@ analyzeLivenessInFunc :: SourcePos -> Func AST -> (Func AST, Liveness)
 analyzeLivenessInFunc func_pos func = let
   -- Analyze the function body
   (new_body, livenesses, body_live_in) =
-    analyzeLiveness (funcName func) func_pos (funcEntry func) (funcBody func)
+    analyzeLiveness (funcName func) func_pos (funcParams func)
+    (funcEntry func) (funcBody func)
   func' = func {funcBody = new_body, funcLivenesses = Just livenesses}
 
-  -- Remove the function parameters from the live-in set. 
+  -- Remove the function's type parameters from the live-in set.
   -- Note that the function name is _not_ removed from the live-in set;
   -- the name is not bound in the function definition, but in the
   -- enclosing defgroup or global scope.
   func_live_in =
     let foralls = funcAnnotation func
         return_type = funcReturnAnnotation func
-        params = funcParams func
     in useForallAnnotation foralls
-       (use return_type . localKill params (Set.union body_live_in))
+       (use return_type . Set.union body_live_in)
        Set.empty
   in (func', func_live_in)
 
