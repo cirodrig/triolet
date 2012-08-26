@@ -33,17 +33,7 @@ import Common.MonadLogic
 import Common.SourcePos
 import Common.Supply
 import Common.Worklist
-import Parser.ParserSyntax(Loc(..), unLoc, mapLoc, AST,
-                           Liveness, MLiveness,
-                           Livenesses, MLivenesses,
-                           VarID,
-                           Var(..), PVar,
-                           Literal(..), Expr(..), Parameter(..),
-                           Annotation, Slice(..),
-                           IterFor(..), IterIf(..), IterLet(..),
-                           Comprehension(..),
-                           ForallAnnotation,
-                           ExportItem(..))
+import Parser.ParserSyntax hiding(Stmt(..))
 import Parser.Control
 import Parser.Dataflow
 
@@ -98,11 +88,11 @@ domFrontier graph dominators =
                       -- B does not dominate c
                     , not $ b `dominates` c]
 
-analyzeDominators :: LFunc AST -> (LabelMap Doms, DomFrontier)
+analyzeDominators :: LCFunc AST -> (LabelMap Doms, DomFrontier)
 analyzeDominators lfunc =
   let func           = unLoc lfunc
-      entry          = funcEntry func  
-      graph          = funcBody func
+      entry          = cfEntry func  
+      graph          = cfBody func
       (graph', doms) = dominators entry graph
       frontier       = domFrontier graph' doms
   in (doms, frontier)
@@ -573,7 +563,7 @@ type WithRenamed t a = t AST -> (t SSAID -> SSAM a) -> SSAM a
 withRenamedVar :: WithRenamed Var a
 withRenamedVar v k = inLocalScope $ defineSSAVar v >>= k
 
-withRenamedParameter ::WithRenamed Parameter a
+withRenamedParameter :: WithRenamed Parameter a
 withRenamedParameter (Parameter v ann) k = do
   ann' <- rename ann
   withRenamedVar v $ \v' -> k (Parameter v' ann')
@@ -581,6 +571,7 @@ withRenamedParameter (Parameter v ann) k = do
 withRenamedParameter (TupleParam ps) k =
   withRenamedParameters ps $ \ps' -> k (TupleParam ps')
 
+withRenamedParameters :: [Parameter AST] -> ([Parameter SSAID] -> SSAM a) -> SSAM a
 withRenamedParameters ps k = withMany withRenamedParameter ps k
 
 withForallAnnotation Nothing k = k Nothing
@@ -605,20 +596,23 @@ ssaParameter (TupleParam ps) = do
   return $ TupleParam ps'
 
 -- | Add a function definition to the environment
-ssaDefineFunction :: LFunc AST -> SSAM SSAVar
-ssaDefineFunction fdef = defineSSAVar (funcName $ unLoc fdef)
+ssaDefineFunction :: LCFunc AST -> SSAM SSAVar
+ssaDefineFunction fdef = defineSSAVar (sigName $ cfSignature $ unLoc fdef)
 
 -- | Perform SSA on a function definition.  The function should have been
 --   added to the environment.
-ssaFunctionDefinition :: LFunc AST -> SSAVar -> SSAM (LFunc SSAID)
+ssaFunctionDefinition :: LCFunc AST -> SSAVar -> SSAM (LCFunc SSAID)
 ssaFunctionDefinition (Loc pos fdef) fname =
-  withForallAnnotation (funcAnnotation fdef) $ \ann' -> do
-    ret_ann <- rename (funcReturnAnnotation fdef)
-    withRenamedParameters (funcParams fdef) $ \params' -> do
-      let entry = funcEntry fdef
-          Just livenesses = funcLivenesses fdef
-      ssa_tree <- ssaGraph' livenesses entry (funcBody fdef)
-      return $ Loc pos $ Func fname ann' params' ret_ann Nothing entry ssa_tree
+  withForallAnnotation ann $ \ann' -> do
+    r_ann' <- rename r_ann
+    withRenamedParameters params $ \params' -> do
+      let sig' = FunSig fname ann' params' r_ann'
+      let entry = cfEntry fdef
+          Just livenesses = cfLivenesses fdef
+      ssa_tree <- ssaGraph' livenesses entry (cfBody fdef)
+      return $ Loc pos $ CFunc sig' Nothing entry ssa_tree
+  where
+    FunSig _ ann params r_ann = cfSignature fdef
 
 ssaStmt :: LStmt AST e x -> SSAM (LStmt SSAID e x)
 ssaStmt (LStmt (Loc pos stmt)) =
@@ -819,8 +813,8 @@ insertPhisIntoFlow phi_map source (Flow target Nothing) = do
   return $ Flow target (Just ssa_vars)
 
 -- | Do SSA on one global function group
-ssaGlobalGroup :: SSAIDSupply -> SSAScope -> [LFunc AST]
-               -> IO ([LFunc SSAID], SSAScope)
+ssaGlobalGroup :: SSAIDSupply -> SSAScope -> [LCFunc AST]
+               -> IO ([LCFunc SSAID], SSAScope)
 ssaGlobalGroup supply scope fdefs =
   with_supply $ globalSSAComputation scope $ do
     vs <- mapM ssaDefineFunction fdefs

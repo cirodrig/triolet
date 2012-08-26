@@ -167,14 +167,18 @@ type ForallAnnotation id = [(Var id, Maybe (LExpr id))]
 
 type LFunc id = Loc (Func id)
 
+data FunSig id =
+  FunSig
+  { sigName             :: Var id
+  , sigAnnotation       :: Maybe (ForallAnnotation id)
+  , sigParams           :: [Parameter id] 
+  , sigReturnAnnotation :: Annotation id
+  }
+
 data Func id =
   Func 
-  { funcName :: Var id 
-  , funcAnnotation :: Maybe (ForallAnnotation id) 
-  , funcParams :: [Parameter id] 
-  , funcReturnAnnotation :: Annotation id
-  , funcLivenesses :: !MLivenesses
-  , funcBody :: Suite
+  { funcSignature        :: !(FunSig id)
+  , funcBody             :: Suite
   }
 
 data ExportItem id =

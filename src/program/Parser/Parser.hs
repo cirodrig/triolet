@@ -850,8 +850,9 @@ funDefinition' decorators (Py.Fun { Py.fun_name = name
     qvars <- traverse (mapM qvarDefinition) forall_decorator
     params' <- parameters params
     result' <- traverse (expression TypeLevel) result
+    let signature = FunSig nameVar qvars params' result'
     body' <- suite body
-    return $ Loc pos $ Func nameVar qvars params' result' Nothing body'
+    return $ Loc pos $ Func signature body'
   where
     qvarDefinition (qvar_name, qvar_kind) = do
       qvar <- parameterDefinition TypeLevel qvar_name
@@ -908,7 +909,9 @@ definitionGroups fs =
 
       -- Map from function name to graph node ID
       nodeMap :: Map Int Int
-      nodeMap = Map.fromList [(varID (funcName $ unLoc f), n) | (n, f) <- nodes]
+      nodeMap = Map.fromList [(varID name, n)
+                             | (n, f) <- nodes
+                             , let name = sigName $ funcSignature $ unLoc f]
 
       nodeOf varID = Map.lookup varID nodeMap
 

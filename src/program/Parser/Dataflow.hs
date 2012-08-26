@@ -22,15 +22,7 @@ import Text.PrettyPrint.HughesPJ
 import Common.Error
 import Common.SourcePos
 import Common.Worklist
-import Parser.ParserSyntax(Loc(..), unLoc, mapLoc, AST,
-                           Liveness, MLiveness,
-                           Livenesses, MLivenesses,
-                           Var(..), PVar,
-                           Literal(..), Expr(..), Parameter(..),
-                           Annotation, Slice(..),
-                           IterFor(..), IterIf(..), IterLet(..),
-                           Comprehension(..),
-                           ForallAnnotation)
+import Parser.ParserSyntax hiding(Stmt(..))
 import Parser.Control
 
 -- | A dataflow analysis monad.
@@ -172,8 +164,8 @@ useForallAnnotation Nothing f   = f
 useForallAnnotation (Just xs) f = use (map snd xs) . localKill (map fst xs) f
 
 -- | Remove a function name from the live-in set
-killFunc :: Func AST -> DeltaLiveness
-killFunc f = kill (funcName f)
+killFunc :: CFunc AST -> DeltaLiveness
+killFunc f = kill (sigName $ cfSignature f)
 
 class Definition a where
   -- | Remove variable definitions from a set
@@ -209,7 +201,7 @@ defStmt :: LStmt AST e x -> DeltaDefinitions
 defStmt stmt =
   case unLStmt stmt
   of Assign params _ -> def params
-     DefGroup fs _   -> def $ map (funcName . unLoc) fs
+     DefGroup fs _   -> def $ map (sigName . cfSignature . unLoc) fs
      Assert _        -> id
      Require _ _     -> id
      Target _ _      -> id
@@ -304,21 +296,22 @@ analyzeLiveness func_name func_pos params entry graph = let
 --   The function is annotated with liveness information, and its live-in
 --   set is returned.
 --   Caller should catch 'DFException's.
-analyzeLivenessInFunc :: SourcePos -> Func AST -> (Func AST, Liveness)
+analyzeLivenessInFunc :: SourcePos -> CFunc AST -> (CFunc AST, Liveness)
 analyzeLivenessInFunc func_pos func = let
   -- Analyze the function body
+  sig = cfSignature func
   (new_body, livenesses, body_live_in) =
-    analyzeLiveness (funcName func) func_pos (funcParams func)
-    (funcEntry func) (funcBody func)
-  func' = func {funcBody = new_body, funcLivenesses = Just livenesses}
+    analyzeLiveness (sigName sig) func_pos (sigParams sig)
+    (cfEntry func) (cfBody func)
+  func' = func {cfBody = new_body, cfLivenesses = Just livenesses}
 
   -- Remove the function's type parameters from the live-in set.
   -- Note that the function name is _not_ removed from the live-in set;
   -- the name is not bound in the function definition, but in the
   -- enclosing defgroup or global scope.
   func_live_in =
-    let foralls = funcAnnotation func
-        return_type = funcReturnAnnotation func
+    let foralls = sigAnnotation sig
+        return_type = sigReturnAnnotation sig
     in useForallAnnotation foralls
        (use return_type . Set.union body_live_in)
        Set.empty
@@ -328,7 +321,7 @@ analyzeLivenessInFunc func_pos func = let
 --   The function is annotated with liveness information, and its live-in
 --   set is returned.
 --   Caller should catch 'DFException's.
-analyzeLivenessInLFunc :: LFunc AST -> (LFunc AST, Liveness)
+analyzeLivenessInLFunc :: LCFunc AST -> (LCFunc AST, Liveness)
 analyzeLivenessInLFunc (Loc pos f) =
   let (f', liveness) = analyzeLivenessInFunc pos f
   in (Loc pos f', liveness)

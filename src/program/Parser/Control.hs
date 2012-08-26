@@ -13,16 +13,7 @@ import qualified Language.Python.Common.PrettyAST as Python
 import Text.PrettyPrint.HughesPJ
 
 import Common.SourcePos
-import Parser.ParserSyntax(Loc(..), unLoc, AST,
-                           Liveness, MLiveness,
-                           Livenesses, MLivenesses,
-                           Var, PVar,
-                           Literal(..), Expr(..), LExpr, Parameter(..),
-                           Annotation, Slice(..),
-                           IterFor(..), IterIf(..), IterLet(..),
-                           Comprehension(..),
-                           ForallAnnotation)
-import qualified Parser.ParserSyntax as PS
+import Parser.ParserSyntax hiding(Stmt(..))
 
 -- | A control flow source.
 --   A source consists of a block label and an outgoing path.
@@ -50,7 +41,7 @@ data Stmt id e x where
     --   Definition groups are annotated with their live-in variables
     --   during live variable analysis.  The live-in variables is the
     --   union of the functions' live-ins, minus the functions themselves.
-    DefGroup :: [LFunc id] -> !MLiveness -> Stmt id O O
+    DefGroup :: [LCFunc id] -> !MLiveness -> Stmt id O O
 
     -- | Assert that some propositions hold
     Assert :: [LExpr id] -> Stmt id O O
@@ -94,19 +85,16 @@ type family FuncBody id
 
 type instance FuncBody AST = CFG AST C C
 
--- | A function definition
-data Func id =
-  Func
-  { funcName             :: Var id
-  , funcAnnotation       :: Maybe (ForallAnnotation id) 
-  , funcParams           :: [Parameter id] 
-  , funcReturnAnnotation :: Annotation id
-  , funcLivenesses       :: !MLivenesses
-  , funcEntry            :: !Label
-  , funcBody             :: FuncBody id
+-- | A control flow based function definition
+data CFunc id =
+  CFunc
+  { cfSignature        :: !(FunSig id)
+  , cfLivenesses       :: !MLivenesses
+  , cfEntry            :: !Label
+  , cfBody             :: FuncBody id
   }
 
-type LFunc id = Loc (Func id)
+type LCFunc id = Loc (CFunc id)
 
 type CFG id e x = Graph (LStmt id) e x
 
@@ -139,7 +127,7 @@ instance Ppr Literal where
   ppr NoneLit          = text "None"
 
 instance Ppr (Var AST) where
-  ppr v = text (PS.varName v ++ '\'' : show (PS.varID v))
+  ppr v = text (varName v ++ '\'' : show (varID v))
 
 pprCommaList xs = punctuate comma $ map ppr xs
 
@@ -200,19 +188,23 @@ pprComp (CompIf i) = pprIterIf i
 pprComp (CompLet i) = pprIterLet i
 pprComp (CompBody e) = (ppr e, [])
 
-instance (Ppr (Var a), Ppr (FuncBody a)) => Ppr (Func a) where
-  ppr func = let
-    annotation = case funcAnnotation func
+instance Ppr (Var a) => Ppr (FunSig a) where
+  ppr (FunSig name ann params r_ann) = let
+    annotation = case ann
                  of Nothing -> empty
                     Just a  -> text "<forall annotation>"
-    r_annotation = case funcReturnAnnotation func
+    r_annotation = case r_ann
                    of Nothing -> empty
                       Just a  -> text "->" <+> ppr a
-    parameters = parens (sep $ pprCommaList $ funcParams func) <+> r_annotation
-    signature = text "def" <+> ppr (funcName func) <> parameters <> colon
-    entry_point = text "goto" <+> ppr (funcEntry func)
-    body = ppr (funcBody func)
-    in annotation $$ signature <+> entry_point $$ body
+    parameters = parens (sep $ pprCommaList params) <+> r_annotation
+    in annotation $$ text "def" <+> ppr name <> parameters
+
+instance (Ppr (Var a), Ppr (FuncBody a)) => Ppr (CFunc a) where
+  ppr func = let
+    signature = ppr (cfSignature func) <> colon
+    entry_point = text "goto" <+> ppr (cfEntry func)
+    body = ppr (cfBody func)
+    in signature <+> entry_point $$ body
 
 instance (Ppr (Var a), Ppr (FuncBody a)) => Ppr (Graph' Block (LStmt a) C C) where
   ppr (GMany NothingO blocks NothingO) =

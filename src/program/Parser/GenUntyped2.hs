@@ -19,8 +19,8 @@ import Common.Label
 import Common.Identifier
 import Common.SourcePos
 import Common.Supply
-import Parser.ParserSyntax
-import qualified Parser.Control as CF
+import Parser.ParserSyntax hiding(Stmt(..))
+import Parser.Control
 import Parser.SSA2(SSAVar, SSAID, SSATree(..))
 import qualified Untyped.Data as U
 import Untyped.Builtins
@@ -220,10 +220,10 @@ parameter (TupleParam ps) = do
   ps' <- mapM parameter ps
   return $ U.TupleP noAnnotation ps'
 
-defGroup :: [CF.LFunc SSAID] -> Gen [U.FunctionDef]
+defGroup :: [LCFunc SSAID] -> Gen [U.FunctionDef]
 defGroup defs = do
   -- Convert all function names
-  fun_names <- mapM defineVar $ map (CF.funcName . unLoc) defs
+  fun_names <- mapM defineVar $ map (sigName . cfSignature . unLoc) defs
 
   -- Convert function bodies
   zipWithM functionDef fun_names defs
@@ -427,8 +427,8 @@ type FGen a = StateT BlockMap Gen a
 -- | An expression with a hole in it
 type MkExpression = U.Expression -> U.Expression
 
-type BodyStmt = CF.LStmt SSAID Hoopl.O Hoopl.O
-type FlowStmt = CF.LStmt SSAID Hoopl.O Hoopl.C
+type BodyStmt = LStmt SSAID Hoopl.O Hoopl.O
+type FlowStmt = LStmt SSAID Hoopl.O Hoopl.C
 
 defineLabel :: Hoopl.Label -> FGen U.Variable
 defineLabel lab = StateT $ \s -> do 
@@ -458,17 +458,19 @@ leaveBody :: Gen a -> FGen a
 leaveBody = lift
 
 -- | Translate a function definition
-functionDef :: U.Variable -> CF.LFunc SSAID -> Gen U.FunctionDef
+functionDef :: U.Variable -> LCFunc SSAID -> Gen U.FunctionDef
 functionDef func_name (Loc pos func) =
   -- Convert type parameters
-  withMaybeForallAnnotation (CF.funcAnnotation func) $ \qvars -> do
-    ret_type <- mapM typeExp (CF.funcReturnAnnotation func)
+  withMaybeForallAnnotation ann $ \qvars -> do
+    ret_type <- mapM typeExp r_ann
     -- Convert parameters
-    withParameters (CF.funcParams func) $ \params -> do
+    withParameters params $ \u_params -> do
       -- Convert body
-      body <- enterBody $ ssaTreeExp (CF.funcBody func)
+      body <- enterBody $ ssaTreeExp (cfBody func)
       return $ U.FunctionDef func_name $
-        U.Function (U.Ann pos) qvars params ret_type body
+        U.Function (U.Ann pos) qvars u_params ret_type body
+  where
+    FunSig _ ann params r_ann = cfSignature func
 
 -- | Translate a dominator tree into an expression.
 --   Child nodes are translated to letrec-defined functions.
@@ -513,7 +515,7 @@ ssaTreeChildGroup children = do
              | SSATree b t <- children
              , let (Hoopl.JustC f, m, Hoopl.JustC l) =
                      Hoopl.blockToNodeList b
-             , let CF.LStmt (Loc _ (CF.Target label (Just params))) = f]
+             , let LStmt (Loc _ (Target label (Just params))) = f]
 
 -- | Translate a subtree to a local function
 ssaTreeChild :: U.Variable -> [SSAVar] -> [BodyStmt] -> FlowStmt
@@ -535,23 +537,23 @@ ssaTreeChild var params middle last children = inLocalLabelScope $ do
   return $ U.FunctionDef var function
 
 ssaTail :: FlowStmt -> FGen U.Expression
-ssaTail (CF.LStmt (Loc pos s)) =
+ssaTail (LStmt (Loc pos s)) =
   case s
-  of CF.If cond t f -> do
+  of If cond t f -> do
        cond' <- leaveBody $ expr cond
        t_call <- ssaFlow pos t
        f_call <- ssaFlow pos f
        return $ U.IfE ann cond' t_call f_call
-     CF.Jump f -> do
+     Jump f -> do
        ssaFlow pos f
-     CF.Return e -> do
+     Return e -> do
        leaveBody $ expr e
   where
     ann = U.Ann pos
 
 -- | Translate control flow to a function call
-ssaFlow :: SourcePos -> CF.Flow SSAID -> FGen U.Expression
-ssaFlow pos (CF.Flow label (Just args)) = do
+ssaFlow :: SourcePos -> Flow SSAID -> FGen U.Expression
+ssaFlow pos (Flow label (Just args)) = do
   callee_var <- lookupLabel label
   let callee = U.VariableE (U.Ann pos) callee_var
 
@@ -564,21 +566,21 @@ ssaFlow pos (CF.Flow label (Just args)) = do
   return $ U.CallE (U.Ann pos) callee arguments
 
 stmt :: BodyStmt -> Gen MkExpression
-stmt (CF.LStmt (Loc pos s)) =
+stmt (LStmt (Loc pos s)) =
   case s
-  of CF.Assign param rhs -> do
+  of Assign param rhs -> do
        rhs' <- expr rhs
        param' <- parameter param
        return $ U.LetE ann param' rhs'
-     CF.DefGroup defs _ -> do
+     DefGroup defs _ -> do
        defs' <- defGroup defs
        return $ U.LetrecE ann defs'
-     CF.Assert es -> do
+     Assert es -> do
        -- Translate to "if e then ... else __undefined__"
        es' <- mapM expr es
        let make_if test e = U.IfE ann test e (U.UndefinedE ann)
        return $ \body -> foldr make_if body es'
-     CF.Require v e -> do
+     Require v e -> do
        v' <- lookupObjVar v
        e' <- typeExp e
        return $ U.TypeAssertE ann v' e'
@@ -591,7 +593,7 @@ export (ExportItem pos spec v ty) = do
   ty' <- typeExp ty
   return $ U.Export (U.Ann pos) spec v' ty'
 
-genGroup :: IdentSupply Type.Var -> GenScope -> [CF.LFunc SSAID]
+genGroup :: IdentSupply Type.Var -> GenScope -> [LCFunc SSAID]
          -> IO (U.DefGroup, GenScope)
 genGroup id_supply scope xs =
   runGenEnv id_supply scope $ defGroup xs

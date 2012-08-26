@@ -106,21 +106,18 @@ mkIf pos continuation c t f = do
   let if_stmt = mkLast $ CF.lStmt pos (CF.If c t_flow f_flow)
   return $ if_stmt |*><*| t_graph |*><*| f_graph
 
-mkControlFlowFunction :: PS.LFunc AST -> M (CF.LFunc AST)
+mkControlFlowFunction :: PS.LFunc AST -> M (CF.LCFunc AST)
 mkControlFlowFunction (Loc pos f) = do
   (entry, body) <- mkControlFlowGraph pos (returnNone pos) $ PS.funcBody f
   return $ Loc pos $
-    CF.Func { CF.funcName = PS.funcName f
-            , CF.funcAnnotation = PS.funcAnnotation f
-            , CF.funcParams = PS.funcParams f
-            , CF.funcReturnAnnotation = PS.funcReturnAnnotation f
-            , CF.funcLivenesses = Nothing
-            , CF.funcEntry = entry
-            , CF.funcBody = body
-            }
+    CF.CFunc { CF.cfSignature = PS.funcSignature f
+             , CF.cfLivenesses = Nothing
+             , CF.cfEntry = entry
+             , CF.cfBody = body
+             }
 
 -- | Convert a function to control flow graph form
-buildControlFlow :: PS.LFunc AST -> IO (CF.LFunc AST)
+buildControlFlow :: PS.LFunc AST -> IO (CF.LCFunc AST)
 buildControlFlow f = do
   -- Create a new set of int IDs for this function
   supply1 <- newSupply 0 (1+)

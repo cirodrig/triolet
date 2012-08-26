@@ -46,7 +46,7 @@ statelessPipeline :: (group -> IO group') -> (export -> IO export')
                   -> Pipeline group group' export export'
 statelessPipeline f g = Pipeline $ return (f, g, return ())
 
-controlFlowStage :: Pipeline [PFunc] [CF.LFunc AST] (ExportItem AST) (ExportItem AST)
+controlFlowStage :: Pipeline [PFunc] [CF.LCFunc AST] (ExportItem AST) (ExportItem AST)
 controlFlowStage = statelessPipeline (mapM do_func) do_export
   where
     do_func f = do f' <- CF.buildControlFlow f
@@ -54,7 +54,7 @@ controlFlowStage = statelessPipeline (mapM do_func) do_export
                    return f''
     do_export e = return e
 
-ssaStage :: Pipeline [CF.LFunc AST] [CF.LFunc CF.SSAID] (ExportItem AST) (ExportItem CF.SSAID)
+ssaStage :: Pipeline [CF.LCFunc AST] [CF.LCFunc CF.SSAID] (ExportItem AST) (ExportItem CF.SSAID)
 ssaStage = Pipeline $ do
   id_supply <- CF.newSSAIDSupply
   scope_ref <- newIORef external_vars
@@ -77,7 +77,7 @@ ssaStage = Pipeline $ do
     external_vars =
       CF.externSSAScope $ map fst $ readInitGlobalVar parserGlobals
 
-genUntypedStage :: Pipeline [CF.LFunc CF.SSAID] DefGroup (ExportItem CF.SSAID) Export
+genUntypedStage :: Pipeline [CF.LCFunc CF.SSAID] DefGroup (ExportItem CF.SSAID) Export
 genUntypedStage = Pipeline $ do
   scope_ref <- newIORef external_vars
 
