@@ -637,9 +637,9 @@ instance Substitutable (Fun Mem) where
 
 -- | Search for instances of name shadowing in the expression.
 --   If found, raise an exception.
-checkForShadowingExp :: TypeEnv -> ExpM -> ()
+checkForShadowingExp :: TypeEnvBase a -> ExpM -> ()
 checkForShadowingExp tenv e =
-  checkForShadowingExpSet (IntMap.keysSet $ getAllTypes tenv) e
+  checkForShadowingExpSet (IntMap.keysSet $ getAllKinds tenv) e
 
 checkForShadowingExpSet :: CheckForShadowing ExpM
 checkForShadowingExpSet in_scope e =

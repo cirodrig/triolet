@@ -135,16 +135,41 @@ typeInferLitE inf l = do
 typeInferConE inf con@(VarCon op ty_args ex_types) args = do
   let pos = getSourcePos inf
   -- Get constructor's type
-  op_type <- lookupVar op
+  dcon_type <- tcLookupDataCon op
   
-  -- Apply to type arguments
-  ty_arg_kinds <- mapM typeInferType ty_args
-  ex_type_kinds <- mapM typeInferType ex_types
-  inst_type <- computeInstantiatedType pos op_type (zip ty_arg_kinds ty_args ++ zip ex_type_kinds ex_types)
+  -- Check type arguments
+  check_type_args 1 (dataConPatternParams dcon_type) ty_args
+  check_type_args (1 + length ty_args) (dataConPatternExTypes dcon_type)
+    ex_types
+
+  -- Get the argument types
+  (expected_arg_types, ret_type) <-
+    instantiateDataConTypeWithExistentials dcon_type (ty_args ++ ex_types)
 
   -- Apply to other arguments
   arg_types <- mapM typeInferExp args
-  computeAppliedType pos inst_type arg_types
+  check_args expected_arg_types arg_types
+  return ret_type
+  where
+    pos = getSourcePos inf
+    check_type_args first binders givens
+      | length binders /= length givens =
+          typeError $ MiscError pos (text "Wrong number of type arguments to data constructor")
+      | otherwise =
+          sequence_ $ zipWith3 check_type_arg [first..] binders givens
+
+    check_type_arg i (_ ::: expected_kind) ty = do
+      k <- typeInferType ty
+      checkType (typeArgKindMismatch pos i) expected_kind k
+
+    check_args expected given
+      | length expected /= length given =
+          typeError $ MiscError pos (text "Wrong number of fields given to data constructor")
+      | otherwise =
+          sequence_ $ zipWith3 check_arg [1..] expected given
+
+    check_arg i e g =
+      checkType (conFieldTypeMismatch pos i) e g
 
 typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf

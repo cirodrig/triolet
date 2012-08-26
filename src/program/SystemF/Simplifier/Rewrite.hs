@@ -76,6 +76,7 @@ instance Supplies RW (Ident Var) where
   fresh = RW (ReaderT (\env -> supplyValue (rwIdentSupply env)))
 
 instance TypeEnvMonad RW where
+  type TypeFunctionInfo RW = TypeFunction
   getTypeEnv = RW (ReaderT (\env -> return $ rwTypeEnv env))
 
   assumeWithProperties v t b (RW m) = RW (local assume_type m)

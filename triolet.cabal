@@ -7,7 +7,7 @@ License-File:	LICENSE
 Stability:	experimental
 Author:		Christopher Rodrigues
 Build-Type:	Custom
-Tested-With:	GHC == 6.12.1, GHC == 6.12.3
+Tested-With:	GHC == 7.4.1
 
 Data-Dir:	dist/build/data
 Data-Files:
@@ -166,6 +166,7 @@ Executable triolet
     CParser2.AST
     CParser2.Driver
     CParser2.GenCode
+    CParser2.GenCode2
     CParser2.GenCore
     CParser2.LexData
     CParser2.Lexer

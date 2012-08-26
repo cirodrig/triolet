@@ -176,6 +176,7 @@ instance Supplies LR VarID where
   supplyToST = internalError "supplyToST: Not implemented for LR"
 
 instance TypeEnvMonad LR where
+  type TypeFunctionInfo LR = TypeFunction
   getTypeEnv = withTypeEnv return
 
   assumeWithProperties v rt b m = LR $ \env ->

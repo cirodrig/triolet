@@ -426,7 +426,7 @@ typeCheckTopLevel imports defss exports =
 
 -- | Infer the type of an expression.  The expression is assumed to be
 --   well-typed; this function doesn't check for most errors.
-inferExpType :: EvalMonad m => ExpM -> m Type
+inferExpType :: forall m. EvalMonad m => ExpM -> m Type
 inferExpType expression =
   liftTypeEvalM $ infer_exp expression
   where
@@ -462,6 +462,7 @@ inferExpType expression =
     debug = traceShow (text "inferExpType" <+> pprExp expression)
 
 -- | Infer the type of an application, with minimal error checking
+inferAppTypeQuickly :: ExpM -> [Type] -> [ExpM] -> TypeEvalM Type
 inferAppTypeQuickly op ty_args args = do
   op_type <- inferExpType op
   tenv <- getTypeEnv

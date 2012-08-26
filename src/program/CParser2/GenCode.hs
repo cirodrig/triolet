@@ -103,6 +103,7 @@ applyDefAttributes is_global attrs def = SystemF.modifyDefAnnotation f def
     f annotation =
       defAttributes attrs $ annotation {SystemF.defAnnExported = is_exported}
 
+{-
 -- | Determine the type of an expression.
 expType :: RLExp -> TransM Type.Type
 expType (L pos expression) =
@@ -147,6 +148,7 @@ expKind e = do
   t <- expType e
   tenv <- lift getTypeEnv
   return $ Type.Eval.typeKind tenv t
+-}
 
 typeKind :: RType -> TransM Type.Kind
 typeKind t =

@@ -59,6 +59,7 @@ instance Supplies LRW (Ident Var) where
   fresh = LRW $ ReaderT $ \env -> supplyValue (varSupply env)
 
 instance TypeEnvMonad LRW where
+  type TypeFunctionInfo LRW = TypeFunction
   getTypeEnv = LRW $ asks typeEnv
   assumeWithProperties v t conlike (LRW m) = LRW (local insert_type m)
     where

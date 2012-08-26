@@ -546,6 +546,7 @@ instance Supplies Specialize (Ident Var) where
   fresh = Specialize $ ReaderT $ \env -> supplyValue (varIdSupply env)
 
 instance TypeEnvMonad Specialize where
+  type TypeFunctionInfo Specialize = TypeFunction
   getTypeEnv = Specialize $ asks typeEnvironment
   assumeWithProperties v t b (Specialize m) = Specialize $ local add_type m
     where

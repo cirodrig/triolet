@@ -164,6 +164,7 @@ runFlt :: Flt a -> IdentSupply Var -> TypeEnv -> IO a
 runFlt m id_supply tenv = runReaderT (unFlt m) (FloatCtx id_supply tenv)
 
 instance TypeEnvMonad Flt where
+  type TypeFunctionInfo Flt = TypeFunction
   getTypeEnv = Flt (asks fcTypeEnv)
   assumeWithProperties v ty b (Flt m) = Flt $ local insert_type m
     where

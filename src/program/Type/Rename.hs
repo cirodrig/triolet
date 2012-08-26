@@ -174,9 +174,9 @@ instance Renameable Type where
 
 -- | Check for name shadowing in the type.  If any in-scope variables
 --   are redefined, raise an error.
-checkForShadowing :: TypeEnv -> Type -> ()
+checkForShadowing :: TypeEnvBase a -> Type -> ()
 checkForShadowing tenv ty =
-  checkForShadowingSet (IntMap.keysSet $ getAllTypes tenv) ty
+  checkForShadowingSet (IntMap.keysSet $ getAllKinds tenv) ty
 
 type CheckForShadowing a = IntSet.IntSet -> a -> ()
 

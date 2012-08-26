@@ -117,6 +117,7 @@ liftFreshVarAF :: FreshVarM a -> AFMonad e a
 liftFreshVarAF m = AF $ ReaderT $ \env -> runFreshVarM (afVarSupply env) m
 
 instance TypeEnvMonad (AFMonad e) where
+  type TypeFunctionInfo (AFMonad e) = TypeFunction
   getTypeEnv = AF $ asks afTypeEnv
   assumeWithProperties v t b m = AF $ local insert_type $ unAF m
     where

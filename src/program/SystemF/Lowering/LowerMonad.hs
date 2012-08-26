@@ -179,6 +179,7 @@ liftT1 t k = do
   return x
 
 instance TypeEnvMonad Lower where
+  type TypeFunctionInfo Lower = TypeFunction
   getTypeEnv = Lower $ asks typeEnvironment
   
   assumeWithProperties v t b (Lower m) = Lower $ local update m

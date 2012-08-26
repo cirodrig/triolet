@@ -107,8 +107,9 @@ translateDataConDecl tenv data_type_con decl =
       ex_types = map (translateDomain tenv) $ dconExTypes decl
       local_tenv = foldr insertDomain tenv (params ++ ex_types)
       args = map (translateType local_tenv) $ dconArgs decl
-      ty = make_datacon_type params ex_types (dconArgs decl) (range_type params)
-  in (ty, DataConType params ex_types args (toVar $ dconVar decl) data_type_con)
+      arg_kinds = map (Type.toBaseKind . Type.typeKind local_tenv) args
+      --ty = make_datacon_type params ex_types (dconArgs decl) (range_type params)
+  in DataConType params ex_types args arg_kinds (toVar $ dconVar decl) data_type_con
   where
     -- Get the type of a fully applied data constructor.
     -- Create a writer type if appropriate.

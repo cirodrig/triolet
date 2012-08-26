@@ -116,6 +116,7 @@ instance Supplies RI (Ident Var) where
   fresh = RI $ ReaderT $ \env -> supplyValue (riVarSupply env)
 
 instance TypeEnvMonad RI where
+  type TypeFunctionInfo RI = TypeFunction
   getTypeEnv = RI $ asks riTypeEnv
   assumeWithProperties v t b m = RI $ local insert_type (unRI m)
     where
@@ -1120,9 +1121,24 @@ reprApplyCon :: Var                -- ^ Constructor
 reprApplyCon op ty_args args = do
   -- Set up data for use by 'applyToTypeArg'
   tenv <- getTypeEnv
-  let Just data_con = lookupDataCon op tenv
-      Just op_type = lookupType op tenv
-      constructor_app_result = conAppResult op data_con op_type
+
+  -- Compute type of this data 
+  let Just (dtype, data_con) = lookupDataConWithType op tenv
+      init_type t ValK  = t
+      init_type t BoxK  = t
+      init_type t BareK = writeType t
+      arg_types = zipWith init_type
+                  (dataConPatternArgs data_con)
+                  (dataConPatternArgKinds data_con)
+      ret_type = init_type
+                 (varApp (dataTypeCon dtype) $
+                  map (VarT . binderVar) (dataConPatternParams data_con))
+                 (dataTypeKind dtype)
+      op_type = forallType (dataConPatternParams data_con) $
+                forallType (dataConPatternExTypes data_con) $
+                funType arg_types ret_type
+
+  let constructor_app_result = conAppResult op data_con op_type
   
   -- Apply type arguments
   instantiated_result <- foldM applyToTypeArg constructor_app_result ty_args

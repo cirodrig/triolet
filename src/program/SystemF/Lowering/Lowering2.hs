@@ -48,6 +48,7 @@ withMany f xs k = go xs k
     go []     k = k []
 
 instance TypeEnvMonad (Gen Lower) where
+  type TypeFunctionInfo (Gen Lower) = TypeFunctionInfo Lower
   getTypeEnv = lift getTypeEnv
   assumeWithProperties v t b m = liftT (assumeWithProperties v t b) m
 

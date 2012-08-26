@@ -79,6 +79,7 @@ instance MonadWriter Df where
   pass m = Df (\tenv -> let ((x, f), w) = runDf m tenv in (x, f w))
 
 instance TypeEnvMonad Df where
+  type TypeFunctionInfo Df = TypeFunction
   getTypeEnv = ask
   assumeWithProperties v t b = local (insertTypeWithProperties v t b)
 
