@@ -500,10 +500,12 @@ rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
 --   In later compiler phases, @Sequence@ methods are rewritten to sequential
 --   loops.  Other stream methods are inlined and don't require special
 --   transformations.
+interpretStreamInSimplifier :: ExpInfo -> ExpM -> [Type] -> [ExpM]
+                            -> LR (Maybe ExpM)
 interpretStreamInSimplifier inf op ty_args args = LR $ \env ->
   let phase = lrPhase $ lrConstants env
   in if phase > FinalSimplifierPhase
-     then return Nothing
+     then return $ Just Nothing
      else do
        x <- runTypeEvalM (interpret_stream phase) (lrIdSupply $ lrConstants env) (lrTypeEnv env)
        return $ Just x
