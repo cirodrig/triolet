@@ -33,7 +33,10 @@ module SystemF.MemoryIR
         assumeGDefGroup,
         functionType,
         entityType,
-        partitionParameters
+        partitionParameters,
+        mapExpTypes,
+        mapFunTypes,
+        mapModuleTypes
        )
 where
 
@@ -264,3 +267,83 @@ partitionParameters tenv params = go id params
       | otherwise =
         internalError "partitionParameters: Invalid parameter order"
     
+-------------------------------------------------------------------------------
+
+-- | Transform all types and kinds in an expression.
+--
+--   The expression should not shadow any types or kinds.
+mapExpTypes :: (Kind -> Kind) -> (Type -> Type) -> ExpM -> ExpM
+mapExpTypes do_kind do_type expression =
+  case fromExpM expression
+  of VarE {} -> expression
+     LitE {} -> expression
+     ConE inf con args ->
+       ExpM $ ConE inf (do_constructor con) (continues args)
+     AppE inf op ty_args args ->
+       ExpM $ AppE inf (continue op) (map do_type ty_args) (continues args)
+     LamE inf f ->
+       ExpM $ LamE inf (mapFunTypes do_kind do_type f)
+     LetE inf b rhs body ->
+       ExpM $ LetE inf (mapParamTypes do_type b) (continue rhs) (continue body)
+     LetfunE inf defs body ->
+       ExpM $ LetfunE inf (fmap do_def defs) (continue body)
+     CaseE inf scr alts ->
+       ExpM $ CaseE inf (continue scr) (map do_alt alts)
+     ExceptE inf ty ->
+       ExpM $ ExceptE inf (do_type ty)
+     CoerceE inf from_t to_t b ->
+       ExpM $ CoerceE inf (do_type from_t) (do_type to_t) (continue b)
+     ArrayE inf ty es ->
+       ExpM $ ArrayE inf (do_type ty) (continues es)
+  where
+    continue e = mapExpTypes do_kind do_type e
+    continues es = map (mapExpTypes do_kind do_type) es
+
+    do_def (Def v ann f) = Def v ann (mapFunTypes do_kind do_type f)
+
+    do_constructor decon =
+      case decon
+      of VarCon con_var ty_args ex_types ->
+           VarCon con_var (map do_type ty_args) (map do_type ex_types)
+         TupleCon ty_args ->
+           TupleCon (map do_type ty_args)
+
+    do_alt (AltM (Alt decon params body)) =
+      AltM $
+      Alt (do_decon decon) (map (mapParamTypes do_type) params) (continue body)
+
+    do_decon (VarDeCon v ts bs) =
+      VarDeCon v (map do_type ts) [v ::: do_kind k | v ::: k <- bs]
+
+    do_decon (TupleDeCon ts) =
+      TupleDeCon (map do_type ts)
+
+mapParamTypes do_type (PatM (v ::: t) u) = PatM (v ::: do_type t) u
+
+-- | Transform all types and kinds in a function.
+--
+--   The expression should not shadow any types or kinds.
+mapFunTypes :: (Kind -> Kind) -> (Type -> Type) -> FunM -> FunM
+mapFunTypes do_kind do_type (FunM f) =
+  FunM $ f { funTyParams = [TyPat (v ::: do_kind k)
+                           | TyPat (v ::: k) <- funTyParams f]
+           , funParams = map (mapParamTypes do_type) $ funParams f
+           , funReturn = do_type $ funReturn f
+           , funBody = mapExpTypes do_kind do_type $ funBody f}
+
+-- | Transform all types and kinds in a module.
+--
+--   The module should not shadow any types or kinds.
+mapModuleTypes :: (Kind -> Kind) -> (Type -> Type) -> Module Mem -> Module Mem
+mapModuleTypes do_kind do_type (Module name imps defs exports) =
+  Module name (map gdef imps) (fmap (fmap gdef) defs) (map export exports)
+  where
+    gdef def = mapDefiniens entity def
+
+    entity (FunEnt f) = FunEnt $ mapFunTypes do_kind do_type f
+    entity (DataEnt d) = DataEnt $ do_data d
+
+    do_data (Constant inf ty e) =
+      Constant inf (do_type ty) (mapExpTypes do_kind do_type e)
+
+    export e = e {exportFunction = mapFunTypes do_kind do_type $ exportFunction e}

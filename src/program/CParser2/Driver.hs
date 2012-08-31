@@ -1,5 +1,5 @@
 
-module CParser2.Driver(parseCoreModule, parseCoreFunctions)
+module CParser2.Driver(parseCoreModule2)
 where
 
 import qualified Data.Map as Map
@@ -21,8 +21,7 @@ import CParser2.AST
 import CParser2.Lexer
 import CParser2.Parser
 import CParser2.Resolve
-import CParser2.GenCode
-import CParser2.GenCore
+import CParser2.GenCode2
 import Paths
 import GlobalVar
 import Globals
@@ -45,17 +44,18 @@ predefinedVarDetails =
         
         type_function = Map.lookup v builtinTypeFunctions
 
--- | Parse the built-in type declarations.
+-- | Parse the built-in module.
 --
---   Create a type environment and a module containing definitions of
---   built-in functions.
---   The function definitions are created after the type environment is
---   initialized.
-parseCoreModule :: IdentSupply Var -> IO SpecTypeEnv
-parseCoreModule ident_supply = do
-  pathname <- getDataFileName ("symbols" </> "coretypes2")
+--   Create a type environment containing variable, type function, 
+--   and data type definitions.  The type environment contains specification
+--   types and memory types.  Also, create a module containing
+--   definitions of built-in functions and constants.
+parseCoreModule2 :: IdentSupply Var
+                 -> IO (TypeEnv, SpecTypeEnv, TypeEnv, SystemF.Module SystemF.Mem)
+parseCoreModule2 ident_supply = do
+  pathname <- getDataFileName ("symbols" </> "coremodule")
   input_file <- readFile pathname
-  
+
   -- Parse file
   let input_tokens = lexify pathname input_file
   parsed_ast <- parseFile pathname input_tokens
@@ -66,25 +66,5 @@ parseCoreModule ident_supply = do
   resolved_ast <- resolveModule ident_supply resolve_env modname parsed_ast
 
   -- Convert to core expressions
-  return $ createCoreTable resolved_ast
+  createCoreModule ident_supply resolved_ast
 
--- | Parse the built-in function declarations.
---
---   The mem type environment should be passed as a parameter.
-parseCoreFunctions :: IdentSupply Var -> TypeEnv
-                   -> IO (SystemF.Module SystemF.Mem)
-parseCoreFunctions ident_supply mem_types = do
-  pathname <- getDataFileName ("symbols" </> "corecode")
-  input_file <- readFile pathname
-  
-  -- Parse file
-  let input_tokens = lexify pathname input_file
-  parsed_ast <- parseFile pathname input_tokens
-
-  -- Resolve names
-  let modname = ModuleName $ takeBaseName pathname
-      resolve_env = globalEnvironment predefinedVarDetails
-  resolved_ast <- resolveModule ident_supply resolve_env modname parsed_ast
-
-  -- Convert to core expressions
-  createCoreFunctions ident_supply mem_types resolved_ast

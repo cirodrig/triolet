@@ -1457,7 +1457,16 @@ representationInference mod = do
     runReaderT (unRI (reprModule mod)) context
   
   -- Convert from specification types to mem types
-  let mem_mod = convertSpecToMemTypes repr_mod
+  let v_Init = coreBuiltin The_Init
+      v_OutPtr = coreBuiltin The_OutPtr 
+      v_Store = coreBuiltin The_Store
+      mem_mod = convertSpecToMemTypes v_Init v_OutPtr v_Store repr_mod
 
   -- Eta-expand functions
   etaExpandModule mem_mod
+
+-- | Convert a specification type environment to one where types can be
+--   compared.  The 'mem' variant of type functions is selected.  All types
+--   remain unchanged.
+specToTypeEnv :: SpecTypeEnv -> TypeEnv
+specToTypeEnv m = specializeTypeEnv builtinMemTypeFunction Just Just Just m

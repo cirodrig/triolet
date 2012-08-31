@@ -13,6 +13,7 @@ Data-Dir:	dist/build/data
 Data-Files:
   symbols/corecode
   symbols/coretypes2
+  symbols/coremodule
   include/triolet.h
   include/triolet_list.h
   include/triolet_matrix.h
@@ -163,11 +164,10 @@ Executable triolet
     SystemF.Typecheck
     SystemF.TypecheckSF
     SystemF.TypecheckMem
+    CParser2.AdjustTypes
     CParser2.AST
     CParser2.Driver
-    CParser2.GenCode
     CParser2.GenCode2
-    CParser2.GenCore
     CParser2.LexData
     CParser2.Lexer
     CParser2.Parser

@@ -52,10 +52,7 @@ module Type.Environment
        
         -- * New conversion routines
         isAdapterCon,
-        specToPureTypeEnv,
-        specToMemTypeEnv,
-        specToMemType,
-        specToTypeEnv
+        specializeTypeEnv
        )
 where
 
@@ -284,14 +281,6 @@ data TypeFunction =
   , _tyfunReduction :: !([Type] -> TypeEvalM Type)
   }
 
--- | A built-in type function has two implementations, depending on whether
---   it's being evaluated in the pure or mem variant of the type system
-data BuiltinTypeFunction =
-  BuiltinTypeFunction
-  { builtinPureTypeFunction :: !TypeFunction
-  , builtinMemTypeFunction :: !TypeFunction
-  }
-
 -- | Create a type function
 typeFunction :: Int -> ([Type] -> TypeEvalM Type) -> TypeFunction
 typeFunction = TypeFunction
@@ -304,6 +293,15 @@ applyTypeFunction :: EvalMonad m => TypeFunction -> [Type] -> m Type
 applyTypeFunction f ts = do
   x <- liftTypeEvalM $ _tyfunReduction f ts
   return $! x                   -- Ensure that result is evaluated
+
+-- | A built-in type function has two implementations, depending on whether
+--   it's being evaluated in the pure or mem variant of the type system
+data BuiltinTypeFunction =
+  BuiltinTypeFunction
+  { builtinPureTypeFunction :: !TypeFunction
+  , builtinMemTypeFunction :: !TypeFunction
+  }
+
 
 -- | A type environment maps variables to types
 newtype TypeEnvBase type_function =
@@ -500,106 +498,16 @@ pprTypeEnv (TypeEnv tenv) =
 pprTypeAssignment :: TypeAssignment type_function -> Doc
 pprTypeAssignment (VarTypeAssignment ty _) = pprType ty
 pprTypeAssignment (TyConTypeAssignment k _) = pprType k
-pprTypeAssignment (DataConTypeAssignment _) = text "(datacon)"
+pprTypeAssignment (DataConTypeAssignment c) = pprDataConType c
 pprTypeAssignment (TyFunTypeAssignment k _) = pprType k
 
-{-
--------------------------------------------------------------------------------
+pprDataConType c =
+  let constructed_type =
+        varApp (dataConTyCon c) [VarT v | v ::: _ <- dataConPatternParams c]
+      fo_type = funType (dataConPatternArgs c) constructed_type
+  in pprType $ forallType (dataConPatternParams c) $
+               forallType (dataConPatternExTypes c) fo_type
 
--- | Convert an ordinary type environment to a pure type environment
-convertToPureTypeEnv :: TypeEnv -> TypeEnv
-convertToPureTypeEnv (TypeEnv m) =
-  TypeEnv (IntMap.map convertToPureTypeAssignment m)
-
-convertToPureTypeAssignment ass =
-  case ass
-  of VarTypeAssignment rt ->
-       VarTypeAssignment (convertToPureReturnType rt)
-     TyConTypeAssignment rt cons ->
-       TyConTypeAssignment (convertToPureReturnType rt) cons
-     DataConTypeAssignment rt con_type ->
-       DataConTypeAssignment (convertToPureReturnType rt) (convertToPureDataConType con_type)
-     TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment (convertToPureReturnType rt) f
-
-convertToPureParamType (param ::: ty) =
-  let param' = case param
-               of ValPT (Just v) -> param
-                  _ -> ValPT Nothing
-  in param' ::: convertToPureType ty
-
-convertToPureReturnType (_ ::: ty) = ValRT ::: convertToPureType ty
-
-convertToPureType ty =
-  case ty
-  of VarT t -> ty
-     AppT op arg -> AppT (convertToPureType op) (convertToPureType arg)
-     FunT arg ret -> FunT (convertToPureParamType arg) (convertToPureReturnType ret)
-     AnyT _ -> ty
-     IntT _ -> ty
-
-convertToPureDataConType (DataConType params eparams args range con ty_con) =
-  DataConType (map convertToPureParamType params)
-              (map convertToPureParamType eparams)
-              (map convertToPureReturnType args)
-              (convertToPureReturnType range)
-              con
-              ty_con
-
--------------------------------------------------------------------------------
-
--- | Convert an ordinary type environment to an explicit memory passing
---   type environment
-convertToMemTypeEnv :: TypeEnv -> TypeEnv
-convertToMemTypeEnv (TypeEnv m) =
-  TypeEnv (IntMap.map convertToMemTypeAssignment m)
-  
-convertToMemTypeAssignment ass =
-  case ass
-  of VarTypeAssignment rt ->
-       VarTypeAssignment (convertToMemReturnType rt)
-     TyConTypeAssignment rt cons ->
-       TyConTypeAssignment (convertToMemReturnType rt) cons
-     DataConTypeAssignment rt con_type ->
-       DataConTypeAssignment (convertToMemReturnType rt) (convertToMemDataConType con_type)
-     TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment (convertToMemReturnType rt) f
-
-convertToMemParamType (repr ::: ty) 
-  | getLevel ty == TypeLevel =
-    case repr
-    of WritePT ->
-         -- Convert to a function type (output_pointer -> sideeffect)
-         BoxPT ::: FunT (OutPT ::: convertToMemType ty) (SideEffectRT ::: convertToMemType ty)
-       _ -> repr ::: convertToMemType ty
-  | otherwise =
-    repr ::: convertToMemType ty
-
-convertToMemReturnType (repr ::: ty)
-  | getLevel ty == TypeLevel =
-    case repr
-    of WriteRT ->
-         BoxRT ::: FunT (OutPT ::: convertToMemType ty) (SideEffectRT ::: convertToMemType ty)
-       _ -> repr ::: convertToMemType ty
-  | otherwise =
-      repr ::: convertToMemType ty
-
-convertToMemType ty =
-  case ty
-  of VarT t -> ty
-     AppT op arg -> AppT (convertToMemType op) (convertToMemType arg)
-     FunT arg ret -> FunT (convertToMemParamType arg) (convertToMemReturnType ret)
-     AnyT _ -> ty
-     IntT _ -> ty
-
-convertToMemDataConType (DataConType params eparams args range con ty_con) =
-  DataConType (map convertToMemParamType params)
-              (map convertToMemParamType eparams)
-              (map convertToMemReturnType args)
-              (convertToMemReturnType range)
-              con
-              ty_con
--}              
 -------------------------------------------------------------------------------
 
 -- | True if the variable is an adapter type constructor or function.
@@ -616,154 +524,61 @@ isAdapterCon v = v `elem` adapters
                 coreBuiltin The_BoxedType,
                 coreBuiltin The_BareType]
 
-specToPureTypeEnv :: SpecTypeEnv -> TypeEnv
-specToPureTypeEnv (TypeEnv m) =
-  TypeEnv (IntMap.mapMaybe specToPureTypeAssignment m)
-
-specToPureTypeAssignment :: SpecTypeAssignment -> Maybe PureTypeAssignment
-specToPureTypeAssignment ass =
-  case ass
-  of VarTypeAssignment rt conlike ->
-       VarTypeAssignment <$> specToPureTypeOrKind rt <*> pure conlike
-     TyConTypeAssignment rt cons ->
-       TyConTypeAssignment <$> specToPureKind rt <*> pure cons
-     DataConTypeAssignment con_type ->
-       DataConTypeAssignment <$> specToPureDataConType con_type
-     TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment <$>
-       specToPureKind rt <*>
-       pure (builtinPureTypeFunction f)
-
-specToPureTypeOrKind e =
-  case getLevel e
-  of TypeLevel -> specToPureType e
-     KindLevel -> specToPureKind e
-     SortLevel -> Just e        -- Sorts are unchanged
-     _ -> internalError "specToPureTypeOrKind: Not a type, kind, or sort"
-
-specToPureType ty =
-  case fromVarApp ty
-  of Just (con, [arg])
-       -- Adapter types are ignored in the pure representation. 
-       | isAdapterCon con ->
-           specToPureType arg
-       
-     -- Recurse on other types
-     _ -> case ty
-          of VarT _ -> pure ty
-             AppT op arg -> AppT <$> specToPureType op <*> specToPureType arg
-             LamT (x ::: dom) body -> do
-               dom' <- specToPureKind dom
-               body' <- specToPureType body
-               return $ LamT (x ::: dom') body'
-             FunT arg ret -> FunT <$> specToPureType arg <*> specToPureType ret
-             AllT (x ::: dom) rng -> do
-               dom' <- specToPureKind dom
-               rng' <- specToPureType rng
-               return $ AllT (x ::: dom') rng'
-             AnyT _ -> pure ty
-             IntT _ -> pure ty
-             UTupleT _ -> Nothing
-             CoT _ -> pure ty
-
--- Every value is represented in boxed form, so they all have kind 'box'.
--- Types that do not describe values (such as intindexT) can still have
--- distinct kinds.
---
--- The kinds 'out' and 'sideeffect' have no equivalent pure term.  If
--- they appear in a type, then 'Nothing' is returned.  The type environment
--- entry that mentions this kind will be removed from the environment.
-specToPureKind :: Kind -> Maybe Kind
-specToPureKind k =
-  case k
-  of VarT kind_var
-       | kind_var == boxV      -> Just boxT
-       | kind_var == bareV     -> Just boxT
-       | kind_var == valV      -> Just boxT
-       | kind_var == intindexV -> Just intindexT
-       | otherwise             -> Nothing
-     dom `FunT` rng -> liftM2 FunT (specToPureKind dom) (specToPureKind rng)
-     _ -> internalError "specToPureKind: Unexpected kind"
-
-specToPureDataConType dcon_type = do
-  ty_params <- mapM type_param $ dataConPatternParams dcon_type
-  ex_types <- mapM type_param $ dataConPatternExTypes dcon_type
-  args <- mapM specToPureType $ dataConPatternArgs dcon_type
-  return $ DataConType
-           { dataConPatternParams   = ty_params
-           , dataConPatternExTypes  = ex_types
-           , dataConPatternArgs     = args
-           , dataConPatternArgKinds = [BoxK | _ <- args]
-           , dataConCon             = dataConCon dcon_type
-           , dataConTyCon           = dataConTyCon dcon_type
-           }
-  where
-    type_param (v ::: t) = fmap (v :::) $ specToPureKind t
-
-specToMemTypeEnv :: SpecTypeEnv -> TypeEnv
-specToMemTypeEnv (TypeEnv m) =
-  TypeEnv (IntMap.map specToMemTypeAssignment m)
-
-specToMemTypeAssignment ass =
-  case ass
-  of VarTypeAssignment rt conlike ->
-       VarTypeAssignment (specToMemType rt) conlike
-     TyConTypeAssignment rt cons ->
-       TyConTypeAssignment (specToMemType rt) cons
-     DataConTypeAssignment con_type ->
-       DataConTypeAssignment (specToMemDataConType con_type)
-     TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment (specToMemType rt) (builtinMemTypeFunction f)
-
-specToMemType ty =
-  case fromVarApp ty
-  of Just (con, [arg])
-       -- Replace applications of 'Init' by initializer functions.
-       | con `isCoreBuiltin` The_Init ->
-           let mem_arg = specToMemType arg
-           in initializerType mem_arg
-       
-     -- Recurse on other types
-     _ -> case ty
-          of VarT _ -> ty
-             AppT op arg -> AppT (specToMemType op) (specToMemType arg)
-             FunT arg ret -> FunT (specToMemType arg) (specToMemType ret)
-             AnyT _ -> ty
-             IntT _ -> ty
-             AllT (x ::: dom) rng ->
-               AllT (x ::: specToMemType dom) (specToMemType rng)
-             LamT (x ::: dom) body ->
-               LamT (x ::: specToMemType dom) (specToMemType body)
-             UTupleT ks -> UTupleT ks
-             CoT _ -> ty
-
-specToMemDataConType dcon_type =
-  DataConType
-  { dataConPatternParams   = map type_param $ dataConPatternParams dcon_type
-  , dataConPatternExTypes  = map type_param $ dataConPatternExTypes dcon_type
-  , dataConPatternArgs     = map specToMemType $ dataConPatternArgs dcon_type
-  , dataConPatternArgKinds = dataConPatternArgKinds dcon_type
-  , dataConCon             = dataConCon dcon_type
-  , dataConTyCon           = dataConTyCon dcon_type
-  }
-  where
-    type_param (v ::: t) = v ::: specToMemType t
-
 initializerType t =
   varApp (coreBuiltin The_OutPtr) [t] `FunT` VarT (coreBuiltin The_Store)
 
 -------------------------------------------------------------------------------
 
--- | Convert a specification type environment to one where types can be
---   compared.  The 'mem' variant of type functions is selected.  All types
---   remain unchanged.
-specToTypeEnv :: SpecTypeEnv -> TypeEnv
-specToTypeEnv (TypeEnv m) =
-  TypeEnv (IntMap.map specToTypeAssignment m)
+-- | Specialize a specification type environment for a particular use case.
+specializeTypeEnv :: (BuiltinTypeFunction -> a)
+                     -- ^ Choice of type function implementation
+                  -> (BaseKind -> Maybe BaseKind)
+                     -- ^ Transformation on base kinds
+                  -> (Kind -> Maybe Kind)
+                     -- ^ Transformation on kinds
+                  -> (Type -> Maybe Type)
+                     -- ^ Transformation on types
+                  -> SpecTypeEnv -> TypeEnvBase a
+specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) =
+  TypeEnv (IntMap.mapMaybe type_assignment m)
+  where
+    type_assignment (VarTypeAssignment t conlike) =
+      let t' = case getLevel t
+               of SortLevel -> Just t
+                  KindLevel -> kind_f t
+                  TypeLevel -> type_f t
+                  ObjectLevel -> internalError "specializeTypeEnv"
+      in VarTypeAssignment <$> t' <*> pure conlike
 
-specToTypeAssignment ass =
-  case ass
-  of VarTypeAssignment t conlike -> VarTypeAssignment t conlike
-     TyConTypeAssignment t cons -> TyConTypeAssignment t cons
-     DataConTypeAssignment con_type -> DataConTypeAssignment con_type
-     TyFunTypeAssignment t f -> TyFunTypeAssignment t (builtinMemTypeFunction f)
+    type_assignment (TyConTypeAssignment t dtype) =
+      let t' = kind_f t
+          dtype' = data_type dtype
+      in TyConTypeAssignment <$> t' <*> dtype'
+
+    type_assignment (DataConTypeAssignment dcon) =
+      DataConTypeAssignment <$> data_con dcon
+
+    type_assignment (TyFunTypeAssignment t f) =
+      TyFunTypeAssignment <$> kind_f t <*> pure (tyfun_f f)
+
+    data_type dtype = do
+      k' <- basekind_f $ dataTypeKind dtype
+      return $ DataType
+               { dataTypeKind = k'
+               , dataTypeIsAbstract  = dataTypeIsAbstract dtype
+               , dataTypeIsAlgebraic = dataTypeIsAlgebraic dtype
+               , dataTypeDataConstructors = dataTypeDataConstructors dtype
+               , dataTypeCon = dataTypeCon dtype
+               }
+
+    data_con dcon =
+      DataConType <$> (specializeBinders kind_f $ dataConPatternParams dcon)
+                  <*> (specializeBinders kind_f $ dataConPatternExTypes dcon)
+                  <*> (mapM type_f $ dataConPatternArgs dcon)
+                  <*> (mapM basekind_f $ dataConPatternArgKinds dcon)
+                  <*> pure (dataConCon dcon)
+                  <*> pure (dataConTyCon dcon)
+
+specializeBinders f bs = mapM (specializeBinder f) bs
+specializeBinder f (v ::: k) = do {k' <- f k; return (v ::: k')}
+

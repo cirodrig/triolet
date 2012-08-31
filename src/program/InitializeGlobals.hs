@@ -41,23 +41,19 @@ loadBuiltins cl_globals = do
     let vars = createParserGlobals n
     in return (n + length vars, vars)
 
-  -- Initialize core IR data structures
+  -- DEBUG: new core IR initialization
   withTheNewVarIdentSupply $ \supply -> do
-    core_types <- CParser2.Driver.parseCoreModule supply
-    initializeGlobalVar the_specTypes (return core_types)
-    initializeGlobalVar the_systemFTypes (return $ specToPureTypeEnv core_types)
-    let mem_types = specToMemTypeEnv core_types
+    (sf_types, spec_types, mem_types, core_module) <-
+      CParser2.Driver.parseCoreModule2 supply
+    initializeGlobalVar the_systemFTypes (return sf_types)
+    initializeGlobalVar the_specTypes (return spec_types)
     initializeGlobalVar the_memTypes (return mem_types)
-
-  -- Initialize core functions if needed
-  when (useCoreIR cl_globals) $ do
-    mem_types <- readInitGlobalVarIO the_memTypes
-    core_module <- withTheNewVarIdentSupply $ \supply -> do
-      CParser2.Driver.parseCoreFunctions supply mem_types
-      
-    -- Typecheck the module to detect errors
-    SystemF.TypecheckMem.typeCheckModule core_module
     initializeGlobalVar the_coreModule (return core_module)
+  
+  -- Check core module for type errors
+  when (useCoreIR cl_globals) $ do
+    core_module <- readInitGlobalVarIO the_coreModule
+    SystemF.TypecheckMem.typeCheckModule core_module
 
   -- IN DEVELOPMENT: Compute size and alignment of each built-in type
   {-mem_types <- readInitGlobalVarIO the_memTypes

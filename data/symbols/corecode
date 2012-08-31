@@ -6565,7 +6565,6 @@ Sequence_parallel_build @(a : bare)
               fromEffTok @a (seqEffTok store_a store_b)
                                 
           ; pbLeaf @a (tree_list : list a).
-
               case tree_list of make_list @a @(m : intindex) (tree_list_dim : FIInt m) (list_sb : StuckBox (arr m a)).
               case list_sb of stuckBox @(arr m a) (tree_list_array : (arr m a)).
               case rep of
