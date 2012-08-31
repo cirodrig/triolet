@@ -11,8 +11,6 @@ Tested-With:	GHC == 7.4.1
 
 Data-Dir:	dist/build/data
 Data-Files:
-  symbols/corecode
-  symbols/coretypes2
   symbols/coremodule
   include/triolet.h
   include/triolet_list.h
