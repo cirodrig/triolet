@@ -26,23 +26,18 @@ import Paths
 import GlobalVar
 import Globals
 
-predefinedVarDetails :: [(String, VarDetails)]
+predefinedVarDetails :: [(String, Var)]
 predefinedVarDetails =
-  map mk_var_details (valV : boxV : bareV : outV : intindexV :
-                      initV : propV :
-                      posInftyV : negInftyV : []) -- : allBuiltinVars)
+  [(name v, v) | v <- [valV, boxV, bareV, outV, intindexV, initV, propV,
+                       posInftyV, negInftyV]]
   where
-    mk_var_details v = (name, PredefinedVar v type_function)
-      where
-        name =
-          case varName v
-          of Just lab ->
-               case labelLocalName lab
-               of Left name -> name
-                  _ -> internalError "Unnamed predefined variable"
-             _ -> internalError "Unnamed predefined variable"
-        
-        type_function = Nothing -- Map.lookup v builtinTypeFunctions
+    name v =
+      case varName v
+      of Just lab ->
+           case labelLocalName lab
+           of Left name -> name
+              _ -> internalError "Unnamed predefined variable"
+         _ -> internalError "Unnamed predefined variable"
 
 -- | Parse the built-in module.
 --

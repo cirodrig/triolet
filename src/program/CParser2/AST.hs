@@ -18,22 +18,6 @@ import Type.Var
 import Type.Type(Level(..), HasLevel(..))
 import Type.Environment(BuiltinTypeFunction)
 
--- | Details about an externally defined variable.
---
---   The main piece of information is the external variable.
---   By attaching a 'VarDetails' to a parser variable, the parser is directed
---   to translate the parser variable to the given external variable. 
---   Otherwise a new external variable will be created.
---
---   If a type-level variable stands for a built-in type function, then the
---   type function value is also included here.  Type functions must be
---   type-level entities, and must not be data types.
-data VarDetails =
-  PredefinedVar !Var !(Maybe BuiltinTypeFunction)
-
-instance HasLevel VarDetails where
-  getLevel (PredefinedVar v _) = getLevel v
-
 instance Foldable Located where
   foldMap f x = f (unLoc x)
   foldr f z x = f (unLoc x) z
@@ -231,7 +215,7 @@ data Entity ix =
     -- | A variable declaration
     VarEnt (LType ix) [Attribute]
     -- | A type declaration
-  | TypeEnt (LType ix) (Maybe BuiltinTypeFunction)
+  | TypeEnt (LType ix)
     -- | A data type definition
   | DataEnt (LType ix) [LDataConDecl ix] [Attribute]
     -- | A global constant definition
@@ -280,13 +264,13 @@ type RModule = Module Resolved
 -- | Names are resolved to variables
 type instance Identifier Resolved = ResolvedVar
 
-data ResolvedVar = ResolvedVar !Var !(Maybe VarDetails)
+newtype ResolvedVar = ResolvedVar Var
 
 instance HasLevel ResolvedVar where
-  getLevel (ResolvedVar v _) = getLevel v
+  getLevel (ResolvedVar v) = getLevel v
 
 instance Eq ResolvedVar where
-   ResolvedVar v1 _ == ResolvedVar v2 _ = v1 == v2
+   ResolvedVar v1 == ResolvedVar v2 = v1 == v2
 
 instance Ord ResolvedVar where
-   ResolvedVar v1 _ `compare` ResolvedVar v2 _ = v1 `compare` v2
+   ResolvedVar v1 `compare` ResolvedVar v2 = v1 `compare` v2

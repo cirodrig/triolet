@@ -144,17 +144,6 @@ def parsed_name resolved_var =
     let s = addToEnv parsed_name resolved_var names
     in returnNR () s
 
-{-
--- | \"Define\" a global variable.  We actually look up a predefined variable 
---   name here, like 'use', but with a different error message.
-globalDef :: Level -> Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
-globalDef expected_lv name pos = do
-  v <- fetch "Could not find global name:" name pos
-  logErrorIf (expected_lv /= getLevel v) $
-    wrongLevelError pos name expected_lv (getLevel v)
-  return v
--}
-
 use :: Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
 use = fetch "Could not find:"
 
@@ -189,7 +178,7 @@ newRVar lv parsed_name = do
   modname <- getModuleName
   id <- fresh
   let label = plainLabel modname parsed_name
-      v = ResolvedVar (mkVar id (Just label) lv) Nothing
+      v = ResolvedVar (mkVar id (Just label) lv)
   def parsed_name v
   return v
 
@@ -380,16 +369,11 @@ resolveEntity _ (VarEnt ty attrs) = do
     "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
   return $ VarEnt ty' attrs
 
-resolveEntity (GlobalName r_name) (TypeEnt ty Nothing) = do
+resolveEntity (GlobalName r_name) (TypeEnt ty) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= KindLevel) $
     "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
-  let tf = case r_name of ResolvedVar _ (Just (PredefinedVar _ tf)) -> tf
-  return $ TypeEnt ty' tf
-
-resolveEntity _ (TypeEnt ty (Just _)) =
-  -- Type functions should be 'Nothing' up to now 
-  internalError "resolveEntity"
+  return $ TypeEnt ty'
 
 resolveEntity (DataConNames _ data_con_names) (DataEnt ty cons attrs) = do
   (ty', lv) <- resolveLType ty
@@ -452,14 +436,11 @@ resolveModule' (Module decls) = Module <$> resolveDecls decls
 
 -- | Construct a global environment that maps predefined variable names
 --   to predefined variables.
-globalEnvironment :: [(String, VarDetails)]
+globalEnvironment :: [(String, Var)]
                   -> (Map.Map (Identifier Parsed) ResolvedVar)
 globalEnvironment xs = Map.fromList $ map mk_var xs
   where
-    mk_var (name, details) =
-      let PredefinedVar internal_var _ = details  
-          new_var = ResolvedVar internal_var (Just details)
-      in (name, new_var)
+    mk_var (name, sf_var) = (name, ResolvedVar sf_var)
 
 resolveModule :: IdentSupply Var -- ^ Supply of unique variable IDs
               -> Map.Map (Identifier Parsed) ResolvedVar

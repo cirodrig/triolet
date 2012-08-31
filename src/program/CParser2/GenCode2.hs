@@ -51,7 +51,7 @@ instance Monoid UpdateTypeEnv where
 applyUpdates :: UpdateTypeEnv -> SpecTypeEnv -> SpecTypeEnv
 applyUpdates (UpdateTypeEnv f) e = f e
 
-toVar (ResolvedVar v _) = v
+toVar (ResolvedVar v) = v
 
 -- | Extract information from an attribute list on a variable declaration
 fromVarAttrs :: [Attribute] -> Bool
@@ -117,7 +117,7 @@ declKind ldecl = do
   let make_update kind =
         return $ UpdateTypeEnv $ insertType (toVar ident) kind
   case ent of
-    TypeEnt kind _   -> typeExpr kind >>= make_update
+    TypeEnt kind     -> typeExpr kind >>= make_update
     DataEnt kind _ _ -> typeExpr kind >>= make_update
     _                -> return mempty
 
@@ -214,15 +214,12 @@ varEnt ident ty attrs = do
   let update = UpdateTypeEnv (insertTypeWithProperties ident ty' conlike)
   return $! conlike `seq` update
 
-typeFunctionEnt ident ty type_function = do
-  ty' <- typeExpr ty
-  return $ UpdateTypeEnv (insertTypeFunction ident ty' type_function)
-                              
 typeEnt ident ty = do
   ty' <- typeExpr ty
   return $ UpdateTypeEnv
     (maybe (insertType ident ty') (insertTypeFunction ident ty') type_function)
   where
+    -- Look up the type function by its name
     type_function = let name = case varName ident
                                of Just l -> labelLocalNameAsString l
                     in Map.lookup name builtinTypeFunctions
@@ -243,9 +240,7 @@ typeLevelDecl ldecl = do
   case ent of
     VarEnt ty attrs ->
       varEnt core_name ty attrs
-    --TypeEnt ty (Just type_function) ->
-    --  typeFunctionEnt core_name ty type_function
-    TypeEnt ty _ ->
+    TypeEnt ty ->
       typeEnt core_name ty
     DataEnt ty data_cons attrs ->
       dataEnt core_name ty data_cons attrs
@@ -578,8 +573,7 @@ variableNameTable :: [LDecl Resolved] -> VariableNameTable
 variableNameTable decls = Map.fromList keyvals
   where
     keyvals = [(name, v) | decl <- decls
-                         , ident <- lDeclVariables decl
-                         , let ResolvedVar v _ = ident
+                         , ResolvedVar v <- lDeclVariables decl
                          , Just lab <- return $ varName v
                          , Left name <- return $ labelLocalName lab]
 

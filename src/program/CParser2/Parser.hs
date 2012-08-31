@@ -488,7 +488,7 @@ pTypeDecl = located $ do
   tycon <- identifier
   match ColonTok
   kind <- pType
-  return $ Decl tycon $ TypeEnt kind Nothing
+  return $ Decl tycon $ TypeEnt kind
 
 -- | Parse a global variable or constant definition.
 --   Both definitions start the same way.  Constant definitions end with
