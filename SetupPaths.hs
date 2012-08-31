@@ -76,5 +76,4 @@ prebuiltDataFiles = ["include/triolet.h", "include/triolet_list.h",
                      "include/TrioletData.h",
                      "include/triolet/Base.h",
                      "include/triolet/Layout.h",
-                     "symbols/corecode", "symbols/coretypes2",
                      "symbols/coremodule"]
