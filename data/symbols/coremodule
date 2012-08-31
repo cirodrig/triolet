@@ -1625,6 +1625,106 @@ finish_scatter @(r s : bare)
       f tmp ret
   };
 
+-------------------------------------------------------------------------------
+-- Sets of integers
+
+-- A set of integers, represented as a hash table.
+-- The hash table consists of an array of integers and an array
+-- of linked list indices (used for collisions).
+data intset : bare
+{
+  mk_intset () (N : intindex) (FIInt N,
+                               StuckBox (Tuple2 (arr N (Stored int))
+                                                (arr N (Stored uint))));
+};
+
+build_intset (ls : list (Stored int)) (ret : OutPtr intset)
+  -> Store attribute(inline) =
+  case ls of
+    make_list @(Stored int) @(N : intindex)
+              (list_size : FIInt N) (barr : StuckBox (arr N (Stored int))).
+  case barr of stuckBox @(arr N (Stored int)) (a : arr N (Stored int)).
+
+  -- Compute size of hash table
+  let table_count : int = compute_hash_table_size @N list_size in
+
+  case defineIntIndex table_count of
+    someIInt @(M : intindex) (table_size : FIInt M).
+
+  -- Create hash table
+  let type HT = Tuple2 (arr M (Stored int)) (arr M (Stored uint)) in
+  let hash_table : StuckBox HT =
+   stuckBox @HT (build_hash_table @N @M list_size table_size a) in
+
+  mk_intset @M table_size hash_table ret;
+
+
+compute_hash_table_size : (N : intindex) -> FIInt N -> int;
+build_hash_table : (N M : intindex)
+                -> FIInt N -> FIInt M
+                -> arr N (Stored int)
+                -> Init (Tuple2 (arr M (Stored int)) (arr M (Stored uint)));
+
+intsetLookup (set : intset) (key : int) (ret : OutPtr (Maybe (Stored int)))
+  -> Store attribute(inline) =
+
+  case set of
+    mk_intset @(N : intindex)
+              (size : FIInt N)
+              (contents : StuckBox (Tuple2 (arr N (Stored int))
+                                           (arr N (Stored uint)))).
+  case contents of
+    stuckBox @(Tuple2 (arr N (Stored int)) (arr N (Stored uint)))
+    (tuple : Tuple2 (arr N (Stored int)) (arr N (Stored uint))).
+  case tuple of
+    tuple2 @(arr N (Stored int)) @(arr N (Stored uint))
+    (keys_array : arr N (Stored int))
+    (inds_array : arr N (Stored uint)).
+
+  let index : int = lookup_hash_table @N size keys_array inds_array key in
+  if index ==# -1
+  then nothing @(Stored int) ret
+  else just @(Stored int) (stored @int index) ret;
+
+
+lookup_hash_table : (N : intindex)
+                 -> FIInt N
+                 -> arr N (Stored int)
+                 -> arr N (Stored uint)
+                 -> int
+                 -> int;
+
+intsetElements (set : intset) -> Stream1 (Stored int) attribute(inline) =
+   case set of
+    mk_intset @(N : intindex)
+              (size : FIInt N)
+              (contents : StuckBox (Tuple2 (arr N (Stored int))
+                                           (arr N (Stored uint)))).
+  case size of fiInt @N (count : int).
+  case contents of
+    stuckBox @(Tuple2 (arr N (Stored int)) (arr N (Stored uint)))
+    (tuple : Tuple2 (arr N (Stored int)) (arr N (Stored uint))).
+  case tuple of
+    tuple2 @(arr N (Stored int)) @(arr N (Stored uint))
+    (keys_array : arr N (Stored int))
+    (inds_array : arr N (Stored uint)).
+
+  -- For each array element
+  let dom : list_dim = mk_list_dim (justVal @int count) in
+
+  sequenceStream @(Stored int)
+  (Sequence_generate_bind @(Stored int) dom
+   (\ (si : Stored int) -> Sequence (Stored int).
+
+     -- Get the i_th list element
+     -- Skip if its value is -1
+     case si of stored @int (i : int).
+     case subscript @N @(Stored int) (reprSizeAlign @(Stored int) repr_int)
+          keys_array i
+       of stored @int (key : int).
+     if key ==# -1
+     then Sequence_empty @(Stored int) repr_int
+     else Sequence_return @(Stored int) repr_int (stored @int key)));
 
 -------------------------------------------------------------------------------
 -- Trees of lists
@@ -1995,6 +2095,8 @@ repr_Tuple4 :
     (a b c d : bare)
  -> Repr a -> Repr b -> Repr c -> Repr d
  -> Repr (Tuple4 a b c d);
+
+repr_intset : Repr intset;
 
 -- Representation of any boxed object
 repr_Box : (a : box) -> Repr (BareType a);

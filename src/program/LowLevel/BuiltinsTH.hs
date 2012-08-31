@@ -282,6 +282,13 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_appendScatter_initializer) |])
   , (CoreName module_inplace "appendScatter_update_real",
      Right [| coreBuiltin (SystemF.The_appendScatter_update_real) |])
+  , (CoreName module_inplace "compute_hash_table_size",
+     Right [| coreBuiltin (SystemF.The_compute_hash_table_size) |])
+  , (CoreName module_inplace "build_hash_table",
+     Right [| coreBuiltin (SystemF.The_build_hash_table) |])
+  , (CoreName module_inplace "lookup_hash_table",
+     Right [| coreBuiltin (SystemF.The_lookup_hash_table) |])
+    
   , (CoreName module_effects "seqEffTok",
      Right [| coreBuiltin (SystemF.The_seqEffTok) |])
   , (CoreName module_effects "toEffTok",
@@ -451,6 +458,8 @@ builtinGlobals =
      Right [| SystemF.coreBuiltin SystemF.The_repr_StuckRef |])
   , (CoreName module_structures "repr_Box",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Box |])
+  , (CoreName module_structures "repr_intset",
+     Right [| coreBuiltin (SystemF.The_repr_intset) |] )
   , (CoreName module_structures "repr_Stream",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Stream |])
   , (CoreName module_structures "repr_EmptyReference",

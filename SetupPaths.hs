@@ -56,7 +56,7 @@ cabalMakeFile :: FilePath
 cabalMakeFile = "cabal.mk"
 
 -- | C Source files used in RTS
-rtsCSourceFiles = ["apply_data.c", "memory.c", "debug.c"]
+rtsCSourceFiles = ["apply_data.c", "memory.c", "debug.c", "hashtable.c"]
 
 -- | C++ Source files used in RTS
 rtsCxxSourceFiles = ["par_loops.cc"]

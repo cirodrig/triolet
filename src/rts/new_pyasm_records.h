@@ -191,6 +191,14 @@ record SliceObject {
   Maybe(Maybe(int)) stride;
 };
 
+/* A hash table, consisting of a keys array and an indirections array
+ */
+
+record HashTable(n) {
+  array(value n, int) keys;
+  array(value n, uint) inds;
+};
+
 /* Arrays (called "lists")
  *
  * A list consists of a size and a pointer to an array of list elements.

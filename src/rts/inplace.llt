@@ -222,3 +222,33 @@ function inline appendScatter_update_real (owned rep, owned writer, unit _, poin
 
   nil;
 };
+
+function inline compute_hash_table_size (FinIndInt keys_size) -> int
+{
+  FinIndInt {n} = keys_size;
+  int primcall triolet_hash_size (n);
+};
+
+function inline build_hash_table
+    (FinIndInt keys_size, FinIndInt hash_size,
+     pointer keys, pointer hash) -> unit
+{
+  FinIndInt {hash_n} = hash_size;
+  FinIndInt {keys_n} = keys_size;
+
+  typedef hashtable = HashTable(value hash_n);
+
+  () = () primcall triolet_hash_build(hash_n,
+                                      hash @ hashtable.keys,
+                                      hash @ hashtable.inds,
+                                      keys_n, keys);
+  nil;
+};
+
+function inline lookup_hash_table
+    (FinIndInt hash_size, pointer keys_array, pointer inds_array,
+     int key) -> int
+{
+  FinIndInt {n} = hash_size;
+  int primcall triolet_hash_lookup (n, keys_array, inds_array, key);
+};

@@ -1126,6 +1126,7 @@ mkPassableClass = do
                maybe_instance,
                complex_instance, sliceobject_instance,
                scatter_instance,
+               intset_instance,
                list_dim_instance,
                dim1_instance, dim2_instance, dim3_instance,
                any_instance,
@@ -1167,6 +1168,9 @@ mkPassableClass = do
   ; let sliceobject_instance =
           monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_SliceObject)
           (coreBuiltin SystemF.The_repr_SliceObject) []
+  ; let intset_instance =
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_intset)
+          (coreBuiltin SystemF.The_repr_intset) []
         
   ; b <- newTyVar Star Nothing
   ; c <- newTyVar Star Nothing
@@ -1719,6 +1723,23 @@ mkScatterType =
        passable rT],
       functionType [ConTy (tiBuiltin the_con_Scatter) @@ rT @@ iT, tT @@ iT] rT)
 
+mkIntsetType =
+  return $ monomorphic $
+  functionType [ConTy (tiBuiltin the_con_list) @@
+                ConTy (tiBuiltin the_con_int)]
+  (ConTy $ tiBuiltin the_con_intset)
+
+mkIntsetLookupType =
+  return $ monomorphic $
+  functionType [ConTy (tiBuiltin the_con_intset),
+                ConTy (tiBuiltin the_con_int)]
+  (ConTy (tiBuiltin the_con_Maybe) @@ ConTy (tiBuiltin the_con_int))
+
+mkIntsetElementsType =
+  return $ monomorphic $
+  functionType [ConTy (tiBuiltin the_con_intset)]
+  (listIterType $ ConTy (tiBuiltin the_con_int))
+
 mkFloorType =
   return $ monomorphic $
   functionType [ConTy $ tiBuiltin the_con_float] (ConTy $ tiBuiltin the_con_int)
@@ -1877,6 +1898,7 @@ initializeTIBuiltins = do
             , ("Any", Star, [| coreBuiltin SystemF.The_Any |])
             , ("Scatter", Star :-> Star :-> Star,
                [| coreBuiltin SystemF.The_Scatter |])
+            , ("intset", Star, [| coreBuiltin SystemF.The_intset |])
             , ("list_dim", Star, [| coreBuiltin SystemF.The_list_dim |])
             , ("dim0", Star, [| coreBuiltin SystemF.The_dim0 |])
             , ("dim1", Star, [| coreBuiltin SystemF.The_dim1 |])
@@ -2073,6 +2095,15 @@ initializeTIBuiltins = do
               ),
               ("scatter", [| mkScatterType |]
               , [| coreBuiltin SystemF.The_fun_scatter |]
+              ),
+              ("intset", [| mkIntsetType |]
+              , [| coreBuiltin SystemF.The_build_intset |]
+              ),
+              ("intsetLookup", [| mkIntsetLookupType |]
+              , [| coreBuiltin SystemF.The_intsetLookup |]
+              ),
+              ("intsetElements", [| mkIntsetElementsType |]
+              , [| coreBuiltin SystemF.The_intsetElements |]
               ),
               ("matrixiter", [| mkMatrixIterType |]
               , [| coreBuiltin SystemF.The_fun_from_MatrixView_Stream |]

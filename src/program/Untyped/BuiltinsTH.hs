@@ -20,7 +20,7 @@ pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list",
    "array", "array0", "array1", "array2", "array3",
    "blist", "barray1", "barray2", "barray3",
-   "Maybe", "Any",
+   "Maybe", "Any", "intset",
    "shape", "list_dim", "dim0", "dim1", "dim2", "dim3",
    "index", "slice", "cartesianDomain",
    "view",
@@ -91,6 +91,9 @@ pyonSourceGlobals =
   , "barray2Scatter"
   , "barray3Scatter"
   , "scatter"
+  , "intset"
+  , "intsetLookup"
+  , "intsetElements"
   , "__undefined__"
   , "__and__"
   , "__or__"

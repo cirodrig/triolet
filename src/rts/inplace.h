@@ -31,3 +31,19 @@ extern function core.internal.inplace.appendScatter_initializer
     (SA, owned, pointer) -> unit;
 extern function core.internal.inplace.appendScatter_update_real
     (owned, owned, unit, pointer) -> unit;
+
+extern function core.internal.inplace.compute_hash_table_size
+    (FinIndInt) -> int;
+extern function core.internal.inplace.build_hash_table
+    (FinIndInt, FinIndInt, pointer, pointer) -> unit;
+extern function core.internal.inplace.lookup_hash_table
+    (FinIndInt, pointer, pointer, int) -> int;
+
+import procedure triolet_hash_build
+  (int, pointer, pointer, int, pointer) -> ();
+
+import procedure triolet_hash_lookup
+  (int, pointer, pointer, int) -> int;
+
+import procedure triolet_hash_size
+  (int) -> int;

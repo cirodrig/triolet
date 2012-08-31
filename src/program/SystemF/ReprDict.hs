@@ -220,6 +220,9 @@ createDictEnv = do
       sliceobj_dict =
         DictEnv.monoPattern (VarT $ coreBuiltin The_SliceObject)
         (MkDict $ return $ ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_SliceObject))
+  let intset_dict =
+        DictEnv.monoPattern (VarT $ coreBuiltin The_intset)
+        (MkDict $ return $ varE' (coreBuiltin The_repr_intset))
   repr_dict <- createBoxedDictPattern (coreBuiltin The_Repr) 1
   stream_dict <- createBoxedDictPattern (coreBuiltin The_Stream) 2
   eq_dict <- createBoxedDictPattern (coreBuiltin The_EqDict) 1
@@ -289,7 +292,7 @@ createDictEnv = do
 
   let dict_env = DictEnv.DictEnv [repr_dict, ref_dict,
                                   stream_dict,
-                                  bool_dict, float_dict, int_dict, efftok_dict,
+                                  bool_dict, float_dict, int_dict, efftok_dict, intset_dict,
                                   maybeint_dict, maybemaybeint_dict,
                                   sliceobj_dict,
                                   list_dict, array1_dict, array2_dict,
