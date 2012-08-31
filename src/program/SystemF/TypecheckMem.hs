@@ -107,7 +107,7 @@ typeInferVarE inf var = do
 typeInferLitE :: ExpInfo -> Lit -> TCM Type
 typeInferLitE inf l = do
   let literal_type = literalType l
-  checkLiteralType l
+  -- checkLiteralType l
   return literal_type
 
 typeInferConE :: ExpM -> ExpInfo -> ConInst -> [ExpM] -> TCM Type

@@ -90,9 +90,9 @@ parLoopOperator v =
             coreBuiltin The_parallel_dim1_reduce1,
             coreBuiltin The_parallel_dim2_reduce1,
             coreBuiltin The_parallel_list_dim_scatter,
-            coreBuiltin The_parallel_list_dim_list,
-            coreBuiltin The_parallel_dim1_array,
-            coreBuiltin The_parallel_dim2_array,
+            --coreBuiltin The_parallel_list_dim_list,
+            --coreBuiltin The_parallel_dim1_array,
+            --coreBuiltin The_parallel_dim2_array,
             coreBuiltin The_Sequence_parallel_reduce,
             coreBuiltin The_Sequence_parallel_build,
             coreBuiltin The_Sequence_parallel_scatter            
@@ -112,10 +112,10 @@ otherLoopOperator v =
             coreBuiltin The_primitive_list_dim_reduce1,
             coreBuiltin The_primitive_dim1_reduce1,
             coreBuiltin The_primitive_dim2_reduce1,
-            coreBuiltin The_primitive_list_dim_scatter,
-            coreBuiltin The_primitive_list_dim_list,
-            coreBuiltin The_primitive_dim1_array,
-            coreBuiltin The_primitive_dim2_array
+            coreBuiltin The_primitive_list_dim_scatter
+            --coreBuiltin The_primitive_list_dim_list,
+            --coreBuiltin The_primitive_dim1_array,
+            --coreBuiltin The_primitive_dim2_array
             ]
 
 -- | Use rewrite rules on an application
@@ -181,12 +181,12 @@ replaceWithParallelApp inf op_var ty_args args =
          ReplaceWith $ coreBuiltin The_parallel_dim2_reduce1)
       , (coreBuiltin The_primitive_list_dim_scatter,
          ReplaceWith $ coreBuiltin The_parallel_list_dim_scatter)
-      , (coreBuiltin The_primitive_list_dim_list,
-         ReplaceWith $ coreBuiltin The_parallel_list_dim_list)
-      , (coreBuiltin The_primitive_dim1_array,
-         ReplaceWith $ coreBuiltin The_parallel_dim1_array)
-      , (coreBuiltin The_primitive_dim2_array,
-         ReplaceWith $ coreBuiltin The_parallel_dim2_array)
+      --, (coreBuiltin The_primitive_list_dim_list,
+        --ReplaceWith $ coreBuiltin The_parallel_list_dim_list)
+      --, (coreBuiltin The_primitive_dim1_array,
+        --ReplaceWith $ coreBuiltin The_parallel_dim1_array)
+      --, (coreBuiltin The_primitive_dim2_array,
+        --ReplaceWith $ coreBuiltin The_parallel_dim2_array)
       , (coreBuiltin The_doall,
          ReplaceWith $ coreBuiltin The_parallel_doall)
       , (coreBuiltin The_Sequence_reduce,

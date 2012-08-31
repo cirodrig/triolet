@@ -33,8 +33,8 @@ loadBuiltins cl_globals = do
   initializeGlobalVar the_fuel (newIORef $ initValueForFuel cl_globals)
 
   -- Initialize the Core builtins
-  withTheNewVarIdentSupply Builtins.Builtins.initializeBuiltins
-
+  --withTheNewVarIdentSupply Builtins.Builtins.initializeBuiltins
+  
   -- Initialize the parser's index of global variables
   initializeGlobalVar parserGlobals $
     modifyStaticGlobalVar the_nextParserVarID $ \n ->
@@ -43,13 +43,14 @@ loadBuiltins cl_globals = do
 
   -- DEBUG: new core IR initialization
   withTheNewVarIdentSupply $ \supply -> do
-    (sf_types, spec_types, mem_types, core_module) <-
+    (sf_types, spec_types, mem_types, core_module, core_variables) <-
       CParser2.Driver.parseCoreModule2 supply
     initializeGlobalVar the_systemFTypes (return sf_types)
     initializeGlobalVar the_specTypes (return spec_types)
     initializeGlobalVar the_memTypes (return mem_types)
     initializeGlobalVar the_coreModule (return core_module)
-  
+    Builtins.Builtins.initializeBuiltins2 core_variables
+
   -- Check core module for type errors
   when (useCoreIR cl_globals) $ do
     core_module <- readInitGlobalVarIO the_coreModule

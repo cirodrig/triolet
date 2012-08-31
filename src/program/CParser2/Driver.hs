@@ -30,7 +30,7 @@ predefinedVarDetails :: [(String, VarDetails)]
 predefinedVarDetails =
   map mk_var_details (valV : boxV : bareV : outV : intindexV :
                       initV : propV :
-                      posInftyV : negInftyV : allBuiltinVars)
+                      posInftyV : negInftyV : []) -- : allBuiltinVars)
   where
     mk_var_details v = (name, PredefinedVar v type_function)
       where
@@ -42,7 +42,7 @@ predefinedVarDetails =
                   _ -> internalError "Unnamed predefined variable"
              _ -> internalError "Unnamed predefined variable"
         
-        type_function = Map.lookup v builtinTypeFunctions
+        type_function = Nothing -- Map.lookup v builtinTypeFunctions
 
 -- | Parse the built-in module.
 --
@@ -51,7 +51,8 @@ predefinedVarDetails =
 --   types and memory types.  Also, create a module containing
 --   definitions of built-in functions and constants.
 parseCoreModule2 :: IdentSupply Var
-                 -> IO (TypeEnv, SpecTypeEnv, TypeEnv, SystemF.Module SystemF.Mem)
+                 -> IO (TypeEnv, SpecTypeEnv, TypeEnv,
+                        SystemF.Module SystemF.Mem, Map.Map String Var)
 parseCoreModule2 ident_supply = do
   pathname <- getDataFileName ("symbols" </> "coremodule")
   input_file <- readFile pathname

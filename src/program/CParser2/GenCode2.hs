@@ -12,6 +12,7 @@ import Common.Supply
 import Common.Error
 import Common.Label
 import Builtins.Builtins
+import Builtins.TypeFunctions
 import CParser2.AST
 import CParser2.AdjustTypes
 import Data.List
@@ -219,7 +220,12 @@ typeFunctionEnt ident ty type_function = do
                               
 typeEnt ident ty = do
   ty' <- typeExpr ty
-  return $ UpdateTypeEnv (insertType ident ty')
+  return $ UpdateTypeEnv
+    (maybe (insertType ident ty') (insertTypeFunction ident ty') type_function)
+  where
+    type_function = let name = case varName ident
+                               of Just l -> labelLocalNameAsString l
+                    in Map.lookup name builtinTypeFunctions
 
 dataEnt core_name ty data_cons attrs = do
   kind <- typeExpr ty
@@ -237,9 +243,9 @@ typeLevelDecl ldecl = do
   case ent of
     VarEnt ty attrs ->
       varEnt core_name ty attrs
-    TypeEnt ty (Just type_function) ->
-      typeFunctionEnt core_name ty type_function
-    TypeEnt ty Nothing ->
+    --TypeEnt ty (Just type_function) ->
+    --  typeFunctionEnt core_name ty type_function
+    TypeEnt ty _ ->
       typeEnt core_name ty
     DataEnt ty data_cons attrs ->
       dataEnt core_name ty data_cons attrs
@@ -558,17 +564,28 @@ declGlobals decls = do
 
 -------------------------------------------------------------------------------
 
+-- | Get all global variables introduced by a declaration
+lDeclVariables :: LDecl Resolved -> [ResolvedVar]
+lDeclVariables (L _ (Decl ident ent)) = ident : subordinates
+  where
+    subordinates =
+      case ent
+      of DataEnt _ decls _ -> [dconVar d | L _ d <- decls]
+         _ -> []
+
 -- | Create a lookup table of variable names
 variableNameTable :: [LDecl Resolved] -> VariableNameTable
 variableNameTable decls = Map.fromList keyvals
   where
-    keyvals = [(name, v) | L _ (Decl ident _) <- decls
+    keyvals = [(name, v) | decl <- decls
+                         , ident <- lDeclVariables decl
                          , let ResolvedVar v _ = ident
                          , Just lab <- return $ varName v
                          , Left name <- return $ labelLocalName lab]
 
 createCoreModule :: IdentSupply Var -> RModule
-                 -> IO (TypeEnv, SpecTypeEnv, TypeEnv, SystemF.Module SystemF.Mem)
+                 -> IO (TypeEnv, SpecTypeEnv, TypeEnv,
+                        SystemF.Module SystemF.Mem, Map.Map String Var)
 createCoreModule var_supply (Module decls) = do
   -- Create a table of variable names
   let name_table = variableNameTable decls
@@ -596,4 +613,4 @@ createCoreModule var_supply (Module decls) = do
   let spec_env    = convertMemToSpec name_table type_env
       sf_env      = convertSpecToSF name_table spec_env
 
-  return (sf_env, spec_env, mem_env, mem_module)
+  return (sf_env, spec_env, mem_env, mem_module, name_table)

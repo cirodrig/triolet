@@ -555,6 +555,7 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
 
 rwConvertToBoxed _ _ _ = return Nothing
 
+{-
 -- | Rewrite 'stencil2D' to 'viewStencil2D' if the argument is a view.
 rwStencil2D :: RewriteRule
 rwStencil2D inf [container_type, t1, t2]
@@ -580,6 +581,7 @@ rwStencil2D inf [container_type, t1, t2]
                 other_args))]
         _ -> return Nothing
     _ -> return Nothing
+-}
 
 {-
 -- | Convert a reduction on a @mk_darr1@ to a primitive reduction.

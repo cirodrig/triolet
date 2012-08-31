@@ -5,6 +5,7 @@ module Builtins.Builtins where
 import Control.Concurrent.MVar
 import Control.Monad
 import Data.Array
+import qualified Data.Map as Map
 import System.IO.Unsafe
 
 import Language.Haskell.TH
@@ -136,3 +137,33 @@ initializeBuiltins id_supply = do
 
   bi <- createBuiltins id_supply
   putMVar the_CoreBuiltins bi
+
+-- | Look up builtin variable names in the map
+initializeBuiltins2 :: Map.Map String Var -> IO ()
+initializeBuiltins2 name_environment = do
+  -- Ensure that we haven't already initialized these
+  bi_is_empty <- isEmptyMVar the_CoreBuiltins
+  unless bi_is_empty $ internalError "Attempted to re-initialize core builtins"
+
+  eval_builtins $ elems builtin_array
+  putMVar the_CoreBuiltins builtin_array
+  where
+    -- Look up each builtin type and variable
+    get_variable level name =
+      case Map.lookup name name_environment
+      of Just v
+           | getLevel v == level -> v
+           | otherwise -> internalError $
+                          "Wrong level for builtin variable: " ++ name
+         Nothing -> internalError $ "Missing builtin variable: " ++ name
+
+    builtin_list =
+      map (get_variable TypeLevel) builtinTypeNames ++
+      map (get_variable ObjectLevel) builtinVariableNames
+
+    builtin_array = listArray (0, num_builtins-1) builtin_list
+
+    num_builtins = length builtinTypeNames + length builtinVariableNames
+
+    -- Force evaluation of the entire list
+    eval_builtins xs = foldr seq (return ()) xs

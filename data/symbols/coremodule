@@ -42,6 +42,11 @@ data StuckBox : bare -> box
   stuckBox (a : bare) () (a);
 };
 
+-- An unspecified data type
+data Any : box
+{
+};
+
 -- A pointer used for initializing data
 data OutPtr : bare -> out
   attribute(abstract, nonalgebraic) {};
@@ -152,6 +157,10 @@ data arr : intindex -> bare -> bare
   attribute(abstract, nonalgebraic)
 {};
 
+data Tuple0 : bare
+{
+  tuple0 () () ();
+};
 
 data Tuple1 : bare -> bare
 {
@@ -1969,6 +1978,8 @@ repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
 repr_MaybeVal_int : Repr (MaybeVal int);
 repr_MaybeVal_MaybeVal_int : Repr (MaybeVal (MaybeVal int));
 
+repr_Tuple0 : Repr Tuple0;
+
 repr_Tuple1 :
     (a : bare) -> Repr a -> Repr (Tuple1 a);
 
@@ -1990,6 +2001,7 @@ repr_Box : (a : box) -> Repr (BareType a);
 repr_Ref : (a : box) -> Repr (Ref a);
 repr_StuckRef : (a : box) -> Repr (StuckRef a);
 
+repr_Any : Repr (BareType Any);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
 repr_view : (sh : box) -> (a : bare) -> Repr (BareType (view sh a));
 repr_Scatter : (a b : bare) -> Repr (BareType (Scatter a b));
@@ -3764,12 +3776,15 @@ IndexableDict_barray2_get_shape @(a : bare)
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
 
+EqDict_int : EqDict (Stored int);
 EqDict_int_eq : int -> int -> bool;
 EqDict_int_ne : int -> int -> bool;
 
+EqDict_float : EqDict (Stored float);
 EqDict_float_eq : float -> float -> bool;
 EqDict_float_ne : float -> float -> bool;
 
+EqDict_Tuple2 : (a b : bare) -> EqDict a -> EqDict b -> EqDict (Tuple2 a b);
 EqDict_Tuple2_eq @(a b : bare)
   (eqA : EqDict a) (eqB : EqDict b) (x : Tuple2 a b) (y : Tuple2 a b)
   -> bool
@@ -3791,34 +3806,47 @@ EqDict_Tuple2_ne @(a b : bare)
   case y of tuple2 @a @b (ya : a) (yb : b).
   and (ne_a xa ya) (ne_b xb yb);
 
+OrdDict_int : OrdDict (Stored int);
 OrdDict_int_lt : int -> int -> bool;
 OrdDict_int_le : int -> int -> bool;
 OrdDict_int_gt : int -> int -> bool;
 OrdDict_int_ge : int -> int -> bool;
 
+OrdDict_float : OrdDict (Stored float);
 OrdDict_float_lt : float -> float -> bool;
 OrdDict_float_le : float -> float -> bool;
 OrdDict_float_gt : float -> float -> bool;
 OrdDict_float_ge : float -> float -> bool;
 
+OrdDict_Tuple2 : (a b : bare) -> OrdDict a -> OrdDict b -> OrdDict (Tuple2 a b);
+OrdDict_Tuple2_lt : (a b : bare) -> OrdDict a -> OrdDict b -> a -> b -> bool;
+OrdDict_Tuple2_le : (a b : bare) -> OrdDict a -> OrdDict b -> a -> b -> bool;
+OrdDict_Tuple2_gt : (a b : bare) -> OrdDict a -> OrdDict b -> a -> b -> bool;
+OrdDict_Tuple2_ge : (a b : bare) -> OrdDict a -> OrdDict b -> a -> b -> bool;
+
 -------------------------------------------------------------------------------
 -- Numeric dictionaries
 
+AdditiveDict_int : AdditiveDict (Stored int);
 AdditiveDict_int_add : int -> int -> int;
 AdditiveDict_int_sub : int -> int -> int;
 AdditiveDict_int_negate : int -> int;
 AdditiveDict_int_zero : int;
 
+AdditiveDict_uint : AdditiveDict (Stored uint);
 AdditiveDict_uint_add : uint -> uint -> uint;
 AdditiveDict_uint_sub : uint -> uint -> uint;
 AdditiveDict_uint_negate : uint -> uint;
 AdditiveDict_uint_zero : uint;
 
+AdditiveDict_float : AdditiveDict (Stored float);
 AdditiveDict_float_add : float -> float -> float;
 AdditiveDict_float_sub : float -> float -> float;
 AdditiveDict_float_negate : float -> float;
 AdditiveDict_float_zero : float;
 
+AdditiveDict_Tuple2 : (a b : bare) -> AdditiveDict a -> AdditiveDict b
+                   -> AdditiveDict (Tuple2 a b);
 AdditiveDict_Tuple2_add @(a b : bare)
   (repr_a : Repr a)
   (repr_b : Repr b)
@@ -3948,15 +3976,20 @@ AdditiveDict_Complex_zero :
  -> AdditiveDict a
  -> Init (Complex a);-}
 
-
+MultiplicativeDict_int : MultiplicativeDict (Stored int);
+MultiplicativeDict_int_one : int;
 MultiplicativeDict_int_mul : int -> int -> int;
 
 -- Converting int to int is the identity transformation
 MultiplicativeDict_int_fromInt (x : int) -> int attribute(inline) = x;
 
+MultiplicativeDict_uint : MultiplicativeDict (Stored uint);
+MultiplicativeDict_uint_one : uint;
 MultiplicativeDict_uint_mul : uint -> uint -> uint;
 MultiplicativeDict_uint_fromInt : int -> uint;
 
+MultiplicativeDict_float : MultiplicativeDict (Stored float);
+MultiplicativeDict_float_one : float;
 MultiplicativeDict_float_mul : float -> float -> float;
 MultiplicativeDict_float_fromInt : int -> float;
 
@@ -4597,6 +4630,9 @@ CartesianDict_dim3_unbounded :
 
 min_int : int -> int -> int;
 max_int : int -> int -> int;
+
+min_uint : uint -> uint -> uint;
+max_uint : uint -> uint -> uint;
 
 floor : float -> int;
 
@@ -5342,6 +5378,9 @@ reduce_dim1 : (a : bare)
   -> view dim1 a
   -> Init a;
 
+scatter_dim1 : (i r : bare)
+            -> Repr i -> Repr r -> Scatter r i -> view dim1 i -> Init r;
+
 reduce1_dim1 : (a : bare)
   -> Repr a
   -> (a -> a -> Init a)
@@ -5382,6 +5421,36 @@ fold_list_dim @(a acc : bare)
      f x y ret)
   init
   ret;
+
+fold_dim1 : (a acc : bare)
+         -> Repr a -> Repr acc
+         -> (acc -> a -> Init acc)
+         -> acc
+         -> view dim1 a
+         -> Init acc;
+
+reduce_dim2 : (a : bare)
+  -> Repr a
+  -> (a -> a -> Init a)
+  -> a
+  -> view dim2 a
+  -> Init a;
+
+reduce1_dim2 : (a : bare)
+  -> Repr a
+  -> (a -> a -> Init a)
+  -> view dim2 a
+  -> Init a;
+
+scatter_dim2 : (i r : bare)
+            -> Repr i -> Repr r -> Scatter r i -> view dim2 i -> Init r;
+
+fold_dim2 : (a acc : bare)
+         -> Repr a -> Repr acc
+         -> (acc -> a -> Init acc)
+         -> acc
+         -> view dim2 a
+         -> Init acc;
 
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionary-like internal methods
@@ -6965,6 +7034,18 @@ primitive_dim1_fold @(acc : bare)
      ret);
 
 
+primitive_dim2_reduce : (a : bare) -> Repr a -> dim2
+  -> (Tuple2 (Stored int) (Stored int) -> Init a)
+  -> (a -> a -> Init a)
+  -> a
+  -> Init a;
+
+primitive_dim2_reduce1 : (a : bare) -> Repr a -> dim2
+  -> (Tuple2 (Stored int) (Stored int) -> Init a)
+  -> (a -> a -> Init a)
+  -> Init a;
+
+
 -------------------------------------------------------------------------------
 -- Domain loops (parallel)
 
@@ -7231,7 +7312,20 @@ parallel_dim1_reduce1 : (a : bare)
   -> (a -> a -> Init a)
   -> Init a;
 
+parallel_dim2_reduce : (a : bare)
+  -> Repr a
+  -> dim2
+  -> (Tuple2 (Stored int) (Stored int) -> Init a)
+  -> (a -> a -> Init a)
+  -> a
+  -> Init a;
 
+parallel_dim2_reduce1 : (a : bare)
+  -> Repr a
+  -> dim2
+  -> (Tuple2 (Stored int) (Stored int) -> Init a)
+  -> (a -> a -> Init a)
+  -> Init a;
 
 -------------------------------------------------------------------------------
 -- Other functions

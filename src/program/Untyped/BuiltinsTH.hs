@@ -29,7 +29,7 @@ pyonSourceTypes =
 -- | Predefined data types not visible to the Pyon parser
 pyonOtherTypes :: [String]
 pyonOtherTypes =
-  ["SliceObject", "MaybeVal", "StuckRef"]
+  ["SliceObject", "StuckRef"]
 
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]

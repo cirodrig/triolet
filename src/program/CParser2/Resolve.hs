@@ -5,9 +5,9 @@
 module CParser2.Resolve(globalEnvironment, resolveModule)
 where
 
-import Prelude hiding(mapM)
+import Prelude hiding(sequence, mapM)
 import Control.Applicative
-import Control.Monad hiding(mapM)
+import Control.Monad hiding(sequence, mapM)
 import qualified Data.Map as Map
 import Data.Maybe
 import Data.Traversable
@@ -144,6 +144,7 @@ def parsed_name resolved_var =
     let s = addToEnv parsed_name resolved_var names
     in returnNR () s
 
+{-
 -- | \"Define\" a global variable.  We actually look up a predefined variable 
 --   name here, like 'use', but with a different error message.
 globalDef :: Level -> Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
@@ -152,6 +153,7 @@ globalDef expected_lv name pos = do
   logErrorIf (expected_lv /= getLevel v) $
     wrongLevelError pos name expected_lv (getLevel v)
   return v
+-}
 
 use :: Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
 use = fetch "Could not find:"
@@ -351,10 +353,11 @@ resolveFun pos f =
     body <- resolveL resolveExp $ fBody f
     return $ Fun tparams params range body  
 
-resolveDataConDecl :: SourcePos -> DataConDecl Parsed
+resolveDataConDecl :: SourcePos
+                   -> ResolvedVar -- ^ The resolved data constructor
+                   -> DataConDecl Parsed
                    -> NR (DataConDecl Resolved)
-resolveDataConDecl pos (DataConDecl v ty_params ex_types args) = do
-  v' <- globalDef ObjectLevel v pos
+resolveDataConDecl pos v' (DataConDecl _ ty_params ex_types args) = do
   enter $
     withMany (resolveDomainT pos) ty_params $ \ty_params' ->
     withMany (resolveDomainT pos) ex_types $ \ex_types' -> do
@@ -370,14 +373,14 @@ resolveDataConDecl pos (DataConDecl v ty_params ex_types args) = do
       logErrorIf (lv /= TypeLevel) $
       "Bad level in range of data constructor (" ++ show pos ++ ")"
 
-resolveEntity :: Identifier Resolved -> Entity Parsed -> NR (Entity Resolved)
+resolveEntity :: ResolvedDeclName -> Entity Parsed -> NR (Entity Resolved)
 resolveEntity _ (VarEnt ty attrs) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= TypeLevel) $
     "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
   return $ VarEnt ty' attrs
 
-resolveEntity r_name (TypeEnt ty Nothing) = do
+resolveEntity (GlobalName r_name) (TypeEnt ty Nothing) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= KindLevel) $
     "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
@@ -388,11 +391,12 @@ resolveEntity _ (TypeEnt ty (Just _)) =
   -- Type functions should be 'Nothing' up to now 
   internalError "resolveEntity"
 
-resolveEntity _ (DataEnt ty cons attrs) = do
+resolveEntity (DataConNames _ data_con_names) (DataEnt ty cons attrs) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= KindLevel) $
     "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
-  cons' <- mapM (resolveL resolveDataConDecl) cons
+  cons' <- sequence [L pos <$> resolveDataConDecl pos v con
+                    | (v, L pos con) <- zip data_con_names cons]
   return $ DataEnt ty' cons' attrs
 
 resolveEntity _ (ConstEnt ty e attrs) = do
@@ -408,26 +412,41 @@ resolveEntity _ (FunEnt f attrs) = do
 
 -- | Resolve a global declaration.  The declared variable should be in the
 --   environment already.
-resolveDecl :: PLDecl -> NR RLDecl
-resolveDecl (L pos (Decl name ent)) = do
-  r_name <- globalDef expected_level name pos
+resolveDecl :: ResolvedDeclName -> PLDecl -> NR RLDecl
+resolveDecl r_name (L pos (Decl _ ent)) = do
   r_ent <- resolveEntity r_name ent
-  return $ L pos (Decl r_name r_ent)
+  return $ L pos (Decl (resolvedGlobal r_name) r_ent)
+
+data ResolvedDeclName =
+    GlobalName {resolvedGlobal :: ResolvedVar}
+  | DataConNames {resolvedGlobal :: ResolvedVar,
+                  resolvedDataConstructors :: [ResolvedVar]}
+
+resolveDeclName (L _ (Decl name ent)) =
+  case ent
+  of VarEnt {}                -> object_level
+     TypeEnt {}               -> type_level
+     DataEnt _ constructors _ -> data_definition constructors
+     ConstEnt {}              -> object_level
+     FunEnt {}                -> object_level
   where
-    expected_level = case ent
-                     of VarEnt {} -> ObjectLevel
-                        TypeEnt {} -> TypeLevel
-                        DataEnt {} -> TypeLevel
-                        ConstEnt {} -> ObjectLevel
-                        FunEnt {} -> ObjectLevel
+    object_level = liftM GlobalName $ newRVar ObjectLevel name
+    type_level = liftM GlobalName $ newRVar TypeLevel name
+    data_definition constructors = do
+      tycon <- newRVar TypeLevel name
+      datacons <- sequence [newRVar ObjectLevel $ dconVar d
+                           | L _ d <- constructors]
+      return $ DataConNames tycon datacons
 
 -- | Resolve top-level declarations, with limited error recovery
-resolveDecls decls = go id decls
-  where
-    go hd (d:ds) = do
-      d' <- recover id $ fmap (:) $ resolveDecl d
-      go (hd . d') ds
-    go hd [] = return (hd [])
+resolveDecls decls = do
+  -- Create a new variable for each global variable and data constructor
+  r_names <- mapM resolveDeclName decls
+
+  -- Resolve the declarations, recovering from errors
+  r_decls <- sequence [recover Nothing $ liftM Just (resolveDecl name decl) 
+                      | (name, decl) <- zip r_names decls]
+  return $ catMaybes r_decls
 
 resolveModule' (Module decls) = Module <$> resolveDecls decls
 

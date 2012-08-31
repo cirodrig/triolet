@@ -54,20 +54,20 @@ unpackArrayShape ty = do
 array_shape sh =
   varApp (coreBuiltin The_arr_shape) [sh, VarT $ coreBuiltin The_dim0]
 
-builtinTypeFunctions :: Map.Map Var BuiltinTypeFunction
+builtinTypeFunctions :: Map.Map String BuiltinTypeFunction
 builtinTypeFunctions =
   Map.fromList
-  [ (coreBuiltin The_minus_i, BuiltinTypeFunction minusTF minusTF)
-  , (coreBuiltin The_plus_i, BuiltinTypeFunction plusTF plusTF)
-  , (coreBuiltin The_min_i, BuiltinTypeFunction minTF minTF)
-  , (coreBuiltin The_max_i, BuiltinTypeFunction maxTF maxTF)
-  , (coreBuiltin The_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
-  , (coreBuiltin The_cartesianDomain, BuiltinTypeFunction cartPureTF cartMemTF)
-  , (coreBuiltin The_index, BuiltinTypeFunction indexPureTF indexMemTF)
-  , (coreBuiltin The_slice, BuiltinTypeFunction slicePureTF sliceMemTF)
-  , (coreBuiltin The_Stream, BuiltinTypeFunction streamPureTF streamMemTF)
-  , (coreBuiltin The_BoxedType, BuiltinTypeFunction boxedPureTF boxedMemTF)
-  , (coreBuiltin The_BareType, BuiltinTypeFunction barePureTF bareMemTF)
+  [ ("minus_i", BuiltinTypeFunction minusTF minusTF)
+  , ("plus_i", BuiltinTypeFunction plusTF plusTF)
+  , ("min_i", BuiltinTypeFunction minTF minTF)
+  , ("max_i", BuiltinTypeFunction maxTF maxTF)
+  , ("shape", BuiltinTypeFunction shapePureTF shapeMemTF)
+  , ("cartesianDomain", BuiltinTypeFunction cartPureTF cartMemTF)
+  , ("index", BuiltinTypeFunction indexPureTF indexMemTF)
+  , ("slice", BuiltinTypeFunction slicePureTF sliceMemTF)
+  , ("Stream", BuiltinTypeFunction streamPureTF streamMemTF)
+  , ("BoxedType", BuiltinTypeFunction boxedPureTF boxedMemTF)
+  , ("BareType", BuiltinTypeFunction barePureTF bareMemTF)
   ]
 
 -- | The integers extended with @+infinity@ and @-infinity@

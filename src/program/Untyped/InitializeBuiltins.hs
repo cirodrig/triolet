@@ -37,6 +37,9 @@ builtinTyCon name kind sf_con =
   let y = Type.Type.VarT sf_con
   in mkTyCon (builtinLabel name) kind y
 
+anyTyCon =
+  mkTyCon (builtinLabel "Any") Star (Type.Type.AnyT Type.Type.boxT)
+
 shapeType ty = TFunAppTy (tiBuiltin the_con_shape) [ty]
 
 -- | Create the type of an iterator/stream.
@@ -741,7 +744,7 @@ mkAdditiveClass = do
               (coreBuiltin SystemF.The_AdditiveDict)
               (coreBuiltin SystemF.The_additiveDict)
               [add, sub, negate, zero]
-              [int_instance, float_instance, complex_instance, tuple2_instance]
+              [int_instance, float_instance, tuple2_instance]
 
   ; add <- mkClassMethod cls 0 "__add__" binScheme
   ; sub <- mkClassMethod cls 1 "__sub__" binScheme
@@ -764,13 +767,6 @@ mkAdditiveClass = do
           , InstanceMethod $ coreBuiltin SystemF.The_AdditiveDict_float_zero]
   
   ; b <- newTyVar Star Nothing
-  ; let complex_instance =
-          polyInstance [b] [passable (ConTy b), ConTy b `IsInst` cls] cls
-          (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
-          [ InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_add)
-          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_sub)
-          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_negate)
-          , InstanceMethod (coreBuiltin SystemF.The_AdditiveDict_Complex_zero)]
   ; c <- newTyVar Star Nothing
   ; let tuple2_instance =
           polyInstance [b, c] [passable (ConTy b), passable (ConTy c),
@@ -793,7 +789,7 @@ mkMultiplicativeClass = do
               (coreBuiltin SystemF.The_MultiplicativeDict)
               (coreBuiltin SystemF.The_multiplicativeDict)
               [times, fromInt, one]
-              [int_instance, float_instance, complex_instance]
+              [int_instance, float_instance]
 
   ; times <- mkClassMethod cls 0 "__mul__" binScheme
   ; fromInt <- mkClassMethod cls 1 "__fromint__" fromIntScheme
@@ -816,15 +812,7 @@ mkMultiplicativeClass = do
           , InstanceMethod $
             coreBuiltin $ SystemF.The_MultiplicativeDict_float_fromInt
           , InstanceMethod $
-            coreBuiltin $ SystemF.The_MultiplicativeDict_float_one]
-  ; b <- newTyVar Star Nothing
-  ; let complex_instance =
-          polyInstance [b] [ConTy b `IsInst` cls] cls
-          (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
-          [ InstanceMethod (coreBuiltin SystemF.The_MultiplicativeDict_Complex_mul)
-          , InstanceMethod (coreBuiltin SystemF.The_MultiplicativeDict_Complex_fromInt)
-          , InstanceMethod (coreBuiltin SystemF.The_MultiplicativeDict_Complex_one)]
-          }
+            coreBuiltin $ SystemF.The_MultiplicativeDict_float_one]}
   
   return cls
   
@@ -839,7 +827,7 @@ mkFloatingClass = do
                 (coreBuiltin SystemF.The_floatingDict)
                 [fromfloat, power, expfn, logfn, sqrtfn,
                  sinfn, cosfn, tanfn, pi]
-                [float_instance, complex_instance]
+                [float_instance]
 
       fromfloat <- mkClassMethod cls 0 "__fromfloat__" fromFloatScheme
       power <- mkClassMethod cls 1 "__power__" binScheme
@@ -873,7 +861,7 @@ mkFloatingClass = do
             , InstanceMethod $
               coreBuiltin $ SystemF.The_FloatingDict_float_pi]
 
-      b <- newTyVar Star Nothing
+      {-b <- newTyVar Star Nothing
       let complex_instance =
              polyInstance [b]
              [ConTy b `IsInst` tiBuiltin the_c_Multiplicative,
@@ -898,7 +886,7 @@ mkFloatingClass = do
              , InstanceMethod $
                coreBuiltin SystemF.The_FloatingDict_Complex_tan
              , InstanceMethod $
-               coreBuiltin SystemF.The_FloatingDict_Complex_pi]
+               coreBuiltin SystemF.The_FloatingDict_Complex_pi] -}
   
   return cls
 
@@ -916,7 +904,7 @@ mkVectorClass = do
             (coreBuiltin SystemF.The_VectorDict)
             (coreBuiltin SystemF.The_vectorDict)
             [scale, magnitude, dot]
-            [float_instance, complex_instance]
+            [float_instance]
 
       scale <- mkClassMethod cls 0 "scale" scaleScheme
       magnitude <- mkClassMethod cls 1 "magnitude" normScheme
@@ -932,7 +920,7 @@ mkVectorClass = do
             , InstanceMethod $
               coreBuiltin SystemF.The_VectorDict_float_dot]
 
-      b <- newTyVar Star Nothing
+      {-b <- newTyVar Star Nothing
       let complex_instance =
             polyInstance [b] [ConTy b `IsInst` cls] cls
             (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
@@ -941,7 +929,7 @@ mkVectorClass = do
             , InstanceMethod $
               coreBuiltin SystemF.The_VectorDict_Complex_magnitude
             , InstanceMethod $
-              coreBuiltin SystemF.The_VectorDict_Complex_dot]
+              coreBuiltin SystemF.The_VectorDict_Complex_dot]-}
 
   return cls
 
@@ -1109,7 +1097,7 @@ mkFractionalClass = do
             (coreBuiltin SystemF.The_FractionalDict)
             (coreBuiltin SystemF.The_fractionalDict)
             [divide]
-            [float_instance, complex_instance]
+            [float_instance]
 
       divide <- mkClassMethod cls 0 "__div__" divScheme
       let float_instance =
@@ -1118,11 +1106,11 @@ mkFractionalClass = do
             [ InstanceMethod $
               coreBuiltin $ SystemF.The_FractionalDict_float_div]
 
-      b <- newTyVar Star Nothing
+      {-b <- newTyVar Star Nothing
       let complex_instance =
             polyInstance [b] [ConTy b `IsInst` cls] cls
             (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
-            [ InstanceMethod $ coreBuiltin SystemF.The_FractionalDict_Complex_div]
+            [ InstanceMethod $ coreBuiltin SystemF.The_FractionalDict_Complex_div]-}
 
   return cls
 
@@ -1135,7 +1123,7 @@ mkPassableClass = do
               []
               [int_instance, float_instance, bool_instance, none_instance,
                stuckref_instance,
-               maybe_val_instance, maybe_instance,
+               maybe_instance,
                complex_instance, sliceobject_instance,
                scatter_instance,
                list_dim_instance,
@@ -1186,13 +1174,6 @@ mkPassableClass = do
           polyExplicitInstance [b] [] cls
           (ConTy (tiBuiltin the_con_StuckRef) @@ ConTy b)
           (coreBuiltin SystemF.The_repr_StuckRef)
-          []
-  ; let maybe_val_instance =
-          -- We don't need a Repr instance for the contained type.  Since
-          -- it's a value, it can be computed on demand.
-          polyExplicitInstance [b] [] cls
-          (ConTy (tiBuiltin the_con_MaybeVal) @@ ConTy b)
-          (coreBuiltin SystemF.The_repr_MaybeVal)
           []
   ; let maybe_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
@@ -1806,14 +1787,6 @@ mkMakeComplexType =
   ([], functionType [ConTy a, ConTy a]
        (ConTy (tiBuiltin the_con_Complex) @@ ConTy a))
 
-mkJustValType =
-  forallType [Star] $ \[a] ->
-  ([], functionType [ConTy a] (ConTy (tiBuiltin the_con_MaybeVal) @@ ConTy a))
-
-mkNothingValType =
-  forallType [Star] $ \[a] ->
-  ([], ConTy (tiBuiltin the_con_MaybeVal) @@ ConTy a)
-
 mkMakeSliceObjectType =
   return $ monomorphic $
   functionType [bool, int, bool, int, bool, bool, int]
@@ -1887,7 +1860,6 @@ initializeTIBuiltins = do
             , ("NoneType", Star, [| coreBuiltin SystemF.The_NoneType |])
             , ("StuckRef", Star :-> Star, [| coreBuiltin SystemF.The_StuckRef |])
             , ("Maybe", Star :-> Star, [| coreBuiltin SystemF.The_Maybe |])
-            , ("MaybeVal", Star :-> Star, [| coreBuiltin SystemF.The_MaybeVal |])
             , ("SliceObject", Star, [| coreBuiltin SystemF.The_SliceObject |])
             , ("iter", Star :-> Star :-> Star,
                [| coreBuiltin SystemF.The_Stream |])
