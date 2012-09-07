@@ -16,6 +16,7 @@ extern "C" {
 # include "tbb/blocked_range2d.h"
 # include "tbb/parallel_for.h"
 # include "tbb/parallel_reduce.h"
+# include "tbb/task_scheduler_init.h"
 #endif
 
 /*****************************************************************************/
@@ -271,8 +272,12 @@ triolet_C_blocked_reduceip(void *data_value, TrioletInt count)
 {
   BlockedReduceIPPlan plan = {data_value};
 
+  // Set grain size to (count / N_PROCESSORS / 4)
+  int grain_size = count / (tbb::task_scheduler_init::default_num_threads() * 4);
+  if (grain_size == 0) grain_size = 1;
+
   // Use TBB's parallel_reduce template
-  tbb::blocked_range<int> range(0, count);
+  tbb::blocked_range<int> range(0, count, grain_size);
   BlockedInPlaceReducer body(&plan);
   tbb::parallel_reduce(range, body);
 
