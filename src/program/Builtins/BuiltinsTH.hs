@@ -194,6 +194,7 @@ builtinVariableNames =
     -- Class instances
   , "repr_bool"
   , "repr_int"
+  , "repr_uint"
   , "repr_float"
   , "repr_MaybeVal_int"
   , "repr_MaybeVal_MaybeVal_int"

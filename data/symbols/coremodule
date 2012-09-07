@@ -2038,6 +2038,7 @@ copyArray @(N : intindex) @(a : bare)
 reify : (a : bare) -> Repr a -> Init a -> a;
 
 repr_int : Repr (Stored int);
+repr_uint : Repr (Stored uint);
 repr_float : Repr (Stored float);
 repr_bool : Repr (Stored bool);
 repr_NoneType : Repr (Stored NoneType);
