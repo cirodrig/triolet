@@ -335,7 +335,7 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
 
     -- Decide whether code growth is reasonable
     code_growth_ok =
-      is_wrapper || is_used_once || is_marked_inline || is_small
+      is_wrapper || is_used_once || is_marked_inline || is_small || is_stream
       where
         is_wrapper = defAnnInlinePhase ann == InlWrapper
         is_marked_inline = defAnnInlineRequest ann
@@ -350,6 +350,13 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
                          length (funTyParams function)
               threshold = fun_size_threshold + num_args + 1
           in expSize (funBody function) `compareCodeSize` threshold
+
+        is_stream =
+          -- Does the function return a stream?
+          let FunM function = definiens def
+          in case fromVarApp $ funReturn function
+             of Just (op, _) | op `isCoreBuiltin` The_Stream1 -> True
+                _ -> False
 
     -- An arbitrary function size threshold.  Functions smaller than this
     -- will be inlined aggressively.
