@@ -2,13 +2,26 @@
 #include <stdint.h>
 #include <string.h>
 
+// Hash tables consist of a hash array and a collision table.
+// The hash array contains keys.
+// The collision table has one full/empty bit (low bit)
+// and the number of keys that hash to a given table entry
+// in the upper bits.
+
 // Prime number used for hashing
-#define HASH_PRIME 2166136261U
+#define HASH_PRIME 3474692833U
 
 #define EMPTY (~0U)
 
+#define COLLISION_COUNT(n) ((n) >> 1)
+#define COLLISION_FULL(n) ((n) & 1)
+#define COLLISION_EMPTY(n) (!((n) & 1))
+#define COLLISION_SET(ref) ((ref)++)
+
+#define NEXT(i, size) ((i+1) & (size-1))
+
 static inline uint32_t
-triolet_hash_calc(uint32_t size, int32_t key)
+indexing_hash(uint32_t size, int32_t key)
 {
   return ((uint32_t)key * HASH_PRIME) & (size - 1);
 }
@@ -19,41 +32,31 @@ triolet_hash_insert(int32_t hash_size,
                     uint32_t *collision_table,
                     int32_t key)
 {
-  // Actual hash function evaluation
-  uint32_t hash_loc = triolet_hash_calc(hash_size, key);
-  uint32_t old_hash_loc = hash_loc;
+  uint32_t hash_val = indexing_hash(hash_size, key); // Hash value
+  uint32_t occupancy = collision_table[hash_val] >> 1; // Number of colliding keys
 
-  // Collision detection strategy
-  int collision = (hash_array[hash_loc] != -1);
+  uint32_t count;               // number of colliding keys found
+  uint32_t i;                   // hash table index
 
-  // Iterate to end of "linked list"
-  while (collision_table[hash_loc] != EMPTY)
-  {
-    // If any element of this list is the element
-    // we were looking for, then return because
-    // the element has already been inserted
-    if (hash_array[hash_loc] == key) return;
-    
-    old_hash_loc = hash_loc;
-    hash_loc = collision_table[hash_loc];
+  // Search all keys in this hash bucket
+  for (i = 0, count = 0; count < occupancy; i = NEXT(i, hash_size)) {
+    // Skip empty entries
+    if (COLLISION_EMPTY(collision_table[i])) continue;
+
+    int32_t key2 = hash_array[i];
+    if (key == key2) return;    // Key is already in table
+    if (indexing_hash(hash_size, key2) == hash_val) count++;
   }
 
-  // If the element has already been inserted
-  // then return
-  if (hash_array[hash_loc] == key) return;
+  // Find next available entry
+  while (COLLISION_FULL(collision_table[i])) i = NEXT(i, hash_size);
 
-  hash_loc = old_hash_loc;
-  uint32_t last_link = hash_loc;
+  // Save key
+  hash_array[i] = key;
+  COLLISION_SET(collision_table[i]);
 
-  // Scan around location for free location
-  while (hash_array[hash_loc] != -1)
-    hash_loc = (hash_loc + 1) & (hash_size - 1);
-
-  hash_array[hash_loc] = key;
-
-  // Store to linked list on collision
-  if (collision) collision_table[last_link] = hash_loc;
-
+  // Update the count
+  collision_table[hash_val] += 2;
 }
 
 void triolet_hash_build(int32_t hash_size,
@@ -62,8 +65,8 @@ void triolet_hash_build(int32_t hash_size,
                         int32_t num_keys,
                         int32_t *key_array)
 {
-  memset(hash_array, -1, hash_size*sizeof(int32_t));
-  memset(collision_table, EMPTY, hash_size*sizeof(uint32_t));
+  //memset(hash_array, -1, hash_size*sizeof(int32_t));
+  memset(collision_table, 0, hash_size*sizeof(uint32_t));
 
   int i;
   for(i = 0; i < num_keys; i++)
@@ -72,30 +75,35 @@ void triolet_hash_build(int32_t hash_size,
   }
 }
 
-int32_t triolet_hash_lookup(int32_t hash_size,
-                            int32_t *hash_table,
-                            uint32_t *collision_table,
-                            int32_t key)
+uint32_t triolet_hash_lookup(int32_t hash_size,
+                             int32_t *hash_table,
+                             uint32_t *collision_table,
+                             int32_t key)
 {
-  uint32_t hash_loc = triolet_hash_calc(hash_size, key);
-  uint32_t orig_hash_loc = hash_loc;
+  uint32_t hash_val = indexing_hash(hash_size, key); // Hash value
+  uint32_t occupancy = collision_table[hash_val] >> 1; // Number of colliding keys
 
-  // Iterate to tail of linked list
-  while(hash_table[hash_loc] != key)
-  {
-    orig_hash_loc = hash_loc;
-    hash_loc = collision_table[hash_loc];
-    if (hash_loc == EMPTY) break;
+  uint32_t count;               // number of colliding keys found
+  uint32_t i;                   // hash table index
+
+  // Search all keys in this hash bucket
+  for (i = 0, count = 0; count < occupancy; i = NEXT(i, hash_size)) {
+    // Skip empty entries
+    if (COLLISION_EMPTY(collision_table[i])) continue;
+
+    int32_t key2 = hash_table[i];
+    if (key == key2) return i;    // Found key
+    if (indexing_hash(hash_size, key2) == hash_val) count++;
   }
 
-  // Check if key exists there
-  if (hash_table[orig_hash_loc] == -1) return -1;
-  else return hash_table[orig_hash_loc];
-  return key;
+  // Not found
+  return EMPTY;
 }
 
 int32_t triolet_hash_size(int32_t keys_size)
 {
+  if (keys_size == 0) return 1;
+
   int highest_bit = 8*sizeof(int32_t) - 1;
   while( (keys_size & (1 << highest_bit)) == 0) highest_bit -= 1;
   return (1 << (highest_bit + 2));
