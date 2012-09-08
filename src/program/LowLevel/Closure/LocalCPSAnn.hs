@@ -17,7 +17,9 @@ module LowLevel.Closure.LocalCPSAnn
        (LStm(..), GroupLabel, GroupLabel, LAlt, LFunDef, LFun,
         labelFunction,
         pprLStm,
-        pprLFunDef
+        pprLFunDef,
+        unAnnotate,
+        unAnnotateDef
         )
 where
 
@@ -113,6 +115,9 @@ unAnnotate statement =
 
 unAnnotateFun :: LFun -> Fun
 unAnnotateFun = changeFunBody unAnnotate
+
+unAnnotateDef :: Def LFun -> Def Fun
+unAnnotateDef (Def v f) = Def v (unAnnotateFun f)
 
 -------------------------------------------------------------------------------
 

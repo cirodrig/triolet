@@ -244,16 +244,18 @@ unifyRConts rconts hoisted_set caller_map lookup_group = let
 --   in scope at the definition site.  That is fixed later.
 moveFunctions :: IdentSupply Var
               -> LocalCPS.RConts
+              -> Set.Set Var    -- ^ Hoisted functions
               -> MovedFunctions
                  -- ^ The set of functions and continuations that should be
                  --   moved, and their destination groups
               -> ContMap
               -> LFunDef
               -> IO FunDef
-moveFunctions var_ids rconts moved_functions cont_map ann_def = do
-  (extracted_funs, def1) <- extractFunctions var_ids rconts moved_functions ann_def
+moveFunctions var_ids rconts hoisted_set moved_functions cont_map ann_def = do
+  ([], def1) <-
+    extractFunctions var_ids rconts hoisted_set moved_functions ann_def
   
-  return $ insertFunctions moved_functions extracted_funs def1
+  return def1
 
 data MFContext =
   MFContext
@@ -261,6 +263,9 @@ data MFContext =
     --   The return continuation is looked up to decide where to insert
     --   explicit calls to continuations.
     mfRConts     :: !LocalCPS.RConts
+
+    -- | Hoisted functions
+  , mfHoisted :: !(Set.Set Var)
 
     -- | Moved functions.  Definitions of moved functions are extracted
     --   from the code and returned in a list.
@@ -305,18 +310,23 @@ cpsReturnType (Def v f) rconts =
 --   return types are changed.
 extractFunctions :: IdentSupply Var
                  -> LocalCPS.RConts
+                 -> Set.Set Var
                  -> MovedFunctions
                  -> LFunDef
-                 -> IO ([(Ident GroupLabel, LFunDef)], LFunDef)
-extractFunctions supply rconts moved def = do
+                 -> IO ([FunDef], FunDef)
+extractFunctions supply rconts hoisted moved def = do
   let no_fun = internalError "extractFunctions: No function" 
       no_rettype = internalError "extractFunctions: No return type"
-      context = MFContext rconts moved no_fun no_rettype no_rettype supply
+      context = MFContext rconts hoisted moved no_fun no_rettype no_rettype supply
   (def', (), cont_funs) <-
-    runRWST (extractFunctionsDef def) context ()
+    runRWST (extractFunctionsDef True def) context ()
   return (cont_funs, def')
 
-extractFunctionsDef def@(Def v f) = do
+extractFunctionsDef is_global def@(Def v f) = do
+  -- Will this definition be hoisted?
+  hoisted_set <- asks mfHoisted
+  let is_hoisted = is_global || v `Set.member` hoisted_set
+
   -- Compute this function's new return type
   rconts <- asks mfRConts
   let new_rtype = cpsReturnType def rconts
@@ -324,10 +334,18 @@ extractFunctionsDef def@(Def v f) = do
                         , mfContType = new_rtype
                         , mfCurrentFun = v}
   local new_ctx $ do
-    body' <- extractFunctionsStm (funBody f)
+    body' <- with_hoisted is_hoisted $ extractFunctionsStm (funBody f)
     let f' = mkFun (funConvention f) (funInlineRequest f) (funFrameSize f)
              (funParams f) new_rtype body'
     return $ Def v f'
+  where
+    with_hoisted True (RWST m) =
+      RWST $ \r s -> do (x, s', w) <- m r s
+                        let x' = LetrecE (Rec w) x
+                        return (x', s', [])
+
+    with_hoisted False m = m
+
 
 extractFunctionsStm stm =
   case stm
@@ -338,26 +356,23 @@ extractFunctionsStm stm =
            -- Create continuation function
            rtype <- asks mfRType
            let fun = mkFun ClosureCall False 0 params rtype body
-           cont_def <- extractFunctionsDef (Def label fun)
-           tell [(destination_group, cont_def)]
+           cont_def <- extractFunctionsDef False (Def label fun)
+           tell [cont_def]
 
            -- The RHS becomes a tail expression
-           return $ ReturnLCPS rhs
+           return $ ReturnE rhs
          Nothing -> do
            body' <- extractFunctionsStm body
-           return $ LetLCPS params rhs label body'
+           return $ LetE params rhs body'
 
      LetrecLCPS defs group_id body -> do
-       moved <- asks mfMoved
-       defs' <- mapM extractFunctionsDef $ groupMembers defs
-       let (defs_moved, defs_here) = partition_moved moved defs'
-       tell defs_moved
-       body' <- extractFunctionsStm body
-       return $ LetrecLCPS (Rec defs_here) group_id body'
-     
+       defs' <- mapM (extractFunctionsDef False) $ groupMembers defs
+       tell defs'
+       extractFunctionsStm body
+
      SwitchLCPS cond alts -> do
        alts' <- mapM do_alt alts
-       return $ SwitchLCPS cond alts'
+       return $ SwitchE cond alts'
      
      ReturnLCPS atom -> do
        context <- ask
@@ -376,79 +391,18 @@ extractFunctionsStm stm =
            -- temporary variables, then passed to the continuation call.
            tmpvars <- mapM newAnonymousVar_mf rtype
 
-           -- Use an arbitrary variable as the label; its value is ignored
-           return $ LetLCPS tmpvars atom current_cont $
-             ReturnLCPS (CallA ClosureCall (VarV current_cont) (map VarV tmpvars))
+           return $ LetE tmpvars atom $
+             ReturnE (CallA ClosureCall (VarV current_cont) (map VarV tmpvars))
          Nothing ->
-           return $ ReturnLCPS atom
+           return $ ReturnE atom
      ThrowLCPS exc ->
-       return $ ThrowLCPS exc
+       return $ ThrowE exc
   where
     do_alt (tag, s) = liftM ((,) tag) $ extractFunctionsStm s
     
-    -- Partition a set of function definitions into those that are moved 
-    -- and those that are left in place.
-    partition_moved :: MovedFunctions
-                    -> [LFunDef]
-                    -> ([(Ident GroupLabel, LFunDef)], [LFunDef])
-    partition_moved moved defs = go id id defs
-      where
-        go moved_defs unmoved_defs (def:defs) =
-          case IntMap.lookup (fromIdent $ varID $ definiendum def) moved
-          of Nothing  -> go moved_defs (unmoved_defs . (def:)) defs
-             Just gid -> go (moved_defs . ((gid, def):)) unmoved_defs defs
-
-        go moved_defs unmoved_defs [] = (moved_defs [], unmoved_defs [])
-
     newAnonymousVar_mf t = do
       id_supply <- asks mfIdentSupply
       lift $ runFreshVarM id_supply $ newAnonymousVar t
-
--- | Insert the extracted function definitions into the code.
-insertFunctions :: MovedFunctions
-                   -- ^ Map from function to its continuation
-                -> [(Ident GroupLabel, LFunDef)]
-                   -- ^ Continuation function definitions
-                -> LFunDef   -- ^ Top-level function definition
-                -> FunDef
-insertFunctions moved_functions funs def =
-  let fun_map = foldl' insert_def Map.empty funs
-        where
-          insert_def m (grp, f) = Map.insertWith (++) grp [f] m
-  in runReader (insertFunctionsDef def) (moved_functions, fun_map)
-
-insertFunctionsDef (Def v f) = do
-  body <- insertFunctionsStm $ funBody f
-  return $ Def v (f {funBody = body})
-
-insertFunctionsStm stm =
-  case stm
-  of LetLCPS params rhs _ body ->
-       LetE params rhs <$> insertFunctionsStm body
-     LetrecLCPS defs group_id body -> do
-       -- Add continuations to this definition group
-       (_, fun_map) <- ask
-       let functions_here = fromMaybe [] $ Map.lookup group_id fun_map
-       let defs' = functions_here ++ groupMembers defs
-
-       -- Recurse on the bodies of these function definitions
-       finished_defs <- mapM insertFunctionsDef defs'
-
-       finished_body <- insertFunctionsStm body
-
-       -- If the transformation has removed all local function definitions,
-       -- then eliminate this 'Letrec' term
-       if null finished_defs
-         then return finished_body
-         else return $ LetrecE (Rec finished_defs) finished_body
-     SwitchLCPS cond alts ->
-       SwitchE cond <$> mapM do_alt alts
-     ReturnLCPS atom -> pure (ReturnE atom)
-     ThrowLCPS val -> pure (ThrowE val)
-     where
-       do_alt (tag, s) = do
-         s' <- insertFunctionsStm s
-         return (tag, s')
 
 -------------------------------------------------------------------------------
 
@@ -529,7 +483,7 @@ findFunctionsToHoist var_ids global_vars def = do
   -- Move function definitions so that all functions having the same
   -- continuation are in the same definition group
   let moved_functions = unifyRConts rconts hoisted_set caller_map fun_to_group
-  cont_def <- moveFunctions var_ids rconts moved_functions cont_map ann_def
+  cont_def <- moveFunctions var_ids rconts hoisted_set moved_functions cont_map ann_def
 
   -- Construct closure conversion info
   let lookup_function f =
