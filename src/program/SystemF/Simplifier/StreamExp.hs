@@ -329,6 +329,10 @@ data StreamOp =
     -- > chain @{output type} {output repr} {} {input stream 1, input stream 2}
   | ChainOp !Type
 
+    -- | Traverse a linked list
+    -- > traverse @{output type} {output repr} {} {list}
+  | TraverseListOp !Type
+
     -- | The bind operation on sequences.
     --
     -- > bind @{producer type, transformer type}
@@ -605,6 +609,7 @@ streamOpTable =
            , (coreBuiltin The_Sequence_return, interpretReturn)
            , (coreBuiltin The_Sequence_empty, interpretEmpty SequenceType)
            , (coreBuiltin The_Sequence_chain, interpretChain)
+           , (coreBuiltin The_Sequence_from_llist, interpretFromLList)
              {-, (coreBuiltin The_view1_array1_build, interpretBuild (PolyViewType 1) ArrayType)
            , (coreBuiltin The_view1_list_build, interpretBuild (PolyViewType 1) ListType)
            , (coreBuiltin The_view1_empty, interpretEmptyView)
@@ -809,6 +814,14 @@ interpretChain = StreamOpInterpreter check_arity interpret
       s2' <- interpretStreamSubExp s2
       return $ Just $ OpSE inf (ChainOp ty) [repr] [] [s1', s2'] Nothing
 
+interpretFromLList = StreamOpInterpreter check_arity interpret
+  where
+    check_arity 1 2 = True
+    check_arity _ _ = False
+
+    interpret inf [ty] [repr, l] =
+      return $ Just $ OpSE inf (TraverseListOp ty) [repr] [l] [] Nothing
+
 interpretBuild stream_type =
   StreamOpInterpreter check_arity interpret
   where
@@ -1000,6 +1013,9 @@ embedOp (EmptyOp st ty) =
 
 embedOp (ChainOp ty) =
   (varE' $ coreBuiltin The_Sequence_chain, [ty])
+
+embedOp (TraverseListOp ty) =
+  (varE' $ coreBuiltin The_Sequence_from_llist, [ty])
 
 embedOp (BindOp t1 t2) =
   (varE' $ coreBuiltin The_Sequence_bind, [t1, t2])
@@ -1809,6 +1825,21 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
             localE gen_ty (appExp (return f) [] [mkVarE i_var]) $ \x_var ->
             return $ appE' combiner [] [varE' a_var, varE' x_var, varE' r_var]),
         return acc]
+
+     OpSE inf (TraverseListOp ty) [repr] [l] [] Nothing -> do
+       -- Create a fold over the list
+       tenv <- getTypeEnv
+       varAppE (coreBuiltin The_llist_fold)
+         [ty, acc_ty]
+         [return repr,
+          mkVarE acc_repr_var,
+          lamE $ mkFun []
+          (\ [] -> return ([ty, acc_ty, outType acc_ty],
+                           initEffectType acc_ty))
+          (\ [] [i_var, a_var, r_var] ->
+            return $ appE' combiner [] [varE' a_var, varE' i_var, varE' r_var]),
+          return acc,
+          return l]
 
      -- Sequentialize 'map'
      OpSE inf (ZipOp _ [in_ty] zip_ty) [in_repr, _] [zip_f] [in_stream] Nothing -> do

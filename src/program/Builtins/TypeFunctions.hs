@@ -189,6 +189,7 @@ shapePureTF = shapeLike $ \op args ->
         | op `isCoreBuiltin` The_Stream1 -> return_list_dim
         | op `isCoreBuiltin` The_Sequence -> return_list_dim
         | op `isCoreBuiltin` The_list -> return_list_dim
+        | op `isCoreBuiltin` The_llist -> return_list_dim
         | op `isCoreBuiltin` The_array0 -> return_dim0
         | op `isCoreBuiltin` The_array1 -> return_dim1
         | op `isCoreBuiltin` The_array2 -> return_dim2
@@ -301,6 +302,7 @@ shapeMemTF = shapeLike $ \op args ->
                   Just (op, [_])
                     | op `isCoreBuiltin` The_Stream1 -> return_list_dim
                     | op `isCoreBuiltin` The_Sequence -> return_list_dim
+                    | op `isCoreBuiltin` The_llist -> return_list_dim
                   _ -> return Nothing
         | op `isCoreBuiltin` The_list -> return_list_dim
         | op `isCoreBuiltin` The_array0 -> return_dim0

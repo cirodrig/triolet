@@ -20,6 +20,7 @@ builtinTypeNames =
   , "barray1"
   , "barray2"
   , "barray3"
+  , "llist"
   , "view"
   , "NoneType"
   , "Maybe"
@@ -158,6 +159,8 @@ builtinVariableNames =
   , "mk_barray1"
   , "mk_barray2"
   , "mk_barray3"
+  , "cons"
+  , "nil"
   , "mk_view"
   , "effTok"
   , "pf"
@@ -219,6 +222,7 @@ builtinVariableNames =
   , "repr_barray1"
   , "repr_barray2"
   , "repr_barray3"
+  , "repr_llist"
   , "repr_NoneType"
   , "repr_Any"
   , "repr_Ref"
@@ -246,6 +250,8 @@ builtinVariableNames =
   , "ShapeDict_dim3"
   , "TraversableDict_Stream_traverse"
   , "TraversableDict_Stream_build"
+  , "TraversableDict_llist_traverse"
+  , "TraversableDict_llist_build"
   , "TraversableDict_view_list_dim_traverse"
   , "TraversableDict_view_list_dim_build"
   , "TraversableDict_view_dim0_traverse"
@@ -483,6 +489,7 @@ builtinVariableNames =
   , "view_zipWith4"
   , "Sequence_flatten"
   , "Sequence_generate"
+  , "Sequence_from_llist"
   , "Sequence_map"
   , "Sequence_zipWith"
   , "Sequence_zipWith3"
@@ -590,6 +597,11 @@ builtinVariableNames =
   , "unsafeMakeViewCoercion"
   , "traceInt_int"
   , "traceInt_box"
+    
+  , "isCons"
+  , "isNil"
+  , "head"
+  , "tail"
 
     -- In-place update
   , "intUpdateInPlace_int_coercion"
@@ -688,6 +700,7 @@ builtinVariableNames =
   , "fold_list_dim"
   , "fold_dim1"
   , "fold_dim2"
+  , "llist_fold"
 
     -- Primitive functions
   , "primitive_list_dim_chain"
@@ -774,7 +787,6 @@ builtinVariableNames =
   , "fromEffTok"
   
     -- Obsolete, will be eliminated
-  , "generate"
   , "fun_map_Stream"
   , "fun_zip_Stream"
   , "fun_zip3_Stream"

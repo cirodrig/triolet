@@ -110,6 +110,7 @@ mkShapeTyFun = do
                       [list_instance, blist_instance,
                        array1_instance, array2_instance, array3_instance,
                        barray1_instance, barray2_instance, barray3_instance,
+                       llist_instance,
                        view_instance, iter_instance]
 
       ; let list_instance =
@@ -144,6 +145,10 @@ mkShapeTyFun = do
               mkTyFamilyInstance [] [] (tfSignature fam)
               (ConTy $ tiBuiltin the_con_barray3)
               (ConTy $ tiBuiltin the_con_dim3)
+      ; let llist_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_llist)
+              (ConTy $ tiBuiltin the_con_list_dim)
       ; sh <- newTyVar Star Nothing
       ; let view_instance =
               mkTyFamilyInstance [sh] [] (tfSignature fam)
@@ -380,6 +385,7 @@ mkTraversableClass = do
                   [list_instance, blist_instance,
                    array1_instance, array2_instance, array3_instance,
                    barray1_instance, barray2_instance, barray3_instance,
+                   llist_instance,
                    view_list_dim_instance,
                    view_dim0_instance,
                    view_dim1_instance,
@@ -454,6 +460,14 @@ mkTraversableClass = do
                   coreBuiltin SystemF.The_TraversableDict_barray1_traverse
                 , InstanceMethod $
                   coreBuiltin SystemF.The_TraversableDict_barray1_build]
+
+            llist_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_llist)
+                [ InstanceMethod $
+                  coreBuiltin SystemF.The_TraversableDict_llist_traverse
+                , InstanceMethod $
+                  coreBuiltin SystemF.The_TraversableDict_llist_build]
 
             view_list_dim_instance =
                 monomorphicInstance cls
@@ -1133,6 +1147,7 @@ mkPassableClass = do
                list_instance, blist_instance,
                array1_instance, array2_instance, array3_instance,
                barray1_instance, barray2_instance, barray3_instance,
+               llist_instance,
                iter_instance,
                view_instance,
                tuple2_instance, tuple3_instance,
@@ -1224,6 +1239,11 @@ mkPassableClass = do
           (ConTy (tiBuiltin the_con_barray3) @@ ConTy b)
           (coreBuiltin SystemF.The_repr_barray3)
           []
+  ; let llist_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_llist) @@ ConTy b)
+          (coreBuiltin SystemF.The_repr_llist)
+          []
   ; let iter_instance =
           polyExplicitInstance [b, c] [] cls
           (ConTy (tiBuiltin the_con_iter) @@ ConTy b @@ ConTy c)
@@ -1285,6 +1305,28 @@ mkIsJustType = forallType [Star] $ \[a] ->
 mkFromJustType = forallType [Star] $ \[a] ->
   ([passable (ConTy a)],
    functionType [ConTy (tiBuiltin the_con_Maybe) @@ ConTy a] (ConTy a))
+
+mkConsType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy a, ConTy (tiBuiltin the_con_llist) @@ ConTy a]
+   (ConTy (tiBuiltin the_con_llist) @@ ConTy a))
+
+mkNilType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)], ConTy (tiBuiltin the_con_llist) @@ ConTy a)
+
+-- Type of 'isCons' and 'isNil'
+mkIsConsType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy (tiBuiltin the_con_llist) @@ ConTy a] (ConTy (tiBuiltin the_con_bool)))
+
+mkHeadType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy (tiBuiltin the_con_llist) @@ ConTy a] (ConTy a))
+
+mkTailType = forallType [Star] $ \[a] ->
+  ([passable (ConTy a)],
+   functionType [ConTy (tiBuiltin the_con_llist) @@ ConTy a]
+   (ConTy (tiBuiltin the_con_llist) @@ ConTy a))
 
 mkListDimType =
   return $ monomorphic $
@@ -1893,6 +1935,7 @@ initializeTIBuiltins = do
             , ("barray1", Star :-> Star, [| coreBuiltin SystemF.The_barray1 |])
             , ("barray2", Star :-> Star, [| coreBuiltin SystemF.The_barray2 |])
             , ("barray3", Star :-> Star, [| coreBuiltin SystemF.The_barray3 |])
+            , ("llist", Star :-> Star, [| coreBuiltin SystemF.The_llist |])
             , ("view", Star :-> Star :-> Star, 
                [| coreBuiltin SystemF.The_view |])
             , ("Any", Star, [| coreBuiltin SystemF.The_Any |])
@@ -1942,6 +1985,18 @@ initializeTIBuiltins = do
               ),
               ("fromJust", [| mkFromJustType |]
               , [| coreBuiltin SystemF.The_fun_fromJust |]
+              ),
+              ("isCons", [| mkIsConsType |]
+              , [| coreBuiltin SystemF.The_isCons |]
+              ),
+              ("isNil", [| mkIsConsType |]
+              , [| coreBuiltin SystemF.The_isNil |]
+              ),
+              ("head", [| mkHeadType |]
+              , [| coreBuiltin SystemF.The_head |]
+              ),
+              ("tail", [| mkTailType |]
+              , [| coreBuiltin SystemF.The_tail |]
               ),
               ("list_dim", [| mkListDimType |]
               , [| coreBuiltin SystemF.The_fun_list_dim |]
@@ -2163,6 +2218,12 @@ initializeTIBuiltins = do
               ),
               ("Nothing", [| mkNothingType |]
               , [| coreBuiltin SystemF.The_nothing |]
+              ),
+              ("cons", [| mkConsType |]
+              , [| coreBuiltin SystemF.The_cons |]
+              ),
+              ("nil", [| mkNilType |]
+              , [| coreBuiltin SystemF.The_nil |]
               )
             ]
           cls_members =

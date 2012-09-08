@@ -95,6 +95,13 @@ data MaybeVal : val -> val
   nothingVal (a : val) () ();
 };
 
+-- A linked list
+data llist : bare -> box
+{
+  cons (a : bare) () (a, llist a);
+  nil (a : bare) () ();
+};
+
 -- An integer interval, given by inclusive lower and exclusive upper bounds.
 -- The upper bound must be greater or equal to the lower bound.
 -- 'Nothing' means that the interval is unbounded at that end.
@@ -2070,6 +2077,7 @@ repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
 repr_array1 : (a : bare) -> Repr a -> Repr (array1 a);
 repr_array2 : (a : bare) -> Repr a -> Repr (array2 a);
 repr_array3 : (a : bare) -> Repr a -> Repr (array3 a);
+repr_llist : (a : bare) -> Repr (Ref (llist a));
 repr_blist : (a : bare) -> Repr (blist a);
 repr_barray1 : (a : bare) -> Repr (barray1 a);
 repr_barray2 : (a : bare) -> Repr (barray2 a);
@@ -2138,6 +2146,22 @@ repr_arr_2 : (n : intindex) -> (a : bare)
 TraversableDict_Stream_build @(sh : box) @(a : bare)
   (repr : Repr a) (s : Stream sh a)
   -> Stream sh a attribute(inline) = s;
+
+
+TraversableDict_Stream_traverse @(sh : box) @(a : bare)
+  (repr : Repr a) (s : Stream sh a)
+  -> Stream sh a attribute(inline) = s;
+
+
+TraversableDict_llist_build : (a : bare)
+  -> Repr a -> Stream list_dim a -> llist a;
+
+
+TraversableDict_llist_traverse @(a : bare)
+  (repr : Repr a) (l : llist a) -> Stream list_dim a
+  attribute(inline) =
+
+  sequenceStream @a (Sequence_from_llist @a repr l);
 
 
 TraversableDict_Stream_traverse @(sh : box) @(a : bare)
@@ -5788,6 +5812,17 @@ Sequence_generate @(a : bare)
   };
 
 
+Sequence_from_llist @(a : bare) (repr : Repr a) (l : llist a)
+  -> Sequence a attribute(inline, inline_final) =
+  sequence @a @(llist a) l
+  (\ (l : llist a) -> StreamNext (llist a) a.
+     case l of {
+       cons @a (h : a) (t : llist a).
+         streamValue @(llist a) @a t (convertToBoxed @a repr (copy @a repr h))
+     ; nil @a. streamEmpty @(llist a) @a
+     });
+
+
 Sequence_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
           (transformer : a -> Init b) (sq : Sequence a) -> Sequence b
   attribute(inline, inline_final) =
@@ -7475,6 +7510,34 @@ fun_fromJust @(a : bare) (repr : Repr a) (x : Maybe a) (ret : OutPtr a)
   };
 
 
+isCons @(a : bare) (repr : Repr a) (l : llist a) -> bool attribute(inline) =
+  case l of {
+    cons @a (h : a) (t : llist a). True
+  ; nil @a. False
+  };
+
+
+isNil @(a : bare) (repr : Repr a) (l : llist a) -> bool attribute(inline) =
+  case l of {
+    cons @a (h : a) (t : llist a). False
+  ; nil @a. True
+  };
+
+
+head @(a : bare) (repr : Repr a) (l : llist a) -> a attribute(inline) =
+  case l of {
+    cons @a (h : a) (t : llist a). h
+  ; nil @a. except @a
+  };
+
+
+tail @(a : bare) (repr : Repr a) (l : llist a) -> llist a attribute(inline) =
+  case l of {
+    cons @a (h : a) (t : llist a). t
+  ; nil @a. except @(llist a)
+  };
+
+
 arr1D_build @(N : intindex) @(a : bare)
   (repr : Repr a) (size : FIInt N) (f : int -> Init a)
   (arr_ptr : OutPtr (arr N a))
@@ -8602,13 +8665,6 @@ histogramArray : (n : intindex)
               -> Stream dim1 (Stored int)
               -> Init (arr n (Stored int));
 
-generate : (n : intindex)
-        -> (a : bare)
-        -> IInt n
-        -> Repr a
-        -> (int -> Init a)
-        -> Sequence a;
-
 subscript : (n : intindex)
          -> (a : bare)
          -> SizeAlign a
@@ -8854,6 +8910,26 @@ Sequence_array1_build : (a : bare)
 		     -> Repr a
 		     -> Sequence a
 		     -> Init (array1 a);
+
+llist_fold @(a r : bare)
+  (repr_a : Repr a)
+  (repr_r : Repr r)
+  (f : a -> r -> Init r)
+  (init : r)
+  (source : llist a)
+  (ret : OutPtr r)
+  -> Store attribute(inline, inline_final) =
+
+  letfun
+    go (source : llist a) (acc : r) (ret : OutPtr r) -> Store =
+      case source of {
+        cons @a (h : a) (t : llist a).
+          case stuckBox @r (f h acc) of stuckBox @r (new_acc : r).
+          go t new_acc ret
+      ; nil @a. copy @r repr_r acc ret
+      } in
+
+  go source init ret;
 
 -------------------------------------------------------------------------------
 -- Loops
