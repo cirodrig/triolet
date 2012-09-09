@@ -275,6 +275,12 @@ createDictEnv = do
   array2_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (coreBuiltin The_array2) [VarT arg],
      createDict_array2 arg)
+  barray3_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (coreBuiltin The_barray3) [VarT arg],
+     createDict_barray3 arg)
+  array3_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (coreBuiltin The_array3) [VarT arg],
+     createDict_array3 arg)
   complex_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (coreBuiltin The_Complex) [VarT arg],
      createDict_complex arg)
@@ -298,8 +304,8 @@ createDictEnv = do
                                   uint_dict, efftok_dict, intset_dict,
                                   maybeint_dict, maybemaybeint_dict,
                                   sliceobj_dict,
-                                  list_dict, array1_dict, array2_dict,
-                                  blist_dict, barray1_dict, barray2_dict,
+                                  list_dict, array1_dict, array2_dict, array3_dict,
+                                  blist_dict, barray1_dict, barray2_dict, barray3_dict,
                                   complex_dict, array_dict,
                                   {-referenced_dict,-} maybe_dict,
                                   tuple1_dict, tuple2_dict, tuple3_dict, tuple4_dict,
@@ -434,6 +440,21 @@ createDict_barray2 param_var subst = MkDict $
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_barray2)
+
+createDict_array3 :: Var -> TypeSubst -> MkDict
+createDict_array3 param_var subst = MkDict $
+  withReprDict param $ \elt_dict ->
+  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_array3)
+
+createDict_barray3 :: Var -> TypeSubst -> MkDict
+createDict_barray3 param_var subst = MkDict $
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_barray3)
 
 createDict_Maybe :: Var -> TypeSubst -> MkDict
 createDict_Maybe param_var subst = MkDict $

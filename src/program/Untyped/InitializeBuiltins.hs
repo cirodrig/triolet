@@ -274,7 +274,8 @@ mkEqClass = do
                     (coreBuiltin SystemF.The_EqDict)
                     (coreBuiltin SystemF.The_eqDict)
                     [eq, ne]
-                    [int_instance, float_instance, tuple2_instance]
+                    [int_instance, float_instance, tuple2_instance,
+                     tuple3_instance]
   
         ; eq <- mkClassMethod cls 0 "__eq__" compareScheme
         ; ne <- mkClassMethod cls 1 "__ne__" compareScheme
@@ -303,6 +304,17 @@ mkEqClass = do
                    (TupleTy 2 @@ ConTy a @@ ConTy b)
                    [ InstanceMethod $ coreBuiltin SystemF.The_EqDict_Tuple2_eq,
                      InstanceMethod $ coreBuiltin SystemF.The_EqDict_Tuple2_ne]
+        ; tuple3_instance <- do
+          a <- newTyVar Star Nothing
+          b <- newTyVar Star Nothing
+          c <- newTyVar Star Nothing
+          return $ polyInstance
+                   [a, b, c]
+                   [ConTy a `IsInst` cls, ConTy b `IsInst` cls, ConTy c `IsInst` cls]
+                   cls
+                   (TupleTy 3 @@ ConTy a @@ ConTy b @@ ConTy c)
+                   [ InstanceMethod $ coreBuiltin SystemF.The_EqDict_Tuple3_eq,
+                     InstanceMethod $ coreBuiltin SystemF.The_EqDict_Tuple3_ne]
         }
   return cls
 
@@ -390,6 +402,7 @@ mkTraversableClass = do
                    view_dim0_instance,
                    view_dim1_instance,
                    view_dim2_instance,
+                   view_dim3_instance,
                    iter_instance]
 
       ; iter <- mkClassMethod cls 0 "iter" iter_scheme
@@ -500,6 +513,14 @@ mkTraversableClass = do
                   coreBuiltin SystemF.The_TraversableDict_view_dim2_traverse
                 , InstanceMethod $
                   coreBuiltin SystemF.The_TraversableDict_view_dim2_build]
+
+            view_dim3_instance =
+                monomorphicInstance cls
+                (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim3))
+                [ InstanceMethod $
+                  coreBuiltin SystemF.The_TraversableDict_view_dim3_traverse
+                , InstanceMethod $
+                  coreBuiltin SystemF.The_TraversableDict_view_dim3_build]
 
             iter_instance =
               -- A stream of anything is iterable
@@ -664,8 +685,8 @@ mkIndexableClass = do
                   (coreBuiltin SystemF.The_indexableDict)
                   [at, get_shape]
                   [list_instance, blist_instance,
-                   array1_instance, array2_instance,
-                   barray1_instance, barray2_instance,
+                   array1_instance, array2_instance, array3_instance,
+                   barray1_instance, barray2_instance, barray3_instance,
                    view_instance]
 
       ; at <- mkClassMethod cls 0 "at_point" at_scheme
@@ -690,6 +711,11 @@ mkIndexableClass = do
               (ConTy $ tiBuiltin the_con_array2)
               [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array2_at_point
               , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array2_get_shape]
+      ; let array3_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_array3)
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array3_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_array3_get_shape]
       ; let barray1_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_barray1)
@@ -700,6 +726,11 @@ mkIndexableClass = do
               (ConTy $ tiBuiltin the_con_barray2)
               [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray2_at_point
               , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray2_get_shape]
+      ; let barray3_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_barray3)
+              [ InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray3_at_point
+              , InstanceMethod $ coreBuiltin SystemF.The_IndexableDict_barray3_get_shape]
       ; sh <- newTyVar Star Nothing
       ; let view_instance =
               polyInstance [sh] [ConTy sh `IsInst` tiBuiltin the_c_Shape] cls

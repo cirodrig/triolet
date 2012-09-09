@@ -3802,6 +3802,56 @@ IndexableDict_array2_get_shape @(a : bare)
           (arrayDescToDim1 @N lb_x stride_x size_x);
 
 
+IndexableDict_array3_at_point @(a : bare)
+  (repr : Repr a)
+  (ay : array3 a)
+  (ix : Tuple3 (Stored int) (Stored int) (Stored int))
+  (ret : OutPtr a)
+  -> Store
+  attribute(inline) =
+  case ay of mk_array3 @a @(L M N : intindex)
+             (lb_z : int) (stride_z : int) (size_z : FIInt L)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : StuckBox (arr L (arr M (arr N a)))).
+  case ayref of stuckBox @(arr L (arr M (arr N a))) (ay : arr L (arr M (arr N a))).
+  let row_repr : Repr (arr N a) = repr_arr @N @a size_x repr in
+  let plane_repr : Repr (arr M (arr N a)) =
+        repr_arr @M @(arr N a) size_y row_repr in
+
+  -- Compute real array indices
+  case ix of tuple3 @(Stored int) @(Stored int) @(Stored int)
+             (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
+  case ix_z of stored @int (ix_z_i : int).
+  let real_index_z : int = (ix_z_i -# lb_z) //# stride_z in
+  case ix_y of stored @int (ix_y_i : int).
+  let real_index_y : int = (ix_y_i -# lb_y) //# stride_y in
+  case ix_x of stored @int (ix_x_i : int).
+  let real_index_x : int = (ix_x_i -# lb_x) //# stride_x in
+
+  -- Copy the desired element
+  copy @a repr
+  (subscript @N @a (reprSizeAlign @a repr)
+   (subscript @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
+     (subscript @L @(arr M (arr N a)) (reprSizeAlign @(arr M (arr N a)) plane_repr)
+      ay real_index_z)
+    real_index_y)
+   real_index_x) ret;
+
+
+IndexableDict_array3_get_shape @(a : bare)
+  (ay : array3 a) -> dim3
+  attribute(inline) =
+  case ay of mk_array3 @a @(L M N : intindex)
+             (lb_z : int) (stride_z : int) (size_z : FIInt L)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : StuckBox (arr L (arr M (arr N a)))).
+  mk_dim3 (arrayDescToDim1 @L lb_z stride_z size_z)
+          (arrayDescToDim1 @M lb_y stride_y size_y)
+          (arrayDescToDim1 @N lb_x stride_x size_x);
+
+
 IndexableDict_blist_at_point @(a : bare)
   (repr : Repr a) (ls : blist a) (ix : Stored int) (ret : OutPtr a) -> Store
   attribute(inline) =
@@ -3905,6 +3955,64 @@ IndexableDict_barray2_get_shape @(a : bare)
           (arrayDescToDim1 @N lb_x stride_x size_x);
 
 
+IndexableDict_barray3_at_point @(a : bare)
+  (repr : Repr a)
+  (ay : barray3 a)
+  (ix : Tuple3 (Stored int) (Stored int) (Stored int))
+  (ret : OutPtr a)
+  -> Store
+  attribute(inline) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  case ay of mk_barray3 @a (ay2 : array3 boxed_a).
+  case ay2 of mk_array3 @boxed_a @(L M N : intindex)
+             (lb_z : int) (stride_z : int) (size_z : FIInt L)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : StuckBox (arr L (arr M (arr N boxed_a)))).
+  case ayref of stuckBox @(arr L (arr M (arr N boxed_a)))
+                (ay : arr L (arr M (arr N boxed_a))).
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let row_repr : Repr (arr N boxed_a) =
+        repr_arr @N @boxed_a size_x boxed_repr in
+  let plane_repr : Repr (arr M (arr N boxed_a)) =
+        repr_arr @M @(arr N boxed_a) size_y row_repr in
+
+  -- Compute real array indices
+  case ix of tuple3 @(Stored int) @(Stored int) @(Stored int)
+             (ix_z : Stored int) (ix_y : Stored int) (ix_x : Stored int).
+  case ix_z of stored @int (ix_z_i : int).
+  let real_index_z : int = (ix_z_i -# lb_z) //# stride_z in
+  case ix_y of stored @int (ix_y_i : int).
+  let real_index_y : int = (ix_y_i -# lb_y) //# stride_y in
+  case ix_x of stored @int (ix_x_i : int).
+  let real_index_x : int = (ix_x_i -# lb_x) //# stride_x in
+
+  -- Copy the desired element
+  case subscript @N @boxed_a (reprSizeAlign @boxed_a boxed_repr)
+       (subscript @M @(arr N boxed_a)
+        (reprSizeAlign @(arr N boxed_a) row_repr)
+        (subscript @L @(arr M (arr N boxed_a))
+         (reprSizeAlign @(arr M (arr N boxed_a)) plane_repr)
+         ay real_index_z) real_index_y) real_index_x
+    of stuckRef @(BoxedType a) (val : BoxedType a).
+  convertToBare @a repr val ret;
+
+
+IndexableDict_barray3_get_shape @(a : bare)
+  (ay : barray3 a) -> dim3
+  attribute(inline) =
+  let type boxed_a = StuckRef (BoxedType a) in 
+  case ay of mk_barray3 @a (ay2 : array3 boxed_a).
+  case ay2 of mk_array3 @boxed_a @(L M N : intindex)
+             (lb_z : int) (stride_z : int) (size_z : FIInt L)
+             (lb_y : int) (stride_y : int) (size_y : FIInt M)
+             (lb_x : int) (stride_x : int) (size_x : FIInt N)
+             (ayref : StuckBox (arr L (arr M (arr N boxed_a)))).
+  mk_dim3 (arrayDescToDim1 @L lb_z stride_z size_z)
+          (arrayDescToDim1 @M lb_y stride_y size_y)
+          (arrayDescToDim1 @N lb_x stride_x size_x);
+
+
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
 
@@ -3937,6 +4045,35 @@ EqDict_Tuple2_ne @(a b : bare)
   case x of tuple2 @a @b (xa : a) (xb : b).
   case y of tuple2 @a @b (ya : a) (yb : b).
   and (ne_a xa ya) (ne_b xb yb);
+
+
+EqDict_Tuple3 : (a b c : bare) -> EqDict a -> EqDict b -> EqDict c
+             -> EqDict (Tuple3 a b c);
+EqDict_Tuple3_eq @(a b c : bare)
+  (eqA : EqDict a) (eqB : EqDict b) (eqC : EqDict c)
+  (x : Tuple3 a b c) (y : Tuple3 a b c)
+  -> bool
+  attribute(inline) =
+  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
+  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
+  case eqC of eqDict @c (eq_c : c -> c -> bool) (ne_c : c -> c -> bool).
+  case x of tuple3 @a @b @c (xa : a) (xb : b) (xc : c).
+  case y of tuple3 @a @b @c (ya : a) (yb : b) (yc : c).
+  and (and (eq_a xa ya) (eq_b xb yb)) (eq_c xc yc);
+
+
+EqDict_Tuple3_ne @(a b c : bare)
+  (eqA : EqDict a) (eqB : EqDict b) (eqC : EqDict c)
+  (x : Tuple3 a b c) (y : Tuple3 a b c)
+  -> bool
+  attribute(inline) =
+  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
+  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
+  case eqC of eqDict @c (eq_c : c -> c -> bool) (ne_c : c -> c -> bool).
+  case x of tuple3 @a @b @c (xa : a) (xb : b) (xc : c).
+  case y of tuple3 @a @b @c (ya : a) (yb : b) (yc : c).
+  and (and (ne_a xa ya) (ne_b xb yb)) (ne_c xc yc);
+
 
 OrdDict_int : OrdDict (Stored int);
 OrdDict_int_lt : int -> int -> bool;
@@ -8254,7 +8391,7 @@ stencil3D @(t : bare -> bare) @(a b : bare)
   (input : t a)
   (ret: OutPtr (array3 b))
   -> Store
-  attribute(inline, inline_final) =
+  attribute(inline, inline_dimensionality) =
 
   case indexable of
     indexableDict @t 
