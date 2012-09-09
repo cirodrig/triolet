@@ -187,6 +187,16 @@ data owned repr_int = Repr {
   IS_POINTERLESS
 };
 
+// Parameter-passing convention dictionary of uints
+data owned repr_uint = Repr {
+  ObjectHeader { repr_info },
+  SA {sizeof uint32, alignof uint32},
+  copy4F,
+  make_Boxed_4,
+  from_Boxed_4,
+  IS_POINTERLESS
+};
+
 // Parameter-passing convention dictionary of floats
 data owned repr_float = Repr {
   ObjectHeader { repr_info },

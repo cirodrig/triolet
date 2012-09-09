@@ -33,6 +33,7 @@ extern data owned core.internal.structures.repr_Box;
 extern data owned core.internal.structures.repr_Stream;
 extern data owned core.internal.structures.repr_EmptyReference;
 extern data owned core.internal.structures.repr_int;
+extern data owned core.internal.structures.repr_uint;
 extern data owned core.internal.structures.repr_float;
 extern data owned core.internal.structures.repr_bool;
 extern data owned core.internal.structures.repr_NoneType;

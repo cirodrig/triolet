@@ -534,6 +534,7 @@ builtinVariableNames =
   , "min_int"
   , "max_int"
   , "max_uint"
+  , "uint_to_int"
   , "or"
   , "and"
   , "not"

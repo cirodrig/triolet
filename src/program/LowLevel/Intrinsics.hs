@@ -42,6 +42,8 @@ lowerIntrinsicOp v
          binary_int (PrimOrZ Signed S32))
       , (coreBuiltin The_oper_BITWISEXOR,
          binary_int (PrimXorZ Signed S32))
+      , (coreBuiltin The_uint_to_int,
+         uint_to_int)
       , (coreBuiltin The_lshift,
          binary_int (PrimShiftL Signed S32))
       , (coreBuiltin The_rshift,
@@ -145,6 +147,14 @@ float_to_int round_mode =
     int_type = PrimType (IntType Signed S32)
     float_type = PrimType (FloatType S32)
   
+-- | Cast unsigned to signed int
+uint_to_int =
+  genLambdaOrCall [uint_type] [int_type] $ \params -> do
+    emitAtom [int_type] $ PrimA (PrimCastZ Unsigned Signed S32) params
+  where
+    int_type = PrimType (IntType Signed S32)
+    uint_type = PrimType (IntType Unsigned S32)
+
 id_float, id_int, empty_eff_tok, dead_reference, dead_box, proof_object ::
   (Monad m, Supplies m (Ident Var)) => [Val] -> Gen m [Val]
 

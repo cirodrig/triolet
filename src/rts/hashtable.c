@@ -1,4 +1,4 @@
-
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -69,10 +69,15 @@ void triolet_hash_build(int32_t hash_size,
   memset(collision_table, 0, hash_size*sizeof(uint32_t));
 
   int i;
+  //printf("Build\n");
   for(i = 0; i < num_keys; i++)
   {
+    //printf("%d ", key_array[i]);
     triolet_hash_insert(hash_size, hash_array, collision_table, key_array[i]);
   }
+  //printf("\n");
+  //for (i = 0; i < hash_size; i++)
+  //  printf("%d\n", hash_array[i]);
 }
 
 uint32_t triolet_hash_lookup(int32_t hash_size,

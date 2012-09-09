@@ -1723,15 +1723,20 @@ intsetElements (set : intset) -> Stream1 (Stored int) attribute(inline) =
   (Sequence_generate_bind @(Stored int) dom
    (\ (si : Stored int) -> Sequence (Stored int).
 
-     -- Get the i_th list element
-     -- Skip if its value is -1
      case si of stored @int (i : int).
-     case subscript @N @(Stored int) (reprSizeAlign @(Stored int) repr_int)
-          keys_array i
-       of stored @int (key : int).
-     if key ==# -1
-     then Sequence_empty @(Stored int) repr_int
-     else Sequence_return @(Stored int) repr_int (stored @int key)));
+
+     -- Check inds_array to determine if the i_th element of keys_array
+     -- holds a key
+     case subscript @N @(Stored uint)
+          (reprSizeAlign @(Stored uint) repr_uint) inds_array i
+       of stored @uint (indirection : uint).
+
+     if oper_BITWISEAND (uint_to_int indirection) 1 ==# 1
+     then case subscript @N @(Stored int)
+          (reprSizeAlign @(Stored int) repr_int) keys_array i
+            of stored @int (key : int).
+          Sequence_return @(Stored int) repr_int (stored @int key)
+     else Sequence_empty @(Stored int) repr_int));
 
 -------------------------------------------------------------------------------
 -- Trees of lists
@@ -4760,6 +4765,8 @@ max_int : int -> int -> int;
 
 min_uint : uint -> uint -> uint;
 max_uint : uint -> uint -> uint;
+
+uint_to_int : uint -> int;
 
 floor : float -> int;
 

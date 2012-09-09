@@ -468,6 +468,8 @@ builtinGlobals =
      Right [| SystemF.coreBuiltin SystemF.The_repr_EffTok |])
   , (CoreName module_structures "repr_int",
      Right [| coreBuiltin (SystemF.The_repr_int) |] )
+  , (CoreName module_structures "repr_uint",
+     Right [| coreBuiltin (SystemF.The_repr_uint) |] )
   , (CoreName module_structures "repr_float",
      Right [| coreBuiltin (SystemF.The_repr_float) |] )
   , (CoreName module_structures "repr_bool",
