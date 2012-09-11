@@ -272,9 +272,14 @@ triolet_C_blocked_reduceip(void *data_value, TrioletInt count)
 {
   BlockedReduceIPPlan plan = {data_value};
 
-  // Set grain size to (count / N_PROCESSORS / 4)
-  int grain_size = count / (tbb::task_scheduler_init::default_num_threads() * 4);
-  if (grain_size == 0) grain_size = 1;
+  // Set grain size to (count / N_PROCESSORS / 2)
+  // Rounding up
+  int grain_size;
+  {
+    int divisor = 2 * tbb::task_scheduler_init::default_num_threads();
+    grain_size = (count + divisor - 1) / divisor;
+    if (grain_size == 0) grain_size = 1;
+  }
 
   // Use TBB's parallel_reduce template
   tbb::blocked_range<int> range(0, count, grain_size);
