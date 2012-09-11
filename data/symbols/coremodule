@@ -975,6 +975,49 @@ comapScatterIndex @(r i1 i2 : bare)
   updater2 combiner finalizer update_f2 init_f;
 
 
+blistScatter @(a i : bare)
+  (repr_i : Repr i)
+  (repr_a : Repr a)
+  (dom : list_dim)
+  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  -> Scatter (blist a) (Tuple2 (Stored int) i) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  let type i2 = Tuple2 (Stored int) i in
+
+  -- Use listScatter
+  case listScatter @boxed_a @i
+       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+    mk_scatter @(list boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
+    (repr_s : Repr s)
+    (initializer : iniF -> OutPtr s -> EffTok)
+    (updater : updF -> i2 -> EffTok -> OutPtr s -> EffTok)
+    (combiner : s -> s -> Init s)
+    (finalizer : UpdateInPlaceFinalizer s (list boxed_a))
+    (make_updater : i2 -> updF)
+    (make_init : iniF).
+
+  -- Wrap with blist
+  let repr_list_a : Repr (list boxed_a) =
+        repr_list @boxed_a (repr_StuckRef @(BoxedType a)) in
+
+  let blist_finalizer : UpdateInPlaceFinalizer s (blist a) =
+        case finalizer of {
+          mutateInPlace @s @(list boxed_a)
+          (co : coerce @bare s (list boxed_a)).
+            mutateAndCopy @s @(blist a)
+            (\ (x : s) -> Init (blist a).
+               make_blist @a
+               (copy @(list boxed_a) repr_list_a
+                (coerce @s @(list boxed_a) x)))
+        ; mutateAndCopy @s @(list boxed_a) (f : s -> Init (list boxed_a)).
+            mutateAndCopy @s @(blist a)
+            (\ (x : s) -> Init (blist a). make_blist @a (f x))
+        } in
+
+  mk_scatter @(blist a) @i2 @s @iniF @updF repr_s initializer updater combiner
+  blist_finalizer make_updater make_init;
+
+
 listScatter @(e i : bare)
   (repr_i : Repr i)
   (repr_e : Repr e)
@@ -2652,11 +2695,111 @@ TraversableDict_barray2_traverse
      convertToBare @a repr val ret);
 
 
-TraversableDict_barray3_build :
-  (a : bare) -> Repr a -> Stream dim3 a -> Init (barray3 a);
+TraversableDict_barray3_build
+  @(a : bare) (repr : Repr a) (s : view dim3 a) (ret : OutPtr (barray3 a))
+  -> Store attribute(inline, inline_dimensionality) =
 
-TraversableDict_barray3_traverse :
-  (a : bare) -> Repr a -> barray3 a -> Stream dim3 a;
+  let type boxed_a = StuckRef (BoxedType a) in
+  let brepr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  case s of mk_view @dim3 @a (dom : dim3) (f : index dim3 -> Init a).
+  case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
+
+  -- Compute array parameters
+  dim1ToArrayDesc @(barray3 a) dom_z
+  (\ @(L : intindex)
+     (lb_z : int) (stride_z : int) (size_z : FIInt L) (ret : OutPtr (barray3 a))
+     -> Store.
+     dim1ToArrayDesc @(barray3 a) dom_y
+     (\ @(M : intindex)
+        (lb_y : int) (stride_y : int) (size_y : FIInt M) (ret : OutPtr (barray3 a))
+        -> Store.
+        dim1ToArrayDesc @(barray3 a) dom_x
+        (\ @(N : intindex)
+           (lb_x : int) (stride_x : int) (size_x : FIInt N) (ret : OutPtr (barray3 a))
+           -> Store.
+
+           let linear_map_z : LinearMap = linearMap stride_z lb_z in
+           let linear_map_y : LinearMap = linearMap stride_y lb_y in
+           let linear_map_x : LinearMap = linearMap stride_x lb_x in
+           let type out_arr = arr L (arr M (arr N boxed_a)) in
+           let type Sint = Stored int in
+
+           mk_barray3 @a
+           (mk_array3 @boxed_a @L @M @N
+                      lb_z stride_z size_z
+                      lb_y stride_y size_y
+                      lb_x stride_x size_x
+            (stuckBox @out_arr
+             (arr3D_build @L @M @N @boxed_a brepr size_z size_y size_x
+              (\ (z : int) (y : int) (x : int) (ret : OutPtr boxed_a) -> Store.
+                 let logical_z : int = evalLM z linear_map_z in
+                 let logical_y : int = evalLM y linear_map_y in
+                 let logical_x : int = evalLM x linear_map_x in
+                 case boxed @(Tuple3 Sint Sint Sint)
+                      (tuple3 @Sint @Sint @Sint
+                       (stored @int logical_z)
+                       (stored @int logical_y) (stored @int logical_x)) of
+                   boxed @(Tuple3 Sint Sint Sint)
+                         (ix : Tuple3 Sint Sint Sint).
+
+                 -- Evaluate the function and box its result
+                 stuckRef @(BoxedType a)
+                 (convertToBoxed @a repr (f ix))
+                 ret))))
+            ret)
+        ret)
+     ret)
+  ret;
+
+
+TraversableDict_barray3_traverse
+  @(a : bare) (repr : Repr a) (ar : barray3 a)
+  -> view dim3 a attribute(inline) =
+  let type boxed_a = StuckRef (BoxedType a) in
+  case ar of mk_barray3 @a (ar2 : array3 boxed_a).
+  case ar2 of
+    mk_array3 @boxed_a @(L M N : intindex)
+    (lo_z : int) (stride_z : int) (size_z : FIInt L)
+    (lo_y : int) (stride_y : int) (size_y : FIInt M)
+    (lo_x : int) (stride_x : int) (size_x : FIInt N)
+    (ayref : StuckBox (arr L (arr M (arr N boxed_a)))).
+  let type arr1d = arr N boxed_a in
+  let type arr2d = arr M arr1d in
+  let type arr3d = arr L arr2d in
+
+  case ayref of stuckBox @arr3d (ay : arr3d).
+
+  let linear_map_z : LinearMap = linearMap stride_z lo_z in
+  let linear_map_y : LinearMap = linearMap stride_y lo_y in
+  let linear_map_x : LinearMap = linearMap stride_x lo_x in
+  case size_y of fiInt @M (height : int).
+  case size_x of fiInt @N (width : int).
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let row_repr : Repr arr1d = repr_arr @N @boxed_a size_x boxed_repr in
+  let plane_repr : Repr arr2d = repr_arr @M @arr1d size_y row_repr in
+  let type Sint = Stored int in
+
+  view_generate @dim3 ShapeDict_dim3 @a repr
+  (mk_dim3 (arrayDescToDim1 @L lo_z stride_z size_z)
+           (arrayDescToDim1 @M lo_y stride_y size_y)
+           (arrayDescToDim1 @N lo_x stride_x size_x))
+  (\ (ix : Tuple3 Sint Sint Sint) (ret : OutPtr a) -> Store.
+     case ix of tuple3 @Sint @Sint @Sint
+                (ix_z : Sint) (ix_y : Sint) (ix_x : Sint).
+     case ix_z of stored @int (ix_z_i : int).
+     case ix_y of stored @int (ix_y_i : int).
+     case ix_x of stored @int (ix_x_i : int).
+     let real_ix_z : int = invEvalLM ix_z_i linear_map_z in
+     let real_ix_y : int = invEvalLM ix_y_i linear_map_y in
+     let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
+     case subscript @N @boxed_a (reprSizeAlign @boxed_a boxed_repr)
+          (subscript @M @arr1d (reprSizeAlign @arr1d row_repr)
+           (subscript @L @arr2d (reprSizeAlign @arr2d plane_repr) ay real_ix_z)
+           real_ix_y)
+          real_ix_x of
+      stuckRef @(BoxedType a) (val : BoxedType a).
+     convertToBare @a repr val ret);
+
 
 -------------------------------------------------------------------------------
 -- Shape dictionaries
@@ -8378,6 +8521,36 @@ stencil2D @(t : bare -> bare) @(a b : bare)
            ret) in
 
   TraversableDict_array2_build @b repr_b output_view ret;
+
+
+boxedStencil3D @(t : bare -> bare) @(a b : bare)
+  (indexable : IndexableDict t)
+  (is_3d : coerce @box (shape t) dim3)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (output_dom : dim3)
+  (stencil_dom : dim3)
+  (gen_f : view dim3 a -> Init b)
+  (input : t a)
+  (ret: OutPtr (barray3 b))
+  -> Store
+  attribute(inline, inline_dimensionality) =
+
+  -- This function is defined in terms of stencil3D.
+  let type boxed_b = StuckRef (BoxedType b) in
+  let repr_boxed_b : Repr boxed_b = repr_StuckRef @(BoxedType b) in
+
+  mk_barray3 @b
+  (stencil3D @t @a @(StuckRef (BoxedType b))
+   indexable is_3d repr_a repr_boxed_b
+   output_dom stencil_dom
+   (\ (vw : view dim3 a) (ret : OutPtr boxed_b) -> Store.
+
+      -- Call 'gen_f' and re-box the result
+      stuckRef @(BoxedType b)
+      (convertToBoxed @b repr_b (gen_f vw)) ret)
+   input)
+  ret;
 
 
 stencil3D @(t : bare -> bare) @(a b : bare)

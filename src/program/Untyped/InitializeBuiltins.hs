@@ -1590,6 +1590,10 @@ mkBoxedStencil2DType =
 mkStencil3DType =
   mkStencilType (ConTy $ tiBuiltin the_con_dim3) (ConTy $ tiBuiltin the_con_array3)
   
+mkBoxedStencil3DType =
+  mkStencilType (ConTy $ tiBuiltin the_con_dim3)
+                (ConTy $ tiBuiltin the_con_barray3)
+
 mkStencilType domain_type array_type =
   forallType [Star :-> Star, Star, Star] $ \[t, a, b] ->
   let tT = ConTy t
@@ -1737,6 +1741,13 @@ mkListScatterType =
   (ConTy $ tiBuiltin the_con_list)
   (ConTy $ tiBuiltin the_con_int)
   id
+
+mkBListScatterType =
+  mkArrayScatterType
+  (ConTy $ tiBuiltin the_con_list_dim)
+  (ConTy $ tiBuiltin the_con_blist)
+  (ConTy $ tiBuiltin the_con_int)
+  (ConTy (tiBuiltin the_con_StuckRef) @@)
 
 mkArray1ScatterType =
   mkArrayScatterType
@@ -2104,6 +2115,9 @@ initializeTIBuiltins = do
               ("stencil3D", [| mkStencil3DType |]
               , [| coreBuiltin SystemF.The_stencil3D |]
               ),              
+              ("boxedStencil3D", [| mkBoxedStencil3DType |]
+              , [| coreBuiltin SystemF.The_boxedStencil3D |]
+              ),              
               ("extend3D", [| mkExtend3DType |]
               , [| coreBuiltin SystemF.The_extend3D |]
               ),              
@@ -2160,6 +2174,9 @@ initializeTIBuiltins = do
               ),
               ("listScatter", [| mkListScatterType |]
               , [| coreBuiltin SystemF.The_listScatter |]
+              ),
+              ("blistScatter", [| mkBListScatterType |]
+              , [| coreBuiltin SystemF.The_blistScatter |]
               ),
               ("array1Scatter", [| mkArray1ScatterType |]
               , [| coreBuiltin SystemF.The_array1Scatter |]
