@@ -281,7 +281,7 @@ procedure triolet_Array3_initialize
    int x_min, int x_stride, int x_size,
    uint elt_size, uint elt_align, pointer ret) -> () {
   typedef elt_type = bytes(value elt_size, value elt_align);
-  typedef array_type = array(value y_size, array(value x_size, elt_type));
+  typedef array_type = array(value z_size, array(value y_size, array(value x_size, elt_type)));
 
   ret @! Array3.first_z = z_min;
   ret @! Array3.stride_z = z_stride;
