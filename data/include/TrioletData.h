@@ -592,13 +592,14 @@ namespace Triolet {
       Tuple<T1, T2, T3, T4>(TriBarePtr _bare_data) : BareType(_bare_data) {}
       
       // Static Member Functions
-      static unsigned int 
+      static unsigned int
       getSize() {
-        int t1Size = addPadding<T2_Bare>(T1_Bare::getSize());
-        int t2Size = addPadding<T3_Bare>(T2_Bare::getSize());
-        int t3Size = addPadding<T4_Bare>(T3_Bare::getSize());
-        int t4Size = T4_Bare::getSize();
-        return t1Size + t2Size + t3Size + t4Size;
+        int offset = 0;
+        offset = allocateObject<T1_Bare>(offset);
+        offset = allocateObject<T2_Bare>(offset);
+        offset = allocateObject<T3_Bare>(offset);
+        offset = allocateObject<T4_Bare>(offset);
+        return offset;
       }
       
       static unsigned int 
@@ -656,57 +657,81 @@ namespace Triolet {
     template<typename T1, typename T2, typename T3, typename T4>
   struct get_return_type<1, T1, T2, T3, T4> {
     typedef typename AsBareType<T2>::type type;
+    typedef typename AsBareType<T1>::type T1_Bare;
+    typedef typename AsBareType<T2>::type T2_Bare;
+    typedef typename AsBareType<T3>::type T3_Bare;
+    typedef typename AsBareType<T4>::type T4_Bare;
 
     static type 
     get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      return type(tuple->getBareData() + t1Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = addPadding<T2_Bare>(offset);
+      return type(tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      return Incomplete<type>(incompleteTuple->getObject() + t1Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = addPadding<T2_Bare>(offset);
+      return Incomplete<type>(incompleteTuple->getObject() + offset);
     }
   };
   
     template<typename T1, typename T2, typename T3, typename T4>
   struct get_return_type<2, T1, T2, T3, T4> {
     typedef typename AsBareType<T3>::type type;
+    typedef typename AsBareType<T1>::type T1_Bare;
+    typedef typename AsBareType<T2>::type T2_Bare;
+    typedef typename AsBareType<T3>::type T3_Bare;
+    typedef typename AsBareType<T4>::type T4_Bare;
 
     static type 
     get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
-      return type(tuple->getBareData() + t1Size + t2Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = allocateObject<T2_Bare>(offset);
+      offset = addPadding<T3_Bare>(offset);
+      return type(tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
-      return Incomplete<type>(incompleteTuple->getObject() + t1Size + t2Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = allocateObject<T2_Bare>(offset);
+      offset = addPadding<T3_Bare>(offset);
+      return Incomplete<type>(incompleteTuple->getObject() + offset);
     }
   };
 
     template<typename T1, typename T2, typename T3, typename T4>
   struct get_return_type<3, T1, T2, T3, T4> {
     typedef typename AsBareType<T4>::type type;
+    typedef typename AsBareType<T1>::type T1_Bare;
+    typedef typename AsBareType<T2>::type T2_Bare;
+    typedef typename AsBareType<T3>::type T3_Bare;
+    typedef typename AsBareType<T4>::type T4_Bare;
 
     static type 
     get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
-      int t3Size = addPadding< typename AsBareType<T4>::type >(AsBareType<T3>::type::getSize());
-      return type(tuple->getBareData() + t1Size + t2Size + t3Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = allocateObject<T2_Bare>(offset);
+      offset = allocateObject<T3_Bare>(offset);
+      offset = addPadding<T3_Bare>(offset);
+      return type(tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
-      int t3Size = addPadding< typename AsBareType<T4>::type >(AsBareType<T3>::type::getSize());
-      return Incomplete<type>(incompleteTuple->getObject() + t1Size + t2Size + t3Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = allocateObject<T2_Bare>(offset);
+      offset = allocateObject<T3_Bare>(offset);
+      offset = addPadding<T3_Bare>(offset);
+      return Incomplete<type>(incompleteTuple->getObject() + offset);
     }
   };
 
@@ -811,36 +836,50 @@ namespace Triolet {
     template<typename T1, typename T2, typename T3>
   struct get_return_type<1, T1, T2, T3, void> {
     typedef typename AsBareType<T2>::type type;
+    typedef typename AsBareType<T1>::type T1_Bare;
+    typedef typename AsBareType<T2>::type T2_Bare;
+    typedef typename AsBareType<T3>::type T3_Bare;
 
     static type 
     get_return_object(Tuple<T1, T2, T3>* tuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      return type(tuple->getBareData() + t1Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = addPadding<T2_Bare>(offset);
+      return type(tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3> >* incompleteTuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      return Incomplete<type>(incompleteTuple->getObject() + t1Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = addPadding<T2_Bare>(offset);
+      return Incomplete<type>(incompleteTuple->getObject() + offset);
     }
   };
   
     template<typename T1, typename T2, typename T3>
   struct get_return_type<2, T1, T2, T3, void> {
     typedef typename AsBareType<T3>::type type;
+    typedef typename AsBareType<T1>::type T1_Bare;
+    typedef typename AsBareType<T2>::type T2_Bare;
+    typedef typename AsBareType<T3>::type T3_Bare;
 
     static type 
     get_return_object(Tuple<T1, T2, T3>* tuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
-      return type(tuple->getBareData() + t1Size + t2Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = allocateObject<T2_Bare>(offset);
+      offset = addPadding<T3_Bare>(offset);
+      return type(tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3> >* incompleteTuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      int t2Size = addPadding< typename AsBareType<T3>::type >(AsBareType<T2>::type::getSize());
-      return Incomplete<type>(incompleteTuple->getObject() + t1Size + t2Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = allocateObject<T2_Bare>(offset);
+      offset = addPadding<T3_Bare>(offset);
+      return Incomplete<type>(incompleteTuple->getObject() + offset);
     }
   };
 
@@ -936,17 +975,23 @@ namespace Triolet {
     template<typename T1, typename T2>
   struct get_return_type<1, T1, T2, void, void> {
     typedef typename AsBareType<T2>::type type;
+    typedef typename AsBareType<T1>::type T1_Bare;
+    typedef typename AsBareType<T2>::type T2_Bare;
 
     static type 
     get_return_object(Tuple<T1, T2>* tuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      return type(tuple->getBareData() + t1Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = addPadding<T2_Bare>(offset);
+      return type(tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2> >* incompleteTuple) {
-      int t1Size = addPadding< typename AsBareType<T2>::type >(AsBareType<T1>::type::getSize());
-      return Incomplete<type>(incompleteTuple->getObject() + t1Size);
+      int offset = 0;
+      offset = allocateObject<T1_Bare>(offset);
+      offset = addPadding<T2_Bare>(offset);
+      return Incomplete<type>(incompleteTuple->getObject() + offset);
     }
   };
 
