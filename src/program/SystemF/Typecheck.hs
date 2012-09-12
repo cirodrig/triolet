@@ -291,16 +291,16 @@ instantiatePatternType :: SourcePos -- ^ Position where pattern was mentioned
                        -> TCM ([Binder], [Type], Type)
                        -- ^ Compute field types and range type
 instantiatePatternType pos con_ty arg_vals ex_vars
-  | length (dataConPatternParams con_ty) /= length arg_vals =
+  | length (dataConTyParams con_ty) /= length arg_vals =
       internalError $ "instantiatePatternType: Wrong number of type parameters at " ++ show pos
-  | length (dataConPatternExTypes con_ty) /= length ex_vars =
+  | length (dataConExTypes con_ty) /= length ex_vars =
       internalError $ "instantiatePatternType: Wrong number of existential variables at " ++ show pos
   | otherwise = do
       -- Check argument types
-      mapM_ check_argument_type $ zip3 [1..] (dataConPatternParams con_ty) arg_vals
+      mapM_ check_argument_type $ zip3 [1..] (dataConTyParams con_ty) arg_vals
       
       -- Check existential types
-      mapM_ check_ex_pattern $ zip3 [1..] (dataConPatternExTypes con_ty) ex_vars
+      mapM_ check_ex_pattern $ zip3 [1..] (dataConExTypes con_ty) ex_vars
 
       -- Instantiate the type
       instantiateDataConType con_ty (map fst arg_vals) (map fst ex_vars)

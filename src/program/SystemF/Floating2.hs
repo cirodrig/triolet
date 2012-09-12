@@ -128,7 +128,7 @@ isFloatableCon (TupleCon _) = return False
 isFloatableDataType tenv data_type con_type compute_field_types
   | dataTypeIsAbstract data_type = return False
   | not_length_1 (dataTypeDataConstructors data_type) = return False
-  | not_length_1 (dataConPatternArgs con_type) = return False
+  | not_length_1 (dataConFields con_type) = return False
   | otherwise = do
       -- Get the type of the data constructor's single field
       [field_type] <- compute_field_types

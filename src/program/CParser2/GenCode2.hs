@@ -112,14 +112,17 @@ instance HasLetSynonym TransT where
 
 -- | Translate a global type-related declaration.
 declKind :: LDecl Resolved -> TransT UpdateTypeEnv
-declKind ldecl = do
-  let Decl ident ent = unLoc ldecl
+declKind (L loc (Decl ident ent)) = do
   let make_update kind =
         return $ UpdateTypeEnv $ insertType (toVar ident) kind
   case ent of
-    TypeEnt kind     -> typeExpr kind >>= make_update
-    DataEnt kind _ _ -> typeExpr kind >>= make_update
-    _                -> return mempty
+    TypeEnt   kind           -> typeExpr kind >>= make_update
+    DataEnt binders kind _ _ -> typeExpr (fun_kind binders kind) >>= make_update
+    _                        -> return mempty
+  where
+    fun_kind bs k = foldr fun_t k bs
+      where
+        fun_t (Domain _ dom) rng = L loc (dom `FunT` rng)
 
 -- | Create a kind environment from the given declarations
 declKindEnvironment :: [LDecl Resolved] -> TransT UpdateTypeEnv
@@ -197,15 +200,13 @@ typeExpr lty =
        rng' <- typeExpr rng
        return $ Type.typeApp (Type.CoT kind') [dom', rng']
 
-translateDataConDecl :: Var -> DataConDecl Resolved -> TransT DataConType
+translateDataConDecl :: Var -> DataConDecl Resolved -> TransT DataConDescr
 translateDataConDecl data_type_con decl =
-  domains (dconParams decl) $ \params ->
   domains (dconExTypes decl) $ \ex_types -> do
     args_and_kinds <- mapM typeAndKind $ dconArgs decl
-    let (args, arg_kinds) =
-          unzip [(t, Type.toBaseKind k) | (t, k) <- args_and_kinds]
+    let fields = [(t, Type.toBaseKind k) | (t, k) <- args_and_kinds]
         dcon_var = toVar $ dconVar decl
-    return (DataConType params ex_types args arg_kinds dcon_var data_type_con)
+    return (DataConDescr dcon_var ex_types fields)
 
 varEnt :: Var -> LType Resolved -> [Attribute] -> TransT UpdateTypeEnv
 varEnt ident ty attrs = do
@@ -224,13 +225,16 @@ typeEnt ident ty = do
                                of Just l -> labelLocalNameAsString l
                     in Map.lookup name builtinTypeFunctions
 
-dataEnt core_name ty data_cons attrs = do
+dataEnt core_name dom ty data_cons attrs = do
   kind <- typeExpr ty
   let abstract = AbstractAttr `elem` attrs
       algebraic = not $ NonalgebraicAttr `elem` attrs
-  data_con_descrs <- mapM (translateDataConDecl core_name . unLoc) data_cons
-  let descr = DataTypeDescr core_name kind data_con_descrs abstract algebraic
-  return $ UpdateTypeEnv (insertDataType descr)
+
+  domains dom $ \params -> do
+    data_con_descrs <-
+      mapM (translateDataConDecl core_name . unLoc) data_cons
+    let descr = DataTypeDescr core_name params (Type.toBaseKind kind) data_con_descrs abstract algebraic
+    return $ UpdateTypeEnv (insertDataType descr)
 
 -- | Translate a global type-related declaration.
 typeLevelDecl :: LDecl Resolved -> TransT UpdateTypeEnv
@@ -242,8 +246,8 @@ typeLevelDecl ldecl = do
       varEnt core_name ty attrs
     TypeEnt ty ->
       typeEnt core_name ty
-    DataEnt ty data_cons attrs ->
-      dataEnt core_name ty data_cons attrs
+    DataEnt dom ty data_cons attrs ->
+      dataEnt core_name dom ty data_cons attrs
 
     -- Translate only the types of functions and constants
     FunEnt (L pos f) attrs ->
@@ -482,9 +486,9 @@ translateCon inf type_con data_con op ty_args args
         else translateAppWithOperator inf con_exp [] other_args
     
   where
-    n_ty_args = length $ dataConPatternParams data_con
-    n_ex_types = length $ dataConPatternExTypes data_con
-    n_args = length $ dataConPatternArgs data_con
+    n_ty_args = length $ dataConTyParams data_con
+    n_ex_types = length $ dataConExTypes data_con
+    n_args = length $ dataConFields data_con
 
 
 uncurryTypeApp e ty_args =
@@ -565,7 +569,7 @@ lDeclVariables (L _ (Decl ident ent)) = ident : subordinates
   where
     subordinates =
       case ent
-      of DataEnt _ decls _ -> [dconVar d | L _ d <- decls]
+      of DataEnt _ _ decls _ -> [dconVar d | L _ d <- decls]
          _ -> []
 
 -- | Create a lookup table of variable names

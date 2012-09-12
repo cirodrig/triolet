@@ -8,7 +8,6 @@ module Type.Eval
         typeOfTypeApp,
         AppResult(..),
         typeOfApp,
-        dataConFieldKinds,
         unboxedTupleTyCon,
         unboxedTupleType,
         instantiateDataConType,
@@ -195,16 +194,6 @@ typeOfApp op_type arg_type = do
         else return $ TypeMismatchErr dom arg_type
     _ -> return NotAFunctionErr
 
--- | Get the kinds of a data constructor's fields.
-dataConFieldKinds :: TypeEnv -> DataConType -> [BaseKind]
-dataConFieldKinds tenv dcon_type =
-  let local_tenv =
-        foldr insert_binder_type tenv $
-        dataConPatternParams dcon_type ++ dataConPatternExTypes dcon_type
-        where
-          insert_binder_type (v ::: t) e = insertType v t e
-  in [toBaseKind $ typeKind local_tenv t | t <- dataConPatternArgs dcon_type]
-
 -- | Create an unboxed tuple type constructor that can hold 
 --   the given sequence of types.
 unboxedTupleTyCon :: TypeEnv -> [Type] -> Type
@@ -240,25 +229,25 @@ instantiateDataConType :: EvalMonad m =>
                                       -- instantiate to
                        -> m ([Binder], [Type], Type)
 instantiateDataConType con_ty arg_vals ex_vars
-  | length (dataConPatternParams con_ty) /= length arg_vals =
+  | length (dataConTyParams con_ty) /= length arg_vals =
       internalError "instantiateDataConType: Wrong number of type parameters"
-  | length (dataConPatternExTypes con_ty) /= length ex_vars =
+  | length (dataConExTypes con_ty) /= length ex_vars =
       internalError "instantiateDataConType: Wrong number of existential variables"
   | otherwise = do
       let -- Assign parameters
           subst1 = instantiate_arguments $
-                   zip (dataConPatternParams con_ty) arg_vals
+                   zip (dataConTyParams con_ty) arg_vals
 
           -- Rename existential types, if new variables are given
           (subst2, ex_params) = instantiate_exvars subst1 $
-                                zip (dataConPatternExTypes con_ty) ex_vars
+                                zip (dataConExTypes con_ty) ex_vars
 
       -- Apply substitution to range type.  Use subst1 because existential
       -- variables cannot appear in the range.
       range <- substitute subst1 $ dataConPatternRange con_ty
 
       -- Apply the substitution to field and range types
-      fields <- mapM (substitute subst2) $ dataConPatternArgs con_ty
+      fields <- mapM (substitute subst2) $ dataConFieldTypes con_ty
       return (ex_params, fields, range)
   where
     -- Instantiate the type by substituing arguments for the constructor's
@@ -285,7 +274,7 @@ instantiateDataConTypeWithFreshVariables ::
  -> [Type]      -- ^ Type parameters
  -> m ([Binder], [Type], Type)
 instantiateDataConTypeWithFreshVariables con_ty arg_vals = do
-  pattern_vars <- replicateM (length $ dataConPatternExTypes con_ty) $
+  pattern_vars <- replicateM (length $ dataConExTypes con_ty) $
                   newAnonymousVar TypeLevel
   instantiateDataConType con_ty arg_vals pattern_vars
 
@@ -301,18 +290,18 @@ instantiateDataConTypeWithExistentials ::
  -> [Type]      -- ^ Type parameters and existential types
  -> m ([Type], Type)
 instantiateDataConTypeWithExistentials con_ty arg_vals
-  | length (dataConPatternParams con_ty) +
-    length (dataConPatternExTypes con_ty) /= length arg_vals =
+  | length (dataConTyParams con_ty) +
+    length (dataConExTypes con_ty) /= length arg_vals =
       internalError $ "instantiateDataConTypeWithExistentials: " ++
                       "Wrong number of type parameters"
   | otherwise = do
       let -- Assign parameters and existential types
           type_params =
-            dataConPatternParams con_ty ++ dataConPatternExTypes con_ty
+            dataConTyParams con_ty ++ dataConExTypes con_ty
           subst = instantiate_arguments $ zip type_params arg_vals
 
       -- Apply the substitution to field and range types
-      fields <- mapM (substitute subst) $ dataConPatternArgs con_ty
+      fields <- mapM (substitute subst) $ dataConFieldTypes con_ty
       range <- substitute subst $ dataConPatternRange con_ty
       return (fields, range)
   where

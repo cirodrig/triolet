@@ -138,8 +138,8 @@ typeInferConE inf con@(VarCon op ty_args ex_types) args = do
   dcon_type <- tcLookupDataCon op
   
   -- Check type arguments
-  check_type_args 1 (dataConPatternParams dcon_type) ty_args
-  check_type_args (1 + length ty_args) (dataConPatternExTypes dcon_type)
+  check_type_args 1 (dataConTyParams dcon_type) ty_args
+  check_type_args (1 + length ty_args) (dataConExTypes dcon_type)
     ex_types
 
   -- Get the argument types

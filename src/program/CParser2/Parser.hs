@@ -468,19 +468,19 @@ pDataDecl :: P PLDecl
 pDataDecl = located $ do
   match DataTok
   tycon <- identifier
+  params <- parameters
   match ColonTok
   kind <- pType
   attrs <- attributeList
   datacons <- braces $ pDataConDecl `sepEndBy` match SemiTok
-  return $ Decl tycon $ DataEnt kind datacons attrs
+  return $ Decl tycon $ DataEnt params kind datacons attrs
   
 pDataConDecl :: P (LDataConDecl Parsed)
 pDataConDecl = located $ do
   datacon <- identifier
-  (concat -> params) <- commaList pDomains
   (concat -> ex_types) <- commaList pDomains
   args <- commaList pType
-  return $ DataConDecl datacon params ex_types args
+  return $ DataConDecl datacon ex_types args
 
 pTypeDecl :: P PLDecl
 pTypeDecl = located $ do

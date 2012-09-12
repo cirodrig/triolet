@@ -194,8 +194,8 @@ funType pos f =
 data DataConDecl ix =
   DataConDecl
   { dconVar :: Identifier ix
-    -- | Type parameters.
-  , dconParams :: [Domain ix]
+--    -- | Type parameters.
+--  , dconParams :: [Domain ix]
     -- | Existential types.
   , dconExTypes :: [Domain ix]
     -- | Fields
@@ -217,7 +217,7 @@ data Entity ix =
     -- | A type declaration
   | TypeEnt (LType ix)
     -- | A data type definition
-  | DataEnt (LType ix) [LDataConDecl ix] [Attribute]
+  | DataEnt [Domain ix] (LType ix) [LDataConDecl ix] [Attribute]
     -- | A global constant definition
   | ConstEnt (LType ix) (LExp ix) [Attribute]
     -- | A global function

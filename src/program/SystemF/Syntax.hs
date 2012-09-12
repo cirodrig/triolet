@@ -372,7 +372,7 @@ conTypes t = conTyArgs t ++ conExTypes t
 conFieldKinds :: TypeEnv -> ConInst -> [BaseKind]
 conFieldKinds tenv (VarCon op _ _) =
   let Just data_con = lookupDataCon op tenv
-  in dataConFieldKinds tenv data_con
+  in dataConFieldKinds data_con
 
 conFieldKinds tenv (TupleCon types) =
   map (toBaseKind . typeKind tenv) types
@@ -412,7 +412,7 @@ deConExTypes (TupleDeCon _)    = []
 deConFieldKinds :: TypeEnv -> DeConInst -> [BaseKind]
 deConFieldKinds tenv (VarDeCon op _ _) =
   let Just data_con = lookupDataCon op tenv
-  in dataConFieldKinds tenv data_con
+  in dataConFieldKinds data_con
 
 deConFieldKinds tenv (TupleDeCon types) =
   map (toBaseKind . typeKind tenv) types

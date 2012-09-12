@@ -13,33 +13,33 @@ kind sideeffect;
 
 -- Data types
 
-data Stored : val -> bare
+data Stored (a : val) : bare
 {
-  stored (a : val) () (a);
+  stored () (a);
 };
 
-data Ref : box -> bare
+data Ref (a : box) : bare
 {
-  ref (a : box) () (a);
+  ref () (a);
 };
 
 -- A stuck reference is like a 'Ref' but doesn't get unwrapped
 -- by 'convertToBare'.
-data StuckRef : box -> bare
+data StuckRef (a : box) : bare
 {
-  stuckRef (a : box) () (a);
+  stuckRef () (a);
 };
 
-data Boxed : bare -> box
+data Boxed (a : bare) : box
 {
-  boxed (a : bare) () (a);
+  boxed () (a);
 };
 
 -- A stuck box is like a 'boxed' but doesn't get unwrapped
 -- by 'convertToBoxed'.
-data StuckBox : bare -> box
+data StuckBox (a : bare) : box
 {
-  stuckBox (a : bare) () (a);
+  stuckBox () (a);
 };
 
 -- An unspecified data type
@@ -48,14 +48,14 @@ data Any : box
 };
 
 -- A pointer used for initializing data
-data OutPtr : bare -> out
+data OutPtr (a : bare) : out
   attribute(abstract, nonalgebraic) {};
 
 -- A dummy value representing the effect of initializing an object
 data Store : val
   attribute(abstract)
 {
-  store () () ();
+  store () ();
 };
 
 -- Type functions to convert between representations
@@ -69,8 +69,8 @@ type Init : bare -> write;
 
 data bool : val
 {
-  True () () ();
-  False () () ();
+  True () ();
+  False () ();
 };
 
 data int : val attribute(abstract, nonalgebraic) {};
@@ -79,27 +79,27 @@ data float : val attribute(abstract, nonalgebraic) {};
 
 data NoneType : val
 {
-  None () () ();
+  None () ();
 };
 
-data Maybe : bare -> bare
+data Maybe (a : bare) : bare
 {
-  just (a : bare) () (a);
-  nothing (a : bare) () ();
+  just () (a);
+  nothing () ();
 };
 
 -- A value-form of 'Maybe'.  It must be used with statically known arguments.
-data MaybeVal : val -> val
+data MaybeVal (a : val) : val
 {
-  justVal (a : val) () (a);
-  nothingVal (a : val) () ();
+  justVal () (a);
+  nothingVal () ();
 };
 
 -- A linked list
-data llist : bare -> box
+data llist (a : bare) : box
 {
-  cons (a : bare) () (a, llist a);
-  nil (a : bare) () ();
+  cons () (a, llist a);
+  nil () ();
 };
 
 -- An integer interval, given by inclusive lower and exclusive upper bounds.
@@ -107,7 +107,7 @@ data llist : bare -> box
 -- 'Nothing' means that the interval is unbounded at that end.
 data Interval : val
 {
-  interval () () (MaybeVal int, MaybeVal int);
+  interval () (MaybeVal int, MaybeVal int);
 };
 
 -- | A linear map, representing the function y = s*x + a.
@@ -117,32 +117,32 @@ data Interval : val
 --   linear maps with positive strides.
 data LinearMap : val
 {
-  linearMap () () (int, int);
+  linearMap () (int, int);
 };
 
 -- A finite indexed integer 
-data FIInt : intindex -> val
+data FIInt (n : intindex) : val
 {
-  fiInt (n : intindex) () (int);
+  fiInt () (int);
 };
 
 -- An indexed singleton integer type.
 -- Invariant: The type index gives up the integer value.
-data IInt : intindex -> val
+data IInt (n : intindex) : val
 {
   -- Finite value
-  iInt (n : intindex) () (FIInt n);
+  iInt () (FIInt n);
 
   -- Positive and negative infinity
-  iPosInfty (n : intindex) () ();
-  iNegInfty (n : intindex) () ();
+  iPosInfty () ();
+  iNegInfty () ();
 };
 
 -- An existential indexed singleton integer type.
 -- We can convert int to this type.
 data SomeIInt : val
 {
-  someIInt () (n : intindex) (FIInt n);
+  someIInt (n : intindex) (FIInt n);
 };
 
 -- A user-specified slice.
@@ -151,68 +151,64 @@ data SomeIInt : val
 -- Otherwise it specifies a triple.
 data SliceObject : bare
 {
-  sliceObject () ()
+  sliceObject ()
   (MaybeVal int, MaybeVal int, MaybeVal (MaybeVal int));
 };
 
-data Complex : bare -> bare
+data Complex (a : bare) : bare
 {
-  complex (a : bare) () (a, a);
+  complex () (a, a);
 };
 
-data arr : intindex -> bare -> bare
+data arr (n : intindex) (a : bare) : bare
   attribute(abstract, nonalgebraic)
 {};
 
 data Tuple0 : bare
 {
-  tuple0 () () ();
+  tuple0 () ();
 };
 
-data Tuple1 : bare -> bare
+data Tuple1 (a : bare) : bare
 {
-  tuple1
-  (a : bare) () (a);
+  tuple1 () (a);
 };
 
 
-data Tuple2 : bare -> bare -> bare
+data Tuple2 (a b : bare) : bare
 {
-  tuple2
-  (a : bare, b : bare) () (a, b);
+  tuple2 () (a, b);
 };
 
-data Tuple3 : bare -> bare -> bare -> bare
+data Tuple3 (a b c : bare) : bare
 {
-  tuple3
-  (a : bare, b : bare, c : bare) () (a, b, c);
+  tuple3 () (a, b, c);
 };
 
-data Tuple4 : bare -> bare -> bare -> bare -> bare
+data Tuple4 (a b c d : bare) : bare
 {
-  tuple4
-  (a : bare, b : bare, c : bare, d : bare) () (a, b, c, d);
+  tuple4 () (a, b, c, d);
 };
 
 -- Dictionaries
 
-data SizeAlign : bare -> val
+data SizeAlign (a : bare) : val
 {
-  sizeAlign (a : bare) () (uint, uint);
+  sizeAlign () (uint, uint);
 };
 
-data SizeAlignVal : val -> val
+data SizeAlignVal (a : val) : val
 {
-  sizeAlignVal (a : val) () (uint, uint);
+  sizeAlignVal () (uint, uint);
 };
 
 -- This data declaration is not precisely correct:
 -- Size and alignment are not int, but rather unsigned int.
 -- The finalize function has a slightly different type.
-data Repr : bare -> box
+data Repr (a : bare) : box
   attribute(abstract)
 {
-  repr (a : bare) ()
+  repr ()
   (SizeAlign a,                 -- Size and alignment
    a -> Init a,		-- Copy
    Init a -> BoxedType a,	-- Convert to boxed
@@ -221,60 +217,53 @@ data Repr : bare -> box
                                 -- (True if an 'a' definitely doesn't contain pointers)
 };
 
-data EqDict : bare -> box
+data EqDict (a : bare) : box
 {
-  eqDict
-  (a : bare) ()
+  eqDict ()
   (a -> a -> bool, a -> a -> bool);
 };
 
-data OrdDict : bare -> box
+data OrdDict (a : bare) : box
 {
-  ordDict
-  (a : bare) ()
+  ordDict ()
   (EqDict a, a -> a -> bool, a -> a -> bool, a -> a -> bool, a -> a -> bool);
 };
 
-data AdditiveDict : bare -> box
+data AdditiveDict (a : bare) : box
 {
-  additiveDict
-  (a : bare) ()
+  additiveDict ()
   (a -> a -> Init a,
    a -> a -> Init a,
    a -> Init a,
    a);
 };
 
-data MultiplicativeDict : bare -> box
+data MultiplicativeDict (a : bare) : box
 {
-  multiplicativeDict
-  (a : bare) ()
+  multiplicativeDict ()
   (AdditiveDict a,
    a -> a -> Init a,
    int -> Init a,
    a);
 };
 
-data RemainderDict : bare -> box
+data RemainderDict (a : bare) : box
 {
-  remainderDict
-  (a : bare) ()
+  remainderDict ()
   (MultiplicativeDict a,
    a -> a -> int,
    a -> a -> Init a);
 };
 
-data FractionalDict : bare -> box
+data FractionalDict (a : bare) : box
 {
-  fractionalDict
-  (a : bare) ()
+  fractionalDict ()
   (MultiplicativeDict a, a -> a -> Init a);
 };
 
-data FloatingDict : bare -> box
+data FloatingDict (a : bare) : box
 {
-  floatingDict
-  (a : bare) ()
+  floatingDict ()
   (float -> Init a,
    a -> a -> Init a,
    a -> Init a,
@@ -286,10 +275,9 @@ data FloatingDict : bare -> box
    a);
 };
 
-data VectorDict : bare -> box
+data VectorDict (a : bare) : box
 {
-  vectorDict
-  (a : bare) ()
+  vectorDict ()
   (AdditiveDict a,
    a -> float -> Init a,
    a -> float,
@@ -309,11 +297,9 @@ data VectorDict : bare -> box
 -- 8. Scale an index by a scale factor
 -- 9. Scale an index by an inverse scale factor
 -- 10.The largest domain
-data CartesianDict : box -> box
+data CartesianDict (sh : box) : box
 {
-  cartesianDict
-  (sh : box)
-  ()
+  cartesianDict ()
   (coerce @box (cartesianDomain (index sh)) sh,
    sh -> Init (Maybe (index sh)),
    sh -> Init (Maybe (index sh)),
@@ -327,9 +313,9 @@ data CartesianDict : box -> box
    sh);
 };
 
-data TraversableDict : (bare -> bare) -> box
+data TraversableDict (t : bare -> bare) : box
 {
-  traversableDict (t : bare -> bare) ()
+  traversableDict ()
   ((a : bare) -> Repr a -> t a -> Stream (shape t) a,
    (a : bare) -> Repr a -> Stream (shape t) a -> Init (t a));
 };
@@ -337,9 +323,9 @@ data TraversableDict : (bare -> bare) -> box
 -- Operations related to data domains and traversals over them.
 -- The operations are flatten-to-list, generate, map, zipWith{2..4},
 -- range checking for integers, and slicing.
-data ShapeDict : box -> box
+data ShapeDict (sh : box) : box
 {
-  shapeDict (sh : box) ()
+  shapeDict ()
   (Repr (index sh),
    Repr (slice sh),
 
@@ -384,10 +370,9 @@ data ShapeDict : box -> box
 -- Class methods for one-dimensional, array-like container types
 -- that can be indexed into.
 -- Methods should not perform bounds checking.
-data IndexableDict : (bare -> bare) -> box
+data IndexableDict (t : bare -> bare) : box
 {
-  indexableDict
-  (t : bare -> bare) ()
+  indexableDict ()
   ((a : bare) -> Repr a -> t a -> index (shape t) -> Init a,
    (a : bare) -> t a -> shape t);
 };
@@ -413,7 +398,7 @@ data EffTok : val
   -- optimized away.  We don't want the optimizer to mess with this data type
   -- because it stands in for real dependences.
   -- Instead, use 'emptyEffTok' to produce an EffTok value.
-  effTok () () ();
+  effTok () ();
 };
 
 -- An empty side effect.
@@ -436,9 +421,9 @@ data OpaqueRef : box
 
 -- The state of a list-building computation.
 -- This is used when constructing a list from a sequence.
-data ListBuilder : bare -> val
+data ListBuilder (a : bare) : val
 {
-  listBuilder (a : bare) () (int, int, OpaqueRef);
+  listBuilder () (int, int, OpaqueRef);
 };
 
 -- Primitive function for building a list by appending to it.
@@ -453,14 +438,14 @@ append_build_list : (a : bare)
 -- A finalizer performs a one-time computation to convert the updatable
 -- data structure to a read-only data structure.  In some cases, a finalizer
 -- is not required, in which case the update is really performed in-place.
-data UpdateInPlaceFinalizer : bare -> bare -> box
+data UpdateInPlaceFinalizer (mutable immutable : bare) : box
 {
   -- The data can be mutated in place if the mutable and immutable data formats
   -- are the same
-  mutateInPlace (mutable immutable : bare) () (coerce @bare mutable immutable);
+  mutateInPlace () (coerce @bare mutable immutable);
 
   -- Data should be mutated out-of-place, then written to the output
-  mutateAndCopy (mutable immutable : bare) () (mutable -> Init immutable);
+  mutateAndCopy () (mutable -> Init immutable);
 };
 
 -- A scatter-reduce operation.  Reductions are performed with a combination of
@@ -481,9 +466,9 @@ data UpdateInPlaceFinalizer : bare -> bare -> box
 --
 -- Token passing is used to represent dependences during the in-place part of
 -- the reduction.
-data Scatter : bare -> bare -> box
+data Scatter (r i : bare) : box
 {
-  mk_scatter (r i : bare) (s : bare, iniF : box, updF : box)
+  mk_scatter (s : bare, iniF : box, updF : box)
   (Repr s,
    iniF -> OutPtr s -> EffTok,                -- Initializer
    updF -> i -> EffTok -> OutPtr s -> EffTok, -- Updater
@@ -1683,9 +1668,9 @@ finish_scatter @(r s : bare)
 -- of linked list indices (used for collisions).
 data intset : bare
 {
-  mk_intset () (N : intindex) (FIInt N,
-                               StuckBox (Tuple2 (arr N (Stored int))
-                                                (arr N (Stored uint))));
+  mk_intset (N : intindex) (FIInt N,
+                            StuckBox (Tuple2 (arr N (Stored int))
+                                             (arr N (Stored uint))));
 };
 
 build_intset (ls : list (Stored int)) (ret : OutPtr intset)
@@ -1788,13 +1773,13 @@ intsetElements (set : intset) -> Stream1 (Stored int) attribute(inline) =
 -- when constructing irregular arrays.
 --
 -- Invariant: 'pbBranch' never contains 'pbEmpty'.
-data PBTree : bare -> box
+data PBTree (a : bare) : box
 {
   -- A branch with two children.
   -- The 'int' is the total number of list elements in its leaves.
-  pbBranch (a : bare) () (int, PBTree a, PBTree a);
-  pbLeaf (a : bare) () (list a);
-  pbEmpty (a : bare) () ();
+  pbBranch () (int, PBTree a, PBTree a);
+  pbLeaf () (list a);
+  pbEmpty () ();
 };
 
 -------------------------------------------------------------------------------
@@ -1806,48 +1791,45 @@ type Stream : box -> bare -> box;
 
 -- A 1-dimensional stream of values, represented either as a
 -- view or as a linear stream.
-data Stream1 : bare -> box
+data Stream1 (a : bare) : box
 {
-  sequenceStream (a : bare) () (Sequence a);
-  viewStream (a : bare) () (view list_dim a);
+  sequenceStream () (Sequence a);
+  viewStream () (view list_dim a);
 };
 
 -- A dynamically computed sequence of values.
-data Sequence : bare -> box
+data Sequence (a : bare) : box
 {
   -- A stream is a (state, generator) pair.
-  sequence (a : bare) (st : box) (st, st -> StreamNext st a);
+  sequence (st : box) (st, st -> StreamNext st a);
 };
 
 -- The result of attempting to pull a value from a stream.
-data StreamNext : box -> bare -> val
+data StreamNext (st : box) (a : bare) : val
 {
-  streamEmpty (st : box, a : bare) () ();
-  streamValue (st : box, a : bare) () (st, BoxedType a);
+  streamEmpty () ();
+  streamValue () (st, BoxedType a);
 };
 
 -- The state of the stream 'bind' operator
-data BindState : box -> bare -> bare -> box
+data BindState (src_st : box) (src_elt trans_elt : bare) : box
 {
   -- Pull the next value from the source stream
   -- (Also represents a depleted stream)
-  bindFromSource (src_st : box, src_elt : bare, trans_elt : bare)
-    ()
-    (src_st);
+  bindFromSource () (src_st);
 
   -- Pull the next value from the stream transformer
-  bindFromTrans (src_st : box, src_elt : bare, trans_elt : bare)
-    (trans_st : box)
+  bindFromTrans (trans_st : box)
     (src_st,
      trans_st,
      trans_st -> StreamNext trans_st trans_elt);
 };
 
 -- State of a chained stream
-data ChainState : box -> box -> box
+data ChainState (a b : box) : box
 {
-  chainFromFirst (a b : box) () (a, b);
-  chainFromNext (a b : box) () (b);
+  chainFromFirst () (a, b);
+  chainFromNext () (b);
 };
 
 
@@ -1856,25 +1838,24 @@ data ChainState : box -> box -> box
 -- Views
 
 --  A view is a container represented by a function
-data view : box -> bare -> box
+data view (sh : box) (a : bare) : box
 {
-  mk_view (sh : box, a : bare) () (sh, index sh -> Init a);
+  mk_view () (sh, index sh -> Init a);
 };
 
 -------------------------------------------------------------------------------
 -- Storage
 
-data list : bare -> bare
+data list (a : bare) : bare
 {
-  make_list
-  (a : bare) (n : intindex)
+  make_list (n : intindex)
   (FIInt n, StuckBox (arr n a));
 };
 
 -- A list of boxed objects
-data blist : bare -> bare
+data blist (a : bare): bare
 {
-  make_blist (a : bare) () (list (StuckRef (BoxedType a)));
+  make_blist () (list (StuckRef (BoxedType a)));
 };
 
 -- A list with extra fields supporting a mutable "append" operation.
@@ -1882,9 +1863,9 @@ data blist : bare -> bare
 -- The int field is the number of valid array elements.  Other elements are
 -- zeroed.
 -- Mutable operations are implemented in low-level code.
-data append_list : bare -> bare
+data append_list (a : bare) : bare
 {
-  make_append_list (a : bare) (n : intindex)
+  make_append_list (n : intindex)
   (FIInt n, int, StuckBox (arr n a));
 };
 
@@ -1893,36 +1874,34 @@ data append_list : bare -> bare
 type array : bare -> bare -> bare;
 
 -- A singleton container
-data array0 : bare -> bare
+data array0 (a : bare) : bare
 {
-  mk_array0 (a : bare) () (a);
+  mk_array0 () (a);
 };
 
 -- A 1D array.
 -- The array's domain is described by a lower bound, stride, and size.
-data array1 : bare -> bare
+data array1 (a : bare) : bare
 {
-  mk_array1 (a : bare) (N : intindex)
+  mk_array1 (N : intindex)
   (int, int, FIInt N, StuckBox (arr N a));
 };
 
 -- A 2D array.
 -- The array's domain is described by a lower bound, stride, and size in
 -- the Y dimension, and a lower bound, stride, and size in the X dimension.
-data array2 : bare -> bare
+data array2 (a : bare) : bare
 {
-  mk_array2
-  (a : bare) (M N : intindex)
+  mk_array2 (M N : intindex)
   (int, int, FIInt M, int, int, FIInt N, StuckBox (arr M (arr N a)));
 };
 
 -- A 3D array.
 -- The array's domain is described by a lower bound, stride, and size in
 -- the Z, Y, and X dimensions.
-data array3 : bare -> bare
+data array3 (a : bare) : bare
 {
-  mk_array3
-  (a : bare) (L M N : intindex)
+  mk_array3 (L M N : intindex)
   (int, int, FIInt L,
    int, int, FIInt M,
    int, int, FIInt N,
@@ -1930,21 +1909,21 @@ data array3 : bare -> bare
 };
 
 -- A 1D boxed array.
-data barray1 : bare -> bare
+data barray1 (a : bare) : bare
 {
-  mk_barray1 (a : bare) () (array1 (StuckRef (BoxedType a)));
+  mk_barray1 () (array1 (StuckRef (BoxedType a)));
 };
 
 -- A 2D boxed array.
-data barray2 : bare -> bare
+data barray2 (a : bare) : bare
 {
-  mk_barray2 (a : bare) () (array2 (StuckRef (BoxedType a)));
+  mk_barray2 () (array2 (StuckRef (BoxedType a)));
 };
 
 -- A 3D boxed array.
-data barray3 : bare -> bare
+data barray3 (a : bare) : bare
 {
-  mk_barray3 (a : bare) () (array3 (StuckRef (BoxedType a)));
+  mk_barray3 () (array3 (StuckRef (BoxedType a)));
 };
 
 -- Convert the "size" fields of an array to an equivalent dim1.
@@ -1992,13 +1971,13 @@ type shape : (bare -> bare) -> box;
 -- 'Nothing' is an infinite stream; otherwise the shape is the length.
 data list_dim : box
 {
-  mk_list_dim () () (MaybeVal int);
+  mk_list_dim () (MaybeVal int);
 };
 
 -- The shape of a singleton stream
 data dim0 : box
 {
-  mk_dim0 () () ();
+  mk_dim0 () ();
 };
 
 -- A one-dimensional domain.
@@ -2011,26 +1990,26 @@ data dim0 : box
 -- small positive number.
 data dim1 : box
 {
-  mk_dim1 () () (Interval, LinearMap);
+  mk_dim1 () (Interval, LinearMap);
 };
 
 -- A two-dimensional domain.  The cross product of two domains.
 data dim2 : box
 {
-  mk_dim2 () () (dim1, dim1);
+  mk_dim2 () (dim1, dim1);
 };
 
 -- A three-dimensional domain.  The cross product of three domains.
 data dim3 : box
 {
-  mk_dim3 () () (dim1, dim1, dim1);
+  mk_dim3 () (dim1, dim1, dim1);
 };
 
 -- The shape of an array stream.
 -- Array streams are zero-indexed.
-data arr_shape : intindex -> box -> box
+data arr_shape (n : intindex) (sh : box) : box
 {
-  mk_arr_shape (len : intindex, sh : box) () (sh);
+  mk_arr_shape () (sh);
 };
 
 shapeIndexRepr : (sh : box) -> ShapeDict sh -> Repr (index sh);
@@ -5068,8 +5047,8 @@ not : bool -> bool;
 -- Element i of the view maps to element i * in_stride + in_offset.
 data InternalSlice : box
 {
-  internalSlice () (lo hi : intindex) (IInt lo, IInt hi, int, int);
-  emptySlice () () ();
+  internalSlice (lo hi : intindex) (IInt lo, IInt hi, int, int);
+  emptySlice () ();
 };
 
 -------------------------------------------------------------------------------
@@ -5582,10 +5561,10 @@ internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
 -- propositions
 
 -- Proof objects
-data Pf : prop -> val
+data Pf (p : prop) : val
   attribute(abstract)
 {
-  pf (p : prop) () ();
+  pf () ();
 };
 
 type eqZ : intindex -> intindex -> prop;

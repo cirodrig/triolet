@@ -134,7 +134,7 @@ typeInferCon pos con@(VarCon op ty_args ex_types) = do
 
   -- Convert fields to initializers
   tenv <- getTypeEnv
-  let field_kinds = dataConFieldKinds tenv data_con
+  let field_kinds = dataConFieldKinds data_con
       con_field_types = zipWith make_initializer field_kinds field_types
 
   -- Convert result type to initializer

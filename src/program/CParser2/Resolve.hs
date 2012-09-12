@@ -346,13 +346,12 @@ resolveDataConDecl :: SourcePos
                    -> ResolvedVar -- ^ The resolved data constructor
                    -> DataConDecl Parsed
                    -> NR (DataConDecl Resolved)
-resolveDataConDecl pos v' (DataConDecl _ ty_params ex_types args) = do
+resolveDataConDecl pos v' (DataConDecl _ ex_types args) = do
   enter $
-    withMany (resolveDomainT pos) ty_params $ \ty_params' ->
     withMany (resolveDomainT pos) ex_types $ \ex_types' -> do
       (unzip -> (args', arg_levels)) <- mapM resolveLType args
       mapM_ check_arg_level arg_levels
-      return $ DataConDecl v' ty_params' ex_types' args'
+      return $ DataConDecl v' ex_types' args'
   where
     check_arg_level lv =
       logErrorIf (lv /= TypeLevel) $
@@ -362,35 +361,37 @@ resolveDataConDecl pos v' (DataConDecl _ ty_params ex_types args) = do
       logErrorIf (lv /= TypeLevel) $
       "Bad level in range of data constructor (" ++ show pos ++ ")"
 
-resolveEntity :: ResolvedDeclName -> Entity Parsed -> NR (Entity Resolved)
-resolveEntity _ (VarEnt ty attrs) = do
+resolveEntity :: SourcePos -> ResolvedDeclName -> Entity Parsed
+              -> NR (Entity Resolved)
+resolveEntity _ _ (VarEnt ty attrs) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= TypeLevel) $
     "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
   return $ VarEnt ty' attrs
 
-resolveEntity (GlobalName r_name) (TypeEnt ty) = do
+resolveEntity _ (GlobalName r_name) (TypeEnt ty) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= KindLevel) $
     "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
   return $ TypeEnt ty'
 
-resolveEntity (DataConNames _ data_con_names) (DataEnt ty cons attrs) = do
+resolveEntity pos (DataConNames _ data_con_names) (DataEnt params ty cons attrs) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= KindLevel) $
     "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
-  cons' <- sequence [L pos <$> resolveDataConDecl pos v con
-                    | (v, L pos con) <- zip data_con_names cons]
-  return $ DataEnt ty' cons' attrs
+  withMany (resolveDomainT pos) params $ \params' -> do
+    cons' <- sequence [L pos <$> resolveDataConDecl pos v con
+                      | (v, L pos con) <- zip data_con_names cons]
+    return $ DataEnt params' ty' cons' attrs
 
-resolveEntity _ (ConstEnt ty e attrs) = do
+resolveEntity _ _ (ConstEnt ty e attrs) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= TypeLevel) $
     "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
   e' <- resolveL resolveExp e
   return $ ConstEnt ty' e' attrs
 
-resolveEntity _ (FunEnt f attrs) = do
+resolveEntity _ _ (FunEnt f attrs) = do
   f' <- resolveL resolveFun f
   return $ FunEnt f' attrs
 
@@ -398,7 +399,7 @@ resolveEntity _ (FunEnt f attrs) = do
 --   environment already.
 resolveDecl :: ResolvedDeclName -> PLDecl -> NR RLDecl
 resolveDecl r_name (L pos (Decl _ ent)) = do
-  r_ent <- resolveEntity r_name ent
+  r_ent <- resolveEntity pos r_name ent
   return $ L pos (Decl (resolvedGlobal r_name) r_ent)
 
 data ResolvedDeclName =
@@ -408,11 +409,11 @@ data ResolvedDeclName =
 
 resolveDeclName (L _ (Decl name ent)) =
   case ent
-  of VarEnt {}                -> object_level
-     TypeEnt {}               -> type_level
-     DataEnt _ constructors _ -> data_definition constructors
-     ConstEnt {}              -> object_level
-     FunEnt {}                -> object_level
+  of VarEnt {}                  -> object_level
+     TypeEnt {}                 -> type_level
+     DataEnt _ _ constructors _ -> data_definition constructors
+     ConstEnt {}                -> object_level
+     FunEnt {}                  -> object_level
   where
     object_level = liftM GlobalName $ newRVar ObjectLevel name
     type_level = liftM GlobalName $ newRVar TypeLevel name

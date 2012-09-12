@@ -940,7 +940,7 @@ conAppResult v data_type ty
                   , appliedReturnType = ty
                   , appliedCoercions = []
                   , appliedArityRemaining =
-                      case dataConPatternArgs data_type
+                      case dataConFieldTypes data_type
                       of [] -> Nothing
                          xs -> Just $ length xs
                   }
@@ -951,10 +951,10 @@ conAppResult v data_type ty
                            , appliedConstructorType = data_type
                            , appliedReturnType = ty}
   where
-    univ_arity = length (dataConPatternParams data_type)
+    univ_arity = length (dataConTyParams data_type)
 
     -- Number of type arguments expected by the constructor
-    num_args = length (dataConPatternExTypes data_type) + univ_arity
+    num_args = length (dataConExTypes data_type) + univ_arity
 
     -- Create a constructor term with no type arguments
     mk_expr [] = return $ conE defaultExpInfo (VarCon v [] []) []
@@ -1030,15 +1030,15 @@ resultOfTypeApp result_type type_arg (VarConExpectingTypes con ty_args univ_arit
   then FunAppResult mk_expr result_type [] (Just num_fields)
   else VarConExpectingTypes con ty_args' univ_arity data_con result_type
   where
-    num_ty_args = length (dataConPatternParams data_con) +
-                  length (dataConPatternExTypes data_con)
-    num_fields = length (dataConPatternArgs data_con)
+    num_ty_args = length (dataConTyParams data_con) +
+                  length (dataConExTypes data_con)
+    num_fields = length (dataConFieldTypes data_con)
 
     ty_args' = ty_args ++ [type_arg]
 
     mk_expr [] =
-      let u_args = take (length (dataConPatternParams data_con)) ty_args'
-          e_args = drop (length (dataConPatternParams data_con)) ty_args'
+      let u_args = take (length (dataConTyParams data_con)) ty_args'
+          e_args = drop (length (dataConTyParams data_con)) ty_args'
       in return $ conE defaultExpInfo (VarCon con u_args e_args) []
     mk_expr _  = internalError "resultOfTypeApp: Wrong number of arguments"
 
@@ -1128,14 +1128,14 @@ reprApplyCon op ty_args args = do
       init_type t BoxK  = t
       init_type t BareK = writeType t
       arg_types = zipWith init_type
-                  (dataConPatternArgs data_con)
-                  (dataConPatternArgKinds data_con)
+                  (dataConFieldTypes data_con)
+                  (dataConFieldKinds data_con)
       ret_type = init_type
                  (varApp (dataTypeCon dtype) $
-                  map (VarT . binderVar) (dataConPatternParams data_con))
+                  map (VarT . binderVar) (dataConTyParams data_con))
                  (dataTypeKind dtype)
-      op_type = forallType (dataConPatternParams data_con) $
-                forallType (dataConPatternExTypes data_con) $
+      op_type = forallType (dataConTyParams data_con) $
+                forallType (dataConExTypes data_con) $
                 funType arg_types ret_type
 
   let constructor_app_result = conAppResult op data_con op_type
@@ -1327,7 +1327,7 @@ reprAlt return_type (AltSF alt) = do
   con_type <- riLookupDataCon op
 
   -- Convert type arguments and coerce to match the data type
-  let ty_arg_kinds = [k | _ ::: k <- dataConPatternParams con_type]
+  let ty_arg_kinds = [k | _ ::: k <- dataConTyParams con_type]
   ty_args <- zipWithM convert_type_argument ty_arg_kinds ty_args
 
   -- Get kinds of existential types

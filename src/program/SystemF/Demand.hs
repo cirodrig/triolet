@@ -247,8 +247,7 @@ deconstructSpecificity tenv n_fields spc =
        | otherwise ->
            case mono_con
            of VarDeCon con _ _ ->
-                let Just dcon_type = lookupDataCon con tenv
-                    field_kinds = dataConFieldKinds tenv dcon_type
+                let field_kinds = deConFieldKinds tenv mono_con
                     from_field BareK spc = Written spc
                     from_field _     spc = spc
                 in zipWith from_field field_kinds spcs

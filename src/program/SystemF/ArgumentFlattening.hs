@@ -931,7 +931,7 @@ planFlattening mode ty spc = do
            if (case existentialHandling mode
                of UnpackExistentials -> True
                   Don'tUnpackExistentials ->
-                    null $ dataConPatternExTypes data_con)
+                    null $ dataConExTypes data_con)
            then decon_decomp (dataConCon data_con) Nothing
            else id_decomp
          _ -> id_decomp
@@ -945,7 +945,7 @@ planFlattening mode ty spc = do
            if (case existentialHandling mode
                of UnpackExistentials -> True
                   Don'tUnpackExistentials ->
-                    null $ dataConPatternExTypes data_con)
+                    null $ dataConExTypes data_con)
            then do
              -- Create a decomposition
              ret <- decon_decomp (dataConCon data_con) Nothing

@@ -77,8 +77,9 @@ computeTypeLayouts :: IdentSupply Var -> TypeEnv
 computeTypeLayouts var_supply tenv = do
   -- Get layouts for all algebraic data types
   let data_types =
-        [(k, t) | (k, t) <- IntMap.elems $ getAllDataTypeConstructors tenv
-                , dataTypeIsAlgebraic t]
+        [(dataTypeFullKind t, t)
+        | t <- IntMap.elems $ getAllDataTypeConstructors tenv
+        , dataTypeIsAlgebraic t]
   layouts <- runTypeEvalM (mapM computeADTLayout data_types) var_supply tenv
 
   -- Collect global definitions into a list

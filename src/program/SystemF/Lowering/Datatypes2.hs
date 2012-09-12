@@ -1458,7 +1458,7 @@ nullaryValueCon = all is_erased
     is_erased _ = False
 
 nullaryBoxedCon :: DataConType -> Bool
-nullaryBoxedCon c = null $ dataConPatternArgs c
+nullaryBoxedCon c = null $ dataConTyParams c
 
 -- | Given a list of data constructors, create a list of tags. 
 --   The tag data type is chosen based on how many data constructors there are.

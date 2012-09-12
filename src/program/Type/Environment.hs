@@ -23,16 +23,21 @@ module Type.Environment
         TypeEnv,
         SpecTypeEnv,
         DataType(..),
+        dataTypeFullKind,
         DataConType(..),
+        dataConTyParams,
+        dataConTyCon,
+        dataConFieldTypes,
+        dataConFieldKinds,
         dataConPatternRange,
         DataTypeDescr(..),
+        DataConDescr(..),
         TypeFunction,
         BuiltinTypeFunction(..),
         typeFunction,
         typeFunctionArity,
         applyTypeFunction,
         lookupType,
-        lookupDataConType,
         lookupTypeWithProperties,
         lookupDataType,
         lookupDataCon,
@@ -180,16 +185,12 @@ data TypeAssignment type_function =
     , varIsConlike :: !Bool
     }
     -- | Type of a type constructor
-  | TyConTypeAssignment
-    { varType :: !Type
-      
-    , dataType :: !DataType
-    }
+  | TyConTypeAssignment !DataType
+
     -- | Type of a data constructor.
     --   The actual type signature is computed on demand.
-  | DataConTypeAssignment
-    { dataConType :: !DataConType
-    }
+  | DataConTypeAssignment !DataConType
+
     -- | Type and definition of a type function
   | TyFunTypeAssignment
     { varType :: !Type
@@ -203,15 +204,22 @@ varTypeAssignment t = VarTypeAssignment t False
 -- | Get the level of the variable described by a type assignment
 typeAssignmentLevel :: TypeAssignment a -> Level
 typeAssignmentLevel (VarTypeAssignment ty _)  = pred $ getLevel ty 
-typeAssignmentLevel (TyConTypeAssignment _ _) = TypeLevel
+typeAssignmentLevel (TyConTypeAssignment _)   = TypeLevel
 typeAssignmentLevel (DataConTypeAssignment _) = ObjectLevel
 typeAssignmentLevel (TyFunTypeAssignment _ _) = TypeLevel
 
 data DataType =
   DataType
-  { -- | The kind of a value whose type is a
+  { -- | This data type's type constructor
+    dataTypeCon :: !Var
+
+    -- | Type parameters.  Type parameters are passed as arguments when 
+    --   constructing a value and when deconstructing it.
+  , dataTypeParams :: [Binder]
+
+    -- | The kind of a value whose type is a
     --   fully applied instance of this data type.
-    dataTypeKind :: BaseKind
+  , dataTypeKind :: !BaseKind
     
     -- | Abstractness of the data type.
     --   If a data type is abstract, then the compiler should not introduce
@@ -229,9 +237,14 @@ data DataType =
     -- | Data constructors of this data type
   , dataTypeDataConstructors :: [Var]
 
-    -- | This data type's type constructor
-  , dataTypeCon :: !Var
   }
+
+-- | Get the kind of a data type constructor
+dataTypeFullKind :: DataType -> Kind
+dataTypeFullKind dtype =
+  let domain_kinds = map binderType $ dataTypeParams dtype 
+      range_kind = fromBaseKind $ dataTypeKind dtype
+  in funType domain_kinds range_kind
 
 -- | Describes a data constructor.
 --
@@ -240,31 +253,39 @@ data DataType =
 --   then the type of the constructed value is @T a1 ... aN@.
 data DataConType =
   DataConType
-  { -- | Type parameters.  Type parameters are passed as arguments when 
-    --   constructing a value and when deconstructing it.
-    dataConPatternParams :: [Binder]
-
+  { dataConCon :: !Var          -- ^ This data constructor
     -- | Existential types.  These are passed
     --   as arguments when constructing a value, and matched as paramters
     --   when deconstructing it.  They have no run-time representation.
     --   These must be dependent value patterns (@ValPT (Just _)@).
-  , dataConPatternExTypes :: [Binder]
+  , dataConExTypes :: [Binder]
 
     -- | Fields.  These are passed as arguments when constructing a value,
     -- and matched as parameters when deconstructing it.
-  , dataConPatternArgs :: [Type]
-
-    -- | Kinds of the fields.
-  , dataConPatternArgKinds :: [BaseKind]
-
-  , dataConCon :: !Var          -- ^ This data constructor
-  , dataConTyCon :: !Var        -- ^ The type inhabited by constructed values
+    -- The field type are annotated with their kinds.
+  , dataConFields :: [(Type, BaseKind)]
+    
+    -- | The data type constructor of this data constructor.
+    --   This field must be lazy.
+  , dataConType :: DataType
   }
+
+dataConTyParams :: DataConType -> [Binder]
+dataConTyParams t = dataTypeParams $ dataConType t
+
+dataConTyCon :: DataConType -> Var
+dataConTyCon t = dataTypeCon $ dataConType t
+
+dataConFieldTypes :: DataConType -> [Type]
+dataConFieldTypes t = map fst $ dataConFields t
+
+dataConFieldKinds :: DataConType -> [BaseKind]
+dataConFieldKinds t = map snd $ dataConFields t
 
 -- | The type of a 'DataConType' value.
 dataConPatternRange :: DataConType -> Type
 dataConPatternRange dcon_type =
-  let args = [VarT a | (a ::: _) <- dataConPatternParams dcon_type]
+  let args = [VarT a | (a ::: _) <- dataConTyParams dcon_type]
   in varApp (dataConTyCon dcon_type) args
 
 -- | A function on types.  Type functions are evaluated during type checking.
@@ -349,25 +370,37 @@ insertTypeWithProperties v t conlike (TypeEnv env) =
 
 -- | A description of a data type that will be added to a type environment.
 data DataTypeDescr =
-  DataTypeDescr Var Type [DataConType] !Bool !Bool
+  DataTypeDescr
+    Var                         -- Data type name
+    [Binder]                    -- Data type's parameters
+    BaseKind                    -- Result kind
+    [DataConDescr]              -- Constructors
+    !Bool                       -- Is abstract
+    !Bool                       -- Is algebraic
+
+data DataConDescr =
+  DataConDescr 
+    Var                         -- Constructor
+    [Binder]                    -- Existential types
+    [(Type, BaseKind)]          -- Field types and their kinds
 
 insertDataType :: DataTypeDescr
                -> TypeEnvBase type_function -> TypeEnvBase type_function
-insertDataType (DataTypeDescr ty_con kind ctors abstract algebraic) (TypeEnv env) =
+insertDataType (DataTypeDescr ty_con u_args range ctors is_abstract is_algebraic)
+               (TypeEnv env) =
   TypeEnv $ foldr insert env (ty_con_assignment : data_con_assignments)
   where
     insert (v, a) env = IntMap.insert (fromIdent $ varID v) a env
-    data_cons = [dataConCon dtor | dtor <- ctors]
-    data_con_assignments =
-      [(dataConCon dtor, DataConTypeAssignment dtor) | dtor <- ctors]
-    data_type = DataType (result_kind kind) abstract algebraic data_cons ty_con
-    ty_con_assignment = (ty_con, TyConTypeAssignment kind data_type)
     
-    -- The kind of a fully applied instance of the data constructor
-    result_kind k = case k
-                    of FunT _ k2 -> result_kind k2
-                       VarT {}   -> toBaseKind k
+    data_cons = [dtor | DataConDescr dtor _ _ <- ctors]
+    data_type = DataType ty_con u_args range is_abstract is_algebraic data_cons
+    ty_con_assignment = (ty_con, TyConTypeAssignment data_type)
 
+    data_con (DataConDescr v bs fs) = DataConType v bs fs data_type
+    data_con_assignments =
+      [ (v, DataConTypeAssignment (data_con dtor))
+      | dtor@(DataConDescr v _ _) <- ctors]
+    
 insertTypeFunction :: Var -> Type -> type_function
                    -> TypeEnvBase type_function -> TypeEnvBase type_function
 insertTypeFunction v ty f (TypeEnv env) =
@@ -384,7 +417,7 @@ lookupDataType :: Var -> TypeEnvBase type_function -> Maybe DataType
 {-# INLINE lookupDataType #-}
 lookupDataType v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
-  of Just (TyConTypeAssignment _ tc) -> Just tc
+  of Just (TyConTypeAssignment tc) -> Just tc
      _ -> Nothing
 
 lookupDataConWithType :: Var -> TypeEnvBase type_function
@@ -409,11 +442,12 @@ lookupType v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Nothing -> Nothing
      Just (VarTypeAssignment t _)   -> Just t
-     Just (TyConTypeAssignment t _) -> Just t
+     Just (TyConTypeAssignment tc)  -> Just $ dataTypeFullKind tc
      Just (TyFunTypeAssignment t _) -> Just t
      Just (DataConTypeAssignment _) ->
        internalError "lookupType: Unexpected data constructor"
 
+{-
 -- | Look up the mem type of a data constructor as it is used in a
 --   data constructor expression.  Normally, 'instantiateDataConType'
 --   would be used instead.
@@ -433,18 +467,19 @@ makeDataConType dtype dcon_type =
                   (dataConPatternArgKinds dcon_type)
       ret_type = init_type
                  (varApp (dataTypeCon dtype) $
-                  map (VarT . binderVar) (dataConPatternParams dcon_type))
+                  map (VarT . binderVar) (dataConTyParams dcon_type))
                  (dataTypeKind dtype)
 
   -- Create the type
   -- forall as. forall bs. ps -> T as
-  in forallType (dataConPatternParams dcon_type) $
-     forallType (dataConPatternExTypes dcon_type) $
+  in forallType (dataConTyParams dcon_type) $
+     forallType (dataConExTypes dcon_type) $
      funType arg_types ret_type
   where
     init_type t ValK  = t
     init_type t BoxK  = t
     init_type t BareK = initializerType t
+-}
 
 -- | Look up the type and other properties of an ordinary variable
 lookupTypeWithProperties :: Var -> TypeEnvBase type_function
@@ -462,20 +497,20 @@ getAllDataConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env
     get_data_con _ = Nothing
 
 -- | Get all algebraic data type constructors in the type environment
-getAllDataTypeConstructors :: TypeEnv -> IntMap.IntMap (Type, DataType)
+getAllDataTypeConstructors :: TypeEnv -> IntMap.IntMap DataType
 getAllDataTypeConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env 
   where
-    get_data_con (TyConTypeAssignment ty dtype) = Just (ty, dtype)
+    get_data_con (TyConTypeAssignment dtype) = Just dtype
     get_data_con _ = Nothing
 
 -- | Get kind of all types in the type environment
-getAllKinds :: TypeEnvBase type_function -> IntMap.IntMap Type
+getAllKinds :: TypeEnvBase type_function -> IntMap.IntMap Kind
 getAllKinds (TypeEnv env) = IntMap.mapMaybe get_type env
   where
     get_type (VarTypeAssignment ty _)  
       | getLevel ty >= KindLevel       = Just ty
       | otherwise                      = Nothing
-    get_type (TyConTypeAssignment k _) = Just k
+    get_type (TyConTypeAssignment dtype) = Just $ dataTypeFullKind dtype
     get_type (DataConTypeAssignment _) = Nothing
     get_type (TyFunTypeAssignment k _) = Just k
 
@@ -485,7 +520,7 @@ getAllTypes :: TypeEnvBase type_function -> IntMap.IntMap Type
 getAllTypes (TypeEnv env) = IntMap.mapMaybe get_type env
   where
     get_type (VarTypeAssignment ty _)  = Just ty
-    get_type (TyConTypeAssignment k _) = Just k
+    get_type (TyConTypeAssignment dtype) = Just $ dataTypeFullKind dtype
     get_type (DataConTypeAssignment _) = Nothing
     get_type (TyFunTypeAssignment k _) = Just k
 
@@ -497,16 +532,16 @@ pprTypeEnv (TypeEnv tenv) =
 
 pprTypeAssignment :: TypeAssignment type_function -> Doc
 pprTypeAssignment (VarTypeAssignment ty _) = pprType ty
-pprTypeAssignment (TyConTypeAssignment k _) = pprType k
+pprTypeAssignment (TyConTypeAssignment dtype) = pprType $ dataTypeFullKind dtype
 pprTypeAssignment (DataConTypeAssignment c) = pprDataConType c
 pprTypeAssignment (TyFunTypeAssignment k _) = pprType k
 
 pprDataConType c =
   let constructed_type =
-        varApp (dataConTyCon c) [VarT v | v ::: _ <- dataConPatternParams c]
-      fo_type = funType (dataConPatternArgs c) constructed_type
-  in pprType $ forallType (dataConPatternParams c) $
-               forallType (dataConPatternExTypes c) fo_type
+        varApp (dataConTyCon c) [VarT v | v ::: _ <- dataConTyParams c]
+      fo_type = funType (dataConFieldTypes c) constructed_type
+  in pprType $ forallType (dataConTyParams c) $
+               forallType (dataConExTypes c) fo_type
 
 -------------------------------------------------------------------------------
 
@@ -539,9 +574,11 @@ specializeTypeEnv :: (BuiltinTypeFunction -> a)
                   -> (Type -> Maybe Type)
                      -- ^ Transformation on types
                   -> SpecTypeEnv -> TypeEnvBase a
-specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) =
-  TypeEnv (IntMap.mapMaybe type_assignment m)
+specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) = new_type_env
   where
+    -- Data type constructors are looked up in the new type environment
+    new_type_env = TypeEnv (IntMap.mapMaybe type_assignment m)
+
     type_assignment (VarTypeAssignment t conlike) =
       let t' = case getLevel t
                of SortLevel -> Just t
@@ -550,10 +587,8 @@ specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) =
                   ObjectLevel -> internalError "specializeTypeEnv"
       in VarTypeAssignment <$> t' <*> pure conlike
 
-    type_assignment (TyConTypeAssignment t dtype) =
-      let t' = kind_f t
-          dtype' = data_type dtype
-      in TyConTypeAssignment <$> t' <*> dtype'
+    type_assignment (TyConTypeAssignment dtype) =
+      TyConTypeAssignment <$> data_type dtype
 
     type_assignment (DataConTypeAssignment dcon) =
       DataConTypeAssignment <$> data_con dcon
@@ -561,23 +596,22 @@ specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) =
     type_assignment (TyFunTypeAssignment t f) =
       TyFunTypeAssignment <$> kind_f t <*> pure (tyfun_f f)
 
-    data_type dtype = do
-      k' <- basekind_f $ dataTypeKind dtype
-      return $ DataType
-               { dataTypeKind = k'
-               , dataTypeIsAbstract  = dataTypeIsAbstract dtype
-               , dataTypeIsAlgebraic = dataTypeIsAlgebraic dtype
-               , dataTypeDataConstructors = dataTypeDataConstructors dtype
-               , dataTypeCon = dataTypeCon dtype
-               }
+    data_type (DataType con params k is_abstract is_algebraic ctors) = do
+      params' <- specializeBinders kind_f params
+      k' <- basekind_f k
+      return $ DataType con params' k' is_abstract is_algebraic ctors
 
-    data_con dcon =
-      DataConType <$> (specializeBinders kind_f $ dataConPatternParams dcon)
-                  <*> (specializeBinders kind_f $ dataConPatternExTypes dcon)
-                  <*> (mapM type_f $ dataConPatternArgs dcon)
-                  <*> (mapM basekind_f $ dataConPatternArgKinds dcon)
-                  <*> pure (dataConCon dcon)
-                  <*> pure (dataConTyCon dcon)
+    data_con (DataConType con ex_types fields data_type) =
+      DataConType con <$>
+      (specializeBinders kind_f ex_types) <*>
+      (mapM field_type fields) <*>
+      pure new_data_type 
+      where
+        new_data_type =
+          case lookupDataType (dataTypeCon data_type) new_type_env
+          of Just t -> t
+
+        field_type (t, k) = (,) <$> type_f t <*> basekind_f k
 
 specializeBinders f bs = mapM (specializeBinder f) bs
 specializeBinder f (v ::: k) = do {k' <- f k; return (v ::: k')}

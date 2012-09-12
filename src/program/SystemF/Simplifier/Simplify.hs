@@ -677,7 +677,7 @@ inlckBareDataCon :: InlineCheck
 inlckBareDataCon tenv dmd (ExpM (ConE _ (VarCon con _ _) args)) =
   case lookupDataCon con tenv
   of Just dcon ->
-       let field_kinds = dataConFieldKinds tenv dcon
+       let field_kinds = dataConFieldKinds dcon
            check_field BareK arg = inlckBareDataCon tenv unknownDmd arg
            check_field ValK  arg = inlckTrivial tenv unknownDmd arg
            check_field BoxK  arg = inlckTrivial tenv unknownDmd arg

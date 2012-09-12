@@ -797,7 +797,7 @@ interpretCon con fields =
        -- Look up field kinds
        tenv <- getTypeEnv
        let Just (data_type, dcon_type) = lookupDataConWithType op tenv
-       let field_kinds = dataConFieldKinds tenv dcon_type
+       let field_kinds = dataConFieldKinds dcon_type
        when (length field_kinds /= length fields) type_error
        
        -- Compute values
