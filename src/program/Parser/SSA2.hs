@@ -336,7 +336,7 @@ populatePhiMap graph livenesses phi_map frontiers = do
     -- that has 'var' as a live-in
     let Just frontier = mapLookup label frontiers
         filtered_frontier = filter (var `live_in` ) frontier
-    liftIDM1 (forM_ frontier) $ \f_label -> do
+    liftIDM1 (forM_ filtered_frontier) $ \f_label -> do
       -- Insert a phi node here
       updated <- insertPhiInBlock phi_map f_label var
 
