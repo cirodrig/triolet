@@ -210,7 +210,7 @@ toHnf pos pred = do
          instanceReduction pos pred
        IsEqual {} -> do
          -- Perform reduction based on the set of known family instances
-         cst <- equalitySimplification pos [pred]
+         ([], cst) <- equalitySimplification pos [] [pred]
          return (EqualityDerivation pred, cst)
 
 -- | Convert a constraint to HNF and ignore how it was derived
@@ -259,20 +259,24 @@ instanceReduction pos pred = do
 -------------------------------------------------------------------------------
 -- Equality constraint solving
 
--- | Simplify a set of equality constraints as much as possible
-equalitySimplification :: SourcePos -> Constraint -> IO Constraint
-equalitySimplification pos csts =
+-- | Simplify a set of equality constraints as much as possible.
+--
+--   During simplification, perform substitution on a given set of class
+--   constraints.  The class constraints are not otherwise modified.
+equalitySimplification :: SourcePos -> Constraint -> Constraint
+                       -> IO (Constraint, Constraint)
+equalitySimplification pos cls_csts csts =
   -- Simplify constraints repeatedly until no further simplification is
   -- possible
-  repeat_until_convergence csts
+  repeat_until_convergence cls_csts csts
   where
-    repeat_until_convergence csts = do
+    repeat_until_convergence cls_csts csts = do
       (csts', progress1) <-
         applyEqualityReductionRule equalityReductionRules pos csts
-      (progress2, csts'') <- substituteConstraint csts'
+      (progress2, cls_csts', csts'') <- substituteConstraint cls_csts csts'
       if progress1 || progress2
-        then repeat_until_convergence csts''
-        else return csts''
+        then repeat_until_convergence cls_csts' csts''
+        else return (cls_csts', csts'')
 
 -- | Apply an equality reduction rule to all predicates in a constraint
 applyEqualityReductionRule :: EqualityReductionRule
@@ -423,23 +427,40 @@ isInjConstructor (TupleTy _) = True
 isInjConstructor (FunTy _) = True
 isInjConstructor (AnyTy _) = True
 
--- | Perform substitution in the entire constraint.  Return True if any
---   substitution occurred.
-substituteConstraint :: Constraint -> IO (Bool, Constraint)
-substituteConstraint [] = return (False, [])
+-- | Perform substitution in the entire equality constraint.
+--   Return True if any substitution occurred in the equality constraints.
+--
+--   Also substitute into the given non-equality constraints.
+substituteConstraint :: Constraint -> Constraint
+                     -> IO (Bool, Constraint, Constraint)
+substituteConstraint cls_csts [] = return (False, cls_csts, [])
 
-substituteConstraint (p:cst) = go False [] p cst
+substituteConstraint cls_csts (p:cst) = go False cls_csts [] p cst
   where
     -- Process one predicate at a time
-    go changed visited prd unvisited = do
-      result <- substituteEqualityCoercion prd visited unvisited
+    go changed cls_csts visited prd unvisited = do
+      (cls_csts', result) <-
+        substituteEqualityCoercion prd cls_csts visited unvisited
       let (changed', visited', unvisited') =
             case result
             of Nothing     -> (changed, visited, unvisited)
                Just (v, u) -> (True, v, u)
       case unvisited' of
-        []         -> return (changed', prd : visited')
-        prd' : cst -> go changed' (prd : visited') prd' cst
+        []         -> return (changed', cls_csts', prd : visited')
+        prd' : cst -> go changed' cls_csts' (prd : visited') prd' cst
+
+-- | Return 'True' iff this predicate should be used in a substitution
+shouldSubstituteCoercion :: Predicate -> IO Bool
+shouldSubstituteCoercion (IsEqual lhs rhs) = do
+  -- Require that LHS is a type function application containing a type variable
+  lhs_ok <- isTFAppOfFlexibleVar lhs
+  if not lhs_ok
+    then return False
+    else do
+    -- Require that LHS is not a subexpression of RHS
+    subexpressionCheck lhs rhs
+  
+shouldSubstituteCoercion _ = return False
 
 -- | Given an equality coercion satisfying some criteria, exhaustively
 --   apply the coercion as a rewrite rule to all other equality predicates
@@ -449,22 +470,24 @@ substituteConstraint (p:cst) = go False [] p cst
 substituteEqualityCoercion :: Predicate
                            -> Constraint
                            -> Constraint
-                           -> IO (Maybe (Constraint, Constraint))
-substituteEqualityCoercion (IsEqual lhs rhs) cst_l cst_r =
+                           -> Constraint
+                           -> IO (Constraint, Maybe (Constraint, Constraint))
+substituteEqualityCoercion predicate@(IsEqual lhs rhs) cls_csts cst_l cst_r =
 
   -- Test whether the predicate should be applied as a rewrite rule
-  -- Require that LHS is a type function application containing a type variable
-  ifM (liftM not $ isTFAppOfFlexibleVar lhs) (return Nothing) $
-
-  -- Require that LHS is not a subexpression of RHS
-  ifM (subexpressionCheck lhs rhs) (return Nothing) $ do
+  ifM (liftM not $ shouldSubstituteCoercion predicate) skip $ do
 
     -- Apply the substitution to all other predicates
+    (_, cls_csts') <- substitute_exhaustively_list cls_csts
     (change1, cst_l') <- substitute_exhaustively_list cst_l
     (change2, cst_r') <- substitute_exhaustively_list cst_r
-    return $! if change1 || change2 then Just (cst_l', cst_r') else Nothing
+    return $! if change1 || change2
+              then (cls_csts', Just (cst_l', cst_r'))
+              else (cls_csts', Nothing)
 
   where
+    skip = return (cls_csts, Nothing)
+
     substitute_exhaustively_list (p:ps) = do
       (p_change, p') <- substitutePredicateExhaustively lhs rhs p
       (ps_change, ps') <- substitute_exhaustively_list ps
@@ -500,6 +523,18 @@ substitutePredicateExhaustively old new prd = go False prd
         then go True (IsInst t' cls)
         else return (change_acc, prd)
 
+-- | Apply all the substitutions in the given context to a predicate
+applySubstitutions :: Constraint -> Predicate -> IO (Bool, Predicate)
+applySubstitutions ctx prd = go False ctx prd
+  where
+    go change (p:ctx) prd =
+      ifM (liftM not $ shouldSubstituteCoercion p) (go change ctx prd) $ do
+        let IsEqual lhs rhs = p
+        (change2, prd') <- substitutePredicateExhaustively lhs rhs prd
+        go (change || change2) ctx prd'
+
+    go change [] prd = return (change, prd)
+
 -------------------------------------------------------------------------------
 -- Context reduction
 
@@ -528,15 +563,16 @@ reduceContext csts = do
   return csts'
   where
     fixed_point_reduce equalities others = do
-      equalities' <- equalitySimplification noSourcePos equalities
-      others' <- foldM addToContext [] others
+      (others', equalities') <-
+        equalitySimplification noSourcePos others equalities
+      others'' <- foldM addToContext [] others'
 
       -- If class reduction introduced new equality predicates, then repeat
-      if any isEqualityPredicate others'
-        then let (new_equalities, others'') =
-                   partition isEqualityPredicate others'
-             in fixed_point_reduce (new_equalities ++ equalities') others''
-        else return (equalities' ++ others')
+      if any isEqualityPredicate others''
+        then let (new_equalities, others''') =
+                   partition isEqualityPredicate others''
+             in fixed_point_reduce (new_equalities ++ equalities') others'''
+        else return (equalities' ++ others'')
 
   -- Simplify equality constraints and other constraints using separate
   -- procedures
@@ -686,7 +722,7 @@ dependentTypeVariables cst initial_set = do
         fv2_subset = fv2 `Set.isSubsetOf` s
 
 -- | An action taken by splitConstraint
-data SplitAction = Retain | Defer | Default | Ambiguous
+data SplitAction = Retain | Defer | Ambiguous
 
 -- | Partition a set of constraints into a retained set and a deferred set.
 -- A constraint is retained if it mentions any variable in the given set of
@@ -702,20 +738,25 @@ splitConstraint :: Constraint   -- ^ Constraint to partition.
                    -- ^ Returns (retained constraints,
                    -- deferred constraints)
 splitConstraint cst fvars qvars = do
-  (retained, deferred, defaulted, ambiguous) <- partitionM isRetained cst
+  (retained, deferred, ambiguous) <- partitionM isRetained cst
   
   -- Need to default some constraints?
-  if null defaulted
-    then if null ambiguous 
-         then return (retained, deferred)
-         else do cst_doc <- runPpr $ pprContext ambiguous
-                 fail ("Ambiguous constraint:\n" ++ show cst_doc)
+  if null ambiguous
+    then return (retained, deferred)
     else do
-    -- Apply defaulting rules, then retry
-    new_csts <- mapM defaultConstraint defaulted
-    cst' <- reduceContext (concat new_csts ++ cst)
-    splitConstraint cst' fvars qvars
+    -- Attempt to apply defaulting rules, then retry
+    (default_progress, new_csts) <- defaultConstraints ambiguous
+    if default_progress
+      then do
+      cst' <- reduceContext (new_csts ++ cst)
+      splitConstraint cst' fvars qvars
+      else
+      -- Defaulting conditions were not met for any constraint
+      ambiguity_error ambiguous
   where
+    ambiguity_error xs = do
+      cst_doc <- runPpr $ pprContext xs
+      fail ("Ambiguous constraint:\n" ++ show cst_doc)
     isRetained prd = do
       fv <- freeTypeVariables prd
       
@@ -730,55 +771,201 @@ splitConstraint cst fvars qvars = do
               -- either resolved or reported as unsatisfiable
               doc <- runPpr $ uShow prd
               internalError $
-                "splitConstraint: Found unresolved\
-                \ predicate with no free variables:\n" ++ show doc
+                "splitConstraint: Found unresolved predicate with no free variables:\n" ++ show doc
           | fv `Set.isSubsetOf` fvars -> return Defer
           | fv `Set.isSubsetOf` Set.union fvars qvars -> return Retain
-          | isDefaultable prd -> return Default
           | otherwise -> return Ambiguous
     
-    -- Check if the dependent variable can be fixed using defaulting rules
-    isDefaultable (IsInst head cls) =
-      cls == tiBuiltin the_c_Traversable
-    
-    isDefaultable (IsEqual _ _) = False
-
-    partitionM f xs = go xs [] [] [] []
+    partitionM f xs = go xs [] [] []
       where
-        go (x:xs) lefts rights defaults ambigs = do
+        go (x:xs) lefts rights ambigs = do
           b <- f x
           case b of
-            Retain    -> go xs (x:lefts) rights defaults ambigs
-            Defer     -> go xs lefts (x:rights) defaults ambigs
-            Default   -> go xs lefts rights (x:defaults) ambigs
-            Ambiguous -> go xs lefts rights defaults (x:ambigs)
+            Retain    -> go xs (x:lefts) rights ambigs
+            Defer     -> go xs lefts (x:rights) ambigs
+            Ambiguous -> go xs lefts rights (x:ambigs)
 
-        go [] lefts rights defaults ambigs =
-          return (reverse lefts, reverse rights, reverse defaults,
-                  reverse ambigs)
+        go [] lefts rights ambigs =
+          return (reverse lefts, reverse rights, reverse ambigs)
 
--- | Perform defaulting on a constraint, unifying the variable mentioned in
--- the type head with some predetermined type.  The constraint must have been
--- selected for defaulting by 'splitConstraint'.  Defaulting first checks if
--- the given type was already unified (by an earlier defaulting step) and skips
--- if that is the case.
---    
--- Defaulting rules are as follows:
+-- | Perform defaulting on a list of constraints.  Determine whether
+--   at least one defaulting occurred.  Construct a new constraint list.
+defaultConstraints :: Constraint -> IO (Bool, Constraint)
+defaultConstraints predicates = go False [] predicates
+  where
+    -- Attempt to perform defaulting on each constraint, one at a time
+    go change visited (p:cs) = do
+      -- Try to perform defaulting for 'p'
+      result <- defaultConstraint visited cs p
+      case result of
+        Nothing              -> go change (p:visited) cs
+        Just (visited', cs') -> go True   visited'    cs'
+
+    go change visited [] = return (change, reverse visited)
+
+-- | Examine the given predicate and, if it is suitable for defaulting,
+--   unify it with a default type.
+--   The predicate is suitable for defaulting if its head is a type variable 
+--   and the default choice is compatible with other constraints.
 --
--- * @Traversable@ defaults to @list@
-defaultConstraint cst =
-  case cst
+--   If defaulting succeeded, add new generated constraints to the
+--   unvisited set.
+--
+--   Defaulting first checks if the given type was already unified (by
+--   an earlier defaulting step) and skips if that is the case.
+defaultConstraint :: Constraint -> Constraint -> Predicate
+                  -> IO (Maybe (Constraint, Constraint))
+defaultConstraint visited unvisited prd =
+  case prd
   of IsInst head cls
-       | cls == tiBuiltin the_c_Traversable -> do
-           can_head <- canonicalizeHead head
-           case can_head of
-             ConTy c
-               | isFlexibleTyVar c ->
-                 unify noSourcePos (ConTy c) (ConTy $ tiBuiltin the_con_list)
-               | isTyVar c -> internalError "defaultConstraint: Unexpected rigid variable"
-             _ -> return []
-     _ -> internalError "Cannot default constraint"
-       
+       | cls == tiBuiltin the_c_Traversable ->
+           with_flexible_var_type head $
+           defaultTraversableConstraint visited unvisited
+
+     _ -> return Nothing
+  where
+    -- If the given type is a flexible type variable,
+    -- pass the type variable to the function.
+    -- If it is a rigid type variable, report an error.
+    -- Otherwise, this is not a suitable candidate for defaulting.
+    with_flexible_var_type ty f = do
+      ty' <- canonicalizeHead ty
+      case ty' of
+        ConTy c | isFlexibleTyVar c -> f c
+                | isTyVar c -> internalError "defaultConstraint: Unexpected rigid variable"
+        _ -> can't_default
+
+    can't_default = return Nothing
+
+-- | Defaulting for a @Traversable@ constraint.  A traversable type defaults
+--   to @list@, @array1@, @array2@ or @array3@ under suitable conditions.
+--
+--   The only other permitted constraints on the type variable are:
+--
+-- * @Repr (t _)@
+-- * @Indexable t@
+--
+--   Additionally, the following constraints are used to choose a default
+--   instance:
+--
+-- * @shape t ~ list_dim@ (t is 'list')
+-- * @shape t ~ dim1@     (t is 'array1')
+-- * @shape t ~ dim2@     (t is 'array2')
+-- * @shape t ~ dim3@     (t is 'array3')
+--
+-- Note that constraints @Shape (shape t)@, @index (shape t) ~ _@,
+-- @Cartesian (shape t)@, and @shape t ~ cartesianDomain _@ don't appear
+-- when the shape is known
+
+defaultTraversableConstraint :: Constraint -> Constraint -> TyCon
+                             -> IO (Maybe (Constraint, Constraint))
+defaultTraversableConstraint visited unvisited tyvar = do
+  dependent_cst <- do
+    d1 <- find_dependent_constraints visited
+    d2 <- find_dependent_constraints unvisited
+    return (d1 ++ d2)
+
+  -- Determine the shape 
+  m_shape <- find_shape_constraint dependent_cst
+  case m_shape of
+    Just sh
+      | sh == tiBuiltin the_con_list_dim ->
+          defaultable dependent_cst (ConTy $ tiBuiltin the_con_list)
+      | sh == tiBuiltin the_con_dim0 ->
+          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array0)
+      | sh == tiBuiltin the_con_dim1 ->
+          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array1)
+      | sh == tiBuiltin the_con_dim2 ->
+          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array2)
+      | sh == tiBuiltin the_con_dim3 ->
+          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array3)
+    _ -> can't_default
+  where
+    -- All conditions were met.  Unify 'tyvar' with 't'
+    default_to t = do
+      new_cst <- unify noSourcePos (ConTy tyvar) t
+      return $ Just (visited, new_cst ++ unvisited)
+
+    -- Didn't meet conditions.
+    can't_default = return Nothing
+
+    -- Chose a default type.  Verify that all constraints mentioning
+    -- the type variable are permitted, so that defaulting produces no
+    -- unintended effects.
+    defaultable dependent_cst target_type =
+      ifM (allM permitted_constraint dependent_cst)
+      (default_to target_type)
+      can't_default
+
+    permitted_constraint (ty `IsInst` cls)
+      | cls == tiBuiltin the_c_Repr = do
+          -- Type must be of the form @a t@ for any @t@
+          (head, args) <- inspectTypeApplication ty
+          head' <- canonicalizeHead head
+          case head' of
+            ConTy v | v == tyvar -> return True
+            _ -> return False
+
+      | cls == tiBuiltin the_c_Indexable = do
+          -- Type must be @t@
+          ty' <- canonicalizeHead ty
+          case ty' of
+            ConTy v | v == tyvar -> return True
+            _ -> return False
+
+    permitted_constraint c = do
+      -- If this is a shape constraint, it is permitted
+      m_shape <- find_shape_constraint [c]
+      return $ isJust m_shape
+
+    -- Find the constraints that mention 'tyvar'
+    find_dependent_constraints c = filterM depends c
+      where
+        depends prd = do
+          fv <- freeTypeVariables prd
+          return $ tyvar `Set.member` fv
+
+    -- Find a constraint of the form @shape t ~ T@
+    -- where @t@ is the defaulted type variable and @T@ is a type
+    -- constructor.
+    find_shape_constraint :: Constraint -> IO (Maybe TyCon)
+    find_shape_constraint (c:cs) =
+      case c
+      of IsEqual t1 t2 ->
+           check_shape t1 t2 $ check_shape t2 t1 $ find_shape_constraint cs
+         _ -> find_shape_constraint cs
+      where
+        check_shape :: HMType -> HMType -> IO (Maybe TyCon) -> IO (Maybe TyCon)
+        check_shape shape_term value_term k = do
+          shape_matched <- is_shape shape_term
+          if shape_matched
+            then do
+            mc <- is_tycon value_term
+            case mc of
+              Just x  -> return mc
+              Nothing -> k
+            else k
+
+        -- Is 't' the term @shape t@ ?
+        is_shape t = do
+          t' <- canonicalizeHead t
+          case t' of
+            TFunAppTy tc [arg]
+              | tc == tiBuiltin the_con_shape -> do
+                  arg' <- canonicalizeHead arg
+                  case arg' of
+                    ConTy v -> return (v == tyvar)
+                    _ -> return False
+            _ -> return False
+
+        -- Is 't' a nullary type constructor?
+        is_tycon t = do
+          t' <- canonicalizeHead t
+          return $! case t'
+                    of ConTy v | isDataCon v -> Just v
+                       _ -> Nothing
+
+    find_shape_constraint [] = return Nothing
 
 -------------------------------------------------------------------------------
 -- Proof derivation
@@ -791,11 +978,19 @@ defaultConstraint cst =
 prove :: SourcePos
       -> ProofEnvironment -> Predicate -> IO (Bool, Placeholders, TIExp)
 prove pos env prd = do
-  -- Simplify the predicate to HNF
-  (deriv, _) <- toHnf pos prd
+  -- Rewrite constraint to normalized form
+  (change, prd') <- applySubstitutions (map fst $ envProofs env) prd
   
+  -- Simplify the predicate to HNF
+  (deriv, _) <- toHnf pos prd'
+
+  -- If rewriting was performed, a coercion will be necessary
+  let deriv' = if change
+               then CoerceDerivation prd deriv
+               else deriv
+
   -- Generate code for this derivation
-  toProof pos env deriv
+  toProof pos env deriv'
 
 -- | Generate code corresponding to a proof derivation
 --
@@ -835,7 +1030,14 @@ toProof pos env derivation =
        -- No evidence is needed.  Create a coercion value
        prf <- createCoercionValue pos t1 t2
        return (True, [], prf)
-       
+
+     CoerceDerivation { conclusion = prd, contentPremise = d } -> do
+       (progress, ph, e) <- toProof pos env d
+       let premise_type = convertPredicate (conclusion d)
+           result_type = convertPredicate prd
+           coercion = mkCoerceE pos premise_type result_type e
+       return (progress, ph, coercion)
+
      MagicDerivation {} -> do
        -- Create a magic proof value
        return (True, [], mkPolyCallE pos (mkVarE noSourcePos $ SystemF.coreBuiltin SystemF.The_fun_undefined) [convertPredicate $ conclusion derivation] [])
@@ -876,7 +1078,7 @@ addToProofEnv :: SourcePos
 addToProofEnv pos derivation proof env k =
   withLocalAssignment pos proof (convertPredicate $ conclusion derivation) $ \v ->
     let variable = mkVarE noSourcePos v
-        env' = (conclusion derivation, variable) : env
+        env' = env {envProofs = (conclusion derivation, variable) : envProofs env}
     in k env' v
 
 addManyToProofEnv :: SourcePos

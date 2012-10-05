@@ -9,6 +9,7 @@ import Control.Monad
 import Control.Monad.Trans
 import qualified Data.Map as Map
 import Data.Maybe
+import Data.Monoid
 import qualified Data.Set as Set
 import Text.PrettyPrint.HughesPJ
 
@@ -227,13 +228,22 @@ generalize env constraint inferred_types = do
   
   -- Find type variables that are free in the definition group's types or
   -- dependent on a free variable.
-  -- Will generalize over type variables that are dependent, but not
-  -- free in the environment.
+  -- Will generalize over type variables that are dependent on the type,
+  -- but not free in the environment.
   ftv_gamma <- ftvEnvironment env
   ftv_types <- liftM Set.unions $ mapM freeTypeVariables types
   dtv_types <- dependentTypeVariables reduced_constraint ftv_types
   let local_tyvars = dtv_types Set.\\ ftv_gamma
   
+  {-print =<< runPpr (do fv <- mapM pprTyCon $ Set.toList ftv_gamma
+                       fvt <- mapM pprTyCon $ Set.toList ftv_types
+                       bv <- mapM pprTyCon $ Set.toList local_tyvars
+                       c <- pprContext reduced_constraint
+                       ts <- mapM uShow types
+                       return $
+                         fsep fv $$ fsep fvt $$ fsep bv $$ c $$
+                         text "Functions" <+> vcat ts)-}
+
   -- Determine which constraints to generalize over
   (retained, deferred) <-
     splitConstraint reduced_constraint ftv_gamma local_tyvars
@@ -534,7 +544,7 @@ constraintToProofEnvironment :: Constraint
                              -> IO (ProofEnvironment, ProofBinding)
 constraintToProofEnvironment cst = do
   (proofs, bindings) <- mapAndUnzipM convert cst
-  return (concat proofs, bindings)
+  return (ProofEnvironment $ concat proofs, bindings)
   where
     -- Create a dictionary expression for each predicate in the context
     -- and its superclasses.
@@ -554,7 +564,8 @@ constraintToProofEnvironment cst = do
       let proof_assoc = (prd, proof_value)
 
       -- Get superclass proof objects
-      superclasses <- superclassDictionaries noSourcePos prd proof_value
+      ProofEnvironment superclasses <-
+        superclassDictionaries noSourcePos prd proof_value
       
       return (proof_assoc : superclasses, binding)
 
@@ -580,14 +591,14 @@ superclassDictionaries pos (IsInst ty cls) dict = do
 
   -- Transitively get all superclasses of each superclass in the constraint
   transitive_superclasses <-
-    liftM concat $
+    liftM mconcat $
     forM superclass_env $ \(sc_prd, sc_dict) ->
-    superclassDictionaries pos sc_prd sc_dict
+      superclassDictionaries pos sc_prd sc_dict
 
-  return (superclass_env ++ transitive_superclasses)
+  return (ProofEnvironment superclass_env `mappend` transitive_superclasses)
 
 -- Equality constraints have no superclasses
-superclassDictionaries pos (IsEqual t1 t2) dict = return []
+superclassDictionaries pos (IsEqual t1 t2) dict = return mempty
 
 inferDefGroup :: Bool -> [FunctionDef] -> ([TIDef] -> Inf a) -> Inf a
 inferDefGroup is_top_level defs k =
@@ -848,7 +859,7 @@ inferExportType (Export { exportAnnotation = ann
       _ <- reduceContext cst
 
       -- Resolve placeholders.  All placeholders should be resolved.
-      unresolved_placeholders <- resolvePlaceholders [] env placeholders
+      unresolved_placeholders <- resolvePlaceholders mempty env placeholders
       unless (null unresolved_placeholders) $ do
         printUnresolvedPlaceholders unresolved_placeholders
         internalError "Unresolved placeholders in export expression"

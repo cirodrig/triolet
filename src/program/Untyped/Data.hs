@@ -294,6 +294,11 @@ data Derivation =
   | EqualityDerivation
     { conclusion :: Predicate
     }
+    -- | A derivation whose result is coerced to another type
+  | CoerceDerivation
+    { conclusion :: Predicate
+    , contentPremise :: Derivation
+    }
     -- | A derivation without evidence
   | MagicDerivation
     { conclusion :: Predicate

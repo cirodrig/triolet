@@ -20,6 +20,7 @@ import Control.Concurrent.MVar
 import Control.Monad hiding(forM, mapM, sequence)
 import Data.Function
 import Data.Maybe
+import Data.Monoid
 import qualified Data.Set as Set
 import Data.Traversable
 import Data.Typeable(Typeable)
@@ -204,19 +205,27 @@ isIdDerivation _ = False
 
 -- | A proof environment assigns proof values to predicates.
 -- Instance predicates are assigned class dictionary values.
-type ProofEnvironment = [(Predicate, TIExp)]
+newtype ProofEnvironment =
+  ProofEnvironment 
+  { envProofs     :: [(Predicate, TIExp)]
+  }
 
 -- | Look up the proof of a predicate in an environment
 lookupProof :: Predicate -> ProofEnvironment -> IO (Maybe TIExp)
 lookupProof prd env = do
-  assoc <- findM ((prd `uEqual`) . fst) env
+  assoc <- findM ((prd `uEqual`) . fst) $ envProofs env
   return $ fmap snd assoc
 
 -- | Render the proofs in a proof environment (for debugging)
 pprProofEnvironment :: ProofEnvironment -> Ppr Doc
 pprProofEnvironment env = do
-  docs <- mapM uShow $ map fst env
-  return $ vcat $ punctuate semi docs
+  pfs <- mapM uShow $ map fst $ envProofs env
+  return $ vcat $ punctuate semi pfs
+
+instance Monoid ProofEnvironment where
+  mempty = ProofEnvironment []
+  ProofEnvironment p1 `mappend` ProofEnvironment p2 =
+    ProofEnvironment (p1 ++ p2)
 
 -------------------------------------------------------------------------------
 -- Type inference System F data structures
