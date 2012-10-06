@@ -682,16 +682,25 @@ matchInstanceSignature inst_type sig = do
 -------------------------------------------------------------------------------
 -- Generalization-related functions
 
--- | Find variables that are dependent on a given set of variables subject to
+-- | Find variables that may be dependent on a given set of variables subject to
 --   a constraint.  The constraint parameter should be reduced constraint
 --   returned by 'reduceContext'.
 --
---   Dependent variables are those that will be resolved to ground types if
---   types are assigned to all free type variables of the first-order type. 
+--   A variable is dependent if, after assigning types to all type variables in
+--   the given set, the variable _may_ become equal to some other term.  It is
+--   independent if it will definitely remain a variable.
 --
---   All free variables of the first-order type are dependent.  Additionally,
---   variables that are determined by a type equality constraint are
---   dependent.
+--   Underestimating independence may lead to less useful type checking error
+--   messages, but (with one important caveat) will not affect the behavior of 
+--   programs.  The caveat is that defaulting is only applied to independent
+--   types, so we need to determine independence at least for the class of
+--   types that are involved in defaulting rules.  Those types are
+--   single-parameter type classes, and equalities of the form @F a ~ t@
+--   where @F@ is a type function, @a@ is a type variable, and @t@ is any type.
+--
+--   Currently, dependence is based on participation in equality constraints.
+--   If all variables on one side of an equality constraint are in the given
+--   set, then all variables on the other side are considered dependent.
 dependentTypeVariables :: Constraint -> TyVarSet -> IO TyVarSet
 dependentTypeVariables cst initial_set = do
   -- For each equality constraint, find the free variables of its LHS and RHS
@@ -719,8 +728,8 @@ dependentTypeVariables cst initial_set = do
       | fv2_subset && not fv1_subset = Set.union s fv1
       | otherwise                    = s
       where
-        fv1_subset = fv1 `Set.isSubsetOf` s
-        fv2_subset = fv2 `Set.isSubsetOf` s
+        fv1_subset = not (Set.null fv1) && fv1 `Set.isSubsetOf` s
+        fv2_subset = not (Set.null fv2) && fv2 `Set.isSubsetOf` s
 
 -- | An action taken by splitConstraint
 data SplitAction = Retain | Defer | Ambiguous
@@ -728,8 +737,6 @@ data SplitAction = Retain | Defer | Ambiguous
 -- | Partition a set of constraints into a retained set and a deferred set.
 -- A constraint is retained if it mentions any variable in the given set of
 -- \"bound\" variables.
---
--- TODO: Apply defaulting rules when the constraint is ambiguous
 splitConstraint :: Constraint   -- ^ Constraint to partition. 
                                 --   Must have been simplified
                                 --   by 'reduceContext'.
