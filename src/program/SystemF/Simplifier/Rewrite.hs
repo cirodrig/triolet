@@ -363,6 +363,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (coreBuiltin The_OrdDict_int_ge, rwIntComparison (>=))
               -- No rewrite rule for integer (==).  It's handled by
               -- the 'rwIntEqApp' function.
+            , (coreBuiltin The_gcd, rwGcd)
             
             , (coreBuiltin The_AdditiveDict_int_negate, rwNegateInt)
             , (coreBuiltin The_AdditiveDict_int_add, rwAddInt)
@@ -1354,6 +1355,27 @@ rwModInt inf [] [e1, e2]
     int_type = VarT $ coreBuiltin The_int
 
 rwModInt _ _ _ = return Nothing
+
+rwGcd :: RewriteRule
+rwGcd inf [] [e1, e2]
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+    let IntL m t = l1
+        IntL n _ = l2
+    in if m == 0 && n == 0      -- gcd 0 0 = 0
+       then return $ Just $ ExpM (LitE inf (IntL 0 t))
+       else return $! Just $! ExpM (LitE inf (IntL (gcd m n) t))
+  -- gcd 1 x = 1
+  -- gcd x 1 = 1
+  | ExpM (LitE _ (IntL 1 _)) <- e1 = return $ Just $ one_lit
+  | ExpM (LitE _ (IntL 1 _)) <- e2 = return $ Just $ one_lit
+  -- gcd x x = x
+  | ExpM (VarE _ v1) <- e1, ExpM (VarE _ v2) <- e2, v1 == v2 =
+    return $ Just e1
+  where
+    one_lit = ExpM $ LitE inf (IntL 1 int_type)
+    int_type = VarT $ coreBuiltin The_int
+
+rwGcd _ _ _ = return Nothing
 
 negateIntExp inf e = appE inf neg_op [] [e]
   where
