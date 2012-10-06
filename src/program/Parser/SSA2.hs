@@ -606,13 +606,13 @@ ssaFunctionDefinition (Loc pos fdef) fname =
   withForallAnnotation ann $ \ann' -> do
     r_ann' <- rename r_ann
     withRenamedParameters params $ \params' -> do
-      let sig' = FunSig fname ann' params' r_ann'
+      let sig' = FunSig fname ann' pragma params' r_ann'
       let entry = cfEntry fdef
           Just livenesses = cfLivenesses fdef
       ssa_tree <- ssaGraph' livenesses entry (cfBody fdef)
       return $ Loc pos $ CFunc sig' Nothing entry ssa_tree
   where
-    FunSig _ ann params r_ann = cfSignature fdef
+    FunSig _ ann pragma params r_ann = cfSignature fdef
 
 ssaStmt :: LStmt AST e x -> SSAM (LStmt SSAID e x)
 ssaStmt (LStmt (Loc pos stmt)) =

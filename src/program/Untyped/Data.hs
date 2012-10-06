@@ -381,7 +381,11 @@ data TIPat =
 data TITyPat = TITyPat SF.Var TIType
 
 data TIFun =
-  TIFun !ExpInfo [TITyPat] [TIPat] TIType TIExp
+  TIFun !ExpInfo                -- Source position
+        [TITyPat]               -- Type parameters
+        [TIPat]                 -- Parameters
+        TIType                  -- Return type
+        TIExp                   -- Body
 
 data TIDef =
   TIDef SF.Var SF.DefAnn TIFun

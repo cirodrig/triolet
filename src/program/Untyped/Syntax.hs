@@ -151,7 +151,10 @@ data Function =
   }
   deriving(Typeable)
 
-data FunctionDef = FunctionDef !Variable Function
+-- | Annotations on a function definition
+data FunctionAnn = FunctionAnn { funInline :: !Bool}
+
+data FunctionDef = FunctionDef !Variable FunctionAnn Function
                  deriving(Typeable)
 
 type DefGroup = [FunctionDef]
@@ -175,4 +178,4 @@ instance HasSourcePos Function where
   getSourcePos f = case funAnnotation f of Ann pos -> pos
 
 instance HasSourcePos FunctionDef where
-  getSourcePos (FunctionDef _ f) = getSourcePos f
+  getSourcePos (FunctionDef _ _ f) = getSourcePos f

@@ -189,7 +189,7 @@ pprComp (CompLet i) = pprIterLet i
 pprComp (CompBody e) = (ppr e, [])
 
 instance Ppr (Var a) => Ppr (FunSig a) where
-  ppr (FunSig name ann params r_ann) = let
+  ppr (FunSig name ann pragma params r_ann) = let
     annotation = case ann
                  of Nothing -> empty
                     Just a  -> text "<forall annotation>"

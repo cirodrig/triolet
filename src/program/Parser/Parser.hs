@@ -836,21 +836,25 @@ funDefinition (Py.Decorated { Py.decorated_decorators = decorators
 -- A function can be decorated with a list of type variable parameters,
 -- specified with a 'forall' annotation. 
 -- Each parameter consists of a variable and an optional kind expression.
-data Decorators = Decorators (Maybe [(PyIdent, Maybe PExpr)])
+data Decorators =
+  Decorators { forallDecorator :: Maybe [(PyIdent, Maybe PExpr)]
+             , inlineDecorator :: Maybe Bool
+             }
 
 funDefinition' decorators (Py.Fun { Py.fun_name = name
                                   , Py.fun_args = params
                                   , Py.fun_result_annotation = result
                                   , Py.fun_body = body
                                   , Py.stmt_annot = annotation}) = do
-  Decorators forall_decorator <- extractDecorators decorators
+  Decorators forall_dec inline_dec <- extractDecorators decorators
   nameVar <- definition ValueLevel name
   let pos = toSourcePos annotation
   enter $ do
-    qvars <- traverse (mapM qvarDefinition) forall_decorator
+    qvars <- traverse (mapM qvarDefinition) forall_dec
     params' <- parameters params
     result' <- traverse (expression TypeLevel) result
-    let signature = FunSig nameVar qvars params' result'
+    let pragma = FunPragma { funInline = fromMaybe False inline_dec }
+    let signature = FunSig nameVar qvars pragma params' result'
     body' <- suite body
     return $ Loc pos $ Func signature body'
   where
@@ -859,20 +863,24 @@ funDefinition' decorators (Py.Fun { Py.fun_name = name
       return (qvar, qvar_kind)
 
 extractDecorators decorators =
-  foldM extract (Decorators Nothing) decorators
+  foldM extract (Decorators Nothing Nothing) decorators
   where
-    extract (Decorators oldQvars)
+    extract results
             (Py.Decorator { Py.decorator_name = name
                           , Py.decorator_args = arguments
                           , Py.decorator_annot = annot
                           })
       | name `isName` "forall" =
-        if isJust oldQvars
+        if isJust $ forallDecorator results
         then error "Only one 'forall' permitted per function"
         else do args <- readArguments arguments
                 case sequence args
-                  of Just varNames -> return $ Decorators (Just varNames)
-                     Nothing -> error "Invalid parameter to forall"
+                  of Just varNames ->
+                       return $ results {forallDecorator = Just varNames}
+                     Nothing ->
+                       error "Invalid parameter to forall"
+      | name `isName` "inline" =
+        return $ results {inlineDecorator = Just True}
       | otherwise =
         error "Unrecognized decorator"
 

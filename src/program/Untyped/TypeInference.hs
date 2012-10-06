@@ -604,16 +604,16 @@ inferDefGroup :: Bool -> [FunctionDef] -> ([TIDef] -> Inf a) -> Inf a
 inferDefGroup is_top_level defs k =
   let (first_def:_) = defs
       source_pos = getSourcePos first_def
-      defgroup_vars = [v | FunctionDef v _ <- defs]
+      defgroup_vars = [v | FunctionDef v _ _ <- defs]
   in generalizeDefGroup is_top_level source_pos defgroup_vars
      infer_defgroup infer_body
   where
     infer_defgroup = mapM infer_function defs
     
-    infer_function (FunctionDef _ f@(Function { funQVars = qvars
-                                              , funParameters = params
-                                              , funBody = body
-                                              , funReturnType = rt})) = do
+    infer_function (FunctionDef _ _ f@(Function { funQVars = qvars
+                                                , funParameters = params
+                                                , funBody = body
+                                                , funReturnType = rt})) = do
       (fun, ty) <-
         inferFunctionFirstOrderType (getSourcePos f) params body rt
       return (getSourcePos f, qvars, fun, ty)
@@ -622,11 +622,15 @@ inferDefGroup is_top_level defs k =
       sfdefs <- zipWithM convert_def defs functions
       k sfdefs
     
-    convert_def (FunctionDef v _) function = do
+    convert_def (FunctionDef v ann _) function = do
       sfvar <- case varSystemFVariable v
                of Just sfvar -> return sfvar 
                   Nothing -> internalError "Variable has no System F translation"
-      return $ TIDef sfvar (SystemF.defaultDefAnn) function
+      return $ TIDef sfvar (convert_ann ann) function
+
+    convert_ann (FunctionAnn inline) =
+      let insert_inline_ann d = d {SystemF.defAnnInlineRequest = inline}
+      in insert_inline_ann SystemF.defaultDefAnn
 
 -- | Infer an expression's type and parameter-passing convention
 inferExpressionType :: Expression -> Inf (TIExp, HMType)

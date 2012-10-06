@@ -78,7 +78,7 @@ pprBlock e = showBlock $ pprAsStatements e
          _ -> [pprExpression expr]
 
 pprDefinition :: FunctionDef -> Doc
-pprDefinition (FunctionDef name fun) = 
+pprDefinition (FunctionDef name ann fun) = 
   pprFunction (Just $ pprVariable name) fun
 
 pprFunction :: Maybe Doc -> Function -> Doc

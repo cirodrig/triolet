@@ -467,10 +467,11 @@ functionDef func_name (Loc pos func) =
     withParameters params $ \u_params -> do
       -- Convert body
       body <- enterBody $ ssaTreeExp (cfBody func)
-      return $ U.FunctionDef func_name $
-        U.Function (U.Ann pos) qvars u_params ret_type body
+      let annotation = U.FunctionAnn (funInline pragma)
+          function = U.Function (U.Ann pos) qvars u_params ret_type body
+      return $ U.FunctionDef func_name annotation function
   where
-    FunSig _ ann params r_ann = cfSignature func
+    FunSig _ ann pragma params r_ann = cfSignature func
 
 -- | Translate a dominator tree into an expression.
 --   Child nodes are translated to letrec-defined functions.
@@ -534,7 +535,7 @@ ssaTreeChild var params middle last children = inLocalLabelScope $ do
 
   -- Create function
   let function = U.Function noAnnotation Nothing patterns Nothing body
-  return $ U.FunctionDef var function
+  return $ U.FunctionDef var (U.FunctionAnn False) function
 
 ssaTail :: FlowStmt -> FGen U.Expression
 ssaTail (LStmt (Loc pos s)) =

@@ -472,7 +472,8 @@ mkDictPlaceholder pos p = do
   actual <- newEmptyMVar
   return $ DictPH (mkExpInfo pos) p actual
 
-mkFunction :: SourcePos -> [TyCon] -> [TIPat] -> TIType -> TIExp -> IO TIFun
+mkFunction :: SourcePos -> [TyCon] -> [TIPat] -> TIType -> TIExp
+           -> IO TIFun
 mkFunction pos ty_params params ret_type body = do
   ty_params' <- mapM convertTyParam ty_params
   return $ TIFun (mkExpInfo pos) ty_params' params ret_type body
