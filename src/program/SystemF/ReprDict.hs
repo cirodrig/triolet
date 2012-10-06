@@ -99,7 +99,24 @@ lookupReprDict' ty@(AnyT {}) =
           call = ExpM $ AppE defaultExpInfo op [ty] []
       in literalMkDict call
      
-lookupReprDict' ty = withDictEnv (DictEnv.lookup ty . reprDictEnv)
+lookupReprDict' ty =
+  -- Special-case handling for coercions @(Stored (CoT _ _))@
+  case fromVarApp ty
+  of Just (v, [arg]) | v `isCoreBuiltin` The_Stored -> do
+       arg' <- reduceToWhnf arg
+       case fromTypeApp arg' of
+         (CoT {}, [t1, t2]) -> return $ Just $ mk_co_dict arg'
+         _ -> lookup_dict
+     _ -> lookup_dict
+  where
+    mk_co_dict ty =
+      let op = varE' (coreBuiltin The_repr_Coercion)
+          call = appE' op [ty] []
+      in literalMkDict call
+
+    -- Handle the general case here
+    lookup_dict =
+      withDictEnv (DictEnv.lookup ty . reprDictEnv)
 
 -- | Look up the integer value indexed by the given index.  The index must
 --   have kind 'intindex'.

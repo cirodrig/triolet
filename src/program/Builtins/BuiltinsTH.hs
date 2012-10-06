@@ -233,6 +233,7 @@ builtinVariableNames =
   , "repr_view"
   , "repr_Maybe"
   , "repr_EmptyReference"
+  , "repr_Coercion"
   , "repr_arr"
   , "repr_arr_2"
   , "repr_EffTok"

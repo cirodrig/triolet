@@ -2114,6 +2114,10 @@ repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
 repr_MaybeVal_int : Repr (MaybeVal int);
 repr_MaybeVal_MaybeVal_int : Repr (MaybeVal (MaybeVal int));
 
+-- This is only used for coercions.  Since we don't have
+-- kind polymorphism, we cheat a bit on the type.
+repr_Coercion : (a : val) -> Repr (Stored a);
+
 repr_Tuple0 : Repr Tuple0;
 
 repr_Tuple1 :
