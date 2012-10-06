@@ -454,11 +454,12 @@ shouldSubstituteCoercion :: Predicate -> IO Bool
 shouldSubstituteCoercion (IsEqual lhs rhs) = do
   -- Require that LHS is a type function application containing a type variable
   lhs_ok <- isTFAppOfFlexibleVar lhs
-  if not lhs_ok
-    then return False
-    else do
+  if lhs_ok
+    then do
     -- Require that LHS is not a subexpression of RHS
-    subexpressionCheck lhs rhs
+    rhs_contains_lhs <- subexpressionCheck lhs rhs
+    return $ rhs_contains_lhs == False
+    else return False
   
 shouldSubstituteCoercion _ = return False
 
