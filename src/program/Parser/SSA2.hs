@@ -618,8 +618,8 @@ ssaStmt :: LStmt AST e x -> SSAM (LStmt SSAID e x)
 ssaStmt (LStmt (Loc pos stmt)) =
   case stmt
   of Assign params e -> do
-       params' <- ssaParameter params
        e' <- rename e
+       params' <- ssaParameter params
        re_loc' $ Assign params' e'
      DefGroup fs _ -> do
        f_names <- mapM ssaDefineFunction fs
