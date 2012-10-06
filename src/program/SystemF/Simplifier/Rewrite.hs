@@ -1321,6 +1321,13 @@ rwSubInt inf [] [e1, e2]
   | ExpM (LitE _ (IntL 0 _)) <- e1 = return $ Just $ negateIntExp inf e2
   | ExpM (LitE _ (IntL 0 _)) <- e2 = return $ Just e1
 
+  -- x - x = 0
+  | ExpM (VarE _ v1) <- e1, ExpM (VarE _ v2) <- e2, v1 == v2 =
+    return $ Just zero_lit
+  where
+    zero_lit = ExpM $ LitE inf (IntL 0 int_type)
+    int_type = VarT $ coreBuiltin The_int
+
 rwSubInt _ _ _ = return Nothing
 
 rwFloorDivInt :: RewriteRule
