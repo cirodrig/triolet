@@ -368,6 +368,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (coreBuiltin The_AdditiveDict_int_negate, rwNegateInt)
             , (coreBuiltin The_AdditiveDict_int_add, rwAddInt)
             , (coreBuiltin The_AdditiveDict_int_sub, rwSubInt)
+            , (coreBuiltin The_MultiplicativeDict_int_mul, rwMulInt)
             , (coreBuiltin The_RemainderDict_int_floordiv, rwFloorDivInt)
             , (coreBuiltin The_RemainderDict_int_mod, rwModInt)
             ]
@@ -1329,6 +1330,26 @@ rwSubInt inf [] [e1, e2]
     int_type = VarT $ coreBuiltin The_int
 
 rwSubInt _ _ _ = return Nothing
+
+rwMulInt :: RewriteRule
+rwMulInt inf [] [e1, e2]
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+      let IntL m t = l1
+          IntL n _ = l2
+      in return $! Just $! ExpM (LitE inf (IntL (m * n) t))
+
+  -- Eliminate product of zero
+  | ExpM (LitE _ (IntL 0 _)) <- e1 = return $ Just zero_lit
+  | ExpM (LitE _ (IntL 0 _)) <- e2 = return $ Just zero_lit
+
+  -- Eliminate product of one
+  | ExpM (LitE _ (IntL 1 _)) <- e1 = return $ Just e2
+  | ExpM (LitE _ (IntL 1 _)) <- e2 = return $ Just e1
+  where
+    zero_lit = ExpM $ LitE inf (IntL 0 int_type)
+    int_type = VarT $ coreBuiltin The_int
+
+rwMulInt _ _ _ = return Nothing
 
 rwFloorDivInt :: RewriteRule
 rwFloorDivInt inf [] [e1, e2]
