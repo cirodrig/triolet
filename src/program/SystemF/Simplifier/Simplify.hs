@@ -1719,7 +1719,7 @@ rwCopyApp1 inf ty repr src m_dst = do
                   Just (dst', dst_value) ->
                     return (appE defaultExpInfo e [] [dst'], new_value)
 
-      ifElseFuel create_initializer rebuild_copy_expr
+      ifElseFuel rebuild_copy_expr create_initializer
   where
     copy_op = varE inf (coreBuiltin The_copy)
 
