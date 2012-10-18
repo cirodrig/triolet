@@ -12,6 +12,7 @@ System F code after representation inference.
 -}
 
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, Rank2Types #-}
+{-# OPTIONS_GHC -no-auto #-}
 module Type.Environment
        (TypeEnvMonad(..),
         assume,

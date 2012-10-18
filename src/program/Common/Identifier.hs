@@ -1,6 +1,6 @@
 
 {-# LANGUAGE TemplateHaskell #-}
-
+{-# OPTIONS_GHC -no-auto #-}
 module Common.Identifier
     (Ident, Idents, IdentSupply,
      toIdent, fromIdent,

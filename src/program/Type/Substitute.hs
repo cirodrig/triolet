@@ -1,5 +1,6 @@
 
 {-# LANGUAGE FlexibleContexts #-}
+{-# OPTIONS_GHC -no-auto #-}
 module Type.Substitute where
 
 import Prelude hiding(lookup, null, mapM)
@@ -142,7 +143,7 @@ substitute :: forall m a. (EvalMonad m, Substitutable a) =>
 {-# SPECIALIZE substitute :: Substitutable a => Substitution a -> a -> TypeEvalM a #-}
 substitute s x 
   | isEmptySubstitution s = return x
-  | otherwise = substituteWorker s x 
+  | otherwise = {-# SCC substitute #-} substituteWorker s x 
 
 instance Substitutable a => Substitutable (Maybe a) where
   type Substitution (Maybe a) = Substitution a

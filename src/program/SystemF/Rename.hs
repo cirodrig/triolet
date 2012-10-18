@@ -1,5 +1,6 @@
 
 {-# LANGUAGE FlexibleInstances, FlexibleContexts, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
+{-# OPTIONS_GHC -no-auto #-}
 module SystemF.Rename
        (Subst(..),
         ValAss(..),
@@ -465,6 +466,7 @@ instance Renameable ConInst where
 
 instance Renameable (Exp Mem) where
   rename rn (ExpM expression) = ExpM $
+    {-# SCC "Renameable/Exp.rename" #-}
     case expression
     of VarE inf v ->
          case Rename.lookup v rn
@@ -493,6 +495,7 @@ instance Renameable (Exp Mem) where
          ArrayE inf (rename rn ty) (rename rn es)
 
   freeVariables (ExpM expression) =
+    {-# SCC "Renameable/Exp.freeVariables" #-}
     case expression
     of VarE _ v -> Set.singleton v
        LitE _ _ -> Set.empty
@@ -567,6 +570,7 @@ instance Substitutable ConInst where
 instance Substitutable (Exp Mem) where
   type Substitution (Exp Mem) = Subst
   substituteWorker s (ExpM expression) =
+    {-# SCC "Substitutable/Exp.substituteWorker" #-}
     case expression
     of VarE inf v ->
          case lookupV v $ valueSubst s
@@ -643,6 +647,7 @@ checkForShadowingExp tenv e =
 
 checkForShadowingExpSet :: CheckForShadowing ExpM
 checkForShadowingExpSet in_scope e =
+  {-# SCC checkForShadowingExpSet #-}
   case fromExpM e
   of VarE {} -> ()
      LitE {} -> ()
@@ -766,6 +771,7 @@ checkForShadowingExpHere e =
 
 checkForShadowingModule :: Module Mem -> ()
 checkForShadowingModule (Module _ imports defss exports) =
+  {-# SCC checkForShadowingModule #-}
   checkForShadowingGroupSet
   checkForShadowingGlobalDefSet check_globals defss IntSet.empty (Rec imports)
   where

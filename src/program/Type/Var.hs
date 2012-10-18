@@ -1,5 +1,6 @@
 
 {-# LANGUAGE FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
+{-# OPTIONS_GHC -no-auto #-}
 module Type.Var
        (Var, varID, varName, 
         VarID,
