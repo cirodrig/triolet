@@ -1010,13 +1010,11 @@ concretizeHeap _ =
 
 concretizeHeapItem :: Var -> AbsCode -> MaybeT TypeEvalM ExpM
 concretizeHeapItem addr val
-  | Just exp <- codeTrivialExp val =
-      -- Not implemented.  The right thing to do is copy the value to the 
-      -- destination.  We need the type in order to call 'copy'.
-      internalError "concretizeHeapItem: Not implemented"
+  -- Cannot simplify trivial expressions
+  | Just exp <- codeTrivialExp val = mzero
 
+  -- Construct this value at the address
   | DataAV data_value <- codeValue val = do
-      -- Consruct this value at the address
       initializer <- concretizeDataConApp data_value
       let out_ptr = ExpM $ VarE defaultExpInfo addr
       return $ ExpM $ AppE defaultExpInfo initializer [] [out_ptr]
