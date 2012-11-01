@@ -610,12 +610,6 @@ generateDataRules :: Verbosity -> LocalBuildInfo -> IO ([MakeRule], [FilePath])
 generateDataRules verb lbi = do
   info verb "Locating data files"
   
-  -- Find all testcases
-  pre_testcase_files <- getDirectoryContents "data/testcases"
-  let testcase_files = filter ((".py" ==) . takeExtension) pre_testcase_files
-      testcase_rules =
-        map (copyDataFile (dataBuildDir lbi </> "testcases") "data/testcases") testcase_files
-        
   -- Find all RTS interfaces
   let rts_interface_files = map (`replaceExtension` ".ti") rtsPyAsmFiles
       build_dir = rtsBuildDir lbi
@@ -623,10 +617,9 @@ generateDataRules verb lbi = do
         map (copyDataFile (dataBuildDir lbi </> "interfaces") build_dir) rts_interface_files
 
   let prebuilt_data_files =
-        map makeTarget $ testcase_rules ++ prebuilt_data_rules
+        map makeTarget $ prebuilt_data_rules
 
-  return (testcase_rules ++ rts_interface_rules ++ prebuilt_data_rules,
-          prebuilt_data_files)
+  return (rts_interface_rules ++ prebuilt_data_rules, prebuilt_data_files)
   where
     -- Copy prebuilt files from 'data' to 'dist/data'
     prebuilt_data_rules =
