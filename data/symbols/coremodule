@@ -5265,7 +5265,8 @@ inInterval (i : int) (iv : Interval) -> bool =
 
 
 -- Compute the intersection of two intervals.
-intersectInterval (iv1 : Interval) (iv2 : Interval) -> Interval =
+intersectInterval (iv1 : Interval) (iv2 : Interval) -> Interval
+  attribute(inline, inline_final) =
   case iv1 of interval (l1 : MaybeVal int) (u1 : MaybeVal int).
   case iv2 of interval (l2 : MaybeVal int) (u2 : MaybeVal int).
 
