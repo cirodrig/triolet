@@ -1633,7 +1633,13 @@ mkStencilType domain_type array_type =
 
 mkExtend2DType = mkExtendType (ConTy $ tiBuiltin the_con_dim2)
 mkExtend3DType = mkExtendType (ConTy $ tiBuiltin the_con_dim3)
-  
+
+mkUnionView3DType =
+  forallType [Star] $ \[a] ->
+  let aT = ConTy a
+      viewT = ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim3) @@ aT
+  in ([passable (ConTy a)], functionType [viewT, viewT] viewT)
+
 mkExtendType domain_type =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
@@ -2150,6 +2156,9 @@ initializeTIBuiltins = do
               ),              
               ("extend3D", [| mkExtend3DType |]
               , [| coreBuiltin SystemF.The_extend3D |]
+              ),              
+              ("unionView3D", [| mkUnionView3DType |]
+              , [| coreBuiltin SystemF.The_unionView3D |]
               ),              
               ("rows", [| mkRowsColsType |]
               , [| coreBuiltin SystemF.The_rows |]

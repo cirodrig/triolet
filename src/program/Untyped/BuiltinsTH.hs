@@ -81,6 +81,7 @@ pyonSourceGlobals =
   , "stencil3D"
   , "boxedStencil3D"
   , "extend3D"
+  , "unionView3D"
   , "histogram"
   , "matrixiter"
   , "floor"

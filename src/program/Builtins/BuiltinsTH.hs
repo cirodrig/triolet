@@ -606,6 +606,7 @@ builtinVariableNames =
   , "stencil3D"
   , "extend2D"
   , "extend3D"
+  , "unionView3D"
   , "displaceView"
   , "multiplyView"
   , "divideView"
