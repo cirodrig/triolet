@@ -720,7 +720,7 @@ namespace Triolet {
       offset = allocateObject<T1_Bare>(offset);
       offset = allocateObject<T2_Bare>(offset);
       offset = allocateObject<T3_Bare>(offset);
-      offset = addPadding<T3_Bare>(offset);
+      offset = addPadding<T4_Bare>(offset);
       return type(tuple->getBareData() + offset);
     }
 
@@ -730,7 +730,7 @@ namespace Triolet {
       offset = allocateObject<T1_Bare>(offset);
       offset = allocateObject<T2_Bare>(offset);
       offset = allocateObject<T3_Bare>(offset);
-      offset = addPadding<T3_Bare>(offset);
+      offset = addPadding<T4_Bare>(offset);
       return Incomplete<type>(incompleteTuple->getObject() + offset);
     }
   };
