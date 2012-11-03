@@ -314,6 +314,12 @@ builtinFunctions =
      Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple3 |])
   , (CoreName module_structures "repr_Tuple4",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple4 |])
+  , (CoreName module_structures "sizealign_Tuple2",
+     Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple2 |])
+  , (CoreName module_structures "sizealign_Tuple3",
+     Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple3 |])
+  , (CoreName module_structures "sizealign_Tuple4",
+     Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple4 |])
   
   , (CoreName module_prim "traceInt_int",
      Right [| coreBuiltin (SystemF.The_traceInt_int) |])

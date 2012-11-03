@@ -110,6 +110,14 @@ lowerIntrinsicOp v
          proof_object)
       , (coreBuiltin The_unsafeMakeCoercion,
          proof_object)
+      , (coreBuiltin The_sizealign_int,
+         sizealign_int)
+      , (coreBuiltin The_sizealign_uint,
+         sizealign_uint)
+      , (coreBuiltin The_sizealign_float,
+         sizealign_float)
+      , (coreBuiltin The_sizealign_NoneType,
+         sizealign_NoneType)
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -195,3 +203,11 @@ dead_box = do
 
 -- | Create a proof object or coercion value.
 proof_object [] = return [LitV UnitL]
+
+sizeAlignValue t = RecV sizeAlignRecord [nativeWordV (sizeOf t), nativeWordV (alignOf t)]
+
+-- | Size constants
+sizealign_int [] = return [sizeAlignValue trioletIntType]
+sizealign_uint [] = return [sizeAlignValue trioletUintType]
+sizealign_float [] = return [sizeAlignValue trioletFloatType]
+sizealign_NoneType [] = return [sizeAlignValue trioletNoneType]

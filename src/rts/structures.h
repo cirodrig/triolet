@@ -26,6 +26,13 @@ extern function core.internal.structures.repr_Tuple3
 extern function core.internal.structures.repr_Tuple4
   (owned, owned, owned, owned) -> owned;
 
+extern function core.internal.structures.sizealign_Tuple2
+  (SA, SA) -> SA;
+extern function core.internal.structures.sizealign_Tuple3
+  (SA, SA, SA) -> SA;
+extern function core.internal.structures.sizealign_Tuple4
+  (SA, SA, SA, SA) -> SA;
+
 extern data owned core.internal.structures.repr_EffTok;
 extern data owned core.internal.structures.repr_Ref;
 extern data owned core.internal.structures.repr_StuckRef;

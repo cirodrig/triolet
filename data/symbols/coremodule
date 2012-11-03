@@ -2016,8 +2016,19 @@ shapeSliceRepr : (sh : box) -> ShapeDict sh -> Repr (slice sh);
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
-copy : (a : bare) -> Repr a -> a -> Init a
-       attribute(conlike);
+copy @(a : bare) (rep : Repr a) (src : a) (dst : OutPtr a) -> Store
+  attribute(conlike, inline, inline_final) =
+
+  case rep of
+    repr @a 
+    (sa : SizeAlign a)
+    (copy_a : a -> Init a)
+    (to_boxed_a : Init a -> BoxedType a)
+    (to_bare_a : BoxedType a -> Init a)
+    (pointerless_a : bool).
+
+  copy_a src dst;
+
 convertToBoxed : (a : bare) -> Repr a -> Init a -> BoxedType a;
 convertToBare : (a : bare) -> Repr a -> BoxedType a -> Init a;
 
@@ -2069,9 +2080,60 @@ copyArray @(N : intindex) @(a : bare)
 -- applications to values
 reify : (a : bare) -> Repr a -> Init a -> a;
 
-repr_int : Repr (Stored int);
-repr_uint : Repr (Stored uint);
-repr_float : Repr (Stored float);
+sizealign_int : SizeAlign (Stored int);
+sizealign_uint : SizeAlign (Stored uint);
+sizealign_float : SizeAlign (Stored float);
+sizealign_bool : SizeAlign (Stored bool);
+sizealign_NoneType : SizeAlign (Stored NoneType);
+
+copy_int (src : Stored int) (ret : OutPtr (Stored int)) -> Store
+  attribute(inline) =
+  case src of stored @int (x : int). stored @int x ret;
+
+box_int (x : Init (Stored int)) -> Boxed (Stored int)
+  attribute(inline) =
+  boxed @(Stored int) x;
+
+unbox_int (x : Boxed (Stored int)) (ret : OutPtr (Stored int)) -> Store
+  attribute(inline) =
+  case x of boxed @(Stored int) (sf : Stored int).
+  case sf of stored @int (x : int). stored @int x ret;
+
+repr_int : Repr (Stored int) =
+  repr @(Stored int) sizealign_int copy_int box_int unbox_int True;
+
+copy_uint (src : Stored uint) (ret : OutPtr (Stored uint)) -> Store
+  attribute(inline) =
+  case src of stored @uint (x : uint). stored @uint x ret;
+
+box_uint (x : Init (Stored uint)) -> Boxed (Stored uint)
+  attribute(inline) =
+  boxed @(Stored uint) x;
+
+unbox_uint (x : Boxed (Stored uint)) (ret : OutPtr (Stored uint)) -> Store
+  attribute(inline) =
+  case x of boxed @(Stored uint) (sf : Stored uint).
+  case sf of stored @uint (x : uint). stored @uint x ret;
+
+repr_uint : Repr (Stored uint) =
+  repr @(Stored uint) sizealign_uint copy_uint box_uint unbox_uint True;
+
+copy_float (src : Stored float) (ret : OutPtr (Stored float)) -> Store
+  attribute(inline) =
+  case src of stored @float (x : float). stored @float x ret;
+
+box_float (x : Init (Stored float)) -> Boxed (Stored float)
+  attribute(inline) =
+  boxed @(Stored float) x;
+
+unbox_float (x : Boxed (Stored float)) (ret : OutPtr (Stored float)) -> Store
+  attribute(inline) =
+  case x of boxed @(Stored float) (sf : Stored float).
+  case sf of stored @float (x : float). stored @float x ret;
+
+repr_float : Repr (Stored float) =
+  repr @(Stored float) sizealign_float copy_float box_float unbox_float True;
+
 repr_bool : Repr (Stored bool);
 repr_NoneType : Repr (Stored NoneType);
 repr_SliceObject : Repr SliceObject;
@@ -2129,10 +2191,55 @@ repr_Tuple3 :
  -> Repr a -> Repr b -> Repr c
  -> Repr (Tuple3 a b c);
 
-repr_Tuple4 :
-    (a b c d : bare)
- -> Repr a -> Repr b -> Repr c -> Repr d
- -> Repr (Tuple4 a b c d);
+repr_Tuple4 @(a b c d : bare)
+  (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c) (rep_d : Repr d)
+  -> Repr (Tuple4 a b c d)
+  attribute(inline, inline_final) =
+
+  case rep_a of
+    repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
+            (tboxed_a : Init a -> BoxedType a)
+            (fboxed_a : BoxedType a -> Init a)
+            (pl_a : bool).
+
+  case rep_b of
+    repr @b (sa_b : SizeAlign b) (copy_b : b -> Init b)
+            (tboxed_b : Init b -> BoxedType b)
+            (fboxed_b: BoxedType b -> Init b)
+            (pl_b : bool).
+
+  case rep_c of
+    repr @c (sa_c : SizeAlign c) (copy_c : c -> Init c)
+            (tboxed_c : Init c -> BoxedType c)
+            (fboxed_c: BoxedType c -> Init c)
+            (pl_c : bool).
+
+  case rep_d of
+    repr @d (sa_d : SizeAlign d) (copy_d : d -> Init d)
+            (tboxed_d : Init d -> BoxedType d)
+            (fboxed_d : BoxedType d -> Init d)
+            (pl_d : bool).
+
+  letfun
+    copy (x : Tuple4 a b c d) (ret : OutPtr (Tuple4 a b c d)) -> Store =
+      case x of tuple4 @a @b @c @d (fa : a) (fb : b) (fc : c) (fd : d).
+      tuple4 @a @b @c @d (copy_a fa) (copy_b fb) (copy_c fc) (copy_d fd) ret
+  in
+
+  repr @(Tuple4 a b c d)
+
+  (sizealign_Tuple4 @a @b @c @d sa_a sa_b sa_c sa_d)
+
+  copy
+
+  (\ (f : Init (Tuple4 a b c d)) -> Boxed (Tuple4 a b c d).
+    boxed @(Tuple4 a b c d) f)
+
+  (\ (i : Boxed (Tuple4 a b c d)) (ret : OutPtr (Tuple4 a b c d)) -> Store.
+    case i of boxed @(Tuple4 a b c d) (tup : Tuple4 a b c d). copy tup ret)
+
+  (and pl_a (and pl_b (and pl_c pl_d)));
+
 
 repr_intset : Repr intset;
 
@@ -2164,6 +2271,16 @@ repr_EffTok : Repr (Stored EffTok);
 
 --toSizeAlignVal : (a : val) -> (uint, uint) -> SizeAlignVal a;
 --toSizeAlign : (a : bare) -> (uint, uint) -> SizeAlign a;
+
+sizealign_Tuple2 : (a b : bare)
+                -> SizeAlign a -> SizeAlign b
+                -> SizeAlign (Tuple2 a b);
+sizealign_Tuple3 : (a b c : bare)
+                -> SizeAlign a -> SizeAlign b -> SizeAlign c
+                -> SizeAlign (Tuple3 a b c);
+sizealign_Tuple4 : (a b c d : bare)
+                -> SizeAlign a -> SizeAlign b -> SizeAlign c -> SizeAlign d
+                -> SizeAlign (Tuple4 a b c d);
 
 sizealign_arr : (n : intindex) -> IInt n -> (uint, uint) -> (uint, uint);
 repr_arr_2 : (n : intindex) -> (a : bare)

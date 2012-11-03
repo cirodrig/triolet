@@ -437,6 +437,44 @@ function inline copy_Tuple4(owned copy1, owned copy2, owned copy3,
   unit call copy4 (src @ tuple.member4, dst @ tuple.member4);
 };
 
+function inline sizealign_Tuple2
+  (SA sa_x, SA sa_y) -> SA {
+
+  SA {size1, align1} = sa_x;
+  SA {size2, align2} = sa_y;
+  typedef tuple = Tuple2(bytes(value size1, value align1),
+  	  	             bytes(value size2, value align2));
+  SA {sizeof tuple, alignof tuple};
+};
+
+function inline sizealign_Tuple3
+  (SA sa_x, SA sa_y, SA sa_z) -> SA {
+
+  SA {size1, align1} = sa_x;
+  SA {size2, align2} = sa_y;
+  SA {size3, align3} = sa_z;
+  typedef tuple = Tuple3(bytes(value size1, value align1),
+  	  	             bytes(value size2, value align2),
+  	  	             bytes(value size3, value align3));
+  SA {sizeof tuple, alignof tuple};
+};
+
+
+function inline sizealign_Tuple4
+  (SA sa_x, SA sa_y, SA sa_z, SA sa_w) -> SA {
+
+  SA {size1, align1} = sa_x;
+  SA {size2, align2} = sa_y;
+  SA {size3, align3} = sa_z;
+  SA {size4, align4} = sa_w;
+  typedef tuple = Tuple4(bytes(value size1, value align1),
+  	  	             bytes(value size2, value align2),
+  	  	             bytes(value size3, value align3),
+  	  	             bytes(value size4, value align4));
+  SA {sizeof tuple, alignof tuple};
+};
+
+
 function inline makeComplex(float re, float im, pointer ret) -> unit {
   typedef cfloa = complex (float);
   ret @! cfloa.real = re;
