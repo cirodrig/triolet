@@ -827,7 +827,7 @@ appendScatter_concatenate @(a : bare)
          (\ (i : int) -> Store.
             -- Copy l2 into the end of the list
             copy @a rep
-            (subscript @N @a sizealign arr1 i)
+            (subscript @M @a sizealign arr2 i)
             (subscript_out @P @a sizealign ret (i +# n1))))))))
   ret;
 
