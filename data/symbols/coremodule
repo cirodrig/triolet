@@ -784,7 +784,8 @@ appendScatter_concatenate @(a : bare)
   (l1 : append_list a)
   (l2 : append_list a)
   (ret : OutPtr (append_list a))
-  -> Store =
+  -> Store
+  attribute(inline) =
 
   case l1 of
     make_append_list @a @(N : intindex)
@@ -840,9 +841,6 @@ appendScatter_update_real : (a : bare)
                      -> EffTok
                      -> OutPtr (append_list a)
                      -> EffTok;
-
-appendScatter_concatenate : (a : bare) -> Repr a -> append_list a
-                         -> append_list a -> Init (append_list a);
 
 
 arrScatter @(N : intindex) @(e i : bare)
