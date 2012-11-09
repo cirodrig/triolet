@@ -9124,7 +9124,7 @@ permute1D @(t : bare -> bare) @(a : bare)
   (src : t (Tuple2 (Stored int) a))
   (ret : OutPtr (array1 a))
   -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline) =
 
   let type indexval = Tuple2 (Stored int) a in
 
@@ -9182,7 +9182,7 @@ boxedPermute1D @(t : bare -> bare) @(a : bare)
   (src : t (Tuple2 (Stored int) a))
   (ret : OutPtr (barray1 a))
   -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline) =
 
   let type indexval = Tuple2 (Stored int) a in
 
