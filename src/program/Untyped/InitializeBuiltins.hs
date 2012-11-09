@@ -1580,6 +1580,30 @@ mkView2Type =
       functionType [ints_type, ints_type, functionType [ints_type] aT]
       (ConTy (tiBuiltin the_con_view) @@ ConTy (tiBuiltin the_con_dim2) @@ aT))
 
+mkPermute1DType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let aT = ConTy a
+      tT = ConTy t
+  in ([shapeType tT `IsInst` tiBuiltin the_c_Shape,
+       tT `IsInst` tiBuiltin the_c_Traversable,
+       passable $ tT @@ aT,
+       passable aT],
+      functionType [ConTy (tiBuiltin the_con_dim1),
+                    tT @@ (TupleTy 2 @@ ConTy (tiBuiltin the_con_int) @@ aT)] 
+                   (ConTy (tiBuiltin the_con_array1) @@ aT))
+
+mkBoxedPermute1DType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let aT = ConTy a
+      tT = ConTy t
+  in ([shapeType tT `IsInst` tiBuiltin the_c_Shape,
+       tT `IsInst` tiBuiltin the_c_Traversable,
+       passable $ tT @@ aT,
+       passable aT],
+      functionType [ConTy (tiBuiltin the_con_dim1),
+                    tT @@ (TupleTy 2 @@ ConTy (tiBuiltin the_con_int) @@ aT)] 
+                   (ConTy (tiBuiltin the_con_barray1) @@ aT))
+
 mkStencil2DType =
   mkStencilType (ConTy $ tiBuiltin the_con_dim2) (ConTy $ tiBuiltin the_con_array2)
 
@@ -2103,6 +2127,12 @@ initializeTIBuiltins = do
               ("view2", [| mkView2Type |]
               , [| coreBuiltin SystemF.The_create_view2 |]
               ),
+              ("permute1D", [| mkPermute1DType |]
+              , [| coreBuiltin SystemF.The_permute1D |]
+              ),              
+              ("boxedPermute1D", [| mkBoxedPermute1DType |]
+              , [| coreBuiltin SystemF.The_boxedPermute1D |]
+              ),              
               ("stencil2D", [| mkStencil2DType |]
               , [| coreBuiltin SystemF.The_stencil2D |]
               ),              

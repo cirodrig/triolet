@@ -581,6 +581,8 @@ builtinVariableNames =
   , "outerproduct"
   , "outerproductStream"
   , "transpose"
+  , "boxedPermute1D"
+  , "permute1D"
   , "boxedStencil2D"
   , "stencil2D"
   , "boxedStencil3D"

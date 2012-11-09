@@ -73,6 +73,8 @@ pyonSourceGlobals =
   , "multiplyView"
   , "divideView"
   , "view2"
+  , "permute1D"
+  , "boxedPermute1D"
   , "stencil2D"
   , "boxedStencil2D"
   , "extend2D"

@@ -5798,6 +5798,148 @@ scatter_list_dim @(i r : bare)
   primitive_list_dim_scatter @i @r repr_i repr_r dom op gen ret;
 
 
+permute1D_list_dim @(a : bare)
+  (rep : Repr a)
+  (dom : dim1)
+  (vw : view list_dim (Tuple2 (Stored int) a))
+  (ret : OutPtr (array1 a))
+  -> Store
+  attribute(inline, inline_dimensionality) =
+
+  let rep_tuple : Repr (Tuple2 (Stored int) a) =
+        repr_Tuple2 @(Stored int) @a repr_int rep in
+
+  let rep_array : Repr (array1 a) = repr_array1 @a rep in
+
+  -- Create an array of the given size
+  dim1ToArrayDesc @(array1 a) dom
+  (\ @(N : intindex)
+     (lb : int) (stride : int) (count : FIInt N) (ret : OutPtr (array1 a))
+     -> Store.
+
+     case count of fiInt @N (count_int : int).
+
+     mk_array1 @a @N lb stride count
+     (stuckBox @(arr N a)
+
+      (\ (ret : OutPtr (arr N a)) -> Store.
+
+       -- Loop over the inputs
+       case vw of
+         mk_view @list_dim @(Tuple2 (Stored int) a)
+                 (input_dom : list_dim)
+                 (gen : Stored int -> Init (Tuple2 (Stored int) a)).
+
+       case input_dom of mk_list_dim (msize : MaybeVal int).
+       case msize of {
+         justVal @int (size : int).
+           case defineIntIndex size of
+             someIInt @(M : intindex) (count : FIInt M).
+
+           -- For each input value
+           doall @M @(arr N a) @(arr N a) count
+           (\ (i : int) -> Store.
+              case boxed @(Stored int) (stored @int i) of
+                boxed @(Stored int) (si : Stored int).
+
+              -- Get a value
+              case boxed @(Tuple2 (Stored int) a) (gen si) of
+                boxed @(Tuple2 (Stored int) a) (pval : Tuple2 (Stored int) a).
+              case pval of
+                tuple2 @(Stored int) @a (s_index : Stored int) (val : a).
+              case s_index of stored @int (index : int).
+
+              -- Convert to real index
+              let offset_index : int = index -# lb in
+              let real_index : int = offset_index //# stride in
+
+              -- Check bounds
+              if offset_index %# stride /=# 0 then except @Store else
+              if or (real_index <# 0) (real_index >=# count_int) then except @Store else
+
+              -- Write it to the output
+              copy @a rep val
+              (subscript_out @N @a (reprSizeAlign @a rep) ret real_index))
+       ; nothingVal @int.
+           except @Store
+       }))
+     ret)
+  ret;
+
+
+boxedPermute1D_list_dim @(a : bare)
+  (rep : Repr a)
+  (dom : dim1)
+  (vw : view list_dim (Tuple2 (Stored int) a))
+  (ret : OutPtr (barray1 a))
+  -> Store
+  attribute(inline, inline_dimensionality) =
+
+  let type Boxed_a = StuckRef (BoxedType a) in
+
+  let rep_Ref : Repr (StuckRef (BoxedType a)) = repr_StuckRef @(BoxedType a) in
+
+  let rep_tuple : Repr (Tuple2 (Stored int) a) =
+        repr_Tuple2 @(Stored int) @a repr_int rep in
+
+  -- Create an array of the given size
+  dim1ToArrayDesc @(barray1 a) dom
+  (\ @(N : intindex)
+     (lb : int) (stride : int) (count : FIInt N) (ret : OutPtr (barray1 a))
+     -> Store.
+
+     case count of fiInt @N (count_int : int).
+
+     mk_barray1 @a
+     (mk_array1 @Boxed_a @N lb stride count
+      (stuckBox @(arr N Boxed_a)
+
+       (\ (ret : OutPtr (arr N Boxed_a)) -> Store.
+
+        -- Loop over the inputs
+        case vw of
+          mk_view @list_dim @(Tuple2 (Stored int) a)
+                  (input_dom : list_dim)
+                  (gen : Stored int -> Init (Tuple2 (Stored int) a)).
+
+        case input_dom of mk_list_dim (msize : MaybeVal int).
+        case msize of {
+          justVal @int (size : int).
+            case defineIntIndex size of
+              someIInt @(M : intindex) (count : FIInt M).
+
+            -- For each input value
+            doall @M @(arr N Boxed_a) @(arr N Boxed_a) count
+            (\ (i : int) -> Store.
+               case boxed @(Stored int) (stored @int i) of
+                 boxed @(Stored int) (si : Stored int).
+
+               -- Get a value
+               case boxed @(Tuple2 (Stored int) a) (gen si) of
+                 boxed @(Tuple2 (Stored int) a) (pval : Tuple2 (Stored int) a).
+               case pval of
+                 tuple2 @(Stored int) @a (s_index : Stored int) (val : a).
+               case s_index of stored @int (index : int).
+
+               -- Convert to real index
+               let offset_index : int = index -# lb in
+               let real_index : int = offset_index //# stride in
+
+               -- Check bounds
+               if offset_index %# stride /=# 0 then except @Store else
+               if or (real_index <# 0) (real_index >=# count_int) then except @Store else
+
+               -- Write it to the output
+               stuckRef @(BoxedType a)
+               (convertToBoxed @a rep (copy @a rep val))
+               (subscript_out @N @Boxed_a (reprSizeAlign @Boxed_a rep_Ref) ret real_index))
+        ; nothingVal @int.
+            except @Store
+        })))
+     ret)
+  ret;
+
+
 fold_list_dim @(a acc : bare)
   (repr_a : Repr a)
   (repr_acc : Repr acc)
@@ -6383,6 +6525,142 @@ Sequence_scatter @(i r : bare)
   finish_scatter @r @s repr_r repr_s finalizer
   (Sequence_partial_scatter @i @s @iniF @updF
    repr_i repr_s initializer updater make_updater make_init src)
+  ret;
+
+
+Sequence_permute1D @(a : bare)
+  (rep : Repr a)
+  (dom : dim1)
+  (s : Sequence (Tuple2 (Stored int) a))
+  (ret : OutPtr (array1 a))
+  -> Store
+  attribute(inline, inline_final) =
+
+  let rep_tuple : Repr (Tuple2 (Stored int) a) =
+        repr_Tuple2 @(Stored int) @a repr_int rep in
+
+  let rep_array : Repr (array1 a) = repr_array1 @a rep in
+
+  let type SEffTok = Stored EffTok in
+
+  -- Create an array of the given size
+  dim1ToArrayDesc @(array1 a) dom
+  (\ @(N : intindex) (lb : int) (stride : int) (size : FIInt N)
+     (ret : OutPtr (array1 a)) -> Store.
+
+     case size of fiInt @N (size_int : int).
+
+     mk_array1 @a @N lb stride size
+     (stuckBox @(arr N a)
+
+      (\ (ret : OutPtr (arr N a)) -> Store.
+
+       -- Loop over the inputs
+       case boxed @SEffTok (stored @EffTok emptyEffTok) of
+         boxed @SEffTok (eff_tok_in : Stored EffTok).
+
+       case boxed @SEffTok
+            (Sequence_fold @(Tuple2 (Stored int) a) @SEffTok
+             rep_tuple repr_EffTok
+             (\ (acc : SEffTok) (x : Tuple2 (Stored int) a)
+                (eff_ret : OutPtr SEffTok)
+                -> Store.
+
+                case x of tuple2 @(Stored int) @a (s_index : Stored int) (val : a).
+                case s_index of stored @int (index : int).
+
+                -- Convert to real index
+                let offset_index : int = index -# lb in
+                let real_index : int = offset_index //# stride in
+
+                -- Check bounds
+                if offset_index %# stride /=# 0 then except @Store else
+                if or (real_index <# 0) (real_index >=# size_int) then except @Store else
+
+                -- Store it
+                case acc of stored @EffTok (u_acc : EffTok).
+                let new_acc : EffTok =
+                      seqEffTok u_acc
+                      (toEffTok @a
+                       (copy @a rep val
+                        (subscript_out @N @a (reprSizeAlign @a rep) ret real_index))) in
+                stored @EffTok new_acc eff_ret)
+             eff_tok_in s) of
+         boxed @SEffTok (eff_tok_out : Stored EffTok).
+
+       case eff_tok_out of stored @EffTok (tok : EffTok).
+       fromEffTok @(arr N a) tok))
+     ret)
+  ret;
+
+
+Sequence_boxedPermute1D @(a : bare)
+  (rep : Repr a)
+  (dom : dim1)
+  (s : Sequence (Tuple2 (Stored int) a))
+  (ret : OutPtr (barray1 a))
+  -> Store
+  attribute(inline, inline_final) =
+
+  let type Boxed_a = StuckRef (BoxedType a) in
+
+  let rep_Ref : Repr Boxed_a = repr_StuckRef @(BoxedType a) in
+
+  let rep_tuple : Repr (Tuple2 (Stored int) a) =
+        repr_Tuple2 @(Stored int) @a repr_int rep in
+
+  let type SEffTok = Stored EffTok in
+
+  -- Create an array of the given size
+  dim1ToArrayDesc @(barray1 a) dom
+  (\ @(N : intindex) (lb : int) (stride : int) (size : FIInt N)
+     (ret : OutPtr (barray1 a)) -> Store.
+
+     case size of fiInt @N (size_int : int).
+
+     mk_barray1 @a
+     (mk_array1 @Boxed_a @N lb stride size
+      (stuckBox @(arr N Boxed_a)
+
+       (\ (ret : OutPtr (arr N Boxed_a)) -> Store.
+
+        -- Loop over the inputs
+        case boxed @SEffTok (stored @EffTok emptyEffTok) of
+          boxed @SEffTok (eff_tok_in : Stored EffTok).
+
+        case boxed @SEffTok
+             (Sequence_fold @(Tuple2 (Stored int) a) @SEffTok
+              rep_tuple repr_EffTok
+              (\ (acc : SEffTok) (x : Tuple2 (Stored int) a)
+                 (eff_ret : OutPtr SEffTok)
+                 -> Store.
+
+                 case x of tuple2 @(Stored int) @a (s_index : Stored int) (val : a).
+                 case s_index of stored @int (index : int).
+
+                 -- Convert to real index
+                 let offset_index : int = index -# lb in
+                 let real_index : int = offset_index //# stride in
+
+                 -- Check bounds
+                 if offset_index %# stride /=# 0 then except @Store else
+                 if or (real_index <# 0) (real_index >=# size_int) then except @Store else
+
+                 -- Store it
+                 case acc of stored @EffTok (u_acc : EffTok).
+                 let new_acc : EffTok =
+                       seqEffTok u_acc
+                       (toEffTok @Boxed_a
+                        (stuckRef @(BoxedType a)
+                         (convertToBoxed @a rep (copy @a rep val))
+                         (subscript_out @N @Boxed_a (reprSizeAlign @Boxed_a rep_Ref) ret real_index))) in
+                 stored @EffTok new_acc eff_ret)
+              eff_tok_in s) of
+          boxed @SEffTok (eff_tok_out : Stored EffTok).
+
+        case eff_tok_out of stored @EffTok (tok : EffTok).
+        fromEffTok @(arr N Boxed_a) tok)))
+     ret)
   ret;
 
 
@@ -8835,6 +9113,122 @@ extend3D @(t : bare -> bare) @(a : bare)
      at_index @a repr container
      (coerce @(index dim3) @(index (shape t)) inbounds_ix)
      ret);
+
+
+permute1D @(t : bare -> bare) @(a : bare)
+  (shape_dict : ShapeDict (shape t))
+  (traversable : TraversableDict t)
+  (rep_s : Repr (t a))
+  (rep_a : Repr a)
+  (dom : dim1)
+  (src : t (Tuple2 (Stored int) a))
+  (ret : OutPtr (array1 a))
+  -> Store
+  attribute(inline, inline_sequential) =
+
+  let type indexval = Tuple2 (Stored int) a in
+
+  let type sh = shape t in
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+       (build : (a : bare) -> Repr a -> Stream sh a -> Init (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Init a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Init b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Init c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Init d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Init e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  let rep_tuple : Repr indexval =
+        repr_Tuple2 @(Stored int) @a repr_int rep_a in
+
+  -- Do a sequential in-place update
+  case shape_flatten @indexval rep_tuple (traverse @indexval rep_tuple src) of {
+    viewStream @indexval (vw : view list_dim indexval).
+      permute1D_list_dim @a rep_a dom vw ret
+
+  ; sequenceStream @indexval (sq : Sequence indexval).
+      Sequence_permute1D @a rep_a dom sq ret
+  };
+
+
+boxedPermute1D @(t : bare -> bare) @(a : bare)
+  (shape_dict : ShapeDict (shape t))
+  (traversable : TraversableDict t)
+  (rep_s : Repr (t a))
+  (rep_a : Repr a)
+  (dom : dim1)
+  (src : t (Tuple2 (Stored int) a))
+  (ret : OutPtr (barray1 a))
+  -> Store
+  attribute(inline, inline_sequential) =
+
+  let type indexval = Tuple2 (Stored int) a in
+
+  let type sh = shape t in
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+       (build : (a : bare) -> Repr a -> Stream sh a -> Init (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Init a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Init b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Init c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Init d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Init e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  let rep_tuple : Repr indexval =
+        repr_Tuple2 @(Stored int) @a repr_int rep_a in
+
+  -- Do a sequential in-place update
+  case shape_flatten @indexval rep_tuple (traverse @indexval rep_tuple src) of {
+    viewStream @indexval (vw : view list_dim indexval).
+      boxedPermute1D_list_dim @a rep_a dom vw ret
+
+  ; sequenceStream @indexval (sq : Sequence indexval).
+      Sequence_boxedPermute1D @a rep_a dom sq ret
+  };
 
 
 create_view2 : (a : bare) -> Repr a
