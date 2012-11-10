@@ -2187,14 +2187,150 @@ repr_ListBuilder @(a : bare) -> Repr (Stored (ListBuilder a))
   False;
 
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
-repr_array1 : (a : bare) -> Repr a -> Repr (array1 a);
-repr_array2 : (a : bare) -> Repr a -> Repr (array2 a);
-repr_array3 : (a : bare) -> Repr a -> Repr (array3 a);
+
+repr_array1 @(a : bare) (rep : Repr a) -> Repr (array1 a)
+  attribute(inline, inline_final) =
+
+  letfun copy_array (x : array1 a) (ret : OutPtr (array1 a)) -> Store =
+     case x of
+       mk_array1 @a @(N : intindex)
+       (lb : int) (stride : int) (count : FIInt N)
+       (arr_ref : StuckBox (arr N a)).
+
+     mk_array1 @a @N lb stride count arr_ref ret
+  in
+
+  repr @(array1 a) (sizealign_array1 @a) copy_array
+  (\ (x : Init (array1 a)) -> Boxed (array1 a).
+    boxed @(array1 a) x)
+  (\ (x : Boxed (array1 a)) (ret : OutPtr (array1 a)) -> Store.
+     case x of boxed @(array1 a) (ux : array1 a). copy_array ux ret)
+  True;
+
+
+repr_array2 @(a : bare) (rep : Repr a) -> Repr (array2 a)
+  attribute(inline, inline_final) =
+
+  letfun copy_array (x : array2 a) (ret : OutPtr (array2 a)) -> Store =
+     case x of
+       mk_array2 @a @(M N : intindex)
+       (lb_y : int) (stride_y : int) (count_y : FIInt M)
+       (lb_x : int) (stride_x : int) (count_x : FIInt N)
+       (arr_ref : StuckBox (arr M (arr N a))).
+
+     mk_array2 @a @M @N lb_y stride_y count_y lb_x stride_x count_x arr_ref ret
+  in
+
+  repr @(array2 a) (sizealign_array2 @a) copy_array
+  (\ (x : Init (array2 a)) -> Boxed (array2 a).
+    boxed @(array2 a) x)
+  (\ (x : Boxed (array2 a)) (ret : OutPtr (array2 a)) -> Store.
+     case x of boxed @(array2 a) (ux : array2 a). copy_array ux ret)
+  True;
+
+
+repr_array3 @(a : bare) (rep : Repr a) -> Repr (array3 a)
+  attribute(inline, inline_final) =
+
+  letfun copy_array (x : array3 a) (ret : OutPtr (array3 a)) -> Store =
+     case x of
+       mk_array3 @a @(L M N : intindex)
+       (lb_z : int) (stride_z : int) (count_z : FIInt L)
+       (lb_y : int) (stride_y : int) (count_y : FIInt M)
+       (lb_x : int) (stride_x : int) (count_x : FIInt N)
+       (arr_ref : StuckBox (arr L (arr M (arr N a)))).
+
+     mk_array3 @a @L @M @N lb_z stride_z count_z lb_y stride_y count_y lb_x stride_x count_x arr_ref ret
+  in
+
+  repr @(array3 a) (sizealign_array3 @a) copy_array
+  (\ (x : Init (array3 a)) -> Boxed (array3 a).
+    boxed @(array3 a) x)
+  (\ (x : Boxed (array3 a)) (ret : OutPtr (array3 a)) -> Store.
+     case x of boxed @(array3 a) (ux : array3 a). copy_array ux ret)
+  True;
+
+
 repr_llist : (a : bare) -> Repr (Ref (llist a));
 repr_blist : (a : bare) -> Repr (blist a);
-repr_barray1 : (a : bare) -> Repr (barray1 a);
-repr_barray2 : (a : bare) -> Repr (barray2 a);
-repr_barray3 : (a : bare) -> Repr (barray3 a);
+
+
+repr_barray1 @(a : bare) -> Repr (barray1 a)
+  attribute(inline, inline_final) =
+
+  let type a_ref = StuckRef (BoxedType a) in
+
+  letfun copy_array (x : barray1 a) (ret : OutPtr (barray1 a)) -> Store =
+     case x of mk_barray1 @a (y : array1 a_ref).
+     case y of
+       mk_array1 @a_ref @(N : intindex)
+        (lb : int) (stride : int) (count : FIInt N)
+        (arr_ref : StuckBox (arr N a_ref)).
+
+     mk_barray1 @a (mk_array1 @a_ref @N lb stride count arr_ref) ret
+  in
+
+  repr @(barray1 a) (sizealign_barray1 @a) copy_array
+  (\ (x : Init (barray1 a)) -> Boxed (barray1 a).
+    boxed @(barray1 a) x)
+  (\ (x : Boxed (barray1 a)) (ret : OutPtr (barray1 a)) -> Store.
+     case x of boxed @(barray1 a) (ux : barray1 a). copy_array ux ret)
+  True;
+
+
+repr_barray2 @(a : bare) (rep : Repr a) -> Repr (barray2 a)
+  attribute(inline, inline_final) =
+
+  let type a_ref = StuckRef (BoxedType a) in
+
+  letfun copy_barray (x : barray2 a) (ret : OutPtr (barray2 a)) -> Store =
+     case x of mk_barray2 @a (y : array2 a_ref).
+     case y of
+       mk_array2 @a_ref @(M N : intindex)
+       (lb_y : int) (stride_y : int) (count_y : FIInt M)
+       (lb_x : int) (stride_x : int) (count_x : FIInt N)
+       (arr_ref : StuckBox (arr M (arr N a_ref))).
+
+     mk_barray2 @a
+     (mk_array2 @a_ref @M @N lb_y stride_y count_y lb_x stride_x count_x arr_ref)
+     ret
+  in
+
+  repr @(barray2 a) (sizealign_barray2 @a) copy_barray
+  (\ (x : Init (barray2 a)) -> Boxed (barray2 a).
+    boxed @(barray2 a) x)
+  (\ (x : Boxed (barray2 a)) (ret : OutPtr (barray2 a)) -> Store.
+     case x of boxed @(barray2 a) (ux : barray2 a). copy_barray ux ret)
+  True;
+
+
+repr_barray3 @(a : bare) (rep : Repr a) -> Repr (barray3 a)
+  attribute(inline, inline_final) =
+
+  let type a_ref = StuckRef (BoxedType a) in
+
+  letfun copy_barray (x : barray3 a) (ret : OutPtr (barray3 a)) -> Store =
+     case x of mk_barray3 @a (y : array3 a_ref).
+     case y of
+       mk_array3 @a_ref @(L M N : intindex)
+       (lb_z : int) (stride_z : int) (count_z : FIInt L)
+       (lb_y : int) (stride_y : int) (count_y : FIInt M)
+       (lb_x : int) (stride_x : int) (count_x : FIInt N)
+       (arr_ref : StuckBox (arr L (arr M (arr N a_ref)))).
+
+     mk_barray3 @a
+     (mk_array3 @a_ref @L @M @N lb_z stride_z count_z lb_y stride_y count_y lb_x stride_x count_x arr_ref)
+     ret
+  in
+
+  repr @(barray3 a) (sizealign_barray3 @a) copy_barray
+  (\ (x : Init (barray3 a)) -> Boxed (barray3 a).
+    boxed @(barray3 a) x)
+  (\ (x : Boxed (barray3 a)) (ret : OutPtr (barray3 a)) -> Store.
+     case x of boxed @(barray3 a) (ux : barray3 a). copy_barray ux ret)
+  True;
+
+
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
 repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
 repr_MaybeVal_int : Repr (MaybeVal int);
@@ -2355,8 +2491,33 @@ repr_Scatter : (a b : bare) -> Repr (BareType (Scatter a b));
 -- possibly NULL.
 repr_EmptyReference : (a : bare) -> Repr a;
 
-repr_arr : (n : intindex) -> (e : bare)
-        -> FIInt n -> Repr e -> Repr (arr n e);
+repr_arr @(n : intindex) @(e : bare)
+  (size : FIInt n) (repr_e : Repr e) -> Repr (arr n e)
+  attribute(inline, inline_final) =
+
+  case repr_e of
+    repr @e
+    (sa : SizeAlign e)
+    (copy_e : e -> Init e)
+    (to_boxed_e : Init e -> BoxedType e)
+    (to_bare_e : BoxedType e -> Init e)
+    (pointerless_e : bool).
+
+  letfun
+    copy_arr (a : arr n e) (ret : OutPtr (arr n e)) -> Store =
+
+    doall @n @(arr n e) @(arr n e) size
+    (\ (i : int) -> Store.
+       copy_e (subscript @n @e sa a i) (subscript_out @n @e sa ret i))
+  in
+
+  repr @(arr n e) (sizealign_arr @n @e size sa)
+  copy_arr
+  (\ (x : Init (arr n e)) -> Boxed (arr n e). boxed @(arr n e) x)
+  (\ (x : Boxed (arr n e)) (ret : OutPtr (arr n e)) -> Store.
+     case x of boxed @(arr n e) (ux : arr n e). copy_arr ux ret)
+  pointerless_e;
+
 
 copy_EffTok (x : Stored EffTok) (ret : OutPtr (Stored EffTok)) -> Store
   attribute(inline) =
@@ -2398,9 +2559,15 @@ sizealign_Tuple4 : (a b c d : bare)
                 -> SizeAlign a -> SizeAlign b -> SizeAlign c -> SizeAlign d
                 -> SizeAlign (Tuple4 a b c d);
 
-sizealign_arr : (n : intindex) -> IInt n -> (uint, uint) -> (uint, uint);
-repr_arr_2 : (n : intindex) -> (a : bare)
-          -> IInt n -> Repr a -> Repr (arr n a);
+sizealign_arr : (n : intindex) -> (e : bare)
+             -> FIInt n -> SizeAlign e -> SizeAlign (arr n e);
+
+sizealign_array1 : (a : bare) -> SizeAlign (array1 a);
+sizealign_array2 : (a : bare) -> SizeAlign (array2 a);
+sizealign_array3 : (a : bare) -> SizeAlign (array3 a);
+sizealign_barray1 : (a : bare) -> SizeAlign (barray1 a);
+sizealign_barray2 : (a : bare) -> SizeAlign (barray2 a);
+sizealign_barray3 : (a : bare) -> SizeAlign (barray3 a);
 
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionaries

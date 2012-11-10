@@ -320,6 +320,8 @@ builtinFunctions =
      Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple3 |])
   , (CoreName module_structures "sizealign_Tuple4",
      Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple4 |])
+  , (CoreName module_structures "sizealign_arr",
+     Right [| SystemF.coreBuiltin SystemF.The_sizealign_arr |])
   
   , (CoreName module_prim "traceInt_int",
      Right [| coreBuiltin (SystemF.The_traceInt_int) |])

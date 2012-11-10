@@ -251,3 +251,43 @@ matrixRecord = constStaticRecord
              , RecordField finIndexedIntRecord -- Size (x)
              , PrimField PointerType    -- Pointer to contents
              ]
+
+-- Various array objects (array1, array2, array3, barray1, barray2, barray3)
+array1Record :: StaticRecord
+array1Record = constStaticRecord
+               [ PrimField trioletIntType
+               , PrimField trioletIntType
+               , RecordField finIndexedIntRecord
+               , PrimField OwnedType
+               ]
+
+array2Record :: StaticRecord
+array2Record = constStaticRecord
+               [ PrimField trioletIntType
+               , PrimField trioletIntType
+               , RecordField finIndexedIntRecord
+               , PrimField trioletIntType
+               , PrimField trioletIntType
+               , RecordField finIndexedIntRecord
+               , PrimField OwnedType
+               ]
+
+array3Record :: StaticRecord
+array3Record = constStaticRecord
+               [ PrimField trioletIntType
+               , PrimField trioletIntType
+               , RecordField finIndexedIntRecord
+               , PrimField trioletIntType
+               , PrimField trioletIntType
+               , RecordField finIndexedIntRecord
+               , PrimField trioletIntType
+               , PrimField trioletIntType
+               , RecordField finIndexedIntRecord
+               , PrimField OwnedType
+               ]
+
+barray1Record, barray2Record, barray3Record :: StaticRecord
+barray1Record = constStaticRecord [ RecordField array1Record]
+barray2Record = constStaticRecord [ RecordField array2Record]
+barray3Record = constStaticRecord [ RecordField array3Record]
+

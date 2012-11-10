@@ -122,6 +122,18 @@ lowerIntrinsicOp v
          sizealign_EffTok)
       , (coreBuiltin The_sizealign_ListBuilder,
          sizealign_ListBuilder)
+      , (coreBuiltin The_sizealign_array1,
+         sizealign_array1)
+      , (coreBuiltin The_sizealign_array2,
+         sizealign_array2)
+      , (coreBuiltin The_sizealign_array3,
+         sizealign_array3)
+      , (coreBuiltin The_sizealign_barray1,
+         sizealign_barray1)
+      , (coreBuiltin The_sizealign_barray2,
+         sizealign_barray2)
+      , (coreBuiltin The_sizealign_barray3,
+         sizealign_barray3)
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -222,3 +234,10 @@ sizealign_ListBuilder [] = return [sizeAlignValue list_builder_type]
     list_builder_type = mutableStaticRecord [PrimField trioletIntType,
                                              PrimField trioletIntType,
                                              PrimField OwnedType]
+
+sizealign_array1 [] = return [sizeAlignValue array1Record]
+sizealign_array2 [] = return [sizeAlignValue array2Record]
+sizealign_array3 [] = return [sizeAlignValue array3Record]
+sizealign_barray1 [] = return [sizeAlignValue barray1Record]
+sizealign_barray2 [] = return [sizeAlignValue barray2Record]
+sizealign_barray3 [] = return [sizeAlignValue barray3Record]

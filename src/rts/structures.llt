@@ -474,6 +474,13 @@ function inline sizealign_Tuple4
   SA {sizeof tuple, alignof tuple};
 };
 
+function inline sizealign_arr(FinIndInt length, SA elt_size) -> SA {
+  FinIndInt {n} = length;
+  SA {elt_size, elt_align} = elt_size;
+  typedef array_type =
+    array(value n as int, bytes(value elt_size, value elt_align));
+  SA {sizeof array_type as uint, alignof array_type as uint};
+};
 
 function inline makeComplex(float re, float im, pointer ret) -> unit {
   typedef cfloa = complex (float);

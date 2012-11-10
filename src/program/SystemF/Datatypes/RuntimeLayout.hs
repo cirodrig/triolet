@@ -1,3 +1,5 @@
+{- This experimental code is obsolete, and should be deleted after its
+   replacement is finished. -}
 
 module SystemF.Datatypes.RuntimeLayout where
 
@@ -576,7 +578,7 @@ valueRepr ty = do
 
 arrayRepr (TInt size_ty size_val) (TBare elt_ty elt_val) =
   let arr_ty = varApp (coreBuiltin The_arr) [size_ty, elt_ty]
-      arr_val = primFunApp The_repr_arr_2 [size_ty, elt_ty] [size_val, elt_val]
+      arr_val = undefined -- primFunApp The_repr_arr_2 [size_ty, elt_ty] [size_val, elt_val]
   in return $ TBare arr_ty arr_val
 
 -- | Get the type of the expression encoded in a TypedRepr object
