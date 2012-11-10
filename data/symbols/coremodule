@@ -2099,7 +2099,7 @@ unbox_int (x : Boxed (Stored int)) (ret : OutPtr (Stored int)) -> Store
   case x of boxed @(Stored int) (sf : Stored int).
   case sf of stored @int (x : int). stored @int x ret;
 
-repr_int : Repr (Stored int) =
+repr_int : Repr (Stored int) attribute(inline, inline_final) =
   repr @(Stored int) sizealign_int copy_int box_int unbox_int True;
 
 copy_uint (src : Stored uint) (ret : OutPtr (Stored uint)) -> Store
@@ -2115,7 +2115,7 @@ unbox_uint (x : Boxed (Stored uint)) (ret : OutPtr (Stored uint)) -> Store
   case x of boxed @(Stored uint) (sf : Stored uint).
   case sf of stored @uint (x : uint). stored @uint x ret;
 
-repr_uint : Repr (Stored uint) =
+repr_uint : Repr (Stored uint) attribute(inline, inline_final) =
   repr @(Stored uint) sizealign_uint copy_uint box_uint unbox_uint True;
 
 copy_float (src : Stored float) (ret : OutPtr (Stored float)) -> Store
@@ -2131,7 +2131,7 @@ unbox_float (x : Boxed (Stored float)) (ret : OutPtr (Stored float)) -> Store
   case x of boxed @(Stored float) (sf : Stored float).
   case sf of stored @float (x : float). stored @float x ret;
 
-repr_float : Repr (Stored float) =
+repr_float : Repr (Stored float) attribute(inline, inline_final) =
   repr @(Stored float) sizealign_float copy_float box_float unbox_float True;
 
 repr_bool : Repr (Stored bool);
@@ -2159,7 +2159,32 @@ repr_slice3 : Repr (Tuple3 SliceObject SliceObject SliceObject) =
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_append_list : (a : bare) -> Repr a -> Repr (append_list a);
-repr_ListBuilder : (a : bare) -> Repr (Stored (ListBuilder a));
+
+copy_ListBuilder @(a : bare)
+  (src : Stored (ListBuilder a)) (ret : OutPtr (Stored (ListBuilder a))) -> Store
+  attribute(inline) =
+  case src of stored @(ListBuilder a) (x : ListBuilder a). stored @(ListBuilder a) x ret;
+
+box_ListBuilder @(a : bare) (x : Init (Stored (ListBuilder a)))
+  -> Boxed (Stored (ListBuilder a))
+  attribute(inline) =
+  boxed @(Stored (ListBuilder a)) x;
+
+unbox_ListBuilder @(a : bare) (x : Boxed (Stored (ListBuilder a)))
+  (ret : OutPtr (Stored (ListBuilder a))) -> Store
+  attribute(inline) =
+  case x of boxed @(Stored (ListBuilder a)) (sf : Stored (ListBuilder a)).
+  case sf of stored @(ListBuilder a) (x : ListBuilder a). stored @(ListBuilder a) x ret;
+
+repr_ListBuilder @(a : bare) -> Repr (Stored (ListBuilder a))
+  attribute(inline, inline_final) =
+  repr @(Stored (ListBuilder a))
+  (sizealign_ListBuilder @a)
+  (copy_ListBuilder @a)
+  (box_ListBuilder @a)
+  (unbox_ListBuilder @a)
+  False;
+
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
 repr_array1 : (a : bare) -> Repr a -> Repr (array1 a);
 repr_array2 : (a : bare) -> Repr a -> Repr (array2 a);
@@ -2271,6 +2296,8 @@ repr_EffTok : Repr (Stored EffTok);
 
 --toSizeAlignVal : (a : val) -> (uint, uint) -> SizeAlignVal a;
 --toSizeAlign : (a : bare) -> (uint, uint) -> SizeAlign a;
+
+sizealign_ListBuilder : (a : bare) -> SizeAlign (Stored (ListBuilder a));
 
 sizealign_Tuple2 : (a b : bare)
                 -> SizeAlign a -> SizeAlign b

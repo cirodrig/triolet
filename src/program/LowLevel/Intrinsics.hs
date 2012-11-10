@@ -118,6 +118,8 @@ lowerIntrinsicOp v
          sizealign_float)
       , (coreBuiltin The_sizealign_NoneType,
          sizealign_NoneType)
+      , (coreBuiltin The_sizealign_ListBuilder,
+         sizealign_ListBuilder)
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -211,3 +213,9 @@ sizealign_int [] = return [sizeAlignValue trioletIntType]
 sizealign_uint [] = return [sizeAlignValue trioletUintType]
 sizealign_float [] = return [sizeAlignValue trioletFloatType]
 sizealign_NoneType [] = return [sizeAlignValue trioletNoneType]
+
+sizealign_ListBuilder [] = return [sizeAlignValue list_builder_type]
+  where
+    list_builder_type = mutableStaticRecord [PrimField trioletIntType,
+                                             PrimField trioletIntType,
+                                             PrimField OwnedType]

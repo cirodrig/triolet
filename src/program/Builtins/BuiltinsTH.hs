@@ -252,6 +252,7 @@ builtinVariableNames =
   , "sizealign_Tuple2"
   , "sizealign_Tuple3"
   , "sizealign_Tuple4"
+  , "sizealign_ListBuilder"
   , "ShapeDict_list_dim"
   , "ShapeDict_dim0"
   , "ShapeDict_dim1"
