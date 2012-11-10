@@ -2085,6 +2085,7 @@ sizealign_uint : SizeAlign (Stored uint);
 sizealign_float : SizeAlign (Stored float);
 sizealign_bool : SizeAlign (Stored bool);
 sizealign_NoneType : SizeAlign (Stored NoneType);
+sizealign_EffTok : SizeAlign (Stored EffTok);
 
 copy_int (src : Stored int) (ret : OutPtr (Stored int)) -> Store
   attribute(inline) =
@@ -2208,13 +2209,84 @@ repr_Tuple0 : Repr Tuple0;
 repr_Tuple1 :
     (a : bare) -> Repr a -> Repr (Tuple1 a);
 
-repr_Tuple2 :
-    (a b : bare) -> Repr a -> Repr b -> Repr (Tuple2 a b);
+repr_Tuple2 @(a b : bare) (rep_a : Repr a) (rep_b : Repr b)
+  -> Repr (Tuple2 a b)
+  attribute(inline, inline_final) =
 
-repr_Tuple3 :
-    (a b c : bare)
- -> Repr a -> Repr b -> Repr c
- -> Repr (Tuple3 a b c);
+  case rep_a of
+    repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
+            (tboxed_a : Init a -> BoxedType a)
+            (fboxed_a : BoxedType a -> Init a)
+            (pl_a : bool).
+
+  case rep_b of
+    repr @b (sa_b : SizeAlign b) (copy_b : b -> Init b)
+            (tboxed_b : Init b -> BoxedType b)
+            (fboxed_b: BoxedType b -> Init b)
+            (pl_b : bool).
+
+  letfun
+    copy (x : Tuple2 a b) (ret : OutPtr (Tuple2 a b)) -> Store =
+      case x of tuple2 @a @b (fa : a) (fb : b).
+      tuple2 @a @b (copy_a fa) (copy_b fb) ret
+  in
+
+  repr @(Tuple2 a b)
+
+  (sizealign_Tuple2 @a @b sa_a sa_b)
+
+  copy
+
+  (\ (f : Init (Tuple2 a b)) -> Boxed (Tuple2 a b). boxed @(Tuple2 a b) f)
+
+  (\ (i : Boxed (Tuple2 a b)) (ret : OutPtr (Tuple2 a b)) -> Store.
+    case i of boxed @(Tuple2 a b) (tup : Tuple2 a b). copy tup ret)
+
+  (and pl_a pl_b);
+
+
+repr_Tuple3 @(a b c : bare) (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c)
+ -> Repr (Tuple3 a b c)
+ attribute(inline, inline_final) =
+
+  case rep_a of
+    repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
+            (tboxed_a : Init a -> BoxedType a)
+            (fboxed_a : BoxedType a -> Init a)
+            (pl_a : bool).
+
+  case rep_b of
+    repr @b (sa_b : SizeAlign b) (copy_b : b -> Init b)
+            (tboxed_b : Init b -> BoxedType b)
+            (fboxed_b: BoxedType b -> Init b)
+            (pl_b : bool).
+
+  case rep_c of
+    repr @c (sa_c : SizeAlign c) (copy_c : c -> Init c)
+            (tboxed_c : Init c -> BoxedType c)
+            (fboxed_c: BoxedType c -> Init c)
+            (pl_c : bool).
+
+  letfun
+    copy (x : Tuple3 a b c) (ret : OutPtr (Tuple3 a b c)) -> Store =
+      case x of tuple3 @a @b @c (fa : a) (fb : b) (fc : c).
+      tuple3 @a @b @c (copy_a fa) (copy_b fb) (copy_c fc) ret
+  in
+
+  repr @(Tuple3 a b c)
+
+  (sizealign_Tuple3 @a @b @c sa_a sa_b sa_c)
+
+  copy
+
+  (\ (f : Init (Tuple3 a b c)) -> Boxed (Tuple3 a b c).
+    boxed @(Tuple3 a b c) f)
+
+  (\ (i : Boxed (Tuple3 a b c)) (ret : OutPtr (Tuple3 a b c)) -> Store.
+    case i of boxed @(Tuple3 a b c) (tup : Tuple3 a b c). copy tup ret)
+
+  (and pl_a (and pl_b pl_c));
+
 
 repr_Tuple4 @(a b c d : bare)
   (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c) (rep_d : Repr d)
@@ -2286,7 +2358,19 @@ repr_EmptyReference : (a : bare) -> Repr a;
 repr_arr : (n : intindex) -> (e : bare)
         -> FIInt n -> Repr e -> Repr (arr n e);
 
-repr_EffTok : Repr (Stored EffTok);
+repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_final) =
+
+  repr @(Stored EffTok)
+  sizealign_EffTok
+  (\ (x : Stored EffTok) (ret : OutPtr (Stored EffTok)) -> Store.
+    case x of stored @EffTok (t : EffTok). stored @EffTok t ret)
+  (\ (f : Init (Stored EffTok)) -> Boxed (Stored EffTok).
+    boxed @(Stored EffTok) f)
+  (\ (x : Boxed (Stored EffTok)) (ret : OutPtr (Stored EffTok)) -> Store.
+    case x of boxed @(Stored EffTok) (sx : Stored EffTok).
+    case sx of stored @EffTok (t : EffTok).
+    stored @EffTok t ret)
+  True;
 
 --getReprSizeAlignTuple : (a : bare) -> Repr a -> (uint, uint);
 --getSizeAlignValTuple : (a : val) -> SizeAlignVal a -> (uint, uint);

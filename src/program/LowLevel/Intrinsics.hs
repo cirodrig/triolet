@@ -118,6 +118,8 @@ lowerIntrinsicOp v
          sizealign_float)
       , (coreBuiltin The_sizealign_NoneType,
          sizealign_NoneType)
+      , (coreBuiltin The_sizealign_EffTok,
+         sizealign_EffTok)
       , (coreBuiltin The_sizealign_ListBuilder,
          sizealign_ListBuilder)
       ]
@@ -213,6 +215,7 @@ sizealign_int [] = return [sizeAlignValue trioletIntType]
 sizealign_uint [] = return [sizeAlignValue trioletUintType]
 sizealign_float [] = return [sizeAlignValue trioletFloatType]
 sizealign_NoneType [] = return [sizeAlignValue trioletNoneType]
+sizealign_EffTok [] = return [sizeAlignValue UnitType]
 
 sizealign_ListBuilder [] = return [sizeAlignValue list_builder_type]
   where
