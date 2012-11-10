@@ -816,14 +816,14 @@ appendScatter_concatenate @(a : bare)
       fromEffTok @(arr P a)
       (seqEffTok
        (toEffTok @(arr P a)
-        (doall @Np @a @a count1
+        (sequential_doall @Np @a @a count1
          (\ (i : int) -> Store.
             -- Copy l1 into the beginning of the list
             copy @a rep
             (subscript @N @a sizealign arr1 i)
             (subscript_out @P @a sizealign ret i))))
        (toEffTok @(arr P a)
-        (doall @Mp @a @a count2
+        (sequential_doall @Mp @a @a count2
          (\ (i : int) -> Store.
             -- Copy l2 into the end of the list
             copy @a rep
@@ -9777,6 +9777,15 @@ doall : (n : intindex)
      -> FIInt n
      -> (int -> Store)
      -> Store;
+
+-- A doall loop that won't be parallelized
+sequential_doall @(n : intindex) @(a b : bare)
+     (count : FIInt n)
+     (f : int -> Store)
+     -> Store
+     attribute(inline, inline_sequential) =
+
+     doall @n @a @b count f;
 
 -- Sequential loop
 for @(N : intindex) @(acc : bare)
