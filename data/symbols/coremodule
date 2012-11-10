@@ -2358,19 +2358,24 @@ repr_EmptyReference : (a : bare) -> Repr a;
 repr_arr : (n : intindex) -> (e : bare)
         -> FIInt n -> Repr e -> Repr (arr n e);
 
+copy_EffTok (x : Stored EffTok) (ret : OutPtr (Stored EffTok)) -> Store
+  attribute(inline) =
+  case x of stored @EffTok (t : EffTok). stored @EffTok t ret;
+
+box_EffTok (f : Init (Stored EffTok)) -> Boxed (Stored EffTok)
+  attribute(inline) =
+  boxed @(Stored EffTok) f;
+
+unbox_EffTok (x : Boxed (Stored EffTok)) (ret : OutPtr (Stored EffTok))
+  -> Store attribute(inline) =
+  case x of boxed @(Stored EffTok) (sx : Stored EffTok).
+  case sx of stored @EffTok (t : EffTok).
+  stored @EffTok t ret;
+
 repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_final) =
 
   repr @(Stored EffTok)
-  sizealign_EffTok
-  (\ (x : Stored EffTok) (ret : OutPtr (Stored EffTok)) -> Store.
-    case x of stored @EffTok (t : EffTok). stored @EffTok t ret)
-  (\ (f : Init (Stored EffTok)) -> Boxed (Stored EffTok).
-    boxed @(Stored EffTok) f)
-  (\ (x : Boxed (Stored EffTok)) (ret : OutPtr (Stored EffTok)) -> Store.
-    case x of boxed @(Stored EffTok) (sx : Stored EffTok).
-    case sx of stored @EffTok (t : EffTok).
-    stored @EffTok t ret)
-  True;
+  sizealign_EffTok copy_EffTok box_EffTok unbox_EffTok True;
 
 --getReprSizeAlignTuple : (a : bare) -> Repr a -> (uint, uint);
 --getSizeAlignValTuple : (a : val) -> SizeAlignVal a -> (uint, uint);
