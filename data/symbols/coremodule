@@ -9554,6 +9554,202 @@ extend3D @(t : bare -> bare) @(a : bare)
      ret);
 
 
+-- Take the union of an inner and outer view
+unionView3D @(a : bare) (repr : Repr a)
+  (inner : view dim3 a) (edge : view dim3 a)
+  -> view dim3 a attribute(inline, inline_dimensionality) =
+
+  case inner of mk_view @dim3 @a (inner_dom : dim3) (inner_f : index dim3 -> Init a).
+  case edge of mk_view @dim3 @a (edge_dom : dim3) (edge_f : index dim3 -> Init a).
+
+  case inner_dom of mk_dim3 (inner_dom_z : dim1) (inner_dom_y : dim1) (inner_dom_x : dim1).
+  case inner_dom_z of mk_dim1 (inner_z_iv : Interval) (inner_z_lm : LinearMap).
+  case inner_dom_y of mk_dim1 (inner_y_iv : Interval) (inner_y_lm : LinearMap).
+  case inner_dom_x of mk_dim1 (inner_x_iv : Interval) (inner_x_lm : LinearMap).
+  case inner_z_lm of linearMap (inner_z_stride : int) (inner_z_align : int).
+  case inner_y_lm of linearMap (inner_y_stride : int) (inner_y_align : int).
+  case inner_x_lm of linearMap (inner_x_stride : int) (inner_x_align : int).
+
+  case edge_dom of mk_dim3 (edge_dom_z : dim1) (edge_dom_y : dim1) (edge_dom_x : dim1).
+  case edge_dom_z of mk_dim1 (edge_z_iv : Interval) (edge_z_lm : LinearMap).
+  case edge_dom_y of mk_dim1 (edge_y_iv : Interval) (edge_y_lm : LinearMap).
+  case edge_dom_x of mk_dim1 (edge_x_iv : Interval) (edge_x_lm : LinearMap).
+  case edge_z_lm of linearMap (edge_z_stride : int) (edge_z_align : int).
+  case edge_y_lm of linearMap (edge_y_stride : int) (edge_y_align : int).
+  case edge_x_lm of linearMap (edge_x_stride : int) (edge_x_align : int).
+
+  -- Verify that the inner domain is a subset of the outer domain.
+  -- The outer domain's stride must divide the inner domain's stride.
+  if inner_z_stride %# edge_z_stride /=# 0
+  then except @(view dim3 a) else
+
+  if inner_y_stride %# edge_y_stride /=# 0
+  then except @(view dim3 a) else
+
+  if inner_x_stride %# edge_x_stride /=# 0
+  then except @(view dim3 a) else
+
+  -- The outer domain's stride must divide the difference in alignments.
+  if (edge_z_align -# inner_z_align) %# edge_z_stride /=# 0
+  then except @(view dim3 a) else
+
+  if (edge_y_align -# inner_y_align) %# edge_y_stride /=# 0
+  then except @(view dim3 a) else
+
+  if (edge_x_align -# inner_x_align) %# edge_x_stride /=# 0
+  then except @(view dim3 a) else
+
+  -- THe inner domain's interval is a subset of the outer domain's interval
+  if not (subsetInterval inner_x_iv edge_x_iv)
+  then except @(view dim3 a) else
+
+  if not (subsetInterval inner_y_iv edge_y_iv)
+  then except @(view dim3 a) else
+
+  if not (subsetInterval inner_z_iv edge_z_iv)
+  then except @(view dim3 a) else
+
+  -- If an element of the new map is an element of the inner view,
+  -- its value is the inner view's; otherwise it is the outer view's
+  view_generate @dim3 ShapeDict_dim3 @a repr edge_dom
+  (\ (ix : Tuple3 (Stored int) (Stored int) (Stored int)) (ret : OutPtr a)
+     -> Store.
+
+    case ix of tuple3 @(Stored int) @(Stored int) @(Stored int)
+               (sz : Stored int) (sy : Stored int) (sx : Stored int).
+    case sz of stored @int (z : int).
+    case sy of stored @int (y : int).
+    case sx of stored @int (x : int).
+
+    -- Is this part of the inner view?
+    let in_stride : bool =
+          and (and (inLM z inner_z_lm) (inLM y inner_y_lm))
+              (inLM x inner_x_lm) in
+    let in_interval : bool =
+          and (and (inInterval z inner_z_iv) (inInterval y inner_y_iv))
+              (inInterval x inner_x_iv) in
+
+    if and in_stride in_interval
+    then inner_f ix ret
+    else edge_f ix ret);
+
+
+permute1D @(t : bare -> bare) @(a : bare)
+  (shape_dict : ShapeDict (shape t))
+  (traversable : TraversableDict t)
+  (rep_s : Repr (t a))
+  (rep_a : Repr a)
+  (dom : dim1)
+  (src : t (Tuple2 (Stored int) a))
+  (ret : OutPtr (array1 a))
+  -> Store
+  attribute(inline) =
+
+  let type indexval = Tuple2 (Stored int) a in
+
+  let type sh = shape t in
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+       (build : (a : bare) -> Repr a -> Stream sh a -> Init (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Init a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Init b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Init c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Init d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Init e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  let rep_tuple : Repr indexval =
+        repr_Tuple2 @(Stored int) @a repr_int rep_a in
+
+  -- Do a sequential in-place update
+  case shape_flatten @indexval rep_tuple (traverse @indexval rep_tuple src) of {
+    viewStream @indexval (vw : view list_dim indexval).
+      permute1D_list_dim @a rep_a dom vw ret
+
+  ; sequenceStream @indexval (sq : Sequence indexval).
+      Sequence_permute1D @a rep_a dom sq ret
+  };
+
+
+boxedPermute1D @(t : bare -> bare) @(a : bare)
+  (shape_dict : ShapeDict (shape t))
+  (traversable : TraversableDict t)
+  (rep_s : Repr (t a))
+  (rep_a : Repr a)
+  (dom : dim1)
+  (src : t (Tuple2 (Stored int) a))
+  (ret : OutPtr (barray1 a))
+  -> Store
+  attribute(inline) =
+
+  let type indexval = Tuple2 (Stored int) a in
+
+  let type sh = shape t in
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream sh a)
+       (build : (a : bare) -> Repr a -> Stream sh a -> Init (t a)).
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_member : sh -> index sh -> bool)
+    (shape_intersect : sh -> sh -> sh)
+    (shape_flatten : (a : bare) -> Repr a -> Stream sh a -> Stream list_dim a)
+    (shape_generate : (a : bare) -> Repr a -> sh -> (index sh -> Init a) -> Stream sh a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Init b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Init c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Init d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Init e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (shape t) sh ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  let rep_tuple : Repr indexval =
+        repr_Tuple2 @(Stored int) @a repr_int rep_a in
+
+  -- Do a sequential in-place update
+  case shape_flatten @indexval rep_tuple (traverse @indexval rep_tuple src) of {
+    viewStream @indexval (vw : view list_dim indexval).
+      boxedPermute1D_list_dim @a rep_a dom vw ret
+
+  ; sequenceStream @indexval (sq : Sequence indexval).
+      Sequence_boxedPermute1D @a rep_a dom sq ret
+  };
+
+
 create_view2 : (a : bare) -> Repr a
             -> index dim2 -> index dim2 -> (index dim2 -> Init a) -> view dim2 a;
 
