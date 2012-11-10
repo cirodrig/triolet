@@ -1,0 +1,5 @@
+
+def foo(xs):
+  return permute1D(arrayDomain(0, 6), xs)
+
+export cplusplus foo : list((int, int)) -> array1(int)

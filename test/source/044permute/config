@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "One-dimensional array permutation",
+  trioletSources	 = ["permute.tri"],
+  lltrioletSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
+  expectedResult = ShouldPrint "431625"
+}
