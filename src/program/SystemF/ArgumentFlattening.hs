@@ -1093,6 +1093,11 @@ deadValue t = do
                args <- mapM deadValue dom
                let expr = ExpM $ ConE defaultExpInfo (dead_indint_op p) args
                return expr
+           | con `isCoreBuiltin` The_MaybeVal -> do
+               -- Create a 'nothing' value
+               let op = VarCon (coreBuiltin The_nothingVal) [t] []
+                   expr = ExpM $ ConE defaultExpInfo op []
+               return expr
          (CoT (VarT k), [t1, t2])
            | k == boxV ->
                return $ ExpM $ AppE defaultExpInfo make_x_coercion_op [t1, t2] []
