@@ -274,6 +274,9 @@ createDictEnv = do
     return $ DictEnv.pattern [v1, v2, v3, v4]
       (varApp (coreBuiltin The_Tuple4) [VarT v1, VarT v2, VarT v3, VarT v4])
       (createDict_Tuple4 v1 v2 v3 v4)
+  stuckref_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (coreBuiltin The_StuckRef) [VarT arg],
+     createDict_stuckref arg)
   blist_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (coreBuiltin The_blist) [VarT arg],
      createDict_blist arg)
@@ -321,6 +324,7 @@ createDictEnv = do
                                   uint_dict, efftok_dict, intset_dict,
                                   maybeint_dict, maybemaybeint_dict,
                                   sliceobj_dict,
+                                  stuckref_dict,
                                   list_dict, array1_dict, array2_dict, array3_dict,
                                   blist_dict, barray1_dict, barray2_dict, barray3_dict,
                                   complex_dict, array_dict,
@@ -355,6 +359,12 @@ valueDict value dict_var =
   where
     pattern_type = varApp (coreBuiltin The_Stored) [value]
     expr = MkDict $ return $ ExpM $ VarE defaultExpInfo dict_var
+
+createDict_stuckref param_var subst = MkDict $
+  return $ ExpM $ AppE defaultExpInfo dict_oper [param1] []
+  where
+    param1 = getParamType param_var subst
+    dict_oper = varE' (coreBuiltin The_repr_StuckRef)
 
 createDict_Tuple1 :: Var -> TypeSubst -> MkDict
 createDict_Tuple1 param_var subst = MkDict $

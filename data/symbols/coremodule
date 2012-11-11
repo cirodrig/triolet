@@ -2278,8 +2278,8 @@ repr_barray1 @(a : bare) -> Repr (barray1 a)
   True;
 
 
-repr_barray2 @(a : bare) (rep : Repr a) -> Repr (barray2 a)
-  attribute(inline, inline_final) =
+repr_barray2 @(a : bare) -> Repr (barray2 a)
+  attribute(inline, inline_postfinal) =
 
   let type a_ref = StuckRef (BoxedType a) in
 
@@ -2304,8 +2304,8 @@ repr_barray2 @(a : bare) (rep : Repr a) -> Repr (barray2 a)
   True;
 
 
-repr_barray3 @(a : bare) (rep : Repr a) -> Repr (barray3 a)
-  attribute(inline, inline_final) =
+repr_barray3 @(a : bare) -> Repr (barray3 a)
+  attribute(inline, inline_postfinal) =
 
   let type a_ref = StuckRef (BoxedType a) in
 
