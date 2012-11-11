@@ -244,6 +244,10 @@ listRecord = constStaticRecord
              , PrimField PointerType    -- Pointer to contents
              ]
 
+-- | A Triolet list-of-boxed-objects.
+blistRecord :: StaticRecord
+blistRecord = constStaticRecord [RecordField listRecord]
+
 -- | A Triolet matrix.
 matrixRecord :: StaticRecord
 matrixRecord = constStaticRecord

@@ -128,12 +128,14 @@ lowerIntrinsicOp v
          sizealign_array2)
       , (coreBuiltin The_sizealign_array3,
          sizealign_array3)
+      , (coreBuiltin The_sizealign_list,
+         sizealign_list)
       , (coreBuiltin The_sizealign_barray1,
          sizealign_barray1)
       , (coreBuiltin The_sizealign_barray2,
          sizealign_barray2)
-      , (coreBuiltin The_sizealign_barray3,
-         sizealign_barray3)
+      , (coreBuiltin The_sizealign_blist,
+         sizealign_blist)
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -238,6 +240,8 @@ sizealign_ListBuilder [] = return [sizeAlignValue list_builder_type]
 sizealign_array1 [] = return [sizeAlignValue array1Record]
 sizealign_array2 [] = return [sizeAlignValue array2Record]
 sizealign_array3 [] = return [sizeAlignValue array3Record]
+sizealign_list [] = return [sizeAlignValue listRecord]
 sizealign_barray1 [] = return [sizeAlignValue barray1Record]
 sizealign_barray2 [] = return [sizeAlignValue barray2Record]
 sizealign_barray3 [] = return [sizeAlignValue barray3Record]
+sizealign_blist [] = return [sizeAlignValue blistRecord]

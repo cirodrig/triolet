@@ -2158,7 +2158,6 @@ repr_slice3 : Repr (Tuple3 SliceObject SliceObject SliceObject) =
   repr_Tuple3 @SliceObject @SliceObject @SliceObject
   repr_SliceObject repr_SliceObject repr_SliceObject;
 
-repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_append_list : (a : bare) -> Repr a -> Repr (append_list a);
 
 copy_ListBuilder @(a : bare)
@@ -2251,8 +2250,25 @@ repr_array3 @(a : bare) (rep : Repr a) -> Repr (array3 a)
   True;
 
 
+repr_list @(a : bare) (rep_a : Repr a) -> Repr (list a)
+  attribute(inline, inline_postfinal) =
+
+  letfun copy_list (x : list a) (ret : OutPtr (list a)) -> Store =
+     case x of
+       make_list @a @(N : intindex)
+       (count : FIInt N) (arr_ref : StuckBox (arr N a)).
+
+     make_list @a @N count arr_ref ret
+  in
+
+  repr @(list a) (sizealign_list @a) copy_list
+  (\ (x : Init (list a)) -> Boxed (list a). boxed @(list a) x)
+  (\ (x : Boxed (list a)) (ret : OutPtr (list a)) -> Store.
+     case x of boxed @(list a) (ux : list a). copy_list ux ret)
+  False;
+  
+
 repr_llist : (a : bare) -> Repr (Ref (llist a));
-repr_blist : (a : bare) -> Repr (blist a);
 
 
 repr_barray1 @(a : bare) -> Repr (barray1 a)
@@ -2329,6 +2345,27 @@ repr_barray3 @(a : bare) -> Repr (barray3 a)
   (\ (x : Boxed (barray3 a)) (ret : OutPtr (barray3 a)) -> Store.
      case x of boxed @(barray3 a) (ux : barray3 a). copy_barray ux ret)
   True;
+
+
+repr_blist @(a : bare) -> Repr (blist a)
+  attribute(inline, inline_postfinal) =
+
+  let type ref_a = StuckRef (BoxedType a) in
+
+  letfun copy_list (x : blist a) (ret : OutPtr (blist a)) -> Store =
+     case x of make_blist @a (l : list ref_a).
+     case l of
+       make_list @ref_a @(N : intindex)
+       (count : FIInt N) (arr_ref : StuckBox (arr N ref_a)).
+
+     make_blist @a (make_list @ref_a @N count arr_ref) ret
+  in
+
+  repr @(blist a) (sizealign_blist @a) copy_list
+  (\ (x : Init (blist a)) -> Boxed (blist a). boxed @(blist a) x)
+  (\ (x : Boxed (blist a)) (ret : OutPtr (blist a)) -> Store.
+     case x of boxed @(blist a) (ux : blist a). copy_list ux ret)
+  False;
 
 
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
@@ -2562,9 +2599,11 @@ sizealign_Tuple4 : (a b c d : bare)
 sizealign_arr : (n : intindex) -> (e : bare)
              -> FIInt n -> SizeAlign e -> SizeAlign (arr n e);
 
+sizealign_list : (a : bare) -> SizeAlign (list a);
 sizealign_array1 : (a : bare) -> SizeAlign (array1 a);
 sizealign_array2 : (a : bare) -> SizeAlign (array2 a);
 sizealign_array3 : (a : bare) -> SizeAlign (array3 a);
+sizealign_blist : (a : bare) -> SizeAlign (blist a);
 sizealign_barray1 : (a : bare) -> SizeAlign (barray1 a);
 sizealign_barray2 : (a : bare) -> SizeAlign (barray2 a);
 sizealign_barray3 : (a : bare) -> SizeAlign (barray3 a);
