@@ -161,7 +161,8 @@ attr = do
        ("inline", return InlineAttr),
        ("inline_dimensionality", return InlineDimensionalityAttr),
        ("inline_sequential", return InlineSequentialAttr),
-       ("inline_final", return InlineFinalAttr)]
+       ("inline_final", return InlineFinalAttr),
+       ("inline_postfinal", return InlinePostfinalAttr)]
 
 -------------------------------------------------------------------------------
 -- * Type parsing

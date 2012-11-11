@@ -389,6 +389,7 @@ phasePermitsInlining phase def =
              InlDimensionality -> False
              InlSequential -> False
              InlFinal      -> False
+             InlPostfinal  -> False
         DimensionalitySimplifierPhase ->
           case def_phase
           of InlNormal     -> True
@@ -396,6 +397,7 @@ phasePermitsInlining phase def =
              InlDimensionality -> True
              InlSequential -> False
              InlFinal      -> False
+             InlPostfinal  -> False
         SequentialSimplifierPhase ->
           case def_phase
           of InlNormal     -> True 
@@ -403,8 +405,11 @@ phasePermitsInlining phase def =
              InlDimensionality -> True
              InlSequential -> True
              InlFinal      -> False
+             InlPostfinal  -> False
         FinalSimplifierPhase ->
-          True
+          case def_phase
+          of InlPostfinal -> False
+             _ -> True
         PostFinalSimplifierPhase ->
           True
 
@@ -1087,13 +1092,28 @@ eliminateUselessCopying expression = do
     CaseE inf scrutinee alts -> do
       tenv <- getTypeEnv
 
+      -- Eliminate reconstruction of bare or val data in each alternative.
+      -- If scrutinee is a complex expression, don't eliminate, as it may
+      -- produce code duplication.
+      debug_expr <- applySubstitution expression
+      alts1 <-
+        case discardSubstitution scrutinee
+        of ExpM (VarE {}) -> do
+             subst_scrutinee <- applySubstitution scrutinee
+             -- Verify that scrutinee didn't become a big expression
+             case subst_scrutinee of
+               ExpM (VarE {}) -> do
+                 mapM (eliminateReconstructor debug_expr subst_scrutinee) alts
+               _ -> return alts
+           _ -> return alts
+  
       -- First, try to detect the case where a value is deconstructed and
       -- reconstructed.
       -- Skip this step for bare types, since we can't avoid copying.
       uses <-
-        if BareK == alt_kind tenv (head alts)
+        if BareK == alt_kind tenv (head alts1)
         then return Nothing
-        else liftM sequence $ mapM (useless_alt tenv) alts
+        else liftM sequence $ mapM (useless_alt tenv) alts1
 
       -- Useless if all alternatives are useless.
       -- In well-typed code, all return parameters must be the same.
@@ -1113,9 +1133,13 @@ eliminateUselessCopying expression = do
         _ -> do
           -- Next, try to detect the case where a value is constructed and
           -- then copied
-          elim_case <- eliminate_unbox_and_copy tenv scrutinee alts
+          elim_case <- eliminate_unbox_and_copy tenv scrutinee alts1
           case elim_case of 
-            Nothing -> can't_eliminate
+            Nothing -> do -- can't_eliminate
+              -- Reconstruct the case expression
+              scrutinee' <- applySubstitution scrutinee
+              alts1' <- mapM applySubstitutionAlt alts1
+              return $ deferEmptySubstitution $ ExpM (CaseE inf scrutinee' alts1')
             Just new_exp -> consumeFuel >> return new_exp
 
     _ -> can't_eliminate
@@ -1179,41 +1203,15 @@ eliminateUselessCopying expression = do
 
     -- Compare fields of a pattern to fields of a data constructor expression
     -- to determine whether they match.
-    compare_pattern_to_expression decon alt_fields con exp_fields =
-      case (decon, con)
-      of (VarDeCon alt_op alt_ty_args alt_ex_types,
-          VarCon exp_op exp_ty_args exp_ex_types) -> do
-           let bound_ex_types = map (VarT . binderVar) alt_ex_types
-           types_match <-
-             -- Compare constructors
-             return (alt_op == exp_op) >&&>
-
-             -- Compare type parameters
-             andM (zipWith compareTypes alt_ty_args exp_ty_args) >&&>
-
-             -- Compare existential types.  If the existentially bound
-             -- variable is passed back to the data constructor, then the
-             -- new existential type matches the old one.
-             andM (zipWith compareTypes bound_ex_types exp_ex_types) >&&>
-
-             -- Compare fields
-             andM (zipWith match_field alt_fields exp_fields)
-
-           return $! if types_match then Just Nothing else Nothing
-
-         (TupleDeCon alt_types,
-          TupleCon exp_types) -> do
-           types_match <-
-             -- Compare type parameters
-             andM (zipWith compareTypes alt_types exp_types) >&&>
-             -- Compare fields
-             andM (zipWith match_field alt_fields exp_fields)
-
-           return $! if types_match then Just Nothing else Nothing
-
-         _ ->
-           -- Different constructors
-           return Nothing
+    compare_pattern_to_expression decon alt_fields con exp_fields = do
+      constructors_match <- matchConPattern decon con
+      if constructors_match
+        then do
+          -- Compare fields
+          fields_match <- andM (zipWith match_field alt_fields exp_fields)
+          return $! if fields_match then Just Nothing else Nothing
+        else
+          return Nothing
       where
         -- This field should be @v@ (for a value),
         -- @copy _ v@ (for an initializer), or
@@ -1224,6 +1222,29 @@ eliminateUselessCopying expression = do
           subst_expr <- freshenHead expr
           checkForVariableExpr' pattern_var subst_expr >||>
             checkForCopyExpr' pattern_var subst_expr
+
+-- | Decide whether the deconstructor and constructor are equal
+matchConPattern :: DeConInst -> ConInst -> LR Bool
+matchConPattern
+  (VarDeCon alt_op alt_ty_args alt_ex_types)
+  (VarCon exp_op exp_ty_args exp_ex_types) 
+  | alt_op /= exp_op = return False
+  | otherwise =
+    -- Compare type parameters
+    andM (zipWith compareTypes alt_ty_args exp_ty_args) >&&>
+
+    -- Compare existential types
+    andM (zipWith compareTypes bound_ex_types exp_ex_types)
+  where
+    bound_ex_types = map (VarT . binderVar) alt_ex_types
+
+matchConPattern (TupleDeCon alt_types) (TupleCon exp_types) 
+  | length alt_types /= length exp_types = return False
+  | otherwise =
+    -- Compare type parameters
+    andM (zipWith compareTypes alt_types exp_types)
+
+matchConPattern _ _ = return False
 
 -- | Test whether the expression is a variable expression referencing
 --   the given variable.
@@ -1254,6 +1275,85 @@ checkForCopyExpr' v e =
            checkForVariableExpr rparam_var copy_dst
          _ -> return False
      _ -> return False
+
+-- | The code to look for when eliminating reconstructors:
+--
+--   A data constructor term and argument variables.
+--   If an argument has kind 'ValK' or 'BoxK', look for the exact argument;
+--   otherwise, the argument has kind 'BareK' and look for a 'copy' call.
+data ReconstructorTemplate =
+  ReconstructorTemplate 
+  { tmplDataKind :: !BaseKind 
+  , tmplDeCon    :: !DeConInst 
+  , tmplFields   :: [(Var, BaseKind)]
+  }
+
+-- | In code that deconstructs and then reconstructs a value, replace the 
+--   reconstruction with a copy of the original value.
+--
+--   FIXME: Do this in a separate pass to avoid redundant traversals!
+eliminateReconstructor debug_expr scrutinee alt@(AltSM (Alt decon params body)) = do
+  tenv <- getTypeEnv
+
+  -- Determine the kind of the scrutinee and the object fields
+  -- and the type parameters
+  let (data_kind, field_kinds) =
+        case decon
+        of VarDeCon data_con _ _ ->
+             let Just (data_type, con_type) =
+                   lookupDataConWithType data_con tenv
+             in (dataTypeKind data_type, dataConFieldKinds con_type)
+           TupleDeCon fs ->
+             (ValK, map (toBaseKind . typeKind tenv) fs)
+      ty_args = deConTyArgs decon
+      ex_types = deConExTypes decon
+      param_vars = map (patMVar . fromPatSM) params
+
+  let template = ReconstructorTemplate data_kind decon
+                 (zip param_vars field_kinds)
+
+  if data_kind /= BareK
+    then do
+      body' <- eliminateReconstructorTemplate scrutinee template body
+      return $ AltSM (Alt decon params (deferEmptySubstitution body'))
+    else return alt
+
+eliminateReconstructorTemplate scrutinee template body 
+  | tmplDataKind template == BareK =
+    internalError "eliminateReconstructor: Not implemented for bare types"
+  | otherwise = do
+    body' <- freshenHead body
+    case body' of
+      VarE inf v ->
+        return $ ExpM $ VarE inf v
+      ConE inf op args -> do
+        -- Decide whether to eliminate this term
+        con_match <- matchConPattern (tmplDeCon template) op
+        if con_match
+          then do
+            args_match <- andM $ zipWith match_field (tmplFields template) args
+            if args_match      
+              then do
+                -- Can eliminate this term
+                return scrutinee
+              else do args' <- mapM recurse args
+                      return $ ExpM $ ConE inf op args'
+          else do args' <- mapM recurse args
+                  return $ ExpM $ ConE inf op args'
+      LetE inf pat rhs body -> do
+        rhs' <- recurse rhs
+        body' <- assumeBinder (patMBinder $ fromPatSM pat) $ recurse body
+        return $ ExpM $ LetE inf (fromPatSM pat) rhs' body'
+      _ -> freshenFullyExp body
+  where
+    recurse e = eliminateReconstructorTemplate scrutinee template e
+
+    match_field :: (Var, BaseKind) -> ExpSM -> LR Bool
+    match_field (var, kind) field_exp
+      | kind == ValK || kind == BoxK =
+        checkForVariableExpr var field_exp
+      | kind == BareK =
+        checkForCopyExpr var field_exp
 
 -------------------------------------------------------------------------------
 -- Traversing code

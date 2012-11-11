@@ -57,6 +57,8 @@ data Attribute =
                                     --   the sequential compilation phase
   | InlineFinalAttr                 -- ^ Definition should not be inlined until
                                     --   the final optimization phase
+  | InlinePostfinalAttr             -- ^ Definition should not be inlined until
+                                    --   after redundant copying is removed
   deriving (Eq, Ord)
 
 -------------------------------------------------------------------------------

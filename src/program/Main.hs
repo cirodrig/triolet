@@ -262,7 +262,10 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
     print $ pprMemModule repr_mod
   
   -- Inline loops
-  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
+  repr_mod <- iterateM (highLevelOptimizations False SystemF.FinalSimplifierPhase) 2 repr_mod
+
+  -- Final floating, to move repr dictionaries out of the way and ensure
+  -- that copying is eliminated
   repr_mod <- SystemF.longRangeFloating repr_mod
 
   -- Restructure the code resulting from inlining, which may create new

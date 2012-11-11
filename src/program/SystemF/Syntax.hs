@@ -561,6 +561,9 @@ data InliningAnnotation =
   | InlFinal                    -- ^ A sequential loop function.  The function
                                 --   should be inlined after rewriting
                                 --   sequential loops.
+  | InlPostfinal                -- ^ A sequential loop function.  The function
+                                --   should be inlined after eliminating
+                                --   redundant copying.
     deriving (Eq, Enum, Show)
 
 -- | A definition group consists of either a single non-recursive definition

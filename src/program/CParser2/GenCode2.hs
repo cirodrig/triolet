@@ -66,6 +66,7 @@ fromVarAttrs attrs =
     interpret st InlineSequentialAttr = st
     interpret st InlineDimensionalityAttr = st
     interpret st InlineFinalAttr = st
+    interpret st InlinePostfinalAttr = st
 
     interpret st _ =
       error "Unexpected attribute on type declaration"
@@ -324,7 +325,7 @@ defAttributes attrs ann =
 
     -- There should be at most one inlining phase attribute
     check_inlining_attrs =
-      case filter (`elem` [InlineSequentialAttr, InlineDimensionalityAttr, InlineFinalAttr]) attrs
+      case filter (`elem` [InlineSequentialAttr, InlineDimensionalityAttr, InlineFinalAttr, InlinePostfinalAttr]) attrs
       of []  -> ()
          [_] -> ()
          _   -> internalError "Functions may not have more than one inlining phase attribute"
@@ -345,6 +346,9 @@ defAttributes attrs ann =
     
     insert_attribute InlineFinalAttr ann =
       ann {SystemF.defAnnInlinePhase = SystemF.InlFinal}
+
+    insert_attribute InlinePostfinalAttr ann =
+      ann {SystemF.defAnnInlinePhase = SystemF.InlPostfinal}
 
     insert_attribute _ _ =
       internalError "Unexpected function attribute"

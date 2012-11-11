@@ -2017,7 +2017,7 @@ shapeSliceRepr : (sh : box) -> ShapeDict sh -> Repr (slice sh);
 -- Representation dictionaries
 
 copy @(a : bare) (rep : Repr a) (src : a) (dst : OutPtr a) -> Store
-  attribute(conlike, inline, inline_final) =
+  attribute(conlike, inline, inline_postfinal) =
 
   case rep of
     repr @a 
@@ -2069,7 +2069,7 @@ copyArray @(N : intindex) @(a : bare)
       -- Copy each item in a loop
       doall @N @a @a fsize
       (\ (i : int) -> Store.
-        copy_a
+        copy @a rep
         (subscript @N @a sa src i)
         (subscript_out @N @a sa ret i))
   ; iPosInfty @N. except @Store
@@ -2178,7 +2178,7 @@ unbox_ListBuilder @(a : bare) (x : Boxed (Stored (ListBuilder a)))
   case sf of stored @(ListBuilder a) (x : ListBuilder a). stored @(ListBuilder a) x ret;
 
 repr_ListBuilder @(a : bare) -> Repr (Stored (ListBuilder a))
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
   repr @(Stored (ListBuilder a))
   (sizealign_ListBuilder @a)
   (copy_ListBuilder @a)
@@ -2189,7 +2189,7 @@ repr_ListBuilder @(a : bare) -> Repr (Stored (ListBuilder a))
 repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
 
 repr_array1 @(a : bare) (rep : Repr a) -> Repr (array1 a)
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
 
   letfun copy_array (x : array1 a) (ret : OutPtr (array1 a)) -> Store =
      case x of
@@ -2209,7 +2209,7 @@ repr_array1 @(a : bare) (rep : Repr a) -> Repr (array1 a)
 
 
 repr_array2 @(a : bare) (rep : Repr a) -> Repr (array2 a)
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
 
   letfun copy_array (x : array2 a) (ret : OutPtr (array2 a)) -> Store =
      case x of
@@ -2230,7 +2230,7 @@ repr_array2 @(a : bare) (rep : Repr a) -> Repr (array2 a)
 
 
 repr_array3 @(a : bare) (rep : Repr a) -> Repr (array3 a)
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
 
   letfun copy_array (x : array3 a) (ret : OutPtr (array3 a)) -> Store =
      case x of
@@ -2256,7 +2256,7 @@ repr_blist : (a : bare) -> Repr (blist a);
 
 
 repr_barray1 @(a : bare) -> Repr (barray1 a)
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
 
   let type a_ref = StuckRef (BoxedType a) in
 
@@ -2347,7 +2347,7 @@ repr_Tuple1 :
 
 repr_Tuple2 @(a b : bare) (rep_a : Repr a) (rep_b : Repr b)
   -> Repr (Tuple2 a b)
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
 
   case rep_a of
     repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
@@ -2362,28 +2362,28 @@ repr_Tuple2 @(a b : bare) (rep_a : Repr a) (rep_b : Repr b)
             (pl_b : bool).
 
   letfun
-    copy (x : Tuple2 a b) (ret : OutPtr (Tuple2 a b)) -> Store =
+    copy_tuple (x : Tuple2 a b) (ret : OutPtr (Tuple2 a b)) -> Store =
       case x of tuple2 @a @b (fa : a) (fb : b).
-      tuple2 @a @b (copy_a fa) (copy_b fb) ret
+      tuple2 @a @b (copy @a rep_a fa) (copy @b rep_b fb) ret
   in
 
   repr @(Tuple2 a b)
 
   (sizealign_Tuple2 @a @b sa_a sa_b)
 
-  copy
+  copy_tuple
 
   (\ (f : Init (Tuple2 a b)) -> Boxed (Tuple2 a b). boxed @(Tuple2 a b) f)
 
   (\ (i : Boxed (Tuple2 a b)) (ret : OutPtr (Tuple2 a b)) -> Store.
-    case i of boxed @(Tuple2 a b) (tup : Tuple2 a b). copy tup ret)
+    case i of boxed @(Tuple2 a b) (tup : Tuple2 a b). copy_tuple tup ret)
 
   (and pl_a pl_b);
 
 
 repr_Tuple3 @(a b c : bare) (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c)
  -> Repr (Tuple3 a b c)
- attribute(inline, inline_final) =
+ attribute(inline, inline_postfinal) =
 
   case rep_a of
     repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
@@ -2404,22 +2404,22 @@ repr_Tuple3 @(a b c : bare) (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c)
             (pl_c : bool).
 
   letfun
-    copy (x : Tuple3 a b c) (ret : OutPtr (Tuple3 a b c)) -> Store =
+    copy_tuple (x : Tuple3 a b c) (ret : OutPtr (Tuple3 a b c)) -> Store =
       case x of tuple3 @a @b @c (fa : a) (fb : b) (fc : c).
-      tuple3 @a @b @c (copy_a fa) (copy_b fb) (copy_c fc) ret
+      tuple3 @a @b @c (copy @a rep_a fa) (copy @b rep_b fb) (copy @c rep_c fc) ret
   in
 
   repr @(Tuple3 a b c)
 
   (sizealign_Tuple3 @a @b @c sa_a sa_b sa_c)
 
-  copy
+  copy_tuple
 
   (\ (f : Init (Tuple3 a b c)) -> Boxed (Tuple3 a b c).
     boxed @(Tuple3 a b c) f)
 
   (\ (i : Boxed (Tuple3 a b c)) (ret : OutPtr (Tuple3 a b c)) -> Store.
-    case i of boxed @(Tuple3 a b c) (tup : Tuple3 a b c). copy tup ret)
+    case i of boxed @(Tuple3 a b c) (tup : Tuple3 a b c). copy_tuple tup ret)
 
   (and pl_a (and pl_b pl_c));
 
@@ -2427,7 +2427,7 @@ repr_Tuple3 @(a b c : bare) (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c)
 repr_Tuple4 @(a b c d : bare)
   (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c) (rep_d : Repr d)
   -> Repr (Tuple4 a b c d)
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
 
   case rep_a of
     repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
@@ -2454,22 +2454,22 @@ repr_Tuple4 @(a b c d : bare)
             (pl_d : bool).
 
   letfun
-    copy (x : Tuple4 a b c d) (ret : OutPtr (Tuple4 a b c d)) -> Store =
+    copy_tuple (x : Tuple4 a b c d) (ret : OutPtr (Tuple4 a b c d)) -> Store =
       case x of tuple4 @a @b @c @d (fa : a) (fb : b) (fc : c) (fd : d).
-      tuple4 @a @b @c @d (copy_a fa) (copy_b fb) (copy_c fc) (copy_d fd) ret
+      tuple4 @a @b @c @d (copy @a rep_a fa) (copy @b rep_b fb) (copy @c rep_c fc) (copy @d rep_d fd) ret
   in
 
   repr @(Tuple4 a b c d)
 
   (sizealign_Tuple4 @a @b @c @d sa_a sa_b sa_c sa_d)
 
-  copy
+  copy_tuple
 
   (\ (f : Init (Tuple4 a b c d)) -> Boxed (Tuple4 a b c d).
     boxed @(Tuple4 a b c d) f)
 
   (\ (i : Boxed (Tuple4 a b c d)) (ret : OutPtr (Tuple4 a b c d)) -> Store.
-    case i of boxed @(Tuple4 a b c d) (tup : Tuple4 a b c d). copy tup ret)
+    case i of boxed @(Tuple4 a b c d) (tup : Tuple4 a b c d). copy_tuple tup ret)
 
   (and pl_a (and pl_b (and pl_c pl_d)));
 
@@ -2493,7 +2493,7 @@ repr_EmptyReference : (a : bare) -> Repr a;
 
 repr_arr @(n : intindex) @(e : bare)
   (size : FIInt n) (repr_e : Repr e) -> Repr (arr n e)
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
 
   case repr_e of
     repr @e
@@ -2508,7 +2508,7 @@ repr_arr @(n : intindex) @(e : bare)
 
     doall @n @(arr n e) @(arr n e) size
     (\ (i : int) -> Store.
-       copy_e (subscript @n @e sa a i) (subscript_out @n @e sa ret i))
+       copy @e repr_e (subscript @n @e sa a i) (subscript_out @n @e sa ret i))
   in
 
   repr @(arr n e) (sizealign_arr @n @e size sa)
@@ -2533,7 +2533,7 @@ unbox_EffTok (x : Boxed (Stored EffTok)) (ret : OutPtr (Stored EffTok))
   case sx of stored @EffTok (t : EffTok).
   stored @EffTok t ret;
 
-repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_final) =
+repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_postfinal) =
 
   repr @(Stored EffTok)
   sizealign_EffTok copy_EffTok box_EffTok unbox_EffTok True;
@@ -7245,7 +7245,7 @@ Sequence_parallel_build @(a : bare)
 
               doall @m @a @a tree_list_dim
               (\ (i : int) -> Store.
-                copy_a
+                copy @a rep
                 (subscript @m @a sa tree_list_array i)
                 (subscript_out @n @a sa ret_p (i +# ind)))
           } in
