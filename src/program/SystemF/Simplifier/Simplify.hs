@@ -1336,10 +1336,8 @@ eliminateReconstructorTemplate scrutinee template body
               then do
                 -- Can eliminate this term
                 return scrutinee
-              else do args' <- mapM recurse args
-                      return $ ExpM $ ConE inf op args'
-          else do args' <- mapM recurse args
-                  return $ ExpM $ ConE inf op args'
+              else freshenFullyExp body
+          else freshenFullyExp body
       LetE inf pat rhs body -> do
         rhs' <- recurse rhs
         body' <- assumeBinder (patMBinder $ fromPatSM pat) $ recurse body
