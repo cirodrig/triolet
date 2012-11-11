@@ -273,7 +273,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   repr_mod <- iterateM (highLevelOptimizations True SystemF.FinalSimplifierPhase) 3 repr_mod
 
   -- Eliminate case-of-case 
-  repr_mod <- highLevelOptimizations True SystemF.PostFinalSimplifierPhase repr_mod
+  repr_mod <- iterateM (highLevelOptimizations True SystemF.PostFinalSimplifierPhase) 2 repr_mod
 
   -- Argument flattening
   when debugMode $ void $ do
