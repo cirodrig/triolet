@@ -30,7 +30,7 @@ extern function core.internal.inplace.boxedScatter_updater
 extern function core.internal.inplace.appendScatter_initializer
     (SA, owned, pointer) -> unit;
 extern function core.internal.inplace.appendScatter_update_real
-    (owned, owned, unit, pointer) -> unit;
+    (SA, owned, unit, pointer) -> unit;
 
 extern function core.internal.inplace.compute_hash_table_size
     (FinIndInt) -> int;

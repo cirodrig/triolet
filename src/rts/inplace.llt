@@ -184,9 +184,9 @@ function inline appendScatter_initializer (SA sizealign, owned _, pointer ret) -
   nil;
 };
 
-function inline appendScatter_update_real (owned rep, owned writer, unit _, pointer alist) -> unit
+function inline appendScatter_update_real (SA elt_sizealign, owned writer, unit _, pointer alist) -> unit
 {
-  SA {elt_size, elt_align} = rep @! Repr.sizealign;
+  SA {elt_size, elt_align} = elt_sizealign;
   typedef elt = bytes(value elt_size, value elt_align);
 
   FinIndInt {n_elems} = alist @! AppendList.nelems;

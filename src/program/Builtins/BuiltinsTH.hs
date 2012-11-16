@@ -252,6 +252,7 @@ builtinVariableNames =
   , "sizealign_Tuple2"
   , "sizealign_Tuple3"
   , "sizealign_Tuple4"
+  , "sizealign_append_list"
   , "sizealign_ListBuilder"
   , "sizealign_array1"
   , "sizealign_array2"

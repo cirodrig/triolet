@@ -776,7 +776,8 @@ appendScatter_updater @(a : bare)
   (tok_in : EffTok)
   (update_list : OutPtr (append_list a))
   -> EffTok =
-  appendScatter_update_real @a rep writer tok_in update_list;
+  appendScatter_update_real @a
+  (reprSizeAlign @a rep) writer tok_in update_list;
 
 
 appendScatter_concatenate @(a : bare)
@@ -836,7 +837,7 @@ appendScatter_initializer : (a : bare) -> SizeAlign a -> (NoneType -> NoneType)
                          -> OutPtr (append_list a) -> EffTok;
 
 appendScatter_update_real : (a : bare)
-                     -> Repr a
+                     -> SizeAlign a
                      -> (OutPtr a -> Store)
                      -> EffTok
                      -> OutPtr (append_list a)
@@ -2158,7 +2159,25 @@ repr_slice3 : Repr (Tuple3 SliceObject SliceObject SliceObject) =
   repr_Tuple3 @SliceObject @SliceObject @SliceObject
   repr_SliceObject repr_SliceObject repr_SliceObject;
 
-repr_append_list : (a : bare) -> Repr a -> Repr (append_list a);
+repr_append_list @(a : bare) (rep : Repr a) -> Repr (append_list a)
+  attribute(inline, inline_postfinal) =
+
+  letfun
+    copy_append_list (src : append_list a) (dst : OutPtr (append_list a)) -> Store =
+      case src of
+        make_append_list @a @(N : intindex)
+        (capacity : FIInt N) (size : int) (arr : StuckBox (arr N a)).
+
+      make_append_list @a @N capacity size arr dst
+  in
+
+  repr @(append_list a) (sizealign_append_list @a)
+  copy_append_list
+  (\ (x : Init (append_list a)) -> Boxed (append_list a).
+    boxed @(append_list a) x)
+  (\ (x : Boxed (append_list a)) (ret : OutPtr (append_list a)) -> Store.
+    case x of boxed @(append_list a) (y : append_list a). copy_append_list y ret)
+  False;
 
 copy_ListBuilder @(a : bare)
   (src : Stored (ListBuilder a)) (ret : OutPtr (Stored (ListBuilder a))) -> Store
@@ -2583,6 +2602,8 @@ repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_postfinal) =
 
 --toSizeAlignVal : (a : val) -> (uint, uint) -> SizeAlignVal a;
 --toSizeAlign : (a : bare) -> (uint, uint) -> SizeAlign a;
+
+sizealign_append_list : (a : bare) -> SizeAlign (append_list a);
 
 sizealign_ListBuilder : (a : bare) -> SizeAlign (Stored (ListBuilder a));
 

@@ -122,6 +122,8 @@ lowerIntrinsicOp v
          sizealign_EffTok)
       , (coreBuiltin The_sizealign_ListBuilder,
          sizealign_ListBuilder)
+      , (coreBuiltin The_sizealign_append_list,
+         sizealign_append_list)
       , (coreBuiltin The_sizealign_array1,
          sizealign_array1)
       , (coreBuiltin The_sizealign_array2,
@@ -236,6 +238,12 @@ sizealign_ListBuilder [] = return [sizeAlignValue list_builder_type]
     list_builder_type = mutableStaticRecord [PrimField trioletIntType,
                                              PrimField trioletIntType,
                                              PrimField OwnedType]
+
+sizealign_append_list [] = return [sizeAlignValue append_list_type]
+  where
+    append_list_type = mutableStaticRecord [RecordField finIndexedIntRecord,
+                                            PrimField trioletIntType,
+                                            PrimField OwnedType]
 
 sizealign_array1 [] = return [sizeAlignValue array1Record]
 sizealign_array2 [] = return [sizeAlignValue array2Record]
