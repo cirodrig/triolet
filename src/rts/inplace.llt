@@ -195,6 +195,7 @@ function inline appendScatter_update_real (SA elt_sizealign, owned writer, unit 
 
   // Need to resize list?
   (new_contents, new_n_elems) = if (used == n_elems) {
+    // Resize list
     typedef old_arr = array(value n_elems, elt);
 
     // Create a new array with 'ne' elements
@@ -210,6 +211,8 @@ function inline appendScatter_update_real (SA elt_sizealign, owned writer, unit 
     }
     else { (); };
 
+    // Update the list contents pointer
+    alist @! AppendList.contents = nc;
     (nc, ne);
   }
   else {
@@ -224,7 +227,6 @@ function inline appendScatter_update_real (SA elt_sizealign, owned writer, unit 
   // Update the list object
   alist @! AppendList.nelems = FinIndInt {new_n_elems};
   alist @! AppendList.used = used + int 1;
-  alist @! AppendList.contents = new_contents;
 
   nil;
 };
