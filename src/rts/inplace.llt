@@ -195,16 +195,18 @@ function inline appendScatter_update_real (owned rep, owned writer, unit _, poin
 
   // Need to resize list?
   (new_contents, new_n_elems) = if (used == n_elems) {
-    typedef old_arr = Boxed(array(value n_elems, elt));
+    typedef old_arr = array(value n_elems, elt);
 
     // Create a new array with 'ne' elements
     ne = n_elems + n_elems + int 2;
     typedef new_arr = array(value ne, elt);
-    nc = pointer primcall triolet_alloc (sizeof new_arr) as owned;
+    nc = pointer primcall triolet_alloc (sizeof Boxed(new_arr)) as owned;
 
     // If old array was not empty, copy old to new array
     () = if (n_elems != int 0) {
-      () primcall memcpy (nc, old_contents, sizeof old_arr);
+      () primcall memcpy (nc @ Boxed(new_arr).member,
+                          old_contents @ Boxed(old_arr).member,
+                          sizeof old_arr);
     }
     else { (); };
 
