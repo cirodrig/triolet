@@ -1781,6 +1781,94 @@ data PBTree (a : bare) : box
   pbEmpty () ();
 };
 
+
+-- Get the number of 'a's in a PBtree 
+PBTree_size @(a : bare) (t : PBTree a) -> int =
+  case t of {
+    pbLeaf @a (l : list a).
+      case l of
+        make_list @a @(n : intindex) (len : FIInt n) (b : StuckBox (arr n a)).
+      case len of fiInt @n (i : int).
+      i
+  ; pbBranch @a (i : int) (t1 : PBTree a) (t2 : PBTree a).
+      i
+  ; pbEmpty @a.
+      0
+  };
+
+
+-- Create a new branch, computing the number of 'a's in the branch.
+-- Do not create a branch if one of the leaves is empty.
+PBTree_branch @(a : bare) (ta : PBTree a) (tb : PBTree a) -> PBTree a =
+  let tot_sz : int = PBTree_size @a ta +# PBTree_size @a tb in
+  letfun both (x : NoneType) -> PBTree a = pbBranch @a tot_sz ta tb in
+  letfun
+    k1 (empty : NoneType) -> PBTree a =
+      case tb of {
+        pbEmpty @a. ta
+      ; pbLeaf @a (l : list a). both None
+      ; pbBranch @a (n : int) (e_ta : PBTree a) (e_tb : PBTree a). both None
+      } in
+  case ta of {
+    pbEmpty @a. tb
+  ; pbLeaf @a (l : list a). k1 None
+  ; pbBranch @a (n : int) (e_ta : PBTree a) (e_tb : PBTree a). k1 None
+  };
+
+
+-- Flatten a PBTree to a list.  The list contains the elements of the PBTree
+-- in the same order.
+PBTree_flatten @(a : bare)
+  (rep : Repr a) (tree : PBTree a) (ret : OutPtr (list a)) -> Store
+  attribute(inline) =
+  -- Get the list size
+  case defineIntIndex (PBTree_size @a tree) of
+    someIInt @(n : intindex) (out_list_dim : FIInt n).
+
+  letfun
+    -- Copy the given subtree to the output, at the given offset
+    storeTreeVal (new_ind : int) (t : PBTree a) (ret_p : OutPtr (arr n a)) -> Store =
+      let ind : int = new_ind in
+      case t of {
+        pbEmpty @a.
+          fromEffTok @a emptyEffTok
+
+      ; pbBranch @a (e_i : int) (ta : PBTree a) (tb : PBTree a).
+          let ta_sz : int = PBTree_size @a ta in
+          fromEffTok @a
+          (seqEffTok (toEffTok @a (storeTreeVal new_ind ta ret_p))
+                     (toEffTok @a (storeTreeVal (new_ind +# ta_sz) tb ret_p)))
+
+      ; pbLeaf @a (tree_list : list a).
+          case tree_list of make_list @a @(m : intindex) (tree_list_dim : FIInt m) (list_sb : StuckBox (arr m a)).
+          case list_sb of stuckBox @(arr m a) (tree_list_array : (arr m a)).
+          case rep of
+            repr @a
+            (sa : SizeAlign a)
+            (copy_a : a -> Init a)
+            (to_boxed_a : Init a -> BoxedType a)
+            (to_bare_a : BoxedType a -> Init a)
+            (pointerless_a : bool).
+
+          doall @m @a @a tree_list_dim
+          (\ (i : int) -> Store.
+            copy @a rep
+            (subscript @m @a sa tree_list_array i)
+            (subscript_out @n @a sa ret_p (i +# ind)))
+      } in
+
+  -- Create a new list.
+  -- In parallel, copy results into the list.
+  make_list @a @n out_list_dim
+  (stuckBox @(arr n a)
+   (\ (ret_p : OutPtr (arr n a)) -> Store.
+     blocked_PBTree_doall @a @(list a) tree
+     (\ (i : int) (t : PBTree a) -> Store.
+     storeTreeVal i t ret_p)))
+  ret;
+  
+  
+
 -------------------------------------------------------------------------------
 -- Streams
 
@@ -7238,42 +7326,23 @@ Sequence_parallel_build @(a : bare)
   -> Store
   attribute(inline) =
 
+  let reduced_tree : PBTree a = PBTree_parallel_build @a rep dom f in
+
+  PBTree_flatten @a rep reduced_tree ret;
+
+
+-- Run a blocked parallel computation over a sequence.
+-- Collect the results into a tree, where each tree leaf is the result of one
+-- parallel step.
+PBTree_parallel_build @(a : bare)
+  (rep : Repr a) (dom : list_dim)
+  (f : Stored int -> Sequence a)
+  -> PBTree a
+  attribute(inline) =
+
   case dom of mk_list_dim (list_size : MaybeVal int).
   case list_size of {
     justVal @int (size : int).
-      letfun
-        -- Get the number of array elements in a tree
-        treeSz (t : PBTree a) -> int =
-          case t of {
-            pbLeaf @a (l : list a).
-              case l of
-                make_list @a @(n : intindex)
-                (len : FIInt n) (b : StuckBox (arr n a)).
-              case len of fiInt @n (i : int). i
-          ; pbBranch @a (i : int) (t1 : PBTree a) (t2 : PBTree a).
-              i
-          ; pbEmpty @a.
-              0
-          } in
-      letfun
-        -- Create a new tree branch.  However, if one of the subtrees is empty,
-        -- then return the other subtree instead.
-        mkBranch (ta : PBTree a) (tb : PBTree a) -> PBTree a =
-          let tot_sz : int = treeSz ta +# treeSz tb in
-          letfun both (x : NoneType) -> PBTree a = pbBranch @a tot_sz ta tb in
-          letfun
-            k1 (empty : NoneType) -> PBTree a =
-              case tb of {
-                pbEmpty @a. ta
-              ; pbLeaf @a (empty_list : list a). both None
-              ; pbBranch @a (e_i : int) (e_ta : PBTree a) (e_tb : PBTree a). both None
-              } in
-          case ta of {
-            pbEmpty @a. tb
-          ; pbLeaf @a (empty_list : list a). k1 None
-          ; pbBranch @a (e_i : int) (e_ta : PBTree a) (e_tb : PBTree a). k1 None
-          } in
-
       letfun
         -- Sequentially build a list from a subset of the original range.
         -- Put the list in a tree leaf.
@@ -7291,57 +7360,14 @@ Sequence_parallel_build @(a : bare)
                      case boxed @(Stored int) (stored @int (start +# i)) of
                      boxed @(Stored int) (real_si : Stored int).
                      f real_si))) in
-          mkBranch outLeaf init in
+          PBTree_branch @a outLeaf init in
 
       case defineIntIndex size of
         someIInt @(n : intindex) (range_count : FIInt n).
 
       -- Create lists in parallel and build a tree out of them
-      let reduced_tree : PBTree a =
-            blocked_1d_reduce @n @(PBTree a)
-            range_count mkBranch (pbEmpty @a) rangeProc in
-
-      case defineIntIndex (treeSz reduced_tree) of
-        someIInt @(n : intindex) (out_list_dim : FIInt n).
-
-      letfun
-        storeTreeVal (new_ind : int) (t : PBTree a) (ret_p : OutPtr (arr n a) ) -> Store =
-          let ind : int = new_ind in
-          case t of {
-            pbEmpty @a.
-              fromEffTok @a emptyEffTok
-
-          ; pbBranch @a (e_i : int) (ta : PBTree a) (tb : PBTree a).
-              let store_a : EffTok = toEffTok @a (storeTreeVal new_ind ta ret_p) in
-              let ta_sz : int = treeSz ta in
-              let store_b : EffTok = toEffTok @a (storeTreeVal (new_ind +# ta_sz) tb ret_p) in
-              fromEffTok @a (seqEffTok store_a store_b)
-                                
-          ; pbLeaf @a (tree_list : list a).
-              case tree_list of make_list @a @(m : intindex) (tree_list_dim : FIInt m) (list_sb : StuckBox (arr m a)).
-              case list_sb of stuckBox @(arr m a) (tree_list_array : (arr m a)).
-              case rep of
-                repr @a
-                (sa : SizeAlign a)
-                (copy_a : a -> Init a)
-                (to_boxed_a : Init a -> BoxedType a)
-                (to_bare_a : BoxedType a -> Init a)
-                (pointerless_a : bool).
-
-              doall @m @a @a tree_list_dim
-              (\ (i : int) -> Store.
-                copy @a rep
-                (subscript @m @a sa tree_list_array i)
-                (subscript_out @n @a sa ret_p (i +# ind)))
-          } in
-
-      make_list @a @n out_list_dim
-      (stuckBox @(arr n a)
-       (\ (ret_p : OutPtr (arr n a)) -> Store.
-         blocked_PBTree_doall @a @(list a) reduced_tree
-         (\ (i : int) (t : PBTree a) -> Store.
-         storeTreeVal i t ret_p)))
-      ret
+      blocked_1d_reduce @n @(PBTree a)
+      range_count (PBTree_branch @a) (pbEmpty @a) rangeProc
 
   ; nothingVal @int.
       except @Store
