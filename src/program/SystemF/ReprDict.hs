@@ -226,6 +226,8 @@ createDictEnv = do
         valueDict (VarT $ coreBuiltin The_int) (coreBuiltin The_repr_int)
   let uint_dict =
         valueDict (VarT $ coreBuiltin The_uint) (coreBuiltin The_repr_uint)
+  let none_dict =
+        valueDict (VarT $ coreBuiltin The_NoneType) (coreBuiltin The_repr_NoneType)
   let maybeint_dict =
         valueDict (varApp (coreBuiltin The_MaybeVal) [VarT $ coreBuiltin The_int])
         (coreBuiltin The_repr_MaybeVal_int)
@@ -321,7 +323,7 @@ createDictEnv = do
   let dict_env = DictEnv.DictEnv [repr_dict, ref_dict,
                                   stream_dict,
                                   bool_dict, float_dict, int_dict,
-                                  uint_dict, efftok_dict, intset_dict,
+                                  uint_dict, none_dict, efftok_dict, intset_dict,
                                   maybeint_dict, maybemaybeint_dict,
                                   sliceobj_dict,
                                   stuckref_dict,
