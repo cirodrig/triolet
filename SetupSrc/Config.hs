@@ -1,12 +1,21 @@
+{-| Custom configuration information.
 
-module SetupConfig where
+The data type 'ExtraConfigFlags' holds configuration information that goes
+beyond what Cabal supports.  This file also contains code for probing the
+environment and saving configuration information.
+-}
+
+module SetupSrc.Config where
 
 import Control.Exception
+import Control.Monad
+import Data.List hiding(isInfixOf)
 import Distribution.Simple.Setup
 import Distribution.Simple.Utils
 import Distribution.Verbosity
 import System.FilePath
 import System.Directory
+import System.IO
 
 -- Path where we put extra configuration data
 extraConfigPath = "dist" </> "extra-config"
@@ -33,13 +42,17 @@ data ExtraConfigFlags =
     --   target code.  These directories are found by querying the
     --   C++ compiler.
   , configCxxLibDirs :: [FilePath]
+    -- | Extra flags to use when compiling C/C++ host code.
+    --   On some systems, the \"-m32\" flag is required to be
+    --   compatible with GHC output.
+  , configHostArchFlags :: [String]
     -- | Whether TBB is enabled
   , configTBB :: Bool
   }
   deriving (Read, Show)
 
 defaultExtraConfigFlags :: ExtraConfigFlags
-defaultExtraConfigFlags = ExtraConfigFlags [] [] [] True
+defaultExtraConfigFlags = ExtraConfigFlags [] [] [] [] True
 
 -- Write custom configure information to a file
 writeExtraConfigFile :: ExtraConfigFlags -> IO ()
@@ -50,6 +63,65 @@ writeExtraConfigFile config_data =
 readExtraConfigFile :: IO ExtraConfigFlags
 readExtraConfigFile =
   evaluate . read =<< readFile extraConfigPath
+
+-------------------------------------------------------------------------------
+
+-- | Given the output string produced by @g++ -print-search-dirs@,
+--   extract a list of library search paths.
+--
+--   Die with an error message if parsing fails.
+extractGxxLibraryPaths :: Verbosity -> String -> IO [FilePath]
+extractGxxLibraryPaths verb search_dirs =
+  -- Find the "libraries:" line of the output
+  case find ("libraries:" `isPrefixOf`) $ lines search_dirs
+  of Just line ->
+       case break ('=' ==) line
+       of (_, '=':fields) -> filter_paths $ split fields
+          _ -> failed
+     _ -> failed
+  where
+    failed = die "Could not parse output of 'g++ -print-search-paths'"
+
+    -- Split a colon-separated list of file names
+    split fs =
+      case break (':' ==) fs
+      of ([]  , [])        -> []
+         (path, ':' : fs') -> path : split fs'
+         (path, [])        -> [path]
+
+    -- Discard nonexistent file names
+    filter_paths paths = filterM directory_exists paths
+      where
+        directory_exists path = do
+          e <- doesDirectoryExist path
+          when (not e) $
+            info verb $ "Dropping non-existent C++ search path " ++ path
+          return e
+
+-- | Identify compiler flags needed to compile host C/C++ code
+identifyHostCFlags verb = do
+  -- Compile a minimal Haskell program
+  tmpdir <- getTemporaryDirectory
+  file_text <- withTempFile tmpdir "main.hs" $ \path hdl -> do 
+    -- Create file
+    hPutStr hdl "main = return ()\n" 
+    hClose hdl
+
+    -- Compile it
+    let binary_file = tmpdir </> "cfgmain"
+    rawSystemExit verb "ghc" [path, "-o", binary_file]
+
+    -- Test the result
+    file_text <- rawSystemStdout verb "file" ["-b", binary_file]
+    removeFile binary_file
+    return file_text
+
+  return $ parseHostCFlagsOutput file_text
+
+parseHostCFlagsOutput file_text
+  | "x86_64" `isInfixOf` file_text = []
+  | "i386" `isInfixOf` file_text = ["-m32"]
+  | otherwise = error "Unknown architecture"
 
 -------------------------------------------------------------------------------
 

@@ -128,7 +128,7 @@ withEnv key alter_value m = Tester $ \cfg ->
 withLdPath :: Tester a -> Tester a
 withLdPath m = do
   build_dir <- asks buildDir
-  let lib_path = build_dir </> "rts"
+  let lib_path = build_dir </> "data"
       insert_lib_path = maybe lib_path (\x -> lib_path ++ ":" ++ x)
 
       var_name = case os
@@ -359,7 +359,7 @@ linkTest test_path test_case = do
       link_opts = platform_opts ++ 
                   ["-o", testExecutableName] ++
                   cxx_file_paths ++ c_file_paths ++ lltriolet_file_paths ++ triolet_file_paths ++
-                  ["-L" ++ build_dir </> "rts",
+                  ["-L" ++ build_dir </> "data",
                    "-ltrioletrts", "-lgc", "-lm", "-lstdc++"]
       fail_message err = err
 
