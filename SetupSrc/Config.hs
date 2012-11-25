@@ -119,7 +119,8 @@ identifyHostCFlags verb = do
   return $ parseHostCFlagsOutput file_text
 
 parseHostCFlagsOutput file_text
-  | "x86_64" `isInfixOf` file_text = []
+  | "x86_64" `isInfixOf` file_text ||
+    "x86-64" `isInfixOf` file_text = []
   | "i386" `isInfixOf` file_text = ["-m32"]
   | otherwise = error "Unknown architecture"
 
