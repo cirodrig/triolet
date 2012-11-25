@@ -2087,6 +2087,8 @@ sizealign_float : SizeAlign (Stored float);
 sizealign_bool : SizeAlign (Stored bool);
 sizealign_NoneType : SizeAlign (Stored NoneType);
 sizealign_EffTok : SizeAlign (Stored EffTok);
+sizealign_Ref : (a : box) -> SizeAlign (Ref a);
+sizealign_StuckRef : (a : box) -> SizeAlign (StuckRef a);
 
 copy_int (src : Stored int) (ret : OutPtr (Stored int)) -> Store
   attribute(inline) =
@@ -2534,8 +2536,31 @@ repr_intset : Repr intset;
 
 -- Representation of any boxed object
 repr_Box : (a : box) -> Repr (BareType a);
-repr_Ref : (a : box) -> Repr (Ref a);
-repr_StuckRef : (a : box) -> Repr (StuckRef a);
+
+repr_Ref @(a : box) -> Repr (Ref a)
+  attribute(inline, inline_postfinal) =
+
+  repr @(Ref a) (sizealign_Ref @a)
+  (\ (x : Ref a) (r : OutPtr (Ref a)) -> Store.
+    case x of ref @a (bx : a). ref @a bx r)
+  (\ (x : Init (Ref a)) -> a.
+    case stuckBox @(Ref a) x of stuckBox @(Ref a) (ref_x : Ref a).
+    case ref_x of ref @a (bx :a). bx)
+  (\ (x : a) (r : OutPtr (Ref a)) -> Store. ref @a x r)
+  False;
+
+copy_StuckRef @(a : box) (x : StuckRef a) (r : OutPtr (StuckRef a)) -> Store =
+  case x of stuckRef @a (bx : a). stuckRef @a bx r;
+
+repr_StuckRef @(a : box) -> Repr (StuckRef a)
+  attribute(inline, inline_postfinal) =
+
+  repr @(StuckRef a) (sizealign_StuckRef @a) (copy_StuckRef @a)
+  (\ (x : Init (StuckRef a)) -> Boxed (StuckRef a). boxed @(StuckRef a) x)
+  (\ (x : Boxed (StuckRef a)) (r : OutPtr (StuckRef a)) -> Store.
+    case x of boxed @(StuckRef a) (rx : StuckRef a).
+    copy_StuckRef @a rx r)
+  False;
 
 repr_Any : Repr (BareType Any);
 repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));

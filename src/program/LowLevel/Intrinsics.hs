@@ -120,6 +120,10 @@ lowerIntrinsicOp v
          sizealign_NoneType)
       , (coreBuiltin The_sizealign_EffTok,
          sizealign_EffTok)
+      , (coreBuiltin The_sizealign_Ref,
+         sizealign_Ref)
+      , (coreBuiltin The_sizealign_StuckRef,
+         sizealign_StuckRef)
       , (coreBuiltin The_sizealign_ListBuilder,
          sizealign_ListBuilder)
       , (coreBuiltin The_sizealign_append_list,
@@ -232,6 +236,10 @@ sizealign_uint [] = return [sizeAlignValue trioletUintType]
 sizealign_float [] = return [sizeAlignValue trioletFloatType]
 sizealign_NoneType [] = return [sizeAlignValue trioletNoneType]
 sizealign_EffTok [] = return [sizeAlignValue UnitType]
+sizealign_Ref [] = return [sizeAlignValue ref_record]
+  where ref_record = mutableStaticRecord [PrimField OwnedType]
+sizealign_StuckRef [] = return [sizeAlignValue ref_record]
+  where ref_record = mutableStaticRecord [PrimField OwnedType]
 
 sizealign_ListBuilder [] = return [sizeAlignValue list_builder_type]
   where

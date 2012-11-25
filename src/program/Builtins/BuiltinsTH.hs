@@ -248,6 +248,8 @@ builtinVariableNames =
   , "sizealign_float"
   , "sizealign_bool"
   , "sizealign_NoneType"
+  , "sizealign_Ref"
+  , "sizealign_StuckRef"
   , "sizealign_EffTok"
   , "sizealign_Tuple2"
   , "sizealign_Tuple3"
