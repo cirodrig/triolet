@@ -7370,7 +7370,7 @@ PBTree_parallel_build @(a : bare)
       range_count (PBTree_branch @a) (pbEmpty @a) rangeProc
 
   ; nothingVal @int.
-      except @Store
+      except @(PBTree a)
   };
 
 
