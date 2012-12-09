@@ -345,7 +345,8 @@ compileRtsCFiles verb lbi econfig =
     -- Remove the build directory prefix and the extension
     let file_name = dropExtension $ dropPathPrefix build_dir obj_path
         src_path = rtsSourceDir </> file_name
-    needRtsHeaders lbi
+    needRtsHeaders lbi          -- Depend on header files
+    Shake.need [src_path]       -- Depend on source file
     compileCRtsFile verb lbi econfig src_path obj_path
   where
     build_dir = rtsBuildDir lbi
@@ -355,19 +356,20 @@ compileRtsCxxFiles verb lbi econfig =
     -- Remove the build directory prefix and the extension
     let file_name = dropExtension $ dropPathPrefix build_dir obj_path
         src_path = rtsSourceDir </> file_name
-    needRtsHeaders lbi
+    needRtsHeaders lbi          -- Depend on header files
+    Shake.need [src_path]       -- Depend on source file
     compileCxxRtsFile verb lbi econfig src_path obj_path
   where
     build_dir = rtsBuildDir lbi
 
 compileRtsLltFiles verb lbi econfig =
   target_patterns Shake.*>> \[obj_path, _] -> do
-    Shake.need [trioletFile lbi] -- Need compiler
-    needRtsHeaders lbi           -- Need headers
-
     -- Remove the build directory prefix and the extension
     let file_name = dropExtension $ dropPathPrefix build_dir obj_path
         src_path = rtsSourceDir </> file_name
+    Shake.need [trioletFile lbi] -- Need compiler
+    needRtsHeaders lbi           -- Need headers
+    Shake.need [src_path]        -- Depend on source file
     traceShow file_name $ compileLltRtsFile verb lbi econfig src_path obj_path
   where
     build_dir = rtsBuildDir lbi
