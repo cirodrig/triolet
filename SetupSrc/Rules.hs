@@ -124,15 +124,20 @@ compileTriolet verb lbi econfig hs_sources c_objects main = target ?= do
   Shake.need c_objects
 
   -- Invoke GHC to build Triolet
-  let exe = getTrioletExe lbi
   let configured_args = trioletGhcArgs econfig exe lbi
       -- Source files that GHC will compile
       source_args = main : c_objects
       args = ["--make", "-o", target] ++ source_args ++ configured_args
-      Just ghc = lookupProgram ghcProgram $ withPrograms lbi 
   runCommand $ invokeProgram verb ghc args
+
+  -- If profiling, invoke GHC again to build the profiled program
+  let prof_args = args ++ trioletGhcProfArgs econfig exe lbi
+  when is_prof $ runCommand $ invokeProgram verb ghc prof_args
   where
+    Just ghc = lookupProgram ghcProgram $ withPrograms lbi
+    exe = getTrioletExe lbi
     target = trioletFile lbi
+    is_prof = withProfExe lbi
   
 -- | Run a C program to find the size of a C data type
 getCSizeOf :: Verbosity -> String -> Shake.Action Int

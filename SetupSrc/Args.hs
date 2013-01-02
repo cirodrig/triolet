@@ -24,7 +24,13 @@ trioletGhcArgs econfig exe lbi =
              of Nothing -> error "Unexpected missing build info"
                 Just x -> x
       target = buildDir lbi </> "triolet"
-      in ghcOptions lbi (buildInfo exe) clbi target
+  in ghcOptions lbi (buildInfo exe) clbi target
+
+-- | Extra arguments to the Haskell compiler when compiling Triolet
+--   with profiling.  Must compile without profiling first, then compile with
+--   these extra arguments.
+trioletGhcProfArgs econfig exe lbi =
+  ["-prof", "-osuf", "p_o", "-hisuf", "p_hi"]
 
 -- | Arguments to the C compiler when compiling Triolet
 trioletCcArgs econfig exe lbi =
