@@ -66,7 +66,8 @@ maskFreeVar :: Var -> MkFreeVars -> MkFreeVars
 maskFreeVar v (MkFreeVars f) = MkFreeVars $ \s -> Set.delete v (f s)
 
 maskFreeVars :: [Var] -> MkFreeVars -> MkFreeVars
-maskFreeVars vs (MkFreeVars f) = MkFreeVars $ \s -> foldr Set.delete (f s) vs
+maskFreeVars vs (MkFreeVars f) =
+  MkFreeVars $ \s -> foldl' (flip Set.delete) (f s) vs
 
 class HasScope a where
   freeVars :: a -> MkFreeVars
