@@ -1,5 +1,6 @@
 
 {-# LANGUAGE FlexibleContexts, UndecidableInstances #-}
+{-# OPTIONS_GHC -no-auto #-}
 module Type.Type(module Type.Var,
                  module Type.Level,
                  Type(..),
@@ -242,7 +243,7 @@ pprType :: Type -> Doc
 pprType t = unparenthesized $ pprTypePrec t
 
 pprTypePrec :: Type -> PrecDoc
-pprTypePrec ty =
+pprTypePrec ty = {-# SCC pprTypePrec #-}
   case ty
   of VarT v -> hasAtomicPrec $ pprVar v
      -- Special syntax for coercions
