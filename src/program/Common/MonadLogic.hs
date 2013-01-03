@@ -67,6 +67,14 @@ findIndexM f xs = fi 0 xs
                             else fi (n+1) xs
       fi _ []     = return Nothing
 
+-- | Monad analogue of 'scanl'
+scanM :: Monad m => (b -> a -> m b) -> b -> [a] -> m [b]
+scanM f z xs = go id z xs
+  where
+    go hd z (x:xs) = do y <- f z x
+                        go (hd . (z:)) y xs
+    go hd _ []     = return (hd [])
+
 -- | Monad analogue of mapAccumL
 mapAccumM :: Monad m => (acc -> a -> m (acc, b)) -> acc -> [a] -> m (acc, [b])
 mapAccumM f acc xs = go acc id xs
