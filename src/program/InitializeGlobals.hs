@@ -22,6 +22,8 @@ import Builtins.Builtins
 import Type.Environment
 import qualified SystemF.TypecheckMem
 import SystemF.Datatypes.TypeLayout
+import SystemF.Datatypes.Structure
+import SystemF.Datatypes.Size
 import CommandLine
 import Globals
 import GlobalVar
@@ -56,14 +58,23 @@ loadBuiltins cl_globals = do
     core_module <- readInitGlobalVarIO the_coreModule
     SystemF.TypecheckMem.typeCheckModule core_module
 
-  -- IN DEVELOPMENT: Compute size and alignment of each built-in type
-  {-mem_types <- readInitGlobalVarIO the_memTypes
-  withTheNewVarIdentSupply $ \supply -> do
-    layouts <- computeTypeLayouts supply mem_types
-    initializeGlobalVar the_layouts (return layouts)-}
-
   -- Initialize the low-level builtins
   withTheLLVarIdentSupply $ \ll_supply -> do
     withTheNewVarIdentSupply $ \supply -> do
       mem_types <- readInitGlobalVarIO the_memTypes
       initializeLowLevelBuiltins supply ll_supply mem_types
+
+  -- IN DEVELOPMENT: Compute size and alignment of each built-in type
+  withTheNewVarIdentSupply $ \supply -> do
+    mem_types <- readInitGlobalVarIO the_memTypes
+    computeAllDataSizes supply mem_types
+
+    withTheLLVarIdentSupply $ \ll_supply -> do
+      testMemoryLayout supply ll_supply mem_types
+  
+  {- -- IN DEVELOPMENT: Compute size and alignment of each built-in type
+  mem_types <- readInitGlobalVarIO the_memTypes
+  withTheNewVarIdentSupply $ \supply -> do
+    layouts <- computeTypeLayouts supply mem_types
+    initializeGlobalVar the_layouts (return layouts) -}
+

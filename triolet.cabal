@@ -133,6 +133,11 @@ Executable triolet
     SystemF.Datatypes.TypeLayout
     SystemF.Datatypes.ComputeLayout
     SystemF.Datatypes.RuntimeLayout
+    SystemF.Datatypes.DynamicTypeInfo
+    SystemF.Datatypes.Layout
+    SystemF.Datatypes.Size
+    SystemF.Datatypes.Structure
+    SystemF.Datatypes.Util
     SystemF.Demand
     SystemF.DemandAnalysis
     SystemF.DeadCode
