@@ -11,6 +11,14 @@ kind sideeffect;
 
 -}
 
+{- This data type definition should be caught as an error, because its
+   memory layout depends on an existential type parameter.
+data ErroneousType : bare
+{
+  erroneousType (a : bare) (a);
+};
+-}
+
 -- Data types
 
 data Stored (a : val) : bare

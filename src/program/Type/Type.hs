@@ -3,6 +3,7 @@
 module Type.Type(module Type.Var,
                  module Type.Level,
                  Type(..),
+                 KindedType(..),
                  Binder(..),
 
                  -- * Construction and deconstruction helper routines
@@ -11,6 +12,7 @@ module Type.Type(module Type.Var,
                  funType, fromFunType,
                  forallType, fromForallType,
                  fromForallFunType,
+                 getBaseKind, discardBaseKind,
 
                  -- * Predefined types
                  kindT, intindexT, valT, boxT, bareT, outT, initT, propT,
@@ -112,6 +114,15 @@ fromForallFunType t =
   let (qvars, monotype) = fromForallType t
       (dom, rng) = fromFunType monotype
   in (qvars, dom, rng)
+
+-- | A type annotated with its base kind
+data KindedType = KindedType !BaseKind Type
+
+getBaseKind :: KindedType -> BaseKind
+getBaseKind (KindedType k _) = k
+
+discardBaseKind :: KindedType -> Type
+discardBaseKind (KindedType _ t) = t
 
 data Binder = (:::) { binderVar :: Var, binderType :: Type}
 

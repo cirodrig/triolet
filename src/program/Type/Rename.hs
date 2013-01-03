@@ -170,6 +170,10 @@ instance Renameable Type where
        UTupleT _ -> Set.empty
        CoT _ -> Set.empty
 
+instance Renameable KindedType where
+  rename rn (KindedType k t) = KindedType k $ rename rn t
+  freeVariables (KindedType _ t) = freeVariables t
+
 -------------------------------------------------------------------------------
 
 -- | Check for name shadowing in the type.  If any in-scope variables

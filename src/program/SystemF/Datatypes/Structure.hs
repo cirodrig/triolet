@@ -35,9 +35,10 @@ import Control.Monad
 import Control.Monad.ST
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
-import qualified Data.Set as Set
+import Data.List
 import Data.Maybe
 import Data.Monoid hiding((<>))
+import qualified Data.Set as Set
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -87,7 +88,7 @@ ifBoxed IsBoxed  x = Just x
 ifBoxed NotBoxed _ = Nothing
 
 -- | A member of a sum-of-products type
-data Alternative = Alternative !DeConInst [(Type, BaseKind)]
+data Alternative = Alternative !DeConInst [(BaseKind, Type)]
 type Alternatives = [Alternative]
 
 nullaryAlternative (Alternative _ []) = True
@@ -111,10 +112,10 @@ pprStructure UninhabitedStruct = text "_|_"
 
 -------------------------------------------------------------------------------
 
-valFields, bareFields, valAndBareFields :: [(Type, BaseKind)] -> [Type]
-valFields xs = [t | (t, ValK) <- xs]
-bareFields xs = [t | (t, BareK) <- xs]
-valAndBareFields xs = [t | (t, k) <- xs, k == ValK || k == BareK]
+valFields, bareFields, valAndBareFields :: [KindedType] -> [Type]
+valFields xs = [t | KindedType ValK t <- xs]
+bareFields xs = [t | KindedType BareK t <- xs]
+valAndBareFields xs = [t | KindedType k t <- xs, k == ValK || k == BareK]
 
 -- | Run some computation in a local environment and verify that its return
 --   value does not mention bound variables.
@@ -149,9 +150,9 @@ withIndependent context_name check transform m = transform $ do
     then return x
     else internalError $
          context_name ++ ": Layout depends on bound type variable"
-                                      
-getBaseKind :: TypeEnvMonad m => Type -> m BaseKind
-getBaseKind t = do
+
+computeBaseKind :: TypeEnvMonad m => Type -> m BaseKind
+computeBaseKind t = do
   tenv <- getTypeEnv
   return $! toBaseKind $ typeKind tenv t
 
@@ -195,7 +196,7 @@ computeStructure t = liftTypeEvalM $ do
 --   If it's boxed, return a pointer type; otherwise, get the type's structure.
 computeFieldStructure :: EvalMonad m => Type -> m Structure
 computeFieldStructure t = do
-  k <- getBaseKind t
+  k <- computeBaseKind t
   case k of
     BoxK -> return $ PrimStruct OwnedType
     BareK -> computeStructure t
@@ -224,7 +225,7 @@ computeDataStructure dtype args
       let field_kinds = dataConFieldKinds dcon_type
       let decon_instance = VarDeCon con args binders
 
-      return $ Alternative decon_instance (zip fields field_kinds)
+      return $ Alternative decon_instance (zip field_kinds fields)
 
     -- Boxed types have an object header
     boxing =
@@ -236,7 +237,7 @@ computeDataStructure dtype args
 --   kinds and types.
 unboxedTupleStructure :: [BaseKind] -> [Type] -> Structure
 unboxedTupleStructure ks fs =
-  DataStruct $ Data NotBoxed [Alternative (TupleDeCon fs) (zip fs ks)]
+  DataStruct $ Data NotBoxed [Alternative (TupleDeCon fs) (zip ks fs)]
 
 -------------------------------------------------------------------------------
 -- Find the types that affect variable structural components within a given
@@ -246,7 +247,7 @@ unboxedTupleStructure ks fs =
 --   whose head is a free variable or a type function application.
 --
 --   It is an error if any subterms depend on a bound type.
-variableStructuralSubterms :: Type -> TypeEvalM [Type]
+variableStructuralSubterms :: Type -> TypeEvalM [KindedType]
 variableStructuralSubterms ty = do
   l <- computeStructure ty
   case l of
@@ -262,20 +263,25 @@ variableStructuralSubterms ty = do
       liftM mconcat $ mapM alternative_types alts
     ForallStruct (Forall b t) ->
       withIndependentType b $ variableStructuralSubterms t
-    VarStruct t -> return [t]
+    VarStruct t -> do
+      tenv <- getTypeEnv
+      let base_kind = toBaseKind $ typeKind tenv t
+      base_kind `seq` return [KindedType base_kind t]
   where
     -- If the given type of kind @intindex@ is variable, return it
     -- otherwise return nothing
-    int_subterm ty =
-      ifM (isVariableIntSubterm ty) (return [ty]) (return [])
+    int_subterm ty = do
+      is_variable_int <- isVariableIntSubterm ty
+      return $! if is_variable_int then [KindedType IntIndexK ty] else []
 
     -- Get the variable types found in value and bare fields of a
     -- Data alternative
     alternative_types (Alternative decon fields) =
       withIndependentTypes (deConExTypes decon) $
-      concatVariableStructuralSubterms $ valAndBareFields fields
+      concatVariableStructuralSubterms $
+      valAndBareFields [KindedType k t | (k, t) <- fields]
 
-concatVariableStructuralSubterms :: [Type] -> TypeEvalM [Type]
+concatVariableStructuralSubterms :: [Type] -> TypeEvalM [KindedType]
 concatVariableStructuralSubterms ts =
   liftM mconcat $ mapM variableStructuralSubterms ts
 
@@ -299,7 +305,7 @@ data StructuralTypeVariance =
     dtsTyParams :: [Binder]
 
     -- | Size parameter types
-  , dtsSizeParamTypes :: [Type]
+  , dtsSizeParamTypes :: [KindedType]
 
     -- | Statically fixed types
   , dtsStaticTypes :: [Type]
@@ -318,17 +324,8 @@ computeDataSizes dtype
   | not $ dataTypeIsAlgebraic dtype =
     internalError "computeDataSizes: nonalgebraic type"
     
-  | otherwise = do
-    tenv <- getTypeEnv
-
-    -- Create a new type variable for each type parameter
-    params <- mapM rename_binder $ dataTypeParams dtype
-    let invariant = return $ invariantStructure params
-
+  | otherwise =
     assumeBinders params $ do
-      -- Create a new type
-      let data_type = dataTypeCon dtype `varApp` map (VarT . binderVar) params
-
       -- Get its layout
       layout <- computeStructure data_type
       case layout of
@@ -338,7 +335,7 @@ computeDataSizes dtype
 
           -- Remove duplicates from the lists
           let (size_parameter_types, static_types) = mconcat types
-          sp2 <- nubTypeList size_parameter_types
+          sp2 <- nubKindTypeList size_parameter_types
           st2 <- nubTypeList static_types
           return $ StructuralTypeVariance params sp2 st2
 
@@ -349,39 +346,48 @@ computeDataSizes dtype
         _ -> internalError "computeDataSizes: Unexpected layout"
 
   where
+    params = dataTypeParams dtype
+    data_type = dataTypeCon dtype `varApp` map (VarT . binderVar) params
+
+    -- This is returned for invariant data types
+    invariant = return $ invariantStructure params
+
     rename_binder (v ::: k) = do
       v' <- newClonedVar v
       return (v' ::: k)
 
-computeAltSizes ::  Alternative -> TypeEvalM ([Type], [Type])
+computeAltSizes ::  Alternative -> TypeEvalM ([KindedType], [Type])
 computeAltSizes (Alternative decon fields) =
   withIndependentTypes (deConExTypes decon) $ do
     -- Bare fields produce size parameters
-    sizes <- concatVariableStructuralSubterms $ bareFields fields
+    sizes <- concatVariableStructuralSubterms $ bareFields [KindedType k t | (k, t) <- fields]
 
     -- Val fields produce static types
-    static <- concatVariableStructuralSubterms $ valFields fields
-    return (sizes, static)
+    static <- concatVariableStructuralSubterms $ valFields [KindedType k t | (k, t) <- fields]
+    return (sizes, map discardBaseKind static)
 
--- | Compute size information for each data type in the environment
-computeAllDataSizes :: IdentSupply Var -> TypeEnv
-                    -> IO [(Var, StructuralTypeVariance)]
+-- | Compute size information for each data type in the environment.
+--   Update the type environment with computed new size information.
+computeAllDataSizes :: IdentSupply Var -> TypeEnv -> IO TypeEnv
 computeAllDataSizes var_supply env = do
   xs <- runTypeEvalM compute var_supply env
   
   -- DEBUG: print results
   print $ pprDataSizes xs
-  return xs
+  let set_size e (con, variance) =
+        setSizeParameters con (dtsSizeParamTypes variance) e
+  return $! foldl' set_size env xs
   where
     data_constructors = IntMap.elems $ getAllDataTypeConstructors env
-    compute =
-      liftM catMaybes $
-      forM data_constructors $ \dtype ->
-      if dataTypeIsAlgebraic dtype
-      then do
-        info <- computeDataSizes dtype
-        return $ Just (dataTypeCon dtype, info)
-      else return Nothing
+    
+    -- Compute size information for each data type constructor
+    compute = forM data_constructors $ \dtype -> do
+      info <- if dataTypeIsAlgebraic dtype
+              then computeDataSizes dtype
+              else return $ StructuralTypeVariance (dataTypeParams dtype) [] []
+      return (dataTypeCon dtype, info)
+
+
 
 -- | Remove duplicate types from the list
 nubTypeList :: [Type] -> TypeEvalM [Type]
@@ -395,6 +401,24 @@ nubTypeList xs = go id xs
 
     search x xs = anyM (compareTypes x) xs
 
+-- | Remove duplicate types from the list
+nubKindTypeList :: [KindedType] -> TypeEvalM [KindedType]
+nubKindTypeList xs = go id xs
+  where
+    go h (x:xs) =
+      let continue h' = go h' xs
+      in ifM (search x xs) (continue h) (continue (h . (x:)))
+
+    go h [] = return (h [])
+
+    search x xs = anyM (compare_type x) xs
+      where
+        -- First check if kinds are the same
+        -- Then compare types
+        compare_type (KindedType k1 x1) (KindedType k2 x2)
+          | k1 == k2  = compareTypes x1 x2
+          | otherwise = return False
+
 -- | Produce a debug dump of the information computed by 'computeAllDataSizes'
 pprDataSizes xs =
   vcat [hang (pprVar con) 8 $ text "|->" <+> ppr_sizes x| (con, x) <- xs]
@@ -402,6 +426,6 @@ pprDataSizes xs =
     ppr_sizes (StructuralTypeVariance binders size_params fixed_types) =
       text "forall" <+> sep [parens (pprVar v <+> colon <+> pprType t)
                             | v ::: t <- binders] $$
-      parens (fsep $ punctuate comma $ map pprType size_params) $$
+      parens (fsep $ punctuate comma $ map (pprType . discardBaseKind) size_params) $$
       parens (fsep $ punctuate comma $ map pprType fixed_types)
 

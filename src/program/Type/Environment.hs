@@ -55,6 +55,7 @@ module Type.Environment
         insertTypeWithProperties,
         insertDataType,
         insertTypeFunction,
+        setSizeParameters,
        
         -- * New conversion routines
         isAdapterCon,
@@ -62,11 +63,14 @@ module Type.Environment
        )
 where
 
+import Prelude hiding(mapM)
+
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding(mapM)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
+import Data.Traversable
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
@@ -217,6 +221,13 @@ data DataType =
     -- | Type parameters.  Type parameters are passed as arguments when 
     --   constructing a value and when deconstructing it.
   , dataTypeParams :: [Binder]
+
+    -- | Size parameter types along with their kinds.
+    --   This list holds the type itself, not the type of its size
+    --   (e.g., @int@ rather than @SizeAlignVal int@).
+    --   A 'Nothing' value means the size parameter types have not been 
+    --   computed yet.
+  , dataTypeSizeParamTypes :: !(Maybe [KindedType])
 
     -- | The kind of a value whose type is a
     --   fully applied instance of this data type.
@@ -394,7 +405,8 @@ insertDataType (DataTypeDescr ty_con u_args range ctors is_abstract is_algebraic
     insert (v, a) env = IntMap.insert (fromIdent $ varID v) a env
     
     data_cons = [dtor | DataConDescr dtor _ _ <- ctors]
-    data_type = DataType ty_con u_args range is_abstract is_algebraic data_cons
+    data_type = DataType ty_con u_args Nothing range
+                is_abstract is_algebraic data_cons
     ty_con_assignment = (ty_con, TyConTypeAssignment data_type)
 
     data_con (DataConDescr v bs fs) = DataConType v bs fs data_type
@@ -406,6 +418,16 @@ insertTypeFunction :: Var -> Type -> type_function
                    -> TypeEnvBase type_function -> TypeEnvBase type_function
 insertTypeFunction v ty f (TypeEnv env) =
   TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyFunTypeAssignment ty f) env
+
+-- | Set a data type's size parameters
+setSizeParameters :: Var -> [KindedType]
+                  -> TypeEnvBase type_function -> TypeEnvBase type_function
+setSizeParameters v size_params (TypeEnv env) =
+  case IntMap.lookup (fromIdent $ varID v) env
+  of Just (TyConTypeAssignment dtype) ->
+       let dtype' = dtype {dataTypeSizeParamTypes = Just size_params}
+       in TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyConTypeAssignment dtype') env
+     _ -> internalError "setSizeParameters: Not a data type constructor"
 
 lookupDataCon :: Var -> TypeEnvBase type_function -> Maybe DataConType
 {-# INLINE lookupDataCon #-}
@@ -597,10 +619,15 @@ specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) = new_type_env
     type_assignment (TyFunTypeAssignment t f) =
       TyFunTypeAssignment <$> kind_f t <*> pure (tyfun_f f)
 
-    data_type (DataType con params k is_abstract is_algebraic ctors) = do
+    data_type (DataType con params size_params k
+               is_abstract is_algebraic ctors) = do
       params' <- specializeBinders kind_f params
+      size_params' <- mapM (mapM size_parameter) size_params
       k' <- basekind_f k
-      return $ DataType con params' k' is_abstract is_algebraic ctors
+      return $ DataType con params' size_params' k'
+        is_abstract is_algebraic ctors
+
+    size_parameter (KindedType k t) = KindedType <$> basekind_f k <*> type_f t
 
     data_con (DataConType con ex_types fields data_type) =
       DataConType con <$>

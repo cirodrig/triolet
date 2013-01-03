@@ -427,7 +427,7 @@ computeLayout type_info kind layout =
     alt_layout (Alternative decon fs) =
       assumeBinders (deConExTypes decon) $ mapM field_layout fs
 
-    field_layout (t, k) 
+    field_layout (k, t)
       | k == BoxK = return (BoxK, PrimLayout OwnedType)
       | otherwise = do l <- continue k =<< computeStructure t
                        return (k, l)
