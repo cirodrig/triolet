@@ -914,6 +914,8 @@ specializeCallsExp spcl_map expression =
      ExceptE {} -> return expression
      CoerceE inf t1 t2 e ->
        ExpM <$> (CoerceE inf t1 t2 <$> specializeCallsExp spcl_map e)
+     ArrayE inf t es ->
+       ExpM <$> (ArrayE inf t <$> mapM (specializeCallsExp spcl_map) es)
   where
     -- If debugging this module, notify user that a call was specialized
     trace_specialization e =
