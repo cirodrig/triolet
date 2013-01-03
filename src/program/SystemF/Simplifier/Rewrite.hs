@@ -374,6 +374,11 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             ]
 
     exprs = [ (coreBuiltin The_count, count_expr)
+            , (coreBuiltin The_AdditiveDict_int_zero, int0_expr)
+            , (coreBuiltin The_AdditiveDict_float_zero, float0_expr)
+            , (coreBuiltin The_MultiplicativeDict_int_one, int1_expr)
+            , (coreBuiltin The_MultiplicativeDict_float_one, float1_expr)
+            , (coreBuiltin The_FloatingDict_float_pi, floatpi_expr)
             ]
     
     -- The following expression represents the "count" stream:
@@ -404,6 +409,12 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
         mk_view =
           VarCon (coreBuiltin The_mk_view)
           [VarT $ coreBuiltin The_list_dim, storedIntType] []
+
+    int0_expr = return $ litE' $ IntL 0 (VarT $ coreBuiltin The_int)
+    int1_expr = return $ litE' $ IntL 1 (VarT $ coreBuiltin The_int)
+    float0_expr = return $ litE' $ FloatL 0 (VarT $ coreBuiltin The_float)
+    float1_expr = return $ litE' $ FloatL 1 (VarT $ coreBuiltin The_float)
+    floatpi_expr = return $ litE' $ FloatL pi (VarT $ coreBuiltin The_float)
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
