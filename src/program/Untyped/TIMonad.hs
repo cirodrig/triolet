@@ -136,6 +136,13 @@ getRecVarType v = getsEnvironment lu
 getVarBinding :: EnvMonad m => Variable -> m ValueBinding
 getVarBinding v = getsEnvironment (lookupVar v)
 
+-- | Add a type parameter to the type environment
+withTyParam :: EnvMonad m => TyCon -> m a -> m a
+withTyParam tc m = withEnvironment (insertTypeBinding tc TyVarAss) m
+
+withTyParams :: EnvMonad m => [TyCon] -> m a -> m a
+withTyParams tcs m = foldr withTyParam m tcs
+
 -------------------------------------------------------------------------------
 -- A monad with environment lookup
 --
@@ -292,13 +299,6 @@ newAnonymousVariable :: TI Variable
 newAnonymousVariable = do
   sf_v <- SF.newAnonymousVar SF.ObjectLevel
   liftIO $ newVariable Nothing (Just sf_v)
-
--- | Add a type parameter to the type environment
-withTyParam :: TyCon -> TI a -> TI a
-withTyParam tc m = withEnvironment (insertTypeBinding tc TyVarAss) m
-
-withTyParams :: [TyCon] -> TI a -> TI a
-withTyParams tcs m = foldr withTyParam m tcs
 
 -- | Instantiate a type variable and keep track of the variable that was 
 --   created.

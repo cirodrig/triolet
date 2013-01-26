@@ -27,8 +27,7 @@ type FrontendBuiltinTypes = Array Int TyCon
 type FrontendBuiltinVars  = Array Int Variable
 
 $(do let cons = [tcName nm
-                | nm <- frontendSourceTypes ++ frontendOtherTypes ++
-                        frontendClasses]
+                | nm <- frontendSourceTypes ++ frontendOtherTypes]
          con_decls = [return $ TH.NormalC c [] | c <- cons]
 
      -- Declare a data type

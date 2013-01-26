@@ -10,6 +10,7 @@ import Control.Monad.RWS hiding(mapM, sequence)
 import Control.Monad.Trans
 import qualified Compiler.Hoopl as Hoopl
 import Data.List
+import Data.Maybe
 import Data.Traversable
 import qualified Data.Map as Map
 
@@ -22,7 +23,6 @@ import Common.Supply
 import Parser.ParserSyntax hiding(Stmt(..))
 import Parser.Control
 import Parser.SSA2(SSAVar, SSAID, SSATree(..))
-import qualified Untyped.Data as U
 import Untyped.Builtins2
 import qualified Untyped.Syntax as U
 import qualified Untyped.TIMonad as U
@@ -41,6 +41,14 @@ externUntypedScope = Map.fromList
 
 noAnnotation :: U.Ann
 noAnnotation = U.Ann noSourcePos
+
+-- | Create a function annotation for join point functions inserted by SSA.
+--   Join point functions are monomorphic. 
+--   It's generally not beneficial to inline them.
+joinPointAnn :: U.FunctionAnn
+joinPointAnn = U.FunctionAnn { U.funPolySignature = U.InferMonomorphicType
+                             , U.funInline = False
+                             }
 
 type GenEnv = U.Environment
 
@@ -87,12 +95,29 @@ lookupKindVar v = lookupVar' from_kind v
     from_kind (KindBinding k) = k
     from_kind _ = internalError "lookupKindVar: Not a kind"
 
+-- | Look up a type variable that's /not/ part of a class constraint
 lookupTypeVar :: SSAVar -> Gen U.TyCon
-lookupTypeVar v = lookupVar' from_type v
+lookupTypeVar v = do
+  tc <- lookupVar' from_type v
+  -- Error if it's a class constructor 
+  m_class <- U.getTyConClass tc
+  when (isJust m_class) $ error "Type class used as type"
+  return tc
   where
     from_type (TypeBinding t) = t
     from_type _ = internalError "lookupTypeVar: Not a type"
-    
+
+lookupTypeClassVar :: SSAVar -> Gen U.TyCon
+lookupTypeClassVar v = do
+  tc <- lookupVar' from_type v
+  -- Must be a class constructor
+  m_class <- U.getTyConClass tc
+  unless (isJust m_class) $ error "Expecting a type class constructor"
+  return tc
+  where
+    from_type (TypeBinding t) = t
+    from_type _ = internalError "lookupTypeVar: Not a type"
+
 lookupObjVar :: SSAVar -> Gen U.Variable
 lookupObjVar v = lookupVar' from_obj v
   where
@@ -182,6 +207,15 @@ typeExp (Loc pos e) =
        args' <- typeExps args
        return $ U.appTys op' args'
 
+predicateExp :: LExpr SSAID -> Gen U.Predicate
+predicateExp (Loc pos e) =
+  case e
+  of Call (Loc _ (Variable op_v)) [arg] -> do
+       con <- lookupTypeClassVar op_v
+       arg' <- typeExp arg
+       return $ U.IsInst con arg'
+     _ -> error "Invalid predicate in constraint"
+
 -------------------------------------------------------------------------------
 -- Expression translation
 
@@ -198,16 +232,11 @@ callVariable pos op args =
   U.CallE (U.Ann pos) (U.VariableE (U.Ann pos) op) args
 
 withForallAnnotation :: ForallAnnotation SSAID
-                     -> ([U.TyCon] -> Gen a) -> Gen a
-withForallAnnotation ann k = inLocalScope $ do
-  k =<< mapM forall_var ann
-  where
-    forall_var (v, kind_ann) = do
-      -- Determine the variable's kind; default is 'Star'
-      kind <- maybe (return U.Star) kind kind_ann
-
-      -- Create a type variable
-      defineTyVar v kind
+                     -> (([U.TyCon], U.Constraint) -> Gen a) -> Gen a
+withForallAnnotation (ForallAnnotation typarams cst) k =
+  withTypeParameters typarams $ \typarams' -> do
+    cst' <- mapM predicateExp cst
+    k (typarams', cst')
 
 withMaybeForallAnnotation Nothing k = k Nothing
 withMaybeForallAnnotation (Just a) k = withForallAnnotation a $ k . Just
@@ -228,6 +257,25 @@ parameter (Parameter v ann) = do
 parameter (TupleParam ps) = do
   ps' <- mapM parameter ps
   return $ U.TupleP noAnnotation ps'
+
+withTypeParameter :: Parameter SSAID -> (U.TyCon -> Gen a) -> Gen a
+withTypeParameter param k = inLocalScope $ do
+  p <- typeParameter param      -- Define the variable
+  U.withTyParam p $ k p         -- Add to Untyped type environment
+
+withTypeParameters :: [Parameter SSAID] -> ([U.TyCon] -> Gen a) -> Gen a
+withTypeParameters params k = inLocalScope $ do
+  ps <- typeParameters params   -- Define variables
+  U.withTyParams ps $ k ps      -- Add to Untyped type environment
+
+typeParameters xs = mapM typeParameter xs
+
+typeParameter (Parameter v ann) = do
+  -- Determine the variable's kind; default is 'Star'
+  kind <- maybe (return U.Star) kind ann
+
+  -- Create and return a type variable
+  defineTyVar v kind
 
 defGroup :: [LCFunc SSAID] -> Gen [U.FunctionDef]
 defGroup defs = do
@@ -317,7 +365,7 @@ expr (Loc pos e) =
      Lambda params body ->
        withParameters params $ \params' -> do
          body' <- expr body
-         let fun = U.Function (U.Ann pos) Nothing params' Nothing body'
+         let fun = U.Function (U.Ann pos) params' Nothing body'
          return $ U.FunE (U.Ann pos) fun
 
 slice (SliceSlice pos l u s) = do
@@ -366,14 +414,14 @@ iterator (IterFor pos params source body) = do
          -- This works for a broader range of types than the general case.
          body_expr <- expr simple_body
          let body_fun =
-               U.Function (U.Ann pos) Nothing [param'] Nothing body_expr
+               U.Function (U.Ann pos) [param'] Nothing body_expr
          return $ callVariable pos (builtinVar TheV_map)
            [U.FunE (U.Ann pos) body_fun, iterator]
     
        _ -> do
          -- Convert "FOO for x in BAR" to bind(bar, lambda x. FOO)
          body' <- comprehension body 
-         let body_fun = U.Function (U.Ann pos) Nothing [param'] Nothing body'
+         let body_fun = U.Function (U.Ann pos) [param'] Nothing body'
          return $ callVariable pos (builtinVar TheV_iterBind)
            [iterator, U.FunE (U.Ann pos) body_fun]
 
@@ -472,14 +520,17 @@ leaveBody = lift
 functionDef :: U.Variable -> LCFunc SSAID -> Gen U.FunctionDef
 functionDef func_name (Loc pos func) =
   -- Convert type parameters
-  withMaybeForallAnnotation ann $ \qvars -> do
+  withMaybeForallAnnotation ann $ \forall_annotation -> do
     ret_type <- mapM typeExp r_ann
     -- Convert parameters
     withParameters params $ \u_params -> do
       -- Convert body
       body <- enterBody $ ssaTreeExp (cfBody func)
-      let annotation = U.FunctionAnn (funInline pragma)
-          function = U.Function (U.Ann pos) qvars u_params ret_type body
+      let poly_signature = case forall_annotation
+                           of Nothing      -> U.InferPolymorphicType
+                              Just (vs, t) -> U.GivenSignature vs t
+          annotation = U.FunctionAnn poly_signature (funInline pragma)
+          function = U.Function (U.Ann pos) u_params ret_type body
       return $ U.FunctionDef func_name annotation function
   where
     FunSig _ ann pragma params r_ann = cfSignature func
@@ -545,8 +596,8 @@ ssaTreeChild var params middle last children = inLocalLabelScope $ do
   body <- ssaBlock middle last children
 
   -- Create function
-  let function = U.Function noAnnotation Nothing patterns Nothing body
-  return $ U.FunctionDef var (U.FunctionAnn False) function
+  let function = U.Function noAnnotation patterns Nothing body
+  return $ U.FunctionDef var joinPointAnn function
 
 ssaTail :: FlowStmt -> FGen U.Expression
 ssaTail (LStmt (Loc pos s)) =

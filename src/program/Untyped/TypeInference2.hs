@@ -304,22 +304,25 @@ generalizeSubgroup :: Bool -> [FunctionDef] -> TI [(Variable, TyScheme, TIDef)]
 -- Each subgroup is either a single explicitly typed definition
 -- or any number of implicitly typed definitions  
 generalizeSubgroup is_global [fdef]
-  | explicitlyTyped fdef = do
+  | isGivenSignature $ funPolySignature $ functionDefAnn fdef = do
       ti_def <- checkPolyTypeSignature is_global fdef
       return [ti_def]
 
 generalizeSubgroup is_global fdefs
-  | all (not . explicitlyTyped) fdefs = do
-      generalizeImplicitSubgroup is_global fdefs
+  | all (isInferredMonomorphicSignature . funPolySignature . functionDefAnn) fdefs =
+      generalizeImplicitSubgroup is_global False fdefs
+
+  | all (isInferredPolymorphicSignature . funPolySignature . functionDefAnn) fdefs =
+      generalizeImplicitSubgroup is_global True fdefs
 
 generalizeSubgroup _ _ =
   internalError "generalizeSubgroup"
 
 -- | Perform type inference on some mutually recursive function definitions  
 --   and generalize their types.
-generalizeImplicitSubgroup :: Bool -> [FunctionDef]
+generalizeImplicitSubgroup :: Bool -> Bool -> [FunctionDef]
                            -> TI [(Variable, TyScheme, TIDef)]
-generalizeImplicitSubgroup is_global fdefs = do
+generalizeImplicitSubgroup is_global generalize fdefs = do
   -- Will not generalize over type variables in the environment.
   -- Get these unifiable type variables.
   ftv_gamma <- getVisibleTyVars
@@ -338,7 +341,11 @@ generalizeImplicitSubgroup is_global fdefs = do
                 fvs <- mapM pprUVar $ Set.toList ftv_gamma2
                 liftIO $ print (text "fv" <+> fsep fvs $$ text "ty" <+> vcat tys)
     (qvars, retained, deferred) <-
-      liftTE_TI $ chooseGeneralizedTypes ftv_gamma2 monotypes inferred_cst
+      if generalize
+      then liftTE_TI $ chooseGeneralizedTypes ftv_gamma2 monotypes inferred_cst
+
+      -- Not generalized: no type parameters and no constraint
+      else return ([], [], inferred_cst)
 
     -- This error should be impossible.  Errors in the input should have
     -- been detected when splitting the context.
@@ -428,7 +435,8 @@ chooseGeneralizedTypes ftv_gamma monotypes inferred_cst = do
   let local_tyvars = dtv_types Set.\\ ftv_gamma
   runPpr $ do ts <- mapM pprType monotypes
               dtvs <- mapM pprUVar $ Set.toList dtv_types
-              liftIO $ print $ text "splitConstraint on" <+> (fsep dtvs $$ vcat ts)
+              liftIO $ print $ text "splitConstraint on" <+>
+                (brackets (fsep dtvs) $$ vcat ts)
 
   (retained, deferred) <- splitConstraint reduced_cst ftv_gamma local_tyvars
 

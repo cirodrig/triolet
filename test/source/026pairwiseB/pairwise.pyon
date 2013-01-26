@@ -1,5 +1,6 @@
 
 @forall(a)
+@where(Repr(a))
 def tails(xs : list(a)) -> iter(shape(list), (a, iter(shape(list), a))):
   N = len(xs)
 
@@ -27,7 +28,7 @@ def compute_energy(xs, ys, zs):
     distance = dx*dx + dy*dy + dz*dz
     return 1 / distance
 
-  zipped_list = zip3(xs, ys, zs)
+  zipped_list = build(zip3(xs, ys, zs))
   return sum(force(u, v) for (u, v) in all_pairs(zipped_list))
 
 export ccall compute_energy : list(float) * list(float) * list(float) -> float

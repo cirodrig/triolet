@@ -576,13 +576,10 @@ withRenamedParameters ps k = withMany withRenamedParameter ps k
 
 withForallAnnotation Nothing k = k Nothing
 
-withForallAnnotation (Just xs) k =
-  inLocalScope $ withMany with_forall_binding xs (\bs -> k (Just bs))
-  where
-    with_forall_binding (type_var, kind_ann) k = do
-      kind_ann' <- rename kind_ann
-      type_var' <- defineSSAVar type_var
-      k (type_var', kind_ann')
+withForallAnnotation (Just (ForallAnnotation qvars cst)) k =
+  withRenamedParameters qvars $ \qvars' -> do
+    cst' <- rename cst
+    k (Just (ForallAnnotation qvars' cst'))
 
 -- | SSA-rename a parameter whose variables are visible to later statements
 ssaParameter :: Parameter AST -> SSAM (Parameter SSAID)

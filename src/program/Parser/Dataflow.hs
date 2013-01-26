@@ -159,9 +159,10 @@ useStmt' stmt liveness =
      Jump l         -> liveness
      Return e       -> use e liveness
 
--- | A forall annotation declaring type variables and kinds
-useForallAnnotation Nothing f   = f
-useForallAnnotation (Just xs) f = use (map snd xs) . localKill (map fst xs) f
+-- | A forall annotation declaring type variables and a constraint
+useForallAnnotation Nothing f = f
+useForallAnnotation (Just (ForallAnnotation params cst)) f =
+  localKill params (use cst . f)
 
 -- | Remove a function name from the live-in set
 killFunc :: CFunc AST -> DeltaLiveness

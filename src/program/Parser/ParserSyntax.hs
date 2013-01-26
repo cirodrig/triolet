@@ -162,7 +162,11 @@ data Parameter id =
     Parameter (Var id) (Annotation id)
   | TupleParam [Parameter id]
 
-type ForallAnnotation id = [(Var id, Maybe (LExpr id))]
+-- | A polymorphic type annotation
+--
+-- > @forall(a : k1, b : k2 ...)
+-- > @constraint(c1, c2, ...)
+data ForallAnnotation id = ForallAnnotation [Parameter id] [LExpr id]
 
 data FunPragma = FunPragma { funInline :: !Bool }
 

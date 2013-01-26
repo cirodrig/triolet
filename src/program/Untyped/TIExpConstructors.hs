@@ -320,6 +320,6 @@ mkDictE pos cls inst_type scs methods =
   (scs ++ methods)
 
 mkAnnotation :: FunctionAnn -> SF.DefAnn
-mkAnnotation (FunctionAnn inline) =
+mkAnnotation (FunctionAnn _ inline) =
   let insert_inline_ann d = d {SF.defAnnInlineRequest = inline}
   in insert_inline_ann SF.defaultDefAnn

@@ -13,7 +13,6 @@ import Common.Identifier
 import Common.Label
 import Export
 import Untyped.Type
-import Untyped.Data
 import Untyped.Variable
 import Type.Var(Var)
 
@@ -113,7 +112,6 @@ data Expression =
 data Function =
   Function
   { funAnnotation :: Ann
-  , funQVars :: Maybe [TyCon]   -- ^ Optional explicitly supplied forall-variables
   , funParameters :: [Pattern]
   , funReturnType :: Maybe HMType
   , funBody :: Expression
@@ -121,10 +119,38 @@ data Function =
   deriving(Typeable)
 
 -- | Annotations on a function definition
-data FunctionAnn = FunctionAnn { funInline :: !Bool}
+data FunctionAnn =
+  FunctionAnn
+  { -- | A polymorphic type signature specified by user
+    funPolySignature :: !PolySignature
+
+    -- | If true, it's highly desirable to inline this function
+  , funInline :: !Bool}
+
+-- | A polymorphic type signature, controlling how a function's type is
+--   generalized by type inference
+data PolySignature =
+    -- | Type inference should use this signature, given explicitly by user
+    GivenSignature [TyCon] Constraint
+    -- | Type inference should infer a polymorphic type signature
+  | InferPolymorphicType
+    -- | Type inference should infer a type signature, but should not
+    --   generalize.
+  | InferMonomorphicType
+
+isGivenSignature (GivenSignature _ _) = True
+isGivenSignature _ = False
+
+isInferredPolymorphicSignature InferPolymorphicType = True
+isInferredPolymorphicSignature _ = False
+
+isInferredMonomorphicSignature InferMonomorphicType = True
+isInferredMonomorphicSignature _ = False
 
 data FunctionDef = FunctionDef !Variable FunctionAnn Function
                  deriving(Typeable)
+
+functionDefAnn (FunctionDef _ ann _) = ann
 
 type DefGroup = [FunctionDef]
 
@@ -159,16 +185,11 @@ explicitPatternType (VariableP _ _ t) = t
 explicitPatternType (TupleP _ fs) =
   tupleTy `liftM` mapM explicitPatternType fs
 
--- | Is the function definition explicitly annotated with a type? 
-explicitlyTyped :: FunctionDef -> Bool
-explicitlyTyped (FunctionDef _ _ f) = isJust $ funQVars f
-
 -- | Get the explicitly annotated type information from a function definition.
 --   Return 'Nothing' if some annotations are missing.
 explicitFunctionType :: FunctionDef -> Maybe (Qualified ([HMType], HMType))
-explicitFunctionType (FunctionDef _ _ f) = do
-  qvars <- funQVars f
-  let cst = trace "FIXME: Must take explicitly annotated constraint from annotation!" []
+explicitFunctionType (FunctionDef _ ann f) = do
+  GivenSignature qvars cst <- return (funPolySignature ann)
   param_types <- mapM explicitPatternType $ funParameters f
   return_type <- funReturnType f
   return $ Qualified qvars cst (param_types, return_type)

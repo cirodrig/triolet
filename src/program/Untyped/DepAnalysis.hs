@@ -74,7 +74,7 @@ instance Use Expression where
   free (TypeAssertE _ v _ body) = useVar v `mappend` free body
 
 instance Use Function where
-  free (Function _ _ params _ body) = define params $ free body
+  free (Function _ params _ body) = define params $ free body
 
 instance Use Export where
   free (Export _ _ v _) = useVar v
@@ -103,7 +103,8 @@ depAnalysis defs =
 
     defined_variables = Set.fromList [v | FunctionDef v _ _ <- defs]
     explicitly_typed_variables =
-      Set.fromList [v | d@(FunctionDef v _ _) <- defs , explicitlyTyped d]
+      Set.fromList [v | FunctionDef v ann _ <- defs
+                      , isGivenSignature $ funPolySignature ann]
 
     -- It's only possible to depend on locally defined variables that don't
     -- have an explicit type signature

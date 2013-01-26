@@ -14,7 +14,15 @@ frontendSourceTypes =
    "shape", "list_dim", "dim0", "dim1", "dim2", "dim3",
    "index", "slice", "cartesianDomain",
    "view",
-   "Scatter"]
+   "Scatter",
+
+   -- Classes
+   "Repr", "Traversable", "Shape", "Indexable",
+   "Eq", "Ord",
+   "Additive", "Multiplicative",
+   "Remainder", "Fractional",
+   "Floating",
+   "Cartesian"]
 
 -- | Predefined data types not visible to the Triolet parser
 frontendOtherTypes :: [String]
@@ -159,17 +167,6 @@ frontendOtherGlobals =
     "multiplyIndex", "divideIndex",
     "make_sliceObject"
   ]
-
--- | All predefined class names
-frontendClasses :: [String]
-frontendClasses =
-  ["Repr", "Traversable", "Shape", "Indexable",
-   "Eq", "Ord",
-   "Additive", "Multiplicative",
-   "Remainder", "Fractional",
-   "Floating",
-   --"Vector",
-   "Cartesian"]
 
 tcName s = TH.mkName $ "TheTC_" ++ s
 

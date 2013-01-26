@@ -1,10 +1,12 @@
 
 # Get the slice xs[i+j+1 :]
 @forall(a)
+@where(Repr(a))
 def tail_slice(xs : list(a), i : int) -> iter(shape(list), a):
   return (xs[i + j + 1] for j in range(len(xs) - i - 1))
 
 @forall(a)
+@where(Repr(a))
 def tails(xs : list(a)) -> iter(shape(list), (a, iter(shape(list), a))):
   N = len(xs)
   return ((xs[i], tail_slice(xs, i)) for i in range(N))

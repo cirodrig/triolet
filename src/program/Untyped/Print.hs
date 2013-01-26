@@ -73,26 +73,27 @@ pprBlock e = showBlock $ pprAsStatements e
          _ -> [pprExpression expr]
 
 pprDefinition :: FunctionDef -> Doc
-pprDefinition (FunctionDef name ann fun) = 
-  pprFunction (Just $ pprVariable name) fun
+pprDefinition (FunctionDef name ann fun) =
+  let forall_doc = case funPolySignature ann
+                   of GivenSignature {}       -> text "forall" <+> text "..."
+                      InferMonomorphicType {} -> text "monomorphic"
+                      InferPolymorphicType {} -> empty
+      fun_doc = pprFunction (Just $ pprVariable name) fun
+  in forall_doc $$ fun_doc
 
 pprFunction :: Maybe Doc -> Function -> Doc
-pprFunction fname (Function { funQVars = qvars 
-                            , funParameters = params
+pprFunction fname (Function { funParameters = params
                             , funReturnType = rt
                             , funBody = body
                             }) = do
-  let forall_doc = case qvars
-                   of Nothing -> empty
-                      Just vs -> text "forall" <+> text "..."
-      intro = case fname
+  let intro = case fname
               of Nothing -> text "lambda" <+> param_doc <> text "."
                  Just v  -> v <+> param_doc <+> text "="
       rt_doc = case rt
                of Nothing -> empty
                   Just d  -> nest (-3) $ text "->" <+> text "..."
       param_doc = sep (map (parens . pprPattern) params ++ [rt_doc])
-    in forall_doc $$ intro $$ nest 2 (pprExpression body)
+    in intro $$ nest 2 (pprExpression body)
 
 pprExport :: Export -> Doc
 pprExport (Export _ spec v ty) =

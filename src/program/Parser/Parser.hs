@@ -17,6 +17,7 @@ import Prelude hiding(mapM, sequence)
 
 import Control.Applicative
 import Control.Monad hiding(mapM, sequence)
+import Control.Monad.Writer hiding(mapM)
 import Data.Char
 import Data.Function
 import Data.IORef
@@ -516,6 +517,7 @@ use lv name = do
 type PyExpr = Py.ExprSpan
 type PySlice = Py.SliceSpan
 type PyStmt = Py.StatementSpan
+type PyDecorator = Py.DecoratorSpan
 type PyComp a = Py.ComprehensionSpan a
 
 -- | Parse an expression.  The level parameter indicates whether the
@@ -828,40 +830,176 @@ exportStatement stmt@(Py.Export {Py.export_lang = lang,
 
 -- Unpack a function definition into decorator and real definition
 funDefinition :: PyStmt -> Cvt PFunc
-funDefinition stmt@(Py.Fun {}) = funDefinition' [] stmt
+funDefinition stmt@(Py.Fun {}) = funDefinition' noFunDecorators stmt
 funDefinition (Py.Decorated { Py.decorated_decorators = decorators
-                            , Py.decorated_def = stmt@(Py.Fun {})}) = 
-  funDefinition' decorators stmt
+                            , Py.decorated_def = stmt@(Py.Fun {})}) = do
+  decs <- funDecorators decorators
+  funDefinition' decs stmt
 
 -- A function can be decorated with a list of type variable parameters,
 -- specified with a 'forall' annotation. 
 -- Each parameter consists of a variable and an optional kind expression.
-data Decorators =
-  Decorators { forallDecorator :: Maybe [(PyIdent, Maybe PExpr)]
-             , inlineDecorator :: Maybe Bool
-             }
+data FunDecorators =
+  FunDecorators { forallDecorator :: Maybe ([(PyIdent, Maybe PyExpr)], [PyExpr])
+                , inlineDecorator :: Maybe Bool
+                }
 
-funDefinition' decorators (Py.Fun { Py.fun_name = name
-                                  , Py.fun_args = params
-                                  , Py.fun_result_annotation = result
-                                  , Py.fun_body = body
-                                  , Py.stmt_annot = annotation}) = do
-  Decorators forall_dec inline_dec <- extractDecorators decorators
+noFunDecorators :: FunDecorators
+noFunDecorators = FunDecorators Nothing Nothing
+
+funDecorators :: [PyDecorator] -> Cvt FunDecorators
+funDecorators dec1 = do
+  let (forall_args, dec2) = runWriter $ findForallDecorator dec1
+      (inlines, dec3) = runWriter $ findInlineDecorators dec2
+  unless (null dec3) $ error "Unrecognized decorator"
+
+  -- Mark this function "inline" if there are any inline annotations
+  let inline = if null inlines then Nothing else Just True
+
+  -- Check syntax of "forall" decorator arguments
+  let forall_dec =
+        case forall_args
+        of Nothing -> Nothing
+           Just (typarams, constraint) ->
+             Just (map unpack_typaram typarams,
+                   map unpack_predicate constraint)
+
+  return $ FunDecorators forall_dec inline
+  where
+    -- Type parameters are either a variable, or a variable with 
+    -- a kind annotation:
+    --
+    -- > a
+    -- > a : E
+    unpack_typaram (Py.ArgExpr { Py.arg_expr = Py.Var {Py.var_ident = ident}
+                               , Py.arg_py_annotation = annot}) =
+      (ident, annot)
+
+    unpack_typaram _ = error "Invalid type parameter in 'forall' decorator"
+
+    unpack_predicate (Py.ArgExpr { Py.arg_expr = e
+                                 , Py.arg_py_annotation = Nothing}) =
+      e
+
+    unpack_predicate _ =
+      error "Invalid annotation in 'where' decorator"
+
+-- | A function that processes a list of decorators, saving the unused
+--   decorators and returning an @a@
+type ScanDecorators a = [PyDecorator] -> Writer [PyDecorator] a
+
+-- | Search the decorator list for any of the given decorator names. 
+--   When the first matching decorator is found, pass its arguments and
+--   leftover decorators to the given continuation.
+findDecorator :: [(String, [Py.Argument Py.SrcSpan] -> ScanDecorators a)]
+              -> Writer [PyDecorator] a
+              -> ScanDecorators a
+findDecorator patterns defl (d:ds) =
+  case lookup (decorator_name_string d) patterns
+  of Just f  -> f (Py.decorator_args d) ds                 -- Found a match
+     Nothing -> tell [d] >> findDecorator patterns defl ds -- No match
+  where
+    decorator_name_string d = case Py.decorator_name d
+                              of [ident] -> identName ident
+
+findDecorator _ defl [] = defl
+
+-- | Find an optional @\@forall@ decorator, optionally followed by a @\@where@
+--   decorator.  If the where-decorator is missing, treat it like a
+--   where-decorator with an empty argument list.
+findForallDecorator :: ScanDecorators (Maybe ([Py.Argument Py.SrcSpan],
+                                              [Py.Argument Py.SrcSpan]))
+findForallDecorator ds =
+  findDecorator [("forall", find_where), invalid_where_P] (return Nothing) ds
+  where
+    find_where forall_args ds =
+      findDecorator
+      [("where", find_duplicates forall_args), duplicate_forall_P]
+      (return $ Just (forall_args, [])) ds
+
+    find_duplicates forall_args where_args ds =
+      findDecorator [duplicate_forall_P, duplicate_where_P]
+      (return $ Just (forall_args, where_args)) ds
+
+    invalid_where_P = ("where", invalid_where)
+    duplicate_forall_P = ("forall", duplicate_forall)
+    duplicate_where_P = ("where", duplicate_where)
+
+    invalid_where = error "'where' decorator must be after 'forall' decorator"
+    duplicate_forall = error "Function has more than one 'forall' decorator"
+    duplicate_where = error "Function has more than one 'where' decorator"
+
+findInlineDecorators = findAllDecorators "inline"
+
+findAllDecorators :: String -> ScanDecorators [[Py.Argument Py.SrcSpan]]
+findAllDecorators name ds = fmap reverse $ go [] ds
+  where
+    go found ds =
+      findDecorator [(name, \xs ds -> go (xs : found) ds)] (return found) ds
+
+funDefinition' (FunDecorators forall_ann inline_ann) 
+               (Py.Fun { Py.fun_name = name
+                       , Py.fun_args = params
+                       , Py.fun_result_annotation = result
+                       , Py.fun_body = body
+                       , Py.stmt_annot = annotation}) = do
+  -- Decorators forall_dec inline_dec <- extractDecorators decorators
   nameVar <- definition ValueLevel name
-  let pos = toSourcePos annotation
+
+  -- Look up type variable kinds
+  kinds' <- mapM (mapM (expression KindLevel)) forall_kinds
+
   enter $ do
-    qvars <- traverse (mapM qvarDefinition) forall_dec
+    -- Forall annotation
+    qvars <- mapM (parameterDefinition TypeLevel) forall_vars
+    cst' <- mapM (expression TypeLevel) forall_cst
+    let forall_ann' = mk_forall_annotation qvars kinds' cst'
+
+    -- Rest of function header
     params' <- parameters params
     result' <- traverse (expression TypeLevel) result
-    let pragma = FunPragma { funInline = fromMaybe False inline_dec }
-    let signature = FunSig nameVar qvars pragma params' result'
+    let pragma = FunPragma { funInline = fromMaybe False inline_ann }
+    let signature = FunSig nameVar forall_ann' pragma params' result'
+
+    -- If a forall annotation was given, parameters and result must be
+    -- annotated
+    check_type_annotations params' result'
+
+    -- Function body
     body' <- suite body
     return $ Loc pos $ Func signature body'
   where
-    qvarDefinition (qvar_name, qvar_kind) = do
-      qvar <- parameterDefinition TypeLevel qvar_name
-      return (qvar, qvar_kind)
+    pos = toSourcePos annotation
 
+    has_forall_ann = isJust forall_ann
+    forall_vars :: [PyIdent]
+    forall_vars = maybe [] (map fst . fst) forall_ann
+    forall_kinds :: [Maybe PyExpr]
+    forall_kinds = maybe [] (map snd . fst) forall_ann
+    forall_cst :: [PyExpr]
+    forall_cst = maybe [] snd forall_ann
+
+    mk_forall_annotation vs ks cst
+      | has_forall_ann = Just $ ForallAnnotation (zipWith Parameter vs ks) cst
+      | otherwise      = Nothing
+
+    check_type_annotations params' result'
+      -- If there is no explicit polymorphic type annoatation, then
+      -- type annotations are not required
+      | not has_forall_ann = return ()
+
+      -- Verify that parameter and return type annotations are there
+      | any (not . is_annotated_param) params' =
+          error "Missing parameter type annotation on function with explicit 'forall'"
+      | isNothing result' =
+          error "Missing return type annotation on function with explicit 'forall'"
+      | otherwise = return ()
+      where
+        is_annotated_param (Parameter _ ann) = isJust ann
+        -- Python 3 syntax only permits simple variable parameters here
+        is_annotated_param _ = internalError "funDefinition'"
+                            
+{-
 extractDecorators decorators =
   foldM extract (Decorators Nothing Nothing) decorators
   where
@@ -893,6 +1031,7 @@ extractDecorators decorators =
       annot_expr <- traverse (expression KindLevel) annot
       return $ Just (ident, annot_expr)
     readArgument _ = return Nothing
+-}
 
 -------------------------------------------------------------------------------
 -- Definition group partitioning
