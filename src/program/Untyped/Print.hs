@@ -7,6 +7,7 @@ import Text.PrettyPrint.HughesPJ
 import Common.Identifier
 import Common.Label
 import Untyped.Syntax
+import Untyped.Variable
 
 showTuple :: [Doc] -> Doc
 showTuple = parens . sep . punctuate comma
@@ -21,12 +22,6 @@ pprLit (IntL n) = text $ show n
 pprLit (FloatL d) = text $ show d
 pprLit (BoolL b) = text $ show b
 pprLit NoneL = text "None"
-
-pprVariable :: Variable -> Doc
-pprVariable v =
-  let name = maybe "_" showLabel $ varName v 
-      num  = show $ fromIdent $ varID v
-  in text $ name ++ "'" ++ num
 
 pprPattern :: Pattern -> Doc
 pprPattern pat =

@@ -8,6 +8,7 @@ import Data.IORef
 
 import Common.Supply
 import Common.Identifier
+import qualified Untyped.TIMonad as Untyped
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.Datatypes.TypeLayout as SystemF
 import qualified SystemF.MemoryIR as SystemF
@@ -33,6 +34,11 @@ the_newVarIdentSupply =
 the_llVarIdentSupply :: StaticGlobalVar (Supply (Ident LowLevel.Var))
 {-# NOINLINE the_llVarIdentSupply #-}
 the_llVarIdentSupply = defineStaticGlobalVar newIdentSupply
+
+-- | The types used by the frontend type inference engine.
+the_TITypes :: InitGlobalVar Untyped.Environment
+{-# NOINLINE the_TITypes #-}
+the_TITypes = defineInitGlobalVar () 
 
 -- | The types of System F terms.
 the_systemFTypes :: InitGlobalVar Type.Environment.TypeEnv
@@ -82,8 +88,8 @@ the_fuel :: InitGlobalVar (IORef Int)
 the_fuel = defineInitGlobalVar ()
 
 withTheNewVarIdentSupply :: (Supply (Ident Var) -> IO a) -> IO a
-withTheNewVarIdentSupply f = withStaticGlobalVar the_newVarIdentSupply f
+withTheNewVarIdentSupply f = readStaticGlobalVar the_newVarIdentSupply >>= f
 
 withTheLLVarIdentSupply :: (Supply (Ident LowLevel.Var) -> IO a) -> IO a
-withTheLLVarIdentSupply f = withStaticGlobalVar the_llVarIdentSupply f
+withTheLLVarIdentSupply f = readStaticGlobalVar the_llVarIdentSupply >>= f
 

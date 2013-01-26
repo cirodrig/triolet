@@ -58,6 +58,9 @@ data LowerEnv =
            , varMap :: IntMap.IntMap LL.Var
            }
 
+getLLVarSupply :: Lower (IdentSupply LL.Var)
+getLLVarSupply = Lower $ asks llVarSupply
+
 initializeLowerEnv :: IdentSupply Var
                    -> IdentSupply LL.Var
                    -> TypeEnv

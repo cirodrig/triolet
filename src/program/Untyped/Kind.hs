@@ -20,3 +20,10 @@ pprKind k = text $ showKind k
 -- | The kind of a constructor that takes N parameters of kind @*@
 nAryKind :: Int -> Kind
 nAryKind n = iterate (Star :->) Star !! n
+
+-- | Get the domain and range of an arrow kind
+fromArrowKind :: Kind -> ([Kind], Kind)
+fromArrowKind k = examine id k
+  where
+    examine d (k :-> k') = examine (d . (k:)) k'
+    examine d r          = (d [], r)

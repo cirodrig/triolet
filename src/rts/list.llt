@@ -14,6 +14,7 @@ import procedure exit "exit" (int) -> ();
 
 #include "new_pyasm_records.h"
 
+/*
 function inline repr_list (owned elem_repr) -> owned {
   repr = pointer primcall triolet_alloc (sizeof Repr);
 
@@ -28,6 +29,7 @@ function inline repr_list (owned elem_repr) -> owned {
     owned call from_Boxed (sizeof List, alignof List, copy_function);
   repr as owned;
 };
+*/
 
 function list_copy (owned elem_repr, pointer src, pointer dst) -> unit {
   dst @! List.nelems = src @! List.nelems;
@@ -82,6 +84,7 @@ procedure triolet_list_free_POD (pointer list) -> () {
 ///////////////////////////////////////////////////////////////////////////////
 // Matrix functions
 
+/*
 function repr_array2 (owned elem_repr) -> owned {
   repr = pointer primcall triolet_alloc (sizeof Repr);
 
@@ -96,6 +99,7 @@ function repr_array2 (owned elem_repr) -> owned {
     owned call from_Boxed (sizeof Array2, alignof Array2, copy_function);
   repr as owned;
 };
+*/
 
 function matrix_copy (owned elem_repr, pointer src, pointer dst) -> unit {
   first_y = src @! Array2.first_y;

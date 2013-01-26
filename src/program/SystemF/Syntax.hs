@@ -203,16 +203,21 @@ literalType (IntL _ t) = t
 literalType (FloatL _ t) = t
 
 -- | Information common to all expressions.
-data ExpInfo = ExpInfo SourcePos
+data ExpInfo =
+  ExpInfo
+    SourcePos            -- ^ Location where the expression originated
+    !(Maybe ExpSF)       -- ^ Representation dictionary for this expression.
+                         --   This is only used during elaboration; afterward,
+                         --   it is always 'Nothing'.
 
 defaultExpInfo :: ExpInfo
-defaultExpInfo = ExpInfo noSourcePos
+defaultExpInfo = ExpInfo noSourcePos Nothing
 
 mkExpInfo :: SourcePos -> ExpInfo
-mkExpInfo = ExpInfo
+mkExpInfo pos = ExpInfo pos Nothing
 
 instance HasSourcePos ExpInfo where
-  getSourcePos (ExpInfo p) = p
+  getSourcePos (ExpInfo p _) = p
 
 -- Data types used in representing code.  Data types are indexed by a
 -- data format; different indices are used in different stages of the

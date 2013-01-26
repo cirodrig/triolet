@@ -23,11 +23,13 @@ import Parser.ParserSyntax hiding(Stmt(..))
 import Parser.Control
 import Parser.SSA2(SSAVar, SSAID, SSATree(..))
 import qualified Untyped.Data as U
-import Untyped.Builtins
-import Untyped.Data(ParserVarBinding(..))
+import Untyped.Builtins2
 import qualified Untyped.Syntax as U
-import qualified Untyped.HMType as U
+import qualified Untyped.TIMonad as U
+import qualified Untyped.Type as U
 import qualified Untyped.Kind as U
+import qualified Untyped.TypeUnif as U
+import qualified Untyped.Variable as U
 import Type.Level
 import qualified Type.Type as Type
 
@@ -40,17 +42,24 @@ externUntypedScope = Map.fromList
 noAnnotation :: U.Ann
 noAnnotation = U.Ann noSourcePos
 
-type GenEnv = IdentSupply Type.Var
+type GenEnv = U.Environment
 
 newtype Gen a = Gen {runGen :: RWST GenEnv () GenScope IO a}
               deriving(Monad, MonadIO)
 
 instance Supplies Gen (Ident Type.Var) where
-  fresh = Gen $ do {env <- ask; liftIO $ supplyValue env}
-  
-runGenEnv :: IdentSupply Type.Var -> GenScope -> Gen a -> IO (a, GenScope)
-runGenEnv id_supply scope m = do
-  (x, s, _) <- runRWST (runGen m) id_supply scope
+  fresh = Gen $ do s <- asks U.envSFVarIDSupply
+                   liftIO $ supplyValue s
+
+-- | This 'EnvMonad' instance is so that type functions can be evaluated
+instance U.EnvMonad Gen where
+  getEnvironment = Gen ask
+  getsEnvironment f = Gen (asks f)
+  withEnvironment f (Gen m) = Gen (local f m)
+
+runGenEnv :: U.Environment -> GenScope -> Gen a -> IO (a, GenScope)
+runGenEnv env scope m = do
+  (x, s, _) <- runRWST (runGen m) env scope
   return (x, s)
 
 modifyScope :: (GenScope -> GenScope) -> Gen ()
@@ -75,19 +84,19 @@ lookupVar = lookupVar' id
 lookupKindVar :: SSAVar -> Gen U.Kind
 lookupKindVar v = lookupVar' from_kind v
   where
-    from_kind (U.KindBinding k) = k
+    from_kind (KindBinding k) = k
     from_kind _ = internalError "lookupKindVar: Not a kind"
 
 lookupTypeVar :: SSAVar -> Gen U.TyCon
 lookupTypeVar v = lookupVar' from_type v
   where
-    from_type (U.TypeBinding t) = t
+    from_type (TypeBinding t) = t
     from_type _ = internalError "lookupTypeVar: Not a type"
     
 lookupObjVar :: SSAVar -> Gen U.Variable
 lookupObjVar v = lookupVar' from_obj v
   where
-    from_obj (U.ObjectBinding t) = t
+    from_obj (ObjectBinding t) = t
     from_obj _ = internalError "lookupObjVar: Not a value"
 
 lookupObjVarAsExpression :: U.Ann -> SSAVar -> Gen U.Expression
@@ -120,7 +129,7 @@ defineTyVar v kind = do
   let lab = case varName v
             of "" -> Nothing
                nm -> Just $ plainLabel (ModuleName "trioletfile") nm
-  tyvar <- liftIO $ U.newRigidTyVar kind lab
+  tyvar <- U.newTyVar lab kind
   modifyScope $ Map.insert v (TypeBinding tyvar)
   return tyvar
     
@@ -160,9 +169,9 @@ typeExp (Loc pos e) =
   of Variable v ->
        U.ConTy `liftM` lookupTypeVar v
      Binary (Python.Arrow {}) l r ->
-       U.functionType `liftM` funDomain l `ap` typeExp r
+       U.functionTy `liftM` funDomain l `ap` typeExp r
      Tuple ts ->
-       U.tupleType `liftM` typeExps ts
+       U.tupleTy `liftM` typeExps ts
      Call (Loc _ (Variable op_v)) args -> do
        -- Special case handling of type functions
        con <- lookupTypeVar op_v
@@ -183,7 +192,7 @@ noneTypePattern = do
   v <- createNewObjectVariable ""
   return [U.VariableP noAnnotation v (Just nonetype)]
   where
-    nonetype = U.ConTy $ tiBuiltin the_con_NoneType
+    nonetype = U.ConTy $ builtinTyCon TheTC_NoneType
 
 callVariable pos op args =
   U.CallE (U.Ann pos) (U.VariableE (U.Ann pos) op) args
@@ -233,19 +242,21 @@ literal pos l =
   case l
   of IntLit n ->
        -- Generate a call to 'fromInt' to cast to any valid value
-       let oper = tiBuiltin the_v___fromint__
+       let oper = builtinVar TheV___fromint__
        in callVariable pos oper [make_literal (U.IntL n)]
      FloatLit f ->
        -- Generate a call to 'fromFloat' to cast to any valid value
-       let oper = tiBuiltin the_v___fromfloat__
+       let oper = builtinVar TheV___fromfloat__
        in callVariable pos oper [make_literal (U.FloatL f)]
      ImaginaryLit d ->
+       internalError "Imaginary numbers not supported"
+       {-
        -- Generate a call to 'makeComplex' and 'fromFloat'
-       let oper1 = tiBuiltin the_v___fromfloat__
-           oper2 = tiBuiltin the_v_complex
+       let oper1 = builtinVar TheV___fromfloat__
+           oper2 = builtinVar TheV_complex
            real = callVariable pos oper1 [make_literal (U.FloatL 0)]
            imag = callVariable pos oper1 [make_literal (U.FloatL d)]
-       in callVariable pos oper2 [real, imag]
+       in callVariable pos oper2 [real, imag]-}
      BoolLit b -> make_literal $ U.BoolL b
      NoneLit -> make_literal U.NoneL
   where
@@ -280,7 +291,7 @@ expr (Loc pos e) =
              case indices'
              of [i] -> i
                 is  -> U.TupleE (U.Ann pos) is
-       return $ callVariable pos (tiBuiltin the_v_safeIndex) [base', index_expr]
+       return $ callVariable pos (builtinVar TheV___getitem__) [base', index_expr]
      Slicing base subs -> do
        base' <- expr base
        subs' <- mapM slice subs
@@ -288,10 +299,10 @@ expr (Loc pos e) =
              case subs'
              of [i] -> i
                 is  -> U.TupleE (U.Ann pos) is
-       return $ callVariable pos (tiBuiltin the_v_safeSlice) [base', slice_expr]
+       return $ callVariable pos (builtinVar TheV___getslice__) [base', slice_expr]
      ListComp iter -> do
        iter' <- iterator iter
-       return $ callVariable pos (tiBuiltin the_v_build) [iter']
+       return $ callVariable pos (builtinVar TheV_build) [iter']
      Generator iter ->
        iterator iter
      Call e es ->
@@ -314,7 +325,7 @@ slice (SliceSlice pos l u s) = do
   (has_u, u') <- maybe_expr expr zero u
   (has_has_s, (has_s, s')) <-
     maybe_expr (maybe_expr expr zero) (false, zero) s
-  return $ callVariable pos (tiBuiltin the_v_make_sliceObject)
+  return $ callVariable pos (builtinVar TheV_make_sliceObject)
     [has_l, l', has_u, u', has_has_s, has_s, s']
   where
     maybe_expr :: (a -> Gen b) -> b -> Maybe a -> Gen (U.Expression, b)
@@ -333,8 +344,8 @@ slice (ExprSlice e) = do
   e' <- expr e
   v <- createNewObjectVariable ""
   let l = U.VariableE noAnnotation v
-      u = callVariable noSourcePos (tiBuiltin the_v___add__) [l, one]
-      s = callVariable noSourcePos (tiBuiltin the_v_make_sliceObject)
+      u = callVariable noSourcePos (builtinVar TheV___add__) [l, one]
+      s = callVariable noSourcePos (builtinVar TheV_make_sliceObject)
           [true, l, true, u, false, false, zero]
   return $ U.LetE noAnnotation (U.VariableP noAnnotation v Nothing) e' s
   where
@@ -345,7 +356,7 @@ slice (ExprSlice e) = do
 
 iterator (IterFor pos params source body) = do
   source' <- expr source
-  let iterator = callVariable pos (tiBuiltin the_v_iter) [source']
+  let iterator = callVariable pos (builtinVar TheV_iter) [source']
   withParameters params $ \[param'] ->
     case body
     of CompBody simple_body -> do
@@ -356,21 +367,21 @@ iterator (IterFor pos params source body) = do
          body_expr <- expr simple_body
          let body_fun =
                U.Function (U.Ann pos) Nothing [param'] Nothing body_expr
-         return $ callVariable pos (tiBuiltin the_v_map)
+         return $ callVariable pos (builtinVar TheV_map)
            [U.FunE (U.Ann pos) body_fun, iterator]
     
        _ -> do
          -- Convert "FOO for x in BAR" to bind(bar, lambda x. FOO)
          body' <- comprehension body 
          let body_fun = U.Function (U.Ann pos) Nothing [param'] Nothing body'
-         return $ callVariable pos (tiBuiltin the_v_iterBind)
+         return $ callVariable pos (builtinVar TheV_iterBind)
            [iterator, U.FunE (U.Ann pos) body_fun]
 
 iterIf (IterIf pos cond body) = do
   -- Convert "FOO if BAR" to guard(BAR, FOO)
   cond' <- expr cond
   body' <- comprehension body
-  return $ callVariable pos (tiBuiltin the_v_guard) [cond', body']
+  return $ callVariable pos (builtinVar TheV_guard) [cond', body']
 
 iterLet (IterLet pos target rhs body) = do
   rhs' <- expr rhs
@@ -383,36 +394,36 @@ comprehension (CompIf iter) = iterIf iter
 comprehension (CompLet iter) = iterLet iter
 comprehension (CompBody e) = do
   e' <- expr e
-  return $ callVariable noSourcePos (tiBuiltin the_v_do) [e']
+  return $ callVariable noSourcePos (builtinVar TheV_do) [e']
 
 convertUnaryOperator op = 
   case op
-  of Python.Minus {} -> tiBuiltin the_v___negate__
-     Python.Not {} -> tiBuiltin the_v_not
+  of Python.Minus {} -> builtinVar TheV___negate__
+     Python.Not {} -> builtinVar TheV_not
      _ -> internalError "convertUnaryOperator: Unrecognized operator"
 
 convertBinaryOperator op =
   case op
-  of Python.And {}               -> tiBuiltin the_v_and
-     Python.Or {}               -> tiBuiltin the_v_or
-     Python.Exponent {}          -> tiBuiltin the_v___power__
-     Python.LessThan {}          -> tiBuiltin the_v___lt__
-     Python.GreaterThan {}       -> tiBuiltin the_v___gt__
-     Python.Equality {}          -> tiBuiltin the_v___eq__
-     Python.GreaterThanEquals {} -> tiBuiltin the_v___ge__
-     Python.LessThanEquals {}    -> tiBuiltin the_v___le__
-     Python.NotEquals {}         -> tiBuiltin the_v___ne__
-     Python.Xor {}               -> tiBuiltin the_v___xor__
-     Python.BinaryAnd {}         -> tiBuiltin the_v___and__
-     Python.BinaryOr {}          -> tiBuiltin the_v___or__
-     Python.Multiply {}          -> tiBuiltin the_v___mul__
-     Python.Plus {}              -> tiBuiltin the_v___add__
-     Python.Minus {}             -> tiBuiltin the_v___sub__
-     Python.Divide {}            -> tiBuiltin the_v___div__
-     Python.FloorDivide {}       -> tiBuiltin the_v___floordiv__
-     Python.Modulo {}            -> tiBuiltin the_v___mod__
-     Python.ShiftLeft {}         -> tiBuiltin the_v___lshift__
-     Python.ShiftRight {}        -> tiBuiltin the_v___rshift__
+  of Python.And {}               -> builtinVar TheV_and
+     Python.Or {}               -> builtinVar TheV_or
+     Python.Exponent {}          -> builtinVar TheV___power__
+     Python.LessThan {}          -> builtinVar TheV___lt__
+     Python.GreaterThan {}       -> builtinVar TheV___gt__
+     Python.Equality {}          -> builtinVar TheV___eq__
+     Python.GreaterThanEquals {} -> builtinVar TheV___ge__
+     Python.LessThanEquals {}    -> builtinVar TheV___le__
+     Python.NotEquals {}         -> builtinVar TheV___ne__
+     Python.Xor {}               -> builtinVar TheV___xor__
+     Python.BinaryAnd {}         -> builtinVar TheV___and__
+     Python.BinaryOr {}          -> builtinVar TheV___or__
+     Python.Multiply {}          -> builtinVar TheV___mul__
+     Python.Plus {}              -> builtinVar TheV___add__
+     Python.Minus {}             -> builtinVar TheV___sub__
+     Python.Divide {}            -> builtinVar TheV___div__
+     Python.FloorDivide {}       -> builtinVar TheV___floordiv__
+     Python.Modulo {}            -> builtinVar TheV___mod__
+     Python.ShiftLeft {}         -> builtinVar TheV___lshift__
+     Python.ShiftRight {}        -> builtinVar TheV___rshift__
      _ -> internalError "convertBinaryOperator: Unrecognized operator"
 
 -------------------------------------------------------------------------------
@@ -594,12 +605,12 @@ export (ExportItem pos spec v ty) = do
   ty' <- typeExp ty
   return $ U.Export (U.Ann pos) spec v' ty'
 
-genGroup :: IdentSupply Type.Var -> GenScope -> [LCFunc SSAID]
+genGroup :: U.Environment -> GenScope -> [LCFunc SSAID]
          -> IO (U.DefGroup, GenScope)
-genGroup id_supply scope xs =
-  runGenEnv id_supply scope $ defGroup xs
+genGroup env scope xs =
+  runGenEnv env scope $ defGroup xs
 
-genExport :: IdentSupply Type.Var -> GenScope -> ExportItem SSAID
+genExport :: U.Environment -> GenScope -> ExportItem SSAID
           -> IO (U.Export, GenScope)
-genExport id_supply scope x = 
-  runGenEnv id_supply scope $ export x
+genExport env scope x = 
+  runGenEnv env scope $ export x

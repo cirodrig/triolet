@@ -1,46 +1,36 @@
 
-{-# LANGUAGE TemplateHaskell #-}
-module Untyped.BuiltinsTH where
+module Untyped.BuiltinsTH2 where
 
-import Language.Haskell.TH(Strict(..))
-import Language.Haskell.TH.Syntax(Lift(..))
-import Common.THRecord
-import qualified Type.Var
-import Untyped.Data
-import Untyped.Kind
-import Untyped.Syntax
+import qualified Language.Haskell.TH as TH
 
-instance Lift Kind where
-  lift Star = [| Star |]
-  lift (k1 :-> k2) = [| k1 :-> k2 |]
-
--- | All predefined data type names recognized by the Pyon parser
-pyonSourceTypes :: [String] 
-pyonSourceTypes =
-  ["int", "float", "Complex", "bool", "NoneType", "iter", "list",
-   "array", "array0", "array1", "array2", "array3",
+-- | All predefined data type names recognized by the Triolet parser
+frontendSourceTypes :: [String] 
+frontendSourceTypes =
+  ["int", "float", "bool", "NoneType",
+   "iter", "list",
+   "array0", "array1", "array2", "array3",
    "blist", "barray1", "barray2", "barray3",
-   "Maybe", "Any", "intset", "llist",
+   "Maybe", "intset", "llist",
    "shape", "list_dim", "dim0", "dim1", "dim2", "dim3",
    "index", "slice", "cartesianDomain",
    "view",
    "Scatter"]
 
--- | Predefined data types not visible to the Pyon parser
-pyonOtherTypes :: [String]
-pyonOtherTypes =
+-- | Predefined data types not visible to the Triolet parser
+frontendOtherTypes :: [String]
+frontendOtherTypes =
   ["SliceObject", "StuckRef"]
 
--- | All predefined global functions recognized by the Pyon parser
-pyonSourceGlobals :: [String]
-pyonSourceGlobals =
+-- | All predefined global functions recognized by the Triolet parser
+frontendSourceGlobals :: [String]
+frontendSourceGlobals =
   [ "Just"
   , "Nothing"
   , "isJust"
   , "isNothing"
   , "fromJust"
   , "list_dim"
-  , "dim1"
+  , "dim0"
   , "dim2"
   , "dim3"
   , "cons"
@@ -72,7 +62,6 @@ pyonSourceGlobals =
   , "displaceView"
   , "multiplyView"
   , "divideView"
-  , "view2"
   , "permute1D"
   , "boxedPermute1D"
   , "stencil2D"
@@ -83,7 +72,6 @@ pyonSourceGlobals =
   , "extend3D"
   , "unionView3D"
   , "histogram"
-  , "matrixiter"
   , "floor"
   , "intScatter"
   , "floatScatter"
@@ -112,7 +100,8 @@ pyonSourceGlobals =
   , "and"
   , "or"
   , "not"
-  , "complex"
+  , "__getitem__"
+  , "__getslice__"
     -- Class methods
   , "__eq__"
   , "__ne__"
@@ -137,9 +126,9 @@ pyonSourceGlobals =
   , "__div__"
   , "__lshift__"
   , "__rshift__"
-  , "scale"
-  , "magnitude"
-  , "dot"
+  --, "scale"
+  --, "magnitude"
+  --, "dot"
   , "loBound"
   , "hiBound"
   , "stride"
@@ -157,8 +146,8 @@ pyonSourceGlobals =
   ]
 
 -- | Global variables that can't be referred to by name 
-pyonOtherGlobals :: [String]
-pyonOtherGlobals =
+frontendOtherGlobals :: [String]
+frontendOtherGlobals =
   [ "do", "guard", "iterBind",
     "safeIndex", "safeSlice",
     "member",
@@ -172,28 +161,16 @@ pyonOtherGlobals =
   ]
 
 -- | All predefined class names
-pyonClasses :: [String]
-pyonClasses =
+frontendClasses :: [String]
+frontendClasses =
   ["Repr", "Traversable", "Shape", "Indexable",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",
    "Floating",
-   "Vector",
+   --"Vector",
    "Cartesian"]
 
--- Global variable fields are not strict because some of them are built 
--- using fields of the builtins table.  Class fields are strict, but most 
--- of their fields are not for the same reason.
-tiBuiltinSpecification =
-  recordDef "TIBuiltins" fields
-  where
-    fields = [('t':'_':name, IsStrict, [t| Type.Var.Var |])
-             | name <- pyonSourceTypes ++ pyonOtherTypes] ++ 
-             [("con_" ++ name, IsStrict, [t| TyCon |])
-             | name <- pyonSourceTypes ++ pyonOtherTypes] ++
-             [('v':'_':name, NotStrict, [t| Variable |])
-             | name <- pyonSourceGlobals ++ pyonOtherGlobals] ++
-             [('c':'_':name, IsStrict, [t| Class |])
-             | name <- pyonClasses]
+tcName s = TH.mkName $ "TheTC_" ++ s
 
+vName s = TH.mkName $ "TheV_" ++ s

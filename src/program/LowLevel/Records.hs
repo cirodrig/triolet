@@ -256,7 +256,12 @@ matrixRecord = constStaticRecord
              , PrimField PointerType    -- Pointer to contents
              ]
 
--- Various array objects (array1, array2, array3, barray1, barray2, barray3)
+-- Various array objects (array[0..3], barray[1..3])
+array0Record :: StaticRecord
+array0Record = constStaticRecord
+               [ PrimField OwnedType
+               ]
+
 array1Record :: StaticRecord
 array1Record = constStaticRecord
                [ PrimField trioletIntType

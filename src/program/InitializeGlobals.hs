@@ -24,6 +24,7 @@ import qualified SystemF.TypecheckMem
 import SystemF.Datatypes.TypeLayout
 import SystemF.Datatypes.Structure
 import SystemF.Datatypes.Size
+import qualified Untyped.InitializeBuiltins2 as Untyped
 import CommandLine
 import Globals
 import GlobalVar
@@ -34,16 +35,13 @@ loadBuiltins cl_globals = do
   -- Initialize globals from command_line
   initializeGlobalVar the_fuel (newIORef $ initValueForFuel cl_globals)
 
-  -- Initialize the Core builtins
-  --withTheNewVarIdentSupply Builtins.Builtins.initializeBuiltins
-  
   -- Initialize the parser's index of global variables
   initializeGlobalVar parserGlobals $
     modifyStaticGlobalVar the_nextParserVarID $ \n ->
     let vars = createParserGlobals n
     in return (n + length vars, vars)
 
-  -- DEBUG: new core IR initialization
+  -- Core IR initialization
   withTheNewVarIdentSupply $ \supply -> do
     (sf_types, spec_types, mem_types, core_module, core_variables) <-
       CParser2.Driver.parseCoreModule2 supply
@@ -57,6 +55,15 @@ loadBuiltins cl_globals = do
   when (useCoreIR cl_globals) $ do
     core_module <- readInitGlobalVarIO the_coreModule
     SystemF.TypecheckMem.typeCheckModule core_module
+
+  -- Initialize fromtend types
+  when (useCoreIR cl_globals) $
+    withTheNewVarIdentSupply $ \supply -> do
+      sf_types <- readInitGlobalVarIO the_systemFTypes
+      mem_types <- readInitGlobalVarIO the_memTypes
+      initializeGlobalVar the_TITypes $
+        Untyped.setupTypeEnvironment supply sf_types mem_types
+      Untyped.dumpTypeEnvironment =<< readInitGlobalVarIO the_TITypes
 
   -- Initialize the low-level builtins
   withTheLLVarIdentSupply $ \ll_supply -> do

@@ -88,6 +88,16 @@ tupleTypeCon n | n < 0 = internalError "tupleTypeCon"
            , coreBuiltin The_Tuple4
            ]
 
+isTupleTypeCon :: Var -> Bool
+isTupleTypeCon v = v `elem` cons
+  where
+    cons = [ coreBuiltin The_Tuple0
+           , coreBuiltin The_Tuple1
+           , coreBuiltin The_Tuple2
+           , coreBuiltin The_Tuple3
+           , coreBuiltin The_Tuple4
+           ]
+
 tupleCon :: Int -> Var
 tupleCon n | n < 0 = internalError "tupleCon"
            | n >= 5 = internalError $ "tupleCon: Unsupported size"

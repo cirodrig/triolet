@@ -182,16 +182,6 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_convertToBare) |])
 {-  , (CoreName module_structures "makeComplex",
      Right [| coreBuiltin (SystemF.The_makeComplex) |]) -}
-  , (CoreName module_list "repr_list",
-     Right [| coreBuiltin SystemF.The_repr_list |])
-  , (CoreName module_list "repr_array0",
-     Right [| coreBuiltin SystemF.The_repr_array0 |])
-  , (CoreName module_list "repr_array1",
-     Right [| coreBuiltin SystemF.The_repr_array1 |])
-  , (CoreName module_list "repr_array2",
-     Right [| coreBuiltin SystemF.The_repr_array2 |])
-  , (CoreName module_list "repr_array3",
-     Right [| coreBuiltin SystemF.The_repr_array3 |])
   --, (CoreName module_list "list_len",
   --   Right [| coreBuiltin SystemF.The_len |])
   , (CoreName module_list "array1_build",
@@ -454,6 +444,16 @@ builtinGlobals =
      Left $ PrimType PointerType)
 
     -- Physical representations of data types
+  , (CoreName module_list "repr_list",
+     Right [| coreBuiltin SystemF.The_repr_list |])
+  , (CoreName module_list "repr_array0",
+     Right [| coreBuiltin SystemF.The_repr_array0 |])
+  , (CoreName module_list "repr_array1",
+     Right [| coreBuiltin SystemF.The_repr_array1 |])
+  , (CoreName module_list "repr_array2",
+     Right [| coreBuiltin SystemF.The_repr_array2 |])
+  , (CoreName module_list "repr_array3",
+     Right [| coreBuiltin SystemF.The_repr_array3 |])
   , (CoreName module_list "repr_barray1",
      Right [| coreBuiltin SystemF.The_repr_barray1 |])
   , (CoreName module_list "repr_barray2",

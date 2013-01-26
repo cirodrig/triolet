@@ -2,58 +2,27 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module Untyped.Syntax where
 
-import Control.Concurrent.MVar
-import Data.Function
+import Control.Monad
+import Data.Maybe
 import Data.Typeable(Typeable)
-import System.IO.Unsafe
+import Debug.Trace
 
 import Common.SourcePos
 import Common.Supply
 import Common.Identifier
 import Common.Label
 import Export
-import qualified SystemF.Syntax as SystemF
+import Untyped.Type
 import Untyped.Data
+import Untyped.Variable
 import Type.Var(Var)
 
 data Ann = Ann SourcePos
 
-data Variable =
-  Variable 
-  { varID :: {-# UNPACK #-} !(Ident Variable)
-  , varName :: !(Maybe Label)
-    -- | If this variable corresponds to a variable in System F, this is the 
-    -- System F variable.  Otherwise, this is Nothing.
-  , varSystemFVariable :: {-# UNPACK #-} !(Maybe Var)
-    -- | System F translation of this variable; assigned by type inference
-  , varTranslation :: {-# UNPACK #-} !(MVar TypeAssignment)
-  }
-  deriving(Typeable)
-
-variableIDSupply :: Supply (Ident Variable)
-{-# NOINLINE variableIDSupply #-}
-variableIDSupply = unsafePerformIO newIdentSupply
-
-getNextVariableID :: IO (Ident Variable)
-getNextVariableID = supplyValue variableIDSupply
-
-newVariable :: Maybe Label -> Maybe Var -> IO Variable
-newVariable lab sf = do
-  id <- getNextVariableID
-  translation <- newEmptyMVar
-  return $ Variable id lab sf translation
-
-predefinedVariable :: Maybe Label -> TypeAssignment -> IO Variable
+predefinedVariable :: Maybe Label -> Maybe Var -> IO Variable
 predefinedVariable lab trans = do
   id <- getNextVariableID
-  translation <- newMVar trans
-  return $ Variable id lab Nothing translation
-
-instance Eq Variable where
-  (==) = (==) `on` varID
-
-instance Ord Variable where
-  compare = compare `on` varID
+  return $ Variable id lab trans
 
 data Pattern =
     WildP
@@ -179,3 +148,33 @@ instance HasSourcePos Function where
 
 instance HasSourcePos FunctionDef where
   getSourcePos (FunctionDef _ _ f) = getSourcePos f
+
+-------------------------------------------------------------------------------
+
+explicitPatternType :: Pattern -> Maybe HMType
+explicitPatternType (WildP _) = Nothing
+
+explicitPatternType (VariableP _ _ t) = t
+
+explicitPatternType (TupleP _ fs) =
+  tupleTy `liftM` mapM explicitPatternType fs
+
+-- | Is the function definition explicitly annotated with a type? 
+explicitlyTyped :: FunctionDef -> Bool
+explicitlyTyped (FunctionDef _ _ f) = isJust $ funQVars f
+
+-- | Get the explicitly annotated type information from a function definition.
+--   Return 'Nothing' if some annotations are missing.
+explicitFunctionType :: FunctionDef -> Maybe (Qualified ([HMType], HMType))
+explicitFunctionType (FunctionDef _ _ f) = do
+  qvars <- funQVars f
+  let cst = trace "FIXME: Must take explicitly annotated constraint from annotation!" []
+  param_types <- mapM explicitPatternType $ funParameters f
+  return_type <- funReturnType f
+  return $ Qualified qvars cst (param_types, return_type)
+
+-- | Get the explicitly annotated type scheme.  Return 'Nothing' if some
+--   annotations are missing.
+explicitPolyType :: FunctionDef -> Maybe TyScheme
+explicitPolyType def =
+  fmap (fmap $ uncurry functionTy) $ explicitFunctionType def

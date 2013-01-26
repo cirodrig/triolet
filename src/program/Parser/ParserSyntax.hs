@@ -16,8 +16,7 @@ import qualified Data.Set as Set
 import qualified Language.Python.Common.AST as Python
 import Common.SourcePos(SourcePos)
 import Export
-import Untyped.Data(ParserVarBinding)
-import Untyped.Builtins
+import Untyped.Builtins2
 
 data AST                        -- | ^ The AST stage of parsing
 

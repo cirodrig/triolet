@@ -1,22 +1,26 @@
 {- | Constraint manipulation is performed in this module.
 -}
 
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts, TypeFamilies, ConstraintKinds, RankNTypes,
+             UndecidableInstances #-}
 module Untyped.Classes
-       (pprPredicate, pprContext,
-        isInstancePredicate, isEqualityPredicate,
-        instantiateClassConstraint,
-        andSuperclassEqualityPredicates,
+       (isInstancePredicate, isEqualityPredicate,
         reduceTypeFunction,
+        
+        Derivation(..),
         toHnf,
         dependentTypeVariables,
+        normalizePredicate,
         reduceContext,
+        solveConstraint,
+        solveConstraintWithContext,
         splitConstraint,
-        defaultConstraint,
-        prove)
+        defaultConstraint)
 where
 
+import Control.Applicative
 import Control.Monad
+import Control.Monad.State
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import Data.List
@@ -28,34 +32,25 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.MonadLogic
+import Common.Progress
 import Common.SourcePos
 import Common.Supply
-import Untyped.Data
-import Untyped.HMType
+import Untyped.Builtins2
+import Untyped.Instantiation
 import Untyped.Kind
-import Untyped.GenSystemF
-import Untyped.Builtins
+import Untyped.Type
+import Untyped.TypeUnif
+import Untyped.TIMonad
+import Untyped.Unif
+import Untyped.Variable
 import qualified SystemF.Syntax as SystemF
 import qualified Builtins.Builtins as SystemF
-import Untyped.Unification
 import Type.Level
 import Type.Var
 import Globals
 
 -- | Flag turns on debugging dumps during context reduction
 debugContextReduction = False
-
-pprList :: [Doc] -> Doc
-pprList xs = brackets $ sep $ punctuate (text ",") xs
-
-pprPredicate :: Predicate -> Ppr Doc
-pprPredicate = uShow
-
-pprContext :: [Predicate] -> Ppr Doc
-pprContext []  = return (parens Text.PrettyPrint.HughesPJ.empty)
-pprContext [p] = pprPredicate p
-pprContext ps  = do docs <- mapM pprPredicate ps
-                    return $ parens $ fsep $ punctuate (text ",") docs
 
 mapAndUnzip3M :: Monad m => (a -> m (b, c, d)) -> [a] -> m ([b], [c], [d])
 mapAndUnzip3M f xs = liftM unzip3 $ mapM f xs
@@ -66,102 +61,165 @@ isInstancePredicate _ = False
 isEqualityPredicate (IsEqual _ _) = True
 isEqualityPredicate _ = False
 
--- | Somewhat of a hack.  Decide whether this is the distinguished type class
--- for object layout information. 
-isPassableClass cls = clsName (clsSignature cls) == "Repr"
+isEqualityProof = isEqualityPredicate . fromProof
 
--- | Instantiate a class signature's constraint to a given type
-instantiateClassConstraint :: ClassSig -> HMType -> IO Constraint
-instantiateClassConstraint sig instance_type =
-  let substitution = substitutionFromList [(clsParam sig, instance_type)]
-  in renameList substitution (clsConstraint sig)
+-------------------------------------------------------------------------------
+-- Context reduction environments
+
+-- | A proof construction environment for constructing proofs of predicates. 
+--   An environment @Derivation m d@ constructs proofs having type @d@
+--   @d@ in monad @m@.
+--
+--   The monad maintains a proof environment that holds proofs that have been
+--   previously produced.  The proof environment contains all proofs
+--   created by 'hypothesis' and 'superclassDerivation', and these can be
+--   looked up by 'lookupDerivation'.  The proof environment may, but does not
+--   have to, contain other proofs.
+class (NormalizeContext HMType m) => Derivation m d where
+  -- | Lift a 'TE' computation into the derivation monad.
+  --   The parameter of type @d@ is ignored and can be 'undefined'.
+  liftTE :: d -> TE a -> m a
+
+  -- | Add a hypothesis to the proof environment.
+  hypothesis :: Predicate -> m d
+
+  -- | Look up a proof of a predicate.  If found, return it.
+  lookupDerivation :: Predicate -> m (Maybe d)
+
+  -- | Derive a class predicate based on an instance declaraction.
+  --   Add the predicate to the environment.
+  instanceDerivation :: Predicate              -- ^ Derived predicate
+                     -> Instance ClassInstance -- ^ Instance satisfying the predicate
+                     -> [HMType]               -- ^ Class type arguments
+                     -> [d]                    -- ^ Class premises
+                     -> [HMType]               -- ^ Instance type arguments
+                     -> [d]                    -- ^ Instance premises
+                     -> m d
+  boxedReprDerivation :: Predicate -> m d
+  equalityDerivation :: Predicate -> m d
+  coerceDerivation :: Predicate -> Predicate -> d -> m d
+  magicDerivation :: Predicate -> m d
+
+  -- | Derive predicates for all superclasses of the given class and add
+  --   them to the environment.
+  superclassDerivation :: Class       -- ^ A class
+                       -> HMType      -- ^ The class's member
+                       -> d           -- ^ Derivation of class membership
+                       -> m [Proof d] -- ^ Get derivations of all superclasses
+
+-- | A context reduction monad.  The monad maintains a context consisting
+--   of a set of reduced predicates.
+newtype Ctx a = Ctx {runCtx :: StateT Constraint TE a}
+
+noDerivation :: Ctx a -> Constraint -> TE (a, Constraint)
+noDerivation (Ctx m) cst = runStateT m cst
+
+execNoDerivation :: Ctx () -> TE Constraint
+execNoDerivation m = do
+  ((), c) <- noDerivation m []
+  return c
+
+evalNoDerivation :: Ctx a -> TE a
+evalNoDerivation m = do
+  (x, _) <- noDerivation m []
+  return x
+
+-- | Insert a predicate into the context.  This should only be done after the
+--   predicate is examined and simplified.
+insertPredicate :: Predicate -> Ctx ()
+insertPredicate p = Ctx $ modify (p:)
+
+instance Functor Ctx where
+  fmap f (Ctx m) = Ctx $ fmap f m
+
+instance Applicative Ctx where
+  pure x = Ctx $ pure x
+  Ctx f <*> Ctx x = Ctx (f <*> x)
+
+instance Monad Ctx where
+  return x = Ctx $ return x
+  Ctx m >>= k = Ctx (m >>= runCtx . k)
+
+instance MonadIO Ctx where
+  liftIO m = Ctx $ liftIO m
+
+instance EnvMonad Ctx where
+  getEnvironment = Ctx $ lift getEnvironment
+  withEnvironment f (Ctx m) =
+    Ctx $ StateT $ \s -> withEnvironment f (runStateT m s)
+
+instance UMonad HMType Ctx where
+  freshUVarID = liftTE () freshUVarID
+
+-- | The 'Ctx' monad is for context reduction.  It does not construct proofs.
+instance Derivation Ctx () where
+  liftTE _ m = Ctx $ lift m
+  hypothesis = insertPredicate
+
+  lookupDerivation prd = Ctx $ StateT $ \ctx -> do
+    eq <- anyM (prd `predicatesEqual`) ctx
+    return $! if eq then (Just (), ctx) else (Nothing, ctx)
+
+  -- Don't insert a predicate into the environment if it's derivable
+  instanceDerivation _ _ _ _ _ _ = return ()
+  boxedReprDerivation _ = return ()
+
+  -- Insert equality predicates into the environment.  They will be
+  -- extracted and simplified later.
+  equalityDerivation = insertPredicate
+
+  coerceDerivation _ _ _ = return ()
+  magicDerivation _ = return ()
+
+  superclassDerivation cls ty _ = do
+    -- Create superclass derivations, consisting of one @()@ value
+    -- for each element of the context
+    InstanceType _ cls_constraint _ <- instantiateClass cls ty
+
+    -- Add superclasses to environment
+    mapM_ insertPredicate cls_constraint
+    return $ asProofs cls_constraint
 
 -------------------------------------------------------------------------------
 -- Type function evalution
 
 -- | Attempt to reduce a type function application.  If the arguments are 
 --   sufficiently known, reduction will yield a new type.
-reduceTypeFunction :: TyFamily  -- ^ Type function to evaluate
+reduceTypeFunction :: NormalizeContext HMType m =>
+                      TyFamily  -- ^ Type function to evaluate
                    -> [HMType]  -- ^ Arguments to the type function
-                   -> IO (Maybe HMType) -- ^ Reduced type (if reducible)
-reduceTypeFunction family [arg] = runMaybeT $ do
-  (result_type, inst_cst) <-
-    msum $ map match_instance $ tfInstances family
-  when (not $ null inst_cst) $
-    internalError "reduceTypeFunction: Constraint handling is not implemented"
-  return result_type
-  where
-    match_instance inst = do
-      let sig = tinsSignature inst
-      (subst, match_cst) <- MaybeT $ match (insType sig) arg
-      cst <- lift $ mapM (rename subst) $ match_cst ++ insConstraint sig
-      result_type <- lift $ rename subst $ tinsType inst
-      return (result_type, cst)
+                   -> m (Maybe HMType) -- ^ Reduced type (if reducible)
+reduceTypeFunction family [arg] = do
+  inst <- findInstance (tfInstances family) arg 
+  case inst of
+    Nothing -> return Nothing
+    Just (InstanceType _ cst (Instance _ (TyFamilyInstance reduced_type)))
+      | not $ null cst ->
+          -- Constraints not implemented here
+          internalError "reduceTypeFunction: Unexpected constraint"
+      | otherwise -> 
+          return $ Just reduced_type
 
 -------------------------------------------------------------------------------
 -- Context reduction
 
--- | Get all superclass predicates of a given class predicate
-superclassPredicates :: Predicate -> IO [Predicate]
-superclassPredicates (IsInst ty cls) = do
-  -- Get the actual class constraint for this type
-  constraint <- instantiateClassConstraint (clsSignature cls) ty
+-- | Add all superclass predicates of a given class predicate to the
+--   environment
+superclassPredicates :: Derivation m d => Proof d -> m ()
+superclassPredicates (IsInst tycon ty, derivation) = do
+  -- Derive superclasses
+  Just cls <- getTyConClass tycon
+  superclasses <- superclassDerivation cls ty derivation
 
-  -- Find all superclasses
-  liftM concat $ mapM andSuperclassPredicates constraint
+  -- Recursively expand superclasses
+  mapM_ superclassPredicates superclasses
+
+superclassPredicates (IsEqual tycon ty, _) =
+  return ()
 
 superclassPredicates _ = internalError "Not an instance predicate"
 
--- | Get a class and its superclass predicates
-andSuperclassPredicates :: Predicate -> IO [Predicate]
-andSuperclassPredicates p@(IsInst {}) = liftM (p:) $ superclassPredicates p
-andSuperclassPredicates p@(IsEqual {}) = return [p]
-
--- | Get a class and its superclass equality predicates.
---   Superclass instance predicates are searched, but not included in the
---   result.
---
---   This function is used when instantiating type signatures in order to
---   find the equality constraints implied by the type signature's class
---   context.  Equality constraints implied by /instance/ contexts, on the
---   other hand, are only discovered while solving constraints.
-andSuperclassEqualityPredicates :: Predicate -> IO [Predicate]
-andSuperclassEqualityPredicates p@(IsInst {}) = do
-  cst <- superclassPredicates p
-  return $ p : filter isEqualityPredicate cst
-
-andSuperclassEqualityPredicates p@(IsEqual {}) = return [p]
-
--- | Decide whether the constraint entails the predicate, which must be a class
---   instance predicate.
---   If the constraint entails the predicate, then eliminate the predicate and
---   return new, derived predicates.
---   Otherwise, return Nothing.
-entailsInstancePredicate :: Constraint -> Predicate -> IO (Maybe Constraint)
-ps `entailsInstancePredicate` p@(IsInst _ _) = do
-  -- True if the predicate is in the context, including superclasses
-  let inst_ps = filter isInstancePredicate ps
-  b <- anyM p_implied_by inst_ps
-  return $! if b then Just [] else Nothing
-  where
-    p_implied_by p' = do
-      context <- andSuperclassPredicates p'
-      anyM (p `uEqual`) context
-
-_ `entailsInstancePredicate` _ =
-  internalError "entailsInstancePredicate: Not an instance predicate"
-
--- | Decide whether the constraint entails the predicate, which must be a class
---   instance predicate.
---   If the constraint entails the predicate, then eliminate the predicate and
---   return new, derived predicates.
---   Otherwise, return Nothing.
-{-entailsEqualityPredicate :: Constraint -> Predicate -> IO (Maybe Constraint)
-ps `entailsEqualityPredicate` p@(IsEqual s1 t1) = do
-  -- Check both the predicate and its mirrored equivalent
-  b <- anyM (p `uEqual`) ps >||> anyM (IsEqual t1 s1 `uEqual`) ps
-  return $! if b then Just [] else Nothing-}
-
+{-
 -- | Determine whether a class instance predicate is in H98-style
 --   head-normal form.
 --
@@ -177,84 +235,229 @@ ps `entailsEqualityPredicate` p@(IsEqual s1 t1) = do
 -- Pyon allows non-H98 instances, so if a predicate is not in HNF,
 -- an attempt will be made to reduce it, but failure to reduce does not
 -- necessarily indicate an error.
-isH98Hnf :: Predicate -> IO Bool
+isH98Hnf :: Predicate -> TE Bool
 isH98Hnf predicate = case predicate 
-                     of IsInst t _    -> checkTypeHead t
+                     of IsInst _ t    -> checkTypeHead t
                         IsEqual t1 t2 -> return False
   where
-    checkTypeHead t = do
-      t' <- canonicalizeHead t
-      case t' of
-        ConTy c     -> return $ isTyVar c
-        FunTy _     -> return False
-        TupleTy _   -> return False
-        AppTy t'' _ -> checkTypeHead t''
-        TFunAppTy _ [t''] -> checkTypeHead t''
+    checkTypeHead t = normalize t >>= check'
+    check' (VarTy _)         = return True
+    check' (ConTy c)         = return $ isTyVar c
+    check' (FunTy _)         = return False
+    check' (TupleTy _)       = return False
+    check' (AppTy t _)       = checkTypeHead t
+    check' (TFunAppTy _ [t]) = checkTypeHead t
 
 isH98Hnf _ = internalError "isH98Hnf: Not an instance constraint"
+-}
 
--- | Convert a predicate to a conjunction of logically equivalent predicates
--- in head-normal form.  The list may contain duplicates.
--- A description of the conversion steps taken is also returned.
+-- | Attempt to derive a predicate.  Return a derivation and a constraint 
+--   that is logically equivalent to the predicate.
 --
--- If the predicate cannot be converted to head-normal form, an error is
--- thrown.  It represents a type class error in the input program.
-toHnf :: SourcePos -> Predicate -> IO (Derivation, Constraint)
+--   If the predicate can be simplified, its derivation is returned along with
+--   the premises that couldn't be derived.  The returned premises are in HNF.
+toHnf :: Derivation m d =>
+         SourcePos -> Predicate -> m (Maybe (d, Constraint))
 toHnf pos pred = do
-  -- If already in HNF, derivation is trivial
-  is_hnf <- isH98Hnf pred
-  if is_hnf then return (IdDerivation pred, [pred]) else
-    case pred
-    of IsInst {} ->
-         -- Perform reduction based on the set of known class instances
-         instanceReduction pos pred
-       IsEqual {} -> do
-         -- Perform reduction based on the set of known family instances
-         ([], cst) <- equalitySimplification pos [] [pred]
-         return (EqualityDerivation pred, cst)
+  -- If predicate is already in environment, return that
+  m_deriv <- lookupDerivation pred
+  case m_deriv of
+    Just d  -> return $ Just (d, [])
+    Nothing -> derive pos pred
 
--- | Convert a constraint to HNF and ignore how it was derived
-toHnfConstraint :: Predicate -> IO Constraint
-toHnfConstraint p = liftM snd $ toHnf noSourcePos p
+-- | No preexisting derivation found; attempt to derive one
+derive :: forall m d. Derivation m d =>
+          SourcePos -> Predicate -> m (Maybe (d, Constraint))
+derive pos pred@(IsInst cls_tycon t) = uncurryApp t >>= examine
+  where
+    examine (op, args) =
+      case op
+      of -- If op is a variable or type function, this predicate is in HNF
+         VarTy {}            -> is_hnf
+         ConTy c | isTyVar c -> is_hnf
+         TFunAppTy {}        -> is_hnf
+
+         -- If op is a constructor application, this predicate may be
+         -- reducible.  Try to match it against known instances.
+         ConTy {}            -> instance_reduction
+         FunTy {}            -> instance_reduction
+         TupleTy {}          -> instance_reduction
+
+         -- There are no class instances for 'any'
+         AnyTy {}            -> unsatisfiable pos pred
+
+         -- Cannot occur: AppTy {}
+      where
+        is_hnf = return Nothing
+        instance_reduction = instanceReduction pos cls_tycon t op args
+
+derive pos pred@(IsEqual _ _) = do
+  -- Attempt to simplify the predicate immediately
+  (change, cst) <- liftTE (undefined :: d) $
+                   cheapEqualitySimplification pos pred
+  if change
+    then do
+      -- Continue processing the simplified constraint
+      (_ :: [d], cst') <- toHnfs pos cst      
+      d <- equalityDerivation pred
+      return $ Just (d, cst')
+    else do
+      -- Cannot simplify this constraint further
+      return Nothing
+
+-- | Attempt to reduce an instance of a predicate whose head is a constructor.
+--   Ground terms that can't be reduced are reported as errors.
+--
+--   The type is passed, as well as its uncurried form.
+--
+--   Terms with type variables are not reported as errors, since they may
+--   become satisfiable later.
+instanceReduction :: Derivation m d =>
+                     SourcePos -> TyCon
+                  -> HMType     -- ^ The type to examine
+                  -> HMType     -- ^ The type's uncurried operator
+                  -> [HMType]   -- ^ The type's uncurried arguments
+                  -> m (Maybe (d, Constraint))
+instanceReduction pos cls_tycon ty ty_op ty_args
+  -- Function 'Repr' instances are handled specially
+  | cls_tycon == builtinTyCon TheTC_Repr && is_FunTy ty_op = do
+      d <- boxedReprDerivation pred
+      return $ Just (d, [])
+  | otherwise = do
+      -- Search all instances for a match
+      Just cls <- getTyConClass cls_tycon
+      m_instance <- findInstance (clsInstances cls) ty
+      case m_instance of
+        Just inst_inst ->
+          instance_derivation cls inst_inst ty
+
+        Nothing ->
+          ifM (isGround ty)
+            (unsatisfiable pos pred) -- No instance found
+            (return Nothing)         -- Cannot resolve predicate
+  where
+    pred = IsInst cls_tycon ty
+
+    is_FunTy (FunTy {}) = True
+    is_FunTy _ = False
+    
+    -- Found a matching instance.  Create a derivation for it.
+    instance_derivation cls inst_inst@(InstanceType _ inst_cst _) ty = do
+      -- Get the class constraint also
+      cls_inst <- instantiateClassType cls ty
+
+      -- Reduce all superclasses to HNF
+      let InstanceType cls_ty_args cls_cst _ = cls_inst
+      (cls_superclasses, cls_cst') <- toHnfs pos cls_cst
+
+      let InstanceType inst_ty_args inst_cst inst = inst_inst
+      (inst_superclasses, inst_cst') <- toHnfs pos inst_cst
+
+      -- Create an instance derivation
+      d <- instanceDerivation pred inst
+           cls_ty_args cls_superclasses inst_ty_args inst_superclasses
+
+      return $ Just (d, cls_cst' ++ inst_cst')
+
+-- | Apply cheap, but incomplete, simplification rules to an equality predicate
+cheapEqualitySimplification pos pred = do
+  -- Simplify this predicate
+  (progress, ([], cst')) <- runProgressT $ equalitySimplification pos [] [pred]
+  return (progress, cst')
+
+-- | Report that a predicate is unsatisfiable
+unsatisfiable :: Derivation m d =>
+                 SourcePos -> Predicate -> m (Maybe (d, Constraint))
+unsatisfiable pos pred = do
+  pred_doc <- runPpr $ pprPredicate pred
+  error $ show (text "No instance for" <+> pred_doc)
+
+-- | Convert a predicate to HNF and return its derivation, even if it is
+--   already in HNF.
+toHnf' :: Derivation m d => SourcePos -> Predicate -> m (d, Constraint)
+toHnf' pos pred = do
+  m_reduced <- toHnf pos pred
+  case m_reduced of
+    Nothing -> do
+      hyp <- hypothesis pred
+      doc <- runPpr (pprPredicate pred)
+      liftIO $ print $ text "Inserted" <+> doc
+      return (hyp, [pred])
+    Just x -> return x
+
+-- | Reduce a list of predicates to HNF
+toHnfs :: Derivation m d => SourcePos -> Constraint -> m ([d], Constraint)
+toHnfs pos cst = do
+  hnfs <- mapM (toHnf' pos) cst
+  return (map fst hnfs, concatMap snd hnfs)
+
 
 -------------------------------------------------------------------------------
--- Reduction rules for predicates
+-- Entailment
+{-
+-- | Decide whether the constraint entails the predicate.
+entailsPredicate :: Constraint -> Predicate -> TE Bool
 
--- | Context reduction for an IsInst predicate
-instanceReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
-instanceReduction pos pred = do
-    ip <- instancePredicates pred
-    case ip of
-      NotReduced -> do {-
-        -- Can't derive a class dictionary for this type
-        prdDoc <- runPpr $ uShow pred
-        let msg = text (show pos) <> text ":" <+>
-                  text "No instance for" <+> prdDoc
-        fail (show msg) -}
-        return (IdDerivation pred, [pred])
+-- Check if the instance predicate is in the constraint,
+-- including superclasses of predicates in the constraint
+entailsPredicate cst prd@(IsInst {}) =
+  entailsInstancePredicate cst prd
 
-      InstanceReduced cls_cst inst inst_cst -> do
-        -- Reduce all superclasses to HNF
-        cls_hnf <- mapM (toHnf pos) cls_cst
-        let cls_superclasses = map fst cls_hnf
-            cls_hnf_cst = concatMap snd cls_hnf
-        
-        inst_hnf <- mapM (toHnf pos) inst_cst
-        let inst_superclasses = map fst inst_hnf
-            inst_hnf_cst = concatMap snd inst_hnf
-        
-        -- Return a new derivation
-        let derivation = InstanceDerivation
-                         { conclusion = pred 
-                         , derivedInstance = inst
-                         , classPremises = cls_superclasses
-                         , instancePremises = inst_superclasses
-                         }
-        return (derivation, cls_hnf_cst ++ inst_hnf_cst)
+-- Check if the equality predicate can be eliminated using the other
+-- equality predicates in the constraint
+entailsPredicate cst prd@(IsEqual {}) = do
+  let (equalities, others) = partition isEqualityPredicate cst
+  entailsEqualityPredicate equalities prd
+-}
 
-      FunctionPassableReduced ty ->
-        let derivation = FunPassConvDerivation { conclusion = pred }
-        in return (derivation, [])
+{-
+-- | Decide whether the constraint entails the predicate, which must be a class
+--   instance predicate.
+--   If the constraint entails the predicate, then eliminate the predicate and
+--   return new, derived predicates.
+--   Otherwise, return Nothing.
+entailsInstancePredicate :: Derivation m d =>
+                            Constraint -> Predicate -> TE Bool
+context `entailsInstancePredicate` p@(IsInst _ _) = do
+  -- True if the predicate is in the context, including superclasses
+  let inst_ps = filter isInstancePredicate context
+  anyM p_implied_by inst_ps
+  where
+    p_implied_by p' = do
+      context <- andSuperclassPredicates noDerivation (asProof p')
+      anyM (p `predicatesEqual`) $ fromProofs context
+
+_ `entailsInstancePredicate` _ =
+  internalError "entailsInstancePredicate: Not an instance predicate"
+-}
+
+{-
+-- | Decide whether the constraint entails the predicate, which must be a class
+--   instance predicate.
+--   If the constraint entails the predicate, then eliminate the predicate and
+--   return new, derived predicates.
+--   Otherwise, return Nothing.
+entailsEqualityPredicate :: Constraint -> Predicate -> TE Bool
+context `entailsEqualityPredicate` prd = do
+  -- Simplify the predicate
+  (change1, wanted1) <-
+    runProgressT $
+    applyEqualityReductionRule equalityReductionRules noSourcePos [prd]
+
+  -- Test entailment on each simplified predicate.
+  -- Entailment check succeeds if the context entails all simplified
+  -- predicates.  In particular, it succeeds if wanted1 is empty.
+  flip allM wanted1 $ \p -> do
+    -- Substitute context into wanted predicates
+    (change2, wanted2) <-
+      runProgressT $ substituteWantedPredicate context p
+
+    -- If anything changed, then retry
+    -- Otherwise, entailment check failed
+    if change1 || change2
+      then context `entailsEqualityPredicate` wanted2
+      else return False
+-}
 
 -------------------------------------------------------------------------------
 -- Equality constraint solving
@@ -264,44 +467,41 @@ instanceReduction pos pred = do
 --   During simplification, perform substitution on a given set of class
 --   constraints.  The class constraints are not otherwise modified.
 equalitySimplification :: SourcePos -> Constraint -> Constraint
-                       -> IO (Constraint, Constraint)
+                       -> ProgressT TE (Constraint, Constraint)
 equalitySimplification pos cls_csts csts =
   -- Simplify constraints repeatedly until no further simplification is
   -- possible
-  repeat_until_convergence cls_csts csts
+  fixedpoint simplification_step (cls_csts, csts)
   where
-    repeat_until_convergence cls_csts csts = do
-      (csts', progress1) <-
-        applyEqualityReductionRule equalityReductionRules pos csts
-      (progress2, cls_csts', csts'') <- substituteConstraint cls_csts csts'
-      if progress1 || progress2
-        then repeat_until_convergence cls_csts' csts''
-        else return (cls_csts', csts'')
+    simplification_step (cls_csts, csts) = do
+      csts' <- applyEqualityReductionRule equalityReductionRules pos csts
+      (cls_csts', csts'') <- substituteConstraint cls_csts csts'
+      return (cls_csts', csts'')
 
 -- | Apply an equality reduction rule to all predicates in a constraint
 applyEqualityReductionRule :: EqualityReductionRule
                            -> SourcePos
                            -> Constraint
-                           -> IO (Constraint, Bool)
-applyEqualityReductionRule rule pos cst = go False id cst
+                           -> ProgressT TE Constraint
+applyEqualityReductionRule rule pos cst = go id cst
   where
-    go progress new_cst (prd@(t1 `IsEqual` t2) : cst) = do
-      prd_result <- runEqualityReductionRule rule pos t1 t2
+    go new_cst (prd@(t1 `IsEqual` t2) : cst) = do
+      prd_result <- lift $ runEqualityReductionRule rule pos t1 t2
       case prd_result of
         -- No change: go to next constraint
-        Nothing        -> go progress (new_cst . (prd:)) cst
+        Nothing        -> go (new_cst . (prd:)) cst
 
         -- Reduced: continue processing the reduced constraints
-        Just (_, cst') -> go True new_cst (cst' ++ cst)
+        Just (_, cst') -> step >> go new_cst (cst' ++ cst)
 
-    go progress new_cst [] = return (new_cst [], progress)
+    go new_cst [] = return (new_cst [])
 
 newtype EqualityReductionRule =
   EqualityReductionRule 
   {runEqualityReductionRule :: SourcePos
                             -> HMType
                             -> HMType
-                            -> IO (Maybe (Derivation, Constraint))}
+                            -> TE (Maybe ((), Constraint))}
 
 equalityReductionRules =
   anyRule [decompRule, trivRule, unifyRule, funSwapRule]
@@ -321,7 +521,7 @@ trivRule :: EqualityReductionRule
 trivRule = EqualityReductionRule $ \pos t1 t2 -> do
   b <- uEqual t1 t2
   return $! if b
-            then Just (EqualityDerivation (IsEqual t1 t2), [])
+            then Just ((), [])
             else Nothing
 
 -- | Reorient equations of the form @t ~ F t u v@, that is,
@@ -331,9 +531,9 @@ trivRule = EqualityReductionRule $ \pos t1 t2 -> do
 funSwapRule :: EqualityReductionRule
 funSwapRule = EqualityReductionRule $ \pos t1 t2 ->
   let swap =
-        return $ Just (EqualityDerivation (IsEqual t1 t2), [t2 `IsEqual` t1])
+        return $ Just ((), [t2 `IsEqual` t1])
   in do
-    (t2_head, t2_args) <- inspectTypeApplication t2
+    (t2_head, t2_args) <- uncurryApp t2
     case t2_head of
       ConTy c | isTyFun c ->
         -- Does t1 appear anywhere under t2?
@@ -349,22 +549,25 @@ decompRule = EqualityReductionRule $ \pos t1 t2 ->
       -- Decompose into fquality of arguments: @a ~ x, b ~ y@.
       decompose t1_args t2_args =
         let new_constraints = zipWith IsEqual t1_args t2_args
-        in return (Just (EqualityDerivation (IsEqual t1 t2), new_constraints))
+        in return (Just ((), new_constraints))
 
       -- Swap the LHS and RHS of the equality predicate so that it's usable as
       -- a left-to-right rewrite rule.
       swap =
-        return (Just (EqualityDerivation (IsEqual t1 t2), [t2 `IsEqual` t1]))
+        return (Just ((), [t2 `IsEqual` t1]))
 
       -- The predicate is unsolvable because it relates two different injective
       -- data constructors
       contradiction = do
-        (t1_doc, t2_doc) <- runPpr $ liftM2 (,) (uShow t1) (uShow t2)
-        print (t1_doc <+> text "=" <+> t2_doc)
+        doc <- runPpr $ do
+          t1_doc <- pprType t1
+          t2_doc <- pprType t2
+          return $ t1_doc <+> text "=" <+> t2_doc
+        liftIO $ print doc
         fail "Unsolvable type equality constraint detected"
   in do
-    (t1_head, t1_args) <- inspectTypeApplication t1
-    (t2_head, t2_args) <- inspectTypeApplication t2
+    (t1_head, t1_args) <- uncurryApp t1
+    (t2_head, t2_args) <- uncurryApp t2
     case (t1_head, t2_head) of
       _ | equalInjConstructors t1_head t2_head ->
         decompose t1_args t2_args
@@ -381,14 +584,14 @@ decompRule = EqualityReductionRule $ \pos t1 t2 ->
 
 unifyRule :: EqualityReductionRule
 unifyRule = EqualityReductionRule $ \pos t1 t2 ->
-  let success = return $ Just (EqualityDerivation (IsEqual t1 t2), [])
+  let success = return $ Just ((), [])
 
       -- Unify a variable with a type only if the variable does not occur in
       -- the type.  It's not an error for a variable to occur under a type
       -- function.
       unify_with_type v ty =
         -- If the variable does not occur in the type, then unify
-        ifM (liftM not $ occursCheck v ty) (unifyTyVar v ty >> success) $
+        ifM (liftM not $ occursCheck v ty) (unifyUVar v ty >> success) $
 
         -- If the variable occurs under injective type constructors, then error
         ifM (occursInjectively v ty)
@@ -397,69 +600,66 @@ unifyRule = EqualityReductionRule $ \pos t1 t2 ->
         return Nothing
 
   in do
-    t1_c <- canonicalizeHead t1
-    t2_c <- canonicalizeHead t2
+    t1_c <- normalize t1
+    t2_c <- normalize t2
     case (t1_c, t2_c) of
-      (ConTy c1, ConTy c2) | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do
-        unifyTyVars c1 c2
-        success
-
-      (ConTy c1, _) | isFlexibleTyVar c1 -> unify_with_type c1 t2_c
-      (_, ConTy c2) | isFlexibleTyVar c2 -> unify_with_type c2 t1_c
+      (VarTy v1, VarTy v2) -> unifyUVars v1 v2 >> success
+      (VarTy v1, _) -> unify_with_type v1 t2_c
+      (_, VarTy v2) -> unify_with_type v2 t1_c
       _ -> return Nothing
-
--- | Return 'True' if both arguments are equal injective constructors.
---   The arguments should be canonicalized.
---   Only injective constructors return 'True'.  Type variables, functions,
---   and applications always return 'False'.
-equalInjConstructors (ConTy c1) (ConTy c2) =
-  isDataCon c1 && isDataCon c2 && c1 == c2
-
-equalInjConstructors (TupleTy n1) (TupleTy n2) = n1 == n2
-equalInjConstructors (FunTy n1) (FunTy n2) = n1 == n2
-equalInjConstructors (AnyTy k1) (AnyTy k2) = True
-equalInjConstructors _ _ = False
-
--- | Return 'True' if the argument is an injective constructor and
---   not an application.
-isInjConstructor (ConTy c) = isDataCon c
-isInjConstructor (TupleTy _) = True
-isInjConstructor (FunTy _) = True
-isInjConstructor (AnyTy _) = True
 
 -- | Perform substitution in the entire equality constraint.
 --   Return True if any substitution occurred in the equality constraints.
 --
 --   Also substitute into the given non-equality constraints.
 substituteConstraint :: Constraint -> Constraint
-                     -> IO (Bool, Constraint, Constraint)
-substituteConstraint cls_csts [] = return (False, cls_csts, [])
-
-substituteConstraint cls_csts (p:cst) = go False cls_csts [] p cst
+                     -> ProgressT TE (Constraint, Constraint)
+substituteConstraint cls_csts cst = go cls_csts [] cst
   where
     -- Process one predicate at a time
-    go changed cls_csts visited prd unvisited = do
-      (cls_csts', result) <-
+    go cls_csts visited (prd : unvisited) = do
+      (cls_csts', visisted', unvisited') <-
         substituteEqualityCoercion prd cls_csts visited unvisited
-      let (changed', visited', unvisited') =
-            case result
-            of Nothing     -> (changed, visited, unvisited)
-               Just (v, u) -> (True, v, u)
-      case unvisited' of
-        []         -> return (changed', cls_csts', prd : visited')
-        prd' : cst -> go changed' cls_csts' (prd : visited') prd' cst
+
+      go cls_csts' (prd : visisted') unvisited'
+        
+    go cls_csts visited [] = return (cls_csts, visited)
+
+-- | Substitute the given constraint into the wanted predicate.
+--   Return True if any substitution occurred.
+substituteWantedPredicate :: Constraint -> Predicate
+                          -> ProgressT TE Predicate
+substituteWantedPredicate given wanted =
+  fixedpoint (substitute_predicate_exhaustively given) wanted
+  where
+
+{-    -- Exhaustively substitute each given predicate into each wanted predicate
+    substitute_exhaustively ps (w:ws) = do
+      (w_change, w') <- substitute_predicate_exhaustively ps w
+      (ws_change, ws') <- substitute_exhaustively ps ws
+      return (w_change || ws_change, w' ++ ws')
+
+    substitute_exhaustively ps [] =
+      return (False, [])-}
+
+    -- Exhaustively substitute each given predicate into one wanted predicate
+    substitute_predicate_exhaustively (p:ps) (IsEqual lhs rhs) = do
+      w' <- substitutePredicateExhaustively lhs rhs p
+      substitute_predicate_exhaustively ps w'
+  
+    substitute_predicate_exhaustively [] p = return p
 
 -- | Return 'True' iff this predicate should be used in a substitution
-shouldSubstituteCoercion :: Predicate -> IO Bool
+shouldSubstituteCoercion :: Predicate -> TE Bool
 shouldSubstituteCoercion (IsEqual lhs rhs) = do
-  -- Require that LHS is a type function application containing a type variable
-  lhs_ok <- isTFAppOfFlexibleVar lhs
-  if lhs_ok
-    then do
-    -- Require that LHS is not a subexpression of RHS
-    rhs_contains_lhs <- subexpressionCheck lhs rhs
-    return $ rhs_contains_lhs == False
-    else return False
+  -- Require that head of LHS is not injective
+  lhs_injective <- headIsInjective lhs
+  if lhs_injective
+    then return False
+    else do
+      -- Require that LHS is not a subexpression of RHS
+      rhs_contains_lhs <- subexpressionCheck lhs rhs
+      return $ rhs_contains_lhs == False
   
 shouldSubstituteCoercion _ = return False
 
@@ -468,216 +668,160 @@ shouldSubstituteCoercion _ = return False
 --   in the context.
 --
 --   If any substitutions were made, then return the substituted constraints.
-substituteEqualityCoercion :: Predicate
-                           -> Constraint
-                           -> Constraint
-                           -> Constraint
-                           -> IO (Constraint, Maybe (Constraint, Constraint))
+substituteEqualityCoercion :: Predicate  -- ^ Equality predicate to apply
+                           -> Constraint -- ^ Class constraints
+                           -> Constraint -- ^ Visited constraints
+                           -> Constraint -- ^ Unvisited constraints
+                           -> ProgressT TE (Constraint, Constraint, Constraint)
+                           -- ^ Compute new class, visited, unvisited constraints
 substituteEqualityCoercion predicate@(IsEqual lhs rhs) cls_csts cst_l cst_r =
-
   -- Test whether the predicate should be applied as a rewrite rule
-  ifM (liftM not $ shouldSubstituteCoercion predicate) skip $ do
-
-    -- Apply the substitution to all other predicates
-    (_, cls_csts') <- substitute_exhaustively_list cls_csts
-    (change1, cst_l') <- substitute_exhaustively_list cst_l
-    (change2, cst_r') <- substitute_exhaustively_list cst_r
-    return $! if change1 || change2
-              then (cls_csts', Just (cst_l', cst_r'))
-              else (cls_csts', Nothing)
-
+  ifM (lift $ shouldSubstituteCoercion predicate) apply skip
   where
-    skip = return (cls_csts, Nothing)
+    skip = return (cls_csts, cst_l, cst_r)
 
-    substitute_exhaustively_list (p:ps) = do
-      (p_change, p') <- substitutePredicateExhaustively lhs rhs p
-      (ps_change, ps') <- substitute_exhaustively_list ps
-      return (p_change || ps_change, p' : ps')
-    
-    substitute_exhaustively_list [] = return (False, [])
+    apply = do
+      -- Apply the substitution to all other predicates.
+      -- Progress has been made if substitutions were made in
+      -- any equality constraints.
+      cls_csts' <- ignoreProgress $ substitute_exhaustively_list cls_csts
+      cst_l' <- substitute_exhaustively_list cst_l
+      cst_r' <- substitute_exhaustively_list cst_r
+      return (cls_csts', cst_l', cst_r')
+
+    substitute_exhaustively_list ps =
+      mapM (substitutePredicateExhaustively lhs rhs) ps
 
 -- Exhaustively perform substitution in a predicate.
 -- Return 'True' if any substitutions have been made.
 substitutePredicateExhaustively :: HMType
                                 -> HMType
                                 -> Predicate
-                                -> IO (Bool, Predicate)
-substitutePredicateExhaustively old new prd = go False prd
+                                -> ProgressT TE Predicate
+substitutePredicateExhaustively old new prd = fixedpoint go prd
   where
-    -- Use 'change_acc' to keep track of whether anything has changed
-    go change_acc prd@(IsEqual t1 t2) = do
-      (change1, t1') <- substituteType old new t1
-      (change2, t2') <- substituteType old new t2
+    go (IsEqual t1 t2) = do
+      t1' <- liftStep $ substituteType old new t1
+      t2' <- liftStep $ substituteType old new t2
+      return (IsEqual t1' t2')
 
-      -- If any substitutions were made this time, retry to find additional
-      -- substitution opportunities
-      if change1 || change2
-        then go True (IsEqual t1' t2')
-        else return (change_acc, prd)
-
-    go change_acc prd@(IsInst t cls) = do
-      (change, t') <- substituteType old new t
-
-      -- If any substitutions were made this time, retry to find additional
-      -- substitution opportunities
-      if change
-        then go True (IsInst t' cls)
-        else return (change_acc, prd)
+    go (IsInst cls t) = do
+      t' <- liftStep $ substituteType old new t
+      return (IsInst cls t')
 
 -- | Apply all the substitutions in the given context to a predicate
-applySubstitutions :: Constraint -> Predicate -> IO (Bool, Predicate)
-applySubstitutions ctx prd = go False ctx prd
+applySubstitutions :: Constraint -> Predicate -> ProgressT TE Predicate
+applySubstitutions ctx prd = go ctx prd
   where
-    go change (p:ctx) prd =
-      ifM (liftM not $ shouldSubstituteCoercion p) (go change ctx prd) $ do
-        let IsEqual lhs rhs = p
-        (change2, prd') <- substitutePredicateExhaustively lhs rhs prd
-        go (change || change2) ctx prd'
+    go (p:ctx) prd = ifM (lift $ shouldSubstituteCoercion p) apply skip
+      where
+        IsEqual lhs rhs = p
 
-    go change [] prd = return (change, prd)
+        apply = go ctx =<< substitutePredicateExhaustively lhs rhs prd
+        skip = go ctx prd
+      
+    go [] prd = return prd
+
+-- | Normalize the predicate with respect to the context.
+--   All the substitutions in the context are applied to the predicate.
+--   Return 'True' if the predicate changed.
+normalizePredicate :: Constraint -> Predicate -> TE (Bool, Predicate)
+normalizePredicate c p = runProgressT $ applySubstitutions c p
 
 -------------------------------------------------------------------------------
 -- Context reduction
 
 -- | Perform context reduction.
 --
--- A set of constraints is reduced to a constraint set that is in
--- head-normal form with no redundant constraints.
-reduceContext :: Constraint -> IO Constraint
-reduceContext csts = do 
+-- Given a set of constraints, context reduction creates an equivalent but  
+-- simplified set of constraints.  It's possible to derive the given 
+-- constraints from the simplified ones. 
+-- The simplified constraints are in head-normal form with no
+-- redundant constraints.
+reduceContext :: Constraint -> TE Constraint
+reduceContext wanted_cst = do
   when debugContextReduction $ do
-    old_context <- runPpr (pprContext csts)
-    print $ text "Start context reduction:" <+> old_context
+    old_context <- runPpr (pprConstraint wanted_cst)
+    liftIO $ print $ text "Start context reduction:" <+> old_context
 
   -- Add superclass equality predicates to the constraint before solving
-  superclass_csts <- mapM andSuperclassEqualityPredicates csts
-  let expanded_csts = concat superclass_csts
+  all_superclasses <-
+    execNoDerivation $ mapM_ superclassPredicates $ asProofs wanted_cst
+  let superclass_equalities = filter isEqualityPredicate all_superclasses
 
-  let (equalities, others) = partition isEqualityPredicate expanded_csts
-  csts' <- fixed_point_reduce equalities others
+  c1 <- runPpr (pprConstraint superclass_equalities)
+  liftIO $ print $ text "Superclasses:" <+> c1
+
+  -- Reduce until a fixed point is reached
+  cst' <- fixed_point_reduce superclass_equalities wanted_cst
 
   when debugContextReduction $ do
-    old_context <- runPpr (pprContext expanded_csts)
-    new_context <- runPpr (pprContext csts')
-    print $ hang (text "End context reduction:" <+> old_context) 4 new_context
+    old_context <- runPpr (pprConstraint wanted_cst)
+    new_context <- runPpr (pprConstraint cst')
+    liftIO $ print $ hang (text "End context reduction:" <+> old_context) 4 new_context
 
-  return csts'
+  return cst'
   where
-    fixed_point_reduce equalities others = do
-      (others', equalities') <-
-        equalitySimplification noSourcePos others equalities
-      others'' <- foldM addToContext [] others'
+    fixed_point_reduce :: Constraint -> Constraint -> TE Constraint
+    fixed_point_reduce given_eq_cst cst = do
+      -- Partition 'cst' into equality and class proofs
+      let (eq_cst, cls_cst) = 
+            let (e, c) = partition isEqualityPredicate cst
+            in (e ++ given_eq_cst, c)
 
-      -- If class reduction introduced new equality predicates, then repeat
-      if any isEqualityPredicate others''
-        then let (new_equalities, others''') =
-                   partition isEqualityPredicate others''
-             in fixed_point_reduce (new_equalities ++ equalities') others'''
-        else return (equalities' ++ others'')
+      -- Do equality constraint simplification
+      -- Currently we don't derive proofs here; we just fabricate the
+      -- necessary proof objects
+      c2 <- runPpr (pprConstraint cls_cst)
+      liftIO $ print $ text "Expanded:" <+> c2
+      (cls_cst', eq_cst') <-
+        evalProgressT $ equalitySimplification noSourcePos cls_cst eq_cst
 
-  -- Simplify equality constraints and other constraints using separate
-  -- procedures
+      c3 <- runPpr (pprConstraint cls_cst')
+      liftIO $ print $ text "Expanded:" <+> c3
+      -- Eliminate redundant proofs
+      cls_cst'' <- evalNoDerivation $ addConstraintToContext cls_cst'
+      c4 <- runPpr (pprConstraint cls_cst'')
+      liftIO $ print $ text "Simplified:" <+> c4
 
--- | Add the extra information from a predicate to the context.  The 
--- context must be in head-normal form.
-addToContext :: Constraint -> Predicate -> IO Constraint
-addToContext ctx pred = foldM addToContextHNF ctx =<< toHnfConstraint pred
+      -- If any new equality predicates were introduced by class reduction,
+      -- repeat the proces
+      if any isEqualityPredicate cls_cst''
+        then fixed_point_reduce eq_cst' cls_cst''
+        else return (eq_cst' ++ cls_cst'')
 
--- | Add the extra information from a predicate to the context.  The 
--- context and predicate must be in head-normal form.
-addToContextHNF :: Constraint -> Predicate -> IO Constraint
-addToContextHNF ctx pred = do
-  -- If it's a class predicate,
-  -- then reduce it WRT the rest of the class context
-  new_cst <- case pred
-             of IsInst {} -> entailsInstancePredicate ctx pred
-                IsEqual {} -> return Nothing -- entailsEqualityPredicate ctx pred
-  case new_cst of
-    Nothing -> do
-      -- Not a redundant predicate
-      debug_show_constraint [pred]
-      return (pred : ctx)
-    Just new_ctx -> do
-      -- Predicate is redundant wrt context
-      debug_show_constraint new_ctx
-      return (new_ctx ++ ctx)
-  where
-    -- Print how context was changed 
-    debug_show_constraint new_ctx
-      | debugContextReduction = do
-          (pred_doc, new_ctx_doc) <-
-            runPpr $ liftM2 (,) (uShow pred) (pprContext new_ctx)
-          print $ hang (text "addToContext" <+> pred_doc) 4 new_ctx_doc
-      | otherwise = return ()
+-- | Solve a constraint with respect to the context.
+--   Return any leftover, unsolved constraints.
+solveConstraint :: Derivation m d =>
+                   SourcePos -> Constraint -> m ([d], Constraint)
+solveConstraint pos wanted = toHnfs pos wanted
 
-data InstanceReductionStep =
-    NotReduced
-  | InstanceReduced Constraint Instance Constraint
-    -- | Reduction of an equality constraint to simpler constraints
-  | EqualityReduced Constraint
-  | FunctionPassableReduced HMType
-
--- | Try to satisfy a predicate with one of the known class instances.
--- If a match is found, return a list of subgoals generated for the class,
--- the matching instance, and a list of subgoals generated for the instance.
+-- | Solve a constraint with respect to the context.
+--   Return any leftover, unsolved constraints.
 --
--- If a type family constraint is matched, some unification is performed.
-instancePredicates :: Predicate -> IO InstanceReductionStep
-instancePredicates (IsInst t cls) = do
-  (head, _) <- uncurryTypeApplication t
-  case head of
-    ConTy con | isTyVar con -> 
-      -- If the head is a type variable, we won't find any instances
-      return NotReduced
+--   The given and wanted constraints are not necessarily normalized.
+--   The given constraints are not necessarily a terminating rewrite system.
+solveConstraintWithContext :: SourcePos -> Constraint -> Constraint
+                           -> TE Constraint
+solveConstraintWithContext pos context wanted = do
+  -- Normalize the context 
+  reduced_context <- reduceContext context
 
-    FunTy _ ->
-      -- Function instances are handled specially
-      if isPassableClass cls
-      then return $ FunctionPassableReduced t
-      else return NotReduced
+  -- Solve the wanted constraint using the context.
+  -- Return the unsolved constraint.
+  ((_ :: [()], residual), _) <-
+    noDerivation (solveConstraint pos wanted) reduced_context
+  return residual
 
-    _ -> fmap to_reduction_step $ runMaybeT $ do
-      -- Match against all instances until one succeeds
-      (inst_subst, inst, inst_cst) <-
-        msum $ map (matchInstancePredicate t) $ clsInstances cls
 
-      -- Get the class constraints.  Substitute the actual instance type
-      -- for the class variable.
-      let class_subst = substitutionFromList [(clsParam $ clsSignature cls, t)]
+-- | Add the extra information from a predicate to the context.
+--   Get the reduced context.
+addToContext :: Predicate -> Ctx Constraint
+addToContext pred = trace "addToContext" $ do
+  ((), cst) <- toHnf' noSourcePos pred
+  return cst
 
-      -- If an instance matched, then the class must match also
-      cls_csts <-
-        lift $ mapM (instantiatePredicate class_subst t) $
-        clsConstraint $ clsSignature cls
-
-      return (cls_csts, inst, inst_cst)
-  where
-    to_reduction_step Nothing = NotReduced
-    to_reduction_step (Just (x, y, z)) = InstanceReduced x y z
-
-    -- Instantiate a superclass predicate.  Substitute the instance type  
-    -- for the class parameter.
-    instantiatePredicate class_subst inst_type pred =
-      rename class_subst pred
-
-instancePredicates _ = internalError "Not an instance predicate"
-
--- | Attempt to match a type against a class instance
-matchInstancePredicate :: HMType -> Instance
-                       -> MaybeT IO (Substitution, Instance, Constraint)
-matchInstancePredicate inst_type inst = do
-  (subst, inst_cst) <- matchInstanceSignature inst_type (insSignature inst)
-  return (subst, inst, inst_cst)
-
-matchInstanceSignature :: HMType -> InstanceSig
-                       -> MaybeT IO (Substitution, Constraint)
-matchInstanceSignature inst_type sig = do
-  -- Try to match this type against the instance's type
-  (subst, match_cst) <- MaybeT $ match (insType sig) inst_type
-  
-  -- If successful, return the substituted constraints from the instance
-  inst_cst <- lift $ mapM (rename subst) $ match_cst ++ insConstraint sig
-  return (subst, inst_cst)
+addConstraintToContext cst = liftM concat $ mapM addToContext cst
 
 -------------------------------------------------------------------------------
 -- Generalization-related functions
@@ -701,12 +845,12 @@ matchInstanceSignature inst_type sig = do
 --   Currently, dependence is based on participation in equality constraints.
 --   If all variables on one side of an equality constraint are in the given
 --   set, then all variables on the other side are considered dependent.
-dependentTypeVariables :: Constraint -> TyVarSet -> IO TyVarSet
+dependentTypeVariables :: Constraint -> TyVarSet -> TE TyVarSet
 dependentTypeVariables cst initial_set = do
   -- For each equality constraint, find the free variables of its LHS and RHS
   equality_freevars <-
-    sequence [do fv1 <- freeTypeVariables t1
-                 fv2 <- freeTypeVariables t2
+    sequence [do fv1 <- freeUVars t1
+                 fv2 <- freeUVars t2
                  return (fv1, fv2)
              | IsEqual t1 t2 <- cst]
 
@@ -742,10 +886,16 @@ splitConstraint :: Constraint   -- ^ Constraint to partition.
                                 --   by 'reduceContext'.
                 -> TyVarSet     -- ^ Free variables
                 -> TyVarSet     -- ^ Bound variables
-                -> IO (Constraint, Constraint)
+                -> TE (Constraint, Constraint)
                    -- ^ Returns (retained constraints,
                    -- deferred constraints)
 splitConstraint cst fvars qvars = do
+  runPpr $ do
+    free_doc <- mapM pprUVar $ Set.toList fvars
+    q_doc <- mapM pprUVar $ Set.toList qvars
+    cst_doc <- pprConstraint cst
+    liftIO $ print (hsep free_doc $$ hsep q_doc $$ cst_doc)
+    
   (retained, deferred, ambiguous) <- partitionM isRetained cst
   
   -- Need to default some constraints?
@@ -763,26 +913,25 @@ splitConstraint cst fvars qvars = do
       ambiguity_error ambiguous
   where
     ambiguity_error xs = do
-      cst_doc <- runPpr $ pprContext xs
+      cst_doc <- runPpr $ pprConstraint xs
       fail ("Ambiguous constraint:\n" ++ show cst_doc)
     isRetained prd = do
-      fv <- freeTypeVariables prd
+      fv <- predicateFreeVars prd
+
+      -- Error if this predicate has no variables.  Such predicates 
+      -- should have been eliminated by 'reduceContext'.
+      when (Set.null fv) $ whenM (Set.null `liftM` freeC prd) $
+        internalError "splitConstraint: Found unresolved predicate with no free variables"
       
       -- If only variables from the environment are mentioned, then
       -- defer this predicate.  If only variables from the environment and
       -- local context are mentioned, then retain this predicate.
       -- Otherwise the predicate is ambiguous; try to resolve it by
       -- defaulting.
-      case () of
-        _ | Set.null fv -> do
-              -- A predicate with no free variables should have been
-              -- either resolved or reported as unsatisfiable
-              doc <- runPpr $ uShow prd
-              internalError $
-                "splitConstraint: Found unresolved predicate with no free variables:\n" ++ show doc
-          | fv `Set.isSubsetOf` fvars -> return Defer
-          | fv `Set.isSubsetOf` Set.union fvars qvars -> return Retain
-          | otherwise -> return Ambiguous
+      return $! case ()
+                of _ | fv `Set.isSubsetOf` fvars                 -> Defer
+                     | fv `Set.isSubsetOf` Set.union fvars qvars -> Retain
+                     | otherwise                                 -> Ambiguous
     
     partitionM f xs = go xs [] [] []
       where
@@ -798,7 +947,7 @@ splitConstraint cst fvars qvars = do
 
 -- | Perform defaulting on a list of constraints.  Determine whether
 --   at least one defaulting occurred.  Construct a new constraint list.
-defaultConstraints :: Constraint -> IO (Bool, Constraint)
+defaultConstraints :: Constraint -> TE (Bool, Constraint)
 defaultConstraints predicates = go False [] predicates
   where
     -- Attempt to perform defaulting on each constraint, one at a time
@@ -822,11 +971,11 @@ defaultConstraints predicates = go False [] predicates
 --   Defaulting first checks if the given type was already unified (by
 --   an earlier defaulting step) and skips if that is the case.
 defaultConstraint :: Constraint -> Constraint -> Predicate
-                  -> IO (Maybe (Constraint, Constraint))
+                  -> TE (Maybe (Constraint, Constraint))
 defaultConstraint visited unvisited prd =
   case prd
-  of IsInst head cls
-       | cls == tiBuiltin the_c_Traversable ->
+  of IsInst cls head
+       | cls == builtinTyCon TheTC_Traversable ->
            with_flexible_var_type head $
            defaultTraversableConstraint visited unvisited
 
@@ -837,10 +986,10 @@ defaultConstraint visited unvisited prd =
     -- If it is a rigid type variable, report an error.
     -- Otherwise, this is not a suitable candidate for defaulting.
     with_flexible_var_type ty f = do
-      ty' <- canonicalizeHead ty
+      ty' <- normalize ty
       case ty' of
-        ConTy c | isFlexibleTyVar c -> f c
-                | isTyVar c -> internalError "defaultConstraint: Unexpected rigid variable"
+        VarTy v -> f v
+        ConTy c | isTyVar c -> internalError "defaultConstraint: Unexpected rigid variable"
         _ -> can't_default
 
     can't_default = return Nothing
@@ -865,8 +1014,8 @@ defaultConstraint visited unvisited prd =
 -- @Cartesian (shape t)@, and @shape t ~ cartesianDomain _@ don't appear
 -- when the shape is known
 
-defaultTraversableConstraint :: Constraint -> Constraint -> TyCon
-                             -> IO (Maybe (Constraint, Constraint))
+defaultTraversableConstraint :: Constraint -> Constraint -> TyVar
+                             -> TE (Maybe (Constraint, Constraint))
 defaultTraversableConstraint visited unvisited tyvar = do
   dependent_cst <- do
     d1 <- find_dependent_constraints visited
@@ -877,22 +1026,22 @@ defaultTraversableConstraint visited unvisited tyvar = do
   m_shape <- find_shape_constraint dependent_cst
   case m_shape of
     Just sh
-      | sh == tiBuiltin the_con_list_dim ->
-          defaultable dependent_cst (ConTy $ tiBuiltin the_con_list)
-      | sh == tiBuiltin the_con_dim0 ->
-          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array0)
-      | sh == tiBuiltin the_con_dim1 ->
-          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array1)
-      | sh == tiBuiltin the_con_dim2 ->
-          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array2)
-      | sh == tiBuiltin the_con_dim3 ->
-          defaultable dependent_cst (ConTy $ tiBuiltin the_con_array3)
+      | sh == builtinTyCon TheTC_list_dim ->
+          defaultable dependent_cst (ConTy $ builtinTyCon TheTC_list)
+      | sh == builtinTyCon TheTC_dim0 ->
+          defaultable dependent_cst (ConTy $ builtinTyCon TheTC_array0)
+      | sh == builtinTyCon TheTC_dim1 ->
+          defaultable dependent_cst (ConTy $ builtinTyCon TheTC_array1)
+      | sh == builtinTyCon TheTC_dim2 ->
+          defaultable dependent_cst (ConTy $ builtinTyCon TheTC_array2)
+      | sh == builtinTyCon TheTC_dim3 ->
+          defaultable dependent_cst (ConTy $ builtinTyCon TheTC_array3)
     _ -> can't_default
   where
     -- All conditions were met.  Unify 'tyvar' with 't'
     default_to t = do
-      new_cst <- unify noSourcePos (ConTy tyvar) t
-      return $ Just (visited, new_cst ++ unvisited)
+      unifyUVar tyvar t
+      return $ Just (visited, unvisited)
 
     -- Didn't meet conditions.
     can't_default = return Nothing
@@ -905,20 +1054,19 @@ defaultTraversableConstraint visited unvisited tyvar = do
       (default_to target_type)
       can't_default
 
-    permitted_constraint (ty `IsInst` cls)
-      | cls == tiBuiltin the_c_Repr = do
+    permitted_constraint (IsInst cls ty)
+      | cls == builtinTyCon TheTC_Repr = do
           -- Type must be of the form @a t@ for any @t@
-          (head, args) <- inspectTypeApplication ty
-          head' <- canonicalizeHead head
-          case head' of
-            ConTy v | v == tyvar -> return True
+          (head, args) <- uncurryApp ty
+          case head of
+            VarTy v | v == tyvar -> return True
             _ -> return False
 
-      | cls == tiBuiltin the_c_Indexable = do
+      | cls == builtinTyCon TheTC_Indexable = do
           -- Type must be @t@
-          ty' <- canonicalizeHead ty
+          ty' <- normalize ty
           case ty' of
-            ConTy v | v == tyvar -> return True
+            VarTy v | v == tyvar -> return True
             _ -> return False
 
     permitted_constraint c = do
@@ -930,20 +1078,20 @@ defaultTraversableConstraint visited unvisited tyvar = do
     find_dependent_constraints c = filterM depends c
       where
         depends prd = do
-          fv <- freeTypeVariables prd
+          fv <- predicateFreeVars prd
           return $ tyvar `Set.member` fv
 
     -- Find a constraint of the form @shape t ~ T@
     -- where @t@ is the defaulted type variable and @T@ is a type
     -- constructor.
-    find_shape_constraint :: Constraint -> IO (Maybe TyCon)
+    find_shape_constraint :: Constraint -> TE (Maybe TyCon)
     find_shape_constraint (c:cs) =
       case c
       of IsEqual t1 t2 ->
            check_shape t1 t2 $ check_shape t2 t1 $ find_shape_constraint cs
          _ -> find_shape_constraint cs
       where
-        check_shape :: HMType -> HMType -> IO (Maybe TyCon) -> IO (Maybe TyCon)
+        check_shape :: HMType -> HMType -> TE (Maybe TyCon) -> TE (Maybe TyCon)
         check_shape shape_term value_term k = do
           shape_matched <- is_shape shape_term
           if shape_matched
@@ -956,215 +1104,22 @@ defaultTraversableConstraint visited unvisited tyvar = do
 
         -- Is 't' the term @shape t@ ?
         is_shape t = do
-          t' <- canonicalizeHead t
+          t' <- normalize t
           case t' of
             TFunAppTy tc [arg]
-              | tc == tiBuiltin the_con_shape -> do
-                  arg' <- canonicalizeHead arg
+              | tc == builtinTyCon TheTC_shape -> do
+                  arg' <- normalize arg
                   case arg' of
-                    ConTy v -> return (v == tyvar)
+                    VarTy v | v == tyvar -> return True
                     _ -> return False
             _ -> return False
 
         -- Is 't' a nullary type constructor?
         is_tycon t = do
-          t' <- canonicalizeHead t
+          t' <- normalize t
           return $! case t'
-                    of ConTy v | isDataCon v -> Just v
+                    of ConTy v | isTyCon v -> Just v
                        _ -> Nothing
 
     find_shape_constraint [] = return Nothing
-
--------------------------------------------------------------------------------
--- Proof derivation
-
--- | Prove a constraint and generate its proof derivation.
---
--- If the proof cannot be fully derived, placeholders will be returned for
--- the un-derived part.  The boolean value is true if
--- any progress was made toward a proof.
-prove :: SourcePos
-      -> ProofEnvironment -> Predicate -> IO (Bool, Placeholders, TIExp)
-prove pos env prd = do
-  -- Rewrite constraint to normalized form
-  (change, prd') <- applySubstitutions (map fst $ envProofs env) prd
-  
-  -- Simplify the predicate to HNF
-  (deriv, _) <- toHnf pos prd'
-
-  -- If rewriting was performed, a coercion will be necessary
-  let deriv' = if change
-               then CoerceDerivation prd deriv
-               else deriv
-
-  -- Generate code for this derivation
-  toProof pos env deriv'
-
--- | Generate code corresponding to a proof derivation
---
--- The return value includes a partial or complete proof derivation and 
--- placeholders for incomplete proofs.  The boolean value is true if
--- any progress was made toward a proof.
-toProof :: SourcePos
-        -> ProofEnvironment -> Derivation -> IO (Bool, Placeholders, TIExp)
-toProof pos env derivation = 
-  case derivation
-  of IdDerivation {conclusion = prd} ->
-       -- Get it from the environment
-       lookupProof prd env >>= returnIdProof prd
-
-     InstanceDerivation { conclusion = prd@(IsInst inst_type cls)
-                        , derivedInstance = inst
-                        , instancePremises = i_premises
-                        , classPremises = c_premises
-                        } -> do
-       -- Prove class and instance premises
-       (proof, placeholders) <-
-         toLocalProofs c_premises env $ \c_env c_vars ->
-         toLocalProofs i_premises c_env $ \i_env i_vars -> do
-           dict <-
-             createClassInstance pos cls inst inst_type c_vars i_env i_vars
-           return (dict, [])
-
-       return (True, placeholders, proof)
-
-     FunPassConvDerivation { conclusion = prd@(IsInst ty _)
-                           } -> do
-       let con = SystemF.coreBuiltin SystemF.The_repr_Box
-           prf = mkPolyCallE pos (mkVarE pos con) [convertHMType ty] []
-       return (True, [], prf)
-     
-     EqualityDerivation { conclusion = prd@(IsEqual t1 t2) } -> do
-       -- No evidence is needed.  Create a coercion value
-       prf <- createCoercionValue pos t1 t2
-       return (True, [], prf)
-
-     CoerceDerivation { conclusion = prd, contentPremise = d } -> do
-       (progress, ph, e) <- toProof pos env d
-       let premise_type = convertPredicate (conclusion d)
-           result_type = convertPredicate prd
-           coercion = mkCoerceE pos premise_type result_type e
-       return (progress, ph, coercion)
-
-     MagicDerivation {} -> do
-       -- Create a magic proof value
-       return (True, [], mkPolyCallE pos (mkVarE noSourcePos $ SystemF.coreBuiltin SystemF.The_fun_undefined) [convertPredicate $ conclusion derivation] [])
-  where
-    returnIdProof prd (Just e) = return (True, [], e)
-    returnIdProof prd Nothing  = do ph <- mkDictPlaceholder pos prd
-                                    return (False, [ph], ph)
-
-    -- Convert derivations to proofs, bind them to local variables, and
-    -- update the environment
-    toLocalProofs :: [Derivation]
-                  -> ProofEnvironment
-                  -> (ProofEnvironment -> [Var] -> IO (TIExp, Placeholders))
-                  -> IO (TIExp, Placeholders)
-    toLocalProofs derivations env k = do
-      (placeholders, proofs) <- toProofs pos env derivations
-      (exp, local_placeholders) <-
-        addManyToProofEnv pos (zip derivations proofs) env k
-      return (exp, local_placeholders ++ placeholders)
-
--- | Convert a list of independent derivations to proof expressions
-toProofs :: SourcePos
-         -> ProofEnvironment -> [Derivation] -> IO (Placeholders, [TIExp])
-toProofs pos env derivations = do
-  xs <- mapM (toProof pos env) derivations
-  let (_, phs, values) = unzip3 xs
-  return (concat phs, values)
-
--- | Create a local variable to stand for a proof of a derivation.  Add it to 
--- the proof environment.  Create a let-expression that binds the proof to the 
--- variable.
-addToProofEnv :: SourcePos
-              -> Derivation
-              -> TIExp
-              -> ProofEnvironment
-              -> (ProofEnvironment -> Var -> IO (TIExp, a))
-              -> IO (TIExp, a)
-addToProofEnv pos derivation proof env k =
-  withLocalAssignment pos proof (convertPredicate $ conclusion derivation) $ \v ->
-    let variable = mkVarE noSourcePos v
-        env' = env {envProofs = (conclusion derivation, variable) : envProofs env}
-    in k env' v
-
-addManyToProofEnv :: SourcePos
-                  -> [(Derivation, TIExp)]
-                  -> ProofEnvironment 
-                  -> (ProofEnvironment -> [Var] -> IO (TIExp, a))
-                  -> IO (TIExp, a)
-addManyToProofEnv pos ((derivation, proof) : bindings) env k =
-  addToProofEnv pos derivation proof env $ \env' v ->
-  addManyToProofEnv pos bindings env' $ \env'' vs -> k env'' (v:vs)
-
-addManyToProofEnv _ [] env k = k env []
-
--- | Assign an expression to a new local variable over the scope of
--- another expression.  A let-expression is constructed to bind the variable.
-withLocalAssignment :: SourcePos -> TIExp -> TIType -> (Var -> IO (TIExp, a)) 
-                    -> IO (TIExp, a)
-withLocalAssignment pos rhs ty make_body = do
-  -- Create new variable
-  id <- withTheNewVarIdentSupply supplyValue
-  let v = mkAnonymousVar id ObjectLevel
-  
-  -- Create body
-  (body, x) <- make_body v
-  
-  -- Create let expression
-  return (mkLetE pos (TIVarP v ty) rhs body, x)
-
-withLocalAssignments :: SourcePos
-                     -> [(TIExp, TIType)] 
-                     -> ([Var] -> IO (TIExp, a)) 
-                     -> IO (TIExp, a)
-withLocalAssignments pos = withMany (uncurry (withLocalAssignment pos))
-
-createClassInstance pos cls inst inst_type c_vars i_env i_vars = 
-  case insCon inst
-  of Nothing -> do
-       -- Create instance methods
-       inst_methods <- instantiateClassMethods pos inst inst_type i_env
-
-       -- Create dictionary expression
-       return $ mkDictE pos cls hmtype superclasses inst_methods
-     Just con -> do
-       -- Get premise types
-       (_, premise_types) <- uncurryTypeApplication inst_type
-       
-       -- Apply the constructor to premise types and premises
-       let premise_ts = map convertHMType premise_types
-           premise_vs = map (mkVarE pos) i_vars
-       return $ mkPolyCallE pos (mkVarE pos con) premise_ts premise_vs
-  where
-    hmtype = convertHMType inst_type
-    superclasses = map (mkVarE pos) c_vars
-
--- | Create class method expressions for the given class instance, 
--- instantiated at the given type.  This is used in constructing a class
--- dictionary.
-instantiateClassMethods :: SourcePos
-                        -> Instance
-                        -> HMType 
-                        -> ProofEnvironment 
-                        -> IO [TIExp]
-instantiateClassMethods pos inst inst_type env = do
-  -- Get the type and dictionary parameters to use for constructing
-  -- instance methods
-  (ty_params, constraint) <- instantiateAs pos (insScheme inst) inst_type
-
-  -- Create instance methods
-  forM (insMethods inst) $ \method ->
-    let method_exp = mkVarE pos (inmName method)
-    in instanceExpressionWithProofs env pos ty_params constraint method_exp
-
--- | Create a System F value representing a coercion from t1 to t2.
-createCoercionValue :: SourcePos -> HMType -> HMType -> IO TIExp
-createCoercionValue pos t1 t2 = do
-  let t1' = convertHMType t1
-      t2' = convertHMType t2
-  let op = VarTE (SystemF.mkExpInfo pos)
-           (SystemF.coreBuiltin SystemF.The_unsafeMakeCoercion)
-  return $ mkPolyCallE pos op [t1', t2'] []
 

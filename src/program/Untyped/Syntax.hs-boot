@@ -1,4 +1,7 @@
 
 module Untyped.Syntax where
 
-data Variable
+data Lit = IntL !Integer
+         | FloatL !Double
+         | BoolL !Bool
+         | NoneL

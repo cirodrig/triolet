@@ -128,6 +128,8 @@ lowerIntrinsicOp v
          sizealign_ListBuilder)
       , (coreBuiltin The_sizealign_append_list,
          sizealign_append_list)
+      , (coreBuiltin The_sizealign_array0,
+         sizealign_array0)
       , (coreBuiltin The_sizealign_array1,
          sizealign_array1)
       , (coreBuiltin The_sizealign_array2,
@@ -253,6 +255,7 @@ sizealign_append_list [] = return [sizeAlignValue append_list_type]
                                             PrimField trioletIntType,
                                             PrimField OwnedType]
 
+sizealign_array0 [] = return [sizeAlignValue array0Record]
 sizealign_array1 [] = return [sizeAlignValue array1Record]
 sizealign_array2 [] = return [sizeAlignValue array2Record]
 sizealign_array3 [] = return [sizeAlignValue array3Record]

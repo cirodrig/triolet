@@ -17,9 +17,9 @@ import CommandLine
 import Job
 import Paths
 import Parser.Driver
-import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
-import qualified Untyped.TypeInference as Untyped
+import qualified Untyped.Syntax as Untyped
+import qualified Untyped.TypeInference2 as Untyped
 import qualified SystemF.ArgumentFlattening as SystemF
 import qualified SystemF.ConSpecialization as SystemF
 import qualified SystemF.PartialEval as SystemF
@@ -70,7 +70,6 @@ main = do
 
   -- Initialiation
   loadBuiltins global_values
-  initializeTIBuiltins
   
   -- Do work
   runJob runTask job
@@ -190,13 +189,15 @@ compilePyonToPyonMem compile_flags path text = do
   sf_mod <- Untyped.typeInferModule untyped_mod
   
   -- System F transformations
-  sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
-  sf_mod <- SystemF.DeadCodeSF.eliminateDeadCode sf_mod
+  --sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
+  --sf_mod <- SystemF.DeadCodeSF.eliminateDeadCode sf_mod
 
   when debugMode $ void $ do
     putStrLn ""
     putStrLn "System F"
     print $ SystemF.pprModule sf_mod
+
+  _ <- SystemF.TypecheckSF.typeCheckModule sf_mod
 
   -- Convert to explicit memory representation
   repr_mod <- SystemF.representationInference sf_mod

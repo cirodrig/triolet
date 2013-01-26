@@ -29,6 +29,9 @@ defineStaticGlobalVar :: IO a -> StaticGlobalVar a
 defineStaticGlobalVar f = unsafePerformIO $ do
   return . SGV =<< newMVar =<< f
 
+readStaticGlobalVar :: StaticGlobalVar a -> IO a
+readStaticGlobalVar (SGV v) = readMVar v
+
 withStaticGlobalVar :: StaticGlobalVar a -> (a -> IO b) -> IO b
 withStaticGlobalVar (SGV v) f = withMVar v f
 

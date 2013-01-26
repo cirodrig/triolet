@@ -19,7 +19,8 @@ import Parser.Dataflow
 import Parser.Parser
 import Parser.ParserSyntax
 import Untyped.Syntax
-import Untyped.Data(ParserVarBinding(..))
+import Untyped.TIMonad(Environment) 
+import Untyped.Builtins2(ParserVarBinding(..))
 import Globals
 import GlobalVar
 
@@ -77,8 +78,9 @@ ssaStage = Pipeline $ do
     external_vars =
       CF.externSSAScope $ map fst $ readInitGlobalVar parserGlobals
 
-genUntypedStage :: Pipeline [CF.LCFunc CF.SSAID] DefGroup (ExportItem CF.SSAID) Export
-genUntypedStage = Pipeline $ do
+genUntypedStage :: Environment
+                -> Pipeline [CF.LCFunc CF.SSAID] DefGroup (ExportItem CF.SSAID) Export
+genUntypedStage untyped_environment = Pipeline $ do
   scope_ref <- newIORef external_vars
 
   let withScope :: (CF.GenScope -> IO (a, CF.GenScope)) -> IO a
@@ -90,12 +92,10 @@ genUntypedStage = Pipeline $ do
 
   let do_group fs =
         withScope $ \scope ->
-        withTheNewVarIdentSupply $ \supply ->
-        CF.genGroup supply scope fs
+        CF.genGroup untyped_environment scope fs
   let do_export e =
         withScope $ \scope ->
-        withTheNewVarIdentSupply $ \supply ->
-        CF.genExport supply scope e
+        CF.genExport untyped_environment scope e
 
   return (do_group, do_export, return ())  
   where
@@ -104,10 +104,13 @@ genUntypedStage = Pipeline $ do
       CF.externUntypedScope [(CF.externSSAVar v, b)
                             | (v, b) <- readInitGlobalVar parserGlobals]
 
-generateCFG :: [[PFunc]] -> [ExportItem AST] -> IO ([DefGroup], [Export])
-generateCFG fs es = do
+generateCFG :: Environment -> [[PFunc]] -> [ExportItem AST] 
+            -> IO ([DefGroup], [Export])
+generateCFG untyped_environment fs es = do
   let pipeline =
-        controlFlowStage `catPipeline` ssaStage `catPipeline` genUntypedStage
+        controlFlowStage `catPipeline`
+        ssaStage `catPipeline`
+        genUntypedStage untyped_environment
   runPipeline fs es pipeline
 
 -- | The global variables recognized by the parser.
@@ -123,6 +126,7 @@ varBindingLevel (ObjectBinding _) = ValueLevel
 -- | Parse a file.  Generates an untyped module.
 parseFile :: FilePath -> String -> IO Untyped.Syntax.Module
 parseFile file_path text = do
+  untyped_env <- readInitGlobalVarIO the_TITypes
   pglobals <- readInitGlobalVarIO parserGlobals
   let predefined_vars :: [(PVar, Level)]
       predefined_vars = [(v, varBindingLevel b) | (v, b) <- pglobals]
@@ -140,5 +144,5 @@ parseFile file_path text = do
 
   -- Convert the AST to untyped expressions
   let Parser.ParserSyntax.Module module_name groups exports = parse_mod
-  (groups', exports') <- generateCFG groups exports
+  (groups', exports') <- generateCFG untyped_env groups exports
   return $ Untyped.Syntax.Module (ModuleName module_name) groups' exports'

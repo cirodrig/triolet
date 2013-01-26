@@ -7,7 +7,7 @@ def tails(xs : list(a)) -> iter(shape(list), (a, iter(shape(list), a))):
   def tail_slice(i):
     return (xs[i + j + 1] for j in range(N - i - 1))
 
-  return ((xs[i], tail_slice(xs, i)) for i in range(N))
+  return ((xs[i], tail_slice(i)) for i in range(N))
 
 # Get all pairs of members of xs
 def all_pairs(xs):

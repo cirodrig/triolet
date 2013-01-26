@@ -81,6 +81,7 @@ Executable triolet
     Common.Label
     Common.MonadLogic
     Common.PrecDoc
+    Common.Progress
     Common.SourcePos
     Common.Supply
     Common.THRecord
@@ -112,20 +113,32 @@ Executable triolet
     Parser.ParserSyntax
     Parser.SSA2
     Parser.GenUntyped2
-    Untyped.Builtins
-    Untyped.BuiltinsTH
-    Untyped.InitializeBuiltins
+    Untyped.Builtins2
+    Untyped.BuiltinsTH2
+--    Untyped.Builtins
+--    Untyped.BuiltinsTH
+--    Untyped.InitializeBuiltins
     Untyped.Classes
-    Untyped.Data
-    Untyped.GenSystemF
-    Untyped.HMType
+--    Untyped.Data
+--    Untyped.GenSystemF
+--    Untyped.HMType
+    Untyped.DepAnalysis
+    Untyped.InitializeBuiltins2
     Untyped.Kind
     Untyped.Print
+    Untyped.Proof
     Untyped.Syntax
-    Untyped.TypeAssignment
-    Untyped.TypeInference
+    Untyped.TIExp
+    Untyped.TIExpConstructors
+    Untyped.TIMonad
+    Untyped.Type
+    Untyped.TypeInference2
+    Untyped.TypeUnif
+--    Untyped.TypeAssignment
     Untyped.TypeInferenceEval
+    Untyped.Unif
     Untyped.Unification
+    Untyped.Variable
     SystemF.ArgumentFlattening
     SystemF.Build
     SystemF.Context

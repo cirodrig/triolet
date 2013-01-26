@@ -1,19 +1,15 @@
 
+{-# LANGUAGE FlexibleContexts, ConstraintKinds #-}
 module Untyped.Classes
-    (pprContext,
-     instantiateClassConstraint,
-     andSuperclassEqualityPredicates,
-     reduceTypeFunction) where
+    (reduceTypeFunction) where
 
 import Text.PrettyPrint.HughesPJ
-import Untyped.Data
+import Untyped.Unif
+import Untyped.Type
+import Untyped.TIMonad
 
-instantiateClassConstraint :: ClassSig -> HMType -> IO Constraint
-
-andSuperclassEqualityPredicates :: Predicate -> IO [Predicate]
-
-reduceTypeFunction :: TyFamily  -- ^ Type function to evaluate
+reduceTypeFunction :: NormalizeContext HMType m
+                   => TyFamily  -- ^ Type function to evaluate
                    -> [HMType]  -- ^ Arguments to the type function
-                   -> IO (Maybe HMType) -- ^ Reduced type (if reducible)
+                   -> m (Maybe HMType) -- ^ Reduced type (if reducible)
 
-pprContext :: [Predicate] -> Ppr Doc

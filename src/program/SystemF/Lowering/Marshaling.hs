@@ -50,15 +50,15 @@ computeReprDict ty =
   case fromVarApp ty
   of Just (op, args)
        | op `isCoreBuiltin` The_list ->
-           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_list)
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_list
        | op `isCoreBuiltin` The_array0 ->
-           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array0)
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_array0
        | op `isCoreBuiltin` The_array1 ->
-           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array1)
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_array1
        | op `isCoreBuiltin` The_array2 ->
-           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array2)
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_array2
        | op `isCoreBuiltin` The_array3 ->
-           polymorphic_repr 1 args (LL.llBuiltin LL.the_fun_repr_array3)
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_array3
        | op `isCoreBuiltin` The_Tuple2 ->
            polymorphic_repr 2 args (LL.llBuiltin LL.the_fun_repr_Tuple2)
        | op `isCoreBuiltin` The_Tuple3 ->

@@ -989,8 +989,7 @@ blistScatter @(a i : bare)
     (make_init : iniF).
 
   -- Wrap with blist
-  let repr_list_a : Repr (list boxed_a) =
-        repr_list @boxed_a (repr_StuckRef @(BoxedType a)) in
+  let repr_list_a : Repr (list boxed_a) = repr_list @boxed_a in
 
   let blist_finalizer : UpdateInPlaceFinalizer s (blist a) =
         case finalizer of {
@@ -1165,8 +1164,7 @@ barray1Scatter @(a i : bare)
     (make_init : iniF).
 
   -- Wrap with barray1
-  let repr_array_a : Repr (array1 boxed_a) =
-        repr_array1 @boxed_a (repr_StuckRef @(BoxedType a)) in
+  let repr_array_a : Repr (array1 boxed_a) = repr_array1 @boxed_a in
 
   let barray_finalizer : UpdateInPlaceFinalizer s (barray1 a) =
         case finalizer of {
@@ -1346,8 +1344,7 @@ barray2Scatter @(a i : bare)
     (make_init : iniF).
 
   -- Wrap with barray2
-  let repr_array_a : Repr (array2 boxed_a) =
-        repr_array2 @boxed_a (repr_StuckRef @(BoxedType a)) in
+  let repr_array_a : Repr (array2 boxed_a) = repr_array2 @boxed_a in
 
   let barray_finalizer : UpdateInPlaceFinalizer s (barray2 a) =
         case finalizer of {
@@ -1552,8 +1549,7 @@ barray3Scatter @(a i : bare)
     (make_init : iniF).
 
   -- Wrap with barray3
-  let repr_array_a : Repr (array3 boxed_a) =
-        repr_array3 @boxed_a (repr_StuckRef @(BoxedType a)) in
+  let repr_array_a : Repr (array3 boxed_a) = repr_array3 @boxed_a in
 
   let barray_finalizer : UpdateInPlaceFinalizer s (barray3 a) =
         case finalizer of {
@@ -1971,7 +1967,7 @@ type array : bare -> bare -> bare;
 -- A singleton container
 data array0 (a : bare) : bare
 {
-  mk_array0 () (a);
+  mk_array0 () (StuckBox a);
 };
 
 -- A 1D array.
@@ -2236,6 +2232,7 @@ repr_float : Repr (Stored float) attribute(inline, inline_final) =
 
 repr_bool : Repr (Stored bool);
 repr_NoneType : Repr (Stored NoneType);
+repr_FIInt : (n : intindex) -> Repr (Stored (FIInt n));
 repr_SliceObject : Repr SliceObject;
 repr_list_dim : Repr (Ref list_dim);
 repr_dim0 : Repr (Ref dim0);
@@ -2302,9 +2299,23 @@ repr_ListBuilder @(a : bare) -> Repr (Stored (ListBuilder a))
   (unbox_ListBuilder @a)
   False;
 
-repr_array0 : (a : bare) -> Repr a -> Repr (array0 a);
+repr_array0 @(a : bare) -> Repr (array0 a)
+  attribute(inline, inline_postfinal) =
 
-repr_array1 @(a : bare) (rep : Repr a) -> Repr (array1 a)
+  letfun copy_array (x : array0 a) (ret : OutPtr (array0 a)) -> Store =
+    case x of
+      mk_array0 @a (arr_ref : StuckBox a). mk_array0 @a arr_ref ret
+  in
+
+  repr @(array0 a) (sizealign_array0 @a) copy_array
+  (\ (x : Init (array0 a)) -> Boxed (array0 a).
+    boxed @(array0 a) x)
+  (\ (x : Boxed (array0 a)) (ret : OutPtr (array0 a)) -> Store.
+     case x of boxed @(array0 a) (ux : array0 a). copy_array ux ret)
+  False;
+
+
+repr_array1 @(a : bare) -> Repr (array1 a)
   attribute(inline, inline_postfinal) =
 
   letfun copy_array (x : array1 a) (ret : OutPtr (array1 a)) -> Store =
@@ -2324,7 +2335,7 @@ repr_array1 @(a : bare) (rep : Repr a) -> Repr (array1 a)
   False;
 
 
-repr_array2 @(a : bare) (rep : Repr a) -> Repr (array2 a)
+repr_array2 @(a : bare) -> Repr (array2 a)
   attribute(inline, inline_postfinal) =
 
   letfun copy_array (x : array2 a) (ret : OutPtr (array2 a)) -> Store =
@@ -2345,7 +2356,7 @@ repr_array2 @(a : bare) (rep : Repr a) -> Repr (array2 a)
   False;
 
 
-repr_array3 @(a : bare) (rep : Repr a) -> Repr (array3 a)
+repr_array3 @(a : bare) -> Repr (array3 a)
   attribute(inline, inline_postfinal) =
 
   letfun copy_array (x : array3 a) (ret : OutPtr (array3 a)) -> Store =
@@ -2367,7 +2378,7 @@ repr_array3 @(a : bare) (rep : Repr a) -> Repr (array3 a)
   False;
 
 
-repr_list @(a : bare) (rep_a : Repr a) -> Repr (list a)
+repr_list @(a : bare) -> Repr (list a)
   attribute(inline, inline_postfinal) =
 
   letfun copy_list (x : list a) (ret : OutPtr (list a)) -> Store =
@@ -2742,6 +2753,7 @@ sizealign_arr : (n : intindex) -> (e : bare)
              -> FIInt n -> SizeAlign e -> SizeAlign (arr n e);
 
 sizealign_list : (a : bare) -> SizeAlign (list a);
+sizealign_array0 : (a : bare) -> SizeAlign (array0 a);
 sizealign_array1 : (a : bare) -> SizeAlign (array1 a);
 sizealign_array2 : (a : bare) -> SizeAlign (array2 a);
 sizealign_array3 : (a : bare) -> SizeAlign (array3 a);
@@ -2886,15 +2898,16 @@ TraversableDict_array0_build
   case vw of mk_view @dim0 @a (dom : dim0) (f : Stored NoneType -> Init a).
   case boxed @(Stored NoneType) (stored @NoneType None) of
     boxed @(Stored NoneType) (dummy_index : Stored NoneType).
-  mk_array0 @a (f dummy_index) ret;
+  mk_array0 @a (stuckBox @a (f dummy_index)) ret;
 
 
 TraversableDict_array0_traverse
   @(a : bare) (repr : Repr a) (ay : array0 a) -> view dim0 a attribute(inline) =
-  case ay of mk_array0 @a (x : a).
+  case ay of mk_array0 @a (x : StuckBox a).
   view_generate @dim0 ShapeDict_dim0 @a
   repr mk_dim0
-  (\ (dummy_index : Stored NoneType) -> Init a. copy @a repr x);
+  (\ (dummy_index : Stored NoneType) (ret : OutPtr a) -> Store.
+    case x of stuckBox @a (ux : a). copy @a repr ux ret);
 
 
 TraversableDict_array1_build
@@ -4433,7 +4446,9 @@ IndexableDict_array0_at_point @(a : bare)
   (repr : Repr a) (ay : array0 a) (ix : Stored NoneType) (ret : OutPtr a)
   -> Store
   attribute(inline) =
-  case ay of mk_array0 @a (x : a). copy @a repr x ret;
+  case ay of mk_array0 @a (x : StuckBox a).
+  case x of stuckBox @a (ux : a).
+  copy @a repr ux ret;
 
 
 IndexableDict_array0_get_shape @(a : bare)
@@ -6390,7 +6405,7 @@ permute1D_list_dim @(a : bare)
   let rep_tuple : Repr (Tuple2 (Stored int) a) =
         repr_Tuple2 @(Stored int) @a repr_int rep in
 
-  let rep_array : Repr (array1 a) = repr_array1 @a rep in
+  let rep_array : Repr (array1 a) = repr_array1 @a in
 
   -- Create an array of the given size
   dim1ToArrayDesc @(array1 a) dom
@@ -7120,7 +7135,7 @@ Sequence_permute1D @(a : bare)
   let rep_tuple : Repr (Tuple2 (Stored int) a) =
         repr_Tuple2 @(Stored int) @a repr_int rep in
 
-  let rep_array : Repr (array1 a) = repr_array1 @a rep in
+  let rep_array : Repr (array1 a) = repr_array1 @a in
 
   let type SEffTok = Stored EffTok in
 
@@ -9944,7 +9959,7 @@ histogram @(sh : box)
   traversable
   (repr_Box @(Stream sh (Tuple2 Sint SNone)))
   (repr_Tuple2 @Sint @SNone repr_int repr_NoneType)
-  (repr_array1 @(Stored int) repr_int)
+  (repr_array1 @(Stored int))
   sr
   b_input2
   ret;
