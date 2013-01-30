@@ -32,7 +32,7 @@ data Ref (a : box) : bare
 };
 
 -- A stuck reference is like a 'Ref' but doesn't get unwrapped
--- by 'convertToBare'.
+-- by 'asbare'.
 data StuckRef (a : box) : bare
 {
   stuckRef () (a);
@@ -44,7 +44,7 @@ data Boxed (a : bare) : box
 };
 
 -- A stuck box is like a 'boxed' but doesn't get unwrapped
--- by 'convertToBoxed'.
+-- by 'asbox'.
 data StuckBox (a : bare) : box
 {
   stuckBox () (a);
@@ -67,8 +67,8 @@ data Store : val
 };
 
 -- Type functions to convert between representations
-type BoxedType : bare -> box;
-type BareType : box -> bare;
+type AsBox : bare -> box;
+type AsBare : box -> bare;
 
 -- Designates an initializer function for a bare object
 type Init : bare -> write;
@@ -219,8 +219,8 @@ data Repr (a : bare) : box
   repr ()
   (SizeAlign a,                 -- Size and alignment
    a -> Init a,		-- Copy
-   Init a -> BoxedType a,	-- Convert to boxed
-   BoxedType a -> Init a,     -- Convert to bare
+   Init a -> AsBox a,	-- Convert to boxed
+   AsBox a -> Init a,     -- Convert to bare
    bool);                       -- Pointerlessness
                                 -- (True if an 'a' definitely doesn't contain pointers)
 };
@@ -879,8 +879,8 @@ arrScatter @(N : intindex) @(e i : bare)
     repr @s
     (sa_s : SizeAlign s)
     (copy_s : s -> Init s)
-    (to_boxed_s : Init s -> BoxedType s)
-    (to_bare_s : BoxedType s -> Init s)
+    (to_boxed_s : Init s -> AsBox s)
+    (to_bare_s : AsBox s -> Init s)
     (pointerless_s : bool).
 
   mk_scatter @arr_t @i2 @(arr N s) @iniF @updF
@@ -971,14 +971,14 @@ blistScatter @(a i : bare)
   (repr_i : Repr i)
   (repr_a : Repr a)
   (dom : list_dim)
-  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  (reduction_op : Scatter (StuckRef (AsBox a)) i)
   -> Scatter (blist a) (Tuple2 (Stored int) i) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   let type i2 = Tuple2 (Stored int) i in
 
   -- Use listScatter
   case listScatter @boxed_a @i
-       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+       repr_i (repr_StuckRef @(AsBox a)) dom reduction_op of
     mk_scatter @(list boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
     (initializer : iniF -> OutPtr s -> EffTok)
@@ -1146,14 +1146,14 @@ barray1Scatter @(a i : bare)
   (repr_i : Repr i)
   (repr_a : Repr a)
   (dom : dim1)
-  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  (reduction_op : Scatter (StuckRef (AsBox a)) i)
   -> Scatter (barray1 a) (Tuple2 (Stored int) i) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   let type i2 = Tuple2 (Stored int) i in
 
   -- Use array1Scatter
   case array1Scatter @boxed_a @i
-       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+       repr_i (repr_StuckRef @(AsBox a)) dom reduction_op of
     mk_scatter @(array1 boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
     (initializer : iniF -> OutPtr s -> EffTok)
@@ -1326,14 +1326,14 @@ barray2Scatter @(a i : bare)
   (repr_i : Repr i)
   (repr_a : Repr a)
   (dom : dim2)
-  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  (reduction_op : Scatter (StuckRef (AsBox a)) i)
   -> Scatter (barray2 a) (Tuple2 (index dim2) i) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   let type i2 = Tuple2 (index dim2) i in
 
   -- Use array2Scatter
   case array2Scatter @boxed_a @i
-       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+       repr_i (repr_StuckRef @(AsBox a)) dom reduction_op of
     mk_scatter @(array2 boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
     (initializer : iniF -> OutPtr s -> EffTok)
@@ -1531,14 +1531,14 @@ barray3Scatter @(a i : bare)
   (repr_i : Repr i)
   (repr_a : Repr a)
   (dom : dim3)
-  (reduction_op : Scatter (StuckRef (BoxedType a)) i)
+  (reduction_op : Scatter (StuckRef (AsBox a)) i)
   -> Scatter (barray3 a) (Tuple2 (index dim3) i) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   let type i2 = Tuple2 (index dim3) i in
 
   -- Use array3Scatter
   case array3Scatter @boxed_a @i
-       repr_i (repr_StuckRef @(BoxedType a)) dom reduction_op of
+       repr_i (repr_StuckRef @(AsBox a)) dom reduction_op of
     mk_scatter @(array3 boxed_a) @i2 @(s : bare) @(iniF : box) @(updF : box)
     (repr_s : Repr s)
     (initializer : iniF -> OutPtr s -> EffTok)
@@ -1850,8 +1850,8 @@ PBTree_flatten @(a : bare)
             repr @a
             (sa : SizeAlign a)
             (copy_a : a -> Init a)
-            (to_boxed_a : Init a -> BoxedType a)
-            (to_bare_a : BoxedType a -> Init a)
+            (to_boxed_a : Init a -> AsBox a)
+            (to_bare_a : AsBox a -> Init a)
             (pointerless_a : bool).
 
           doall @m @a @a tree_list_dim
@@ -1899,7 +1899,7 @@ data Sequence (a : bare) : box
 data StreamNext (st : box) (a : bare) : val
 {
   streamEmpty () ();
-  streamValue () (st, BoxedType a);
+  streamValue () (st, AsBox a);
 };
 
 -- The state of the stream 'bind' operator
@@ -1946,7 +1946,7 @@ data list (a : bare) : bare
 -- A list of boxed objects
 data blist (a : bare): bare
 {
-  make_blist () (list (StuckRef (BoxedType a)));
+  make_blist () (list (StuckRef (AsBox a)));
 };
 
 -- A list with extra fields supporting a mutable "append" operation.
@@ -2002,19 +2002,19 @@ data array3 (a : bare) : bare
 -- A 1D boxed array.
 data barray1 (a : bare) : bare
 {
-  mk_barray1 () (array1 (StuckRef (BoxedType a)));
+  mk_barray1 () (array1 (StuckRef (AsBox a)));
 };
 
 -- A 2D boxed array.
 data barray2 (a : bare) : bare
 {
-  mk_barray2 () (array2 (StuckRef (BoxedType a)));
+  mk_barray2 () (array2 (StuckRef (AsBox a)));
 };
 
 -- A 3D boxed array.
 data barray3 (a : bare) : bare
 {
-  mk_barray3 () (array3 (StuckRef (BoxedType a)));
+  mk_barray3 () (array3 (StuckRef (AsBox a)));
 };
 
 -- Convert the "size" fields of an array to an equivalent dim1.
@@ -2116,14 +2116,14 @@ copy @(a : bare) (rep : Repr a) (src : a) (dst : OutPtr a) -> Store
     repr @a 
     (sa : SizeAlign a)
     (copy_a : a -> Init a)
-    (to_boxed_a : Init a -> BoxedType a)
-    (to_bare_a : BoxedType a -> Init a)
+    (to_boxed_a : Init a -> AsBox a)
+    (to_bare_a : AsBox a -> Init a)
     (pointerless_a : bool).
 
   copy_a src dst;
 
-convertToBoxed : (a : bare) -> Repr a -> Init a -> BoxedType a;
-convertToBare : (a : bare) -> Repr a -> BoxedType a -> Init a;
+asbox : (a : bare) -> Repr a -> Init a -> AsBox a;
+asbare : (a : bare) -> Repr a -> AsBox a -> Init a;
 
 
 reprSizeAlign @(a : bare) (rep : Repr a) -> SizeAlign a
@@ -2133,8 +2133,8 @@ reprSizeAlign @(a : bare) (rep : Repr a) -> SizeAlign a
     repr @a
     (sa : SizeAlign a)
     (copy_a : a -> Init a)
-    (to_boxed_a : Init a -> BoxedType a)
-    (to_bare_a : BoxedType a -> Init a)
+    (to_boxed_a : Init a -> AsBox a)
+    (to_bare_a : AsBox a -> Init a)
     (pointerless_a : bool).
 
   sa;
@@ -2153,8 +2153,8 @@ copyArray @(N : intindex) @(a : bare)
     repr @a
     (sa : SizeAlign a)
     (copy_a : a -> Init a)
-    (to_boxed_a : Init a -> BoxedType a)
-    (to_bare_a : BoxedType a -> Init a)
+    (to_boxed_a : Init a -> AsBox a)
+    (to_bare_a : AsBox a -> Init a)
     (pointerless_a : bool).
 
   case size of {
@@ -2402,7 +2402,7 @@ repr_llist : (a : bare) -> Repr (Ref (llist a));
 repr_barray1 @(a : bare) -> Repr (barray1 a)
   attribute(inline, inline_postfinal) =
 
-  let type a_ref = StuckRef (BoxedType a) in
+  let type a_ref = StuckRef (AsBox a) in
 
   letfun copy_array (x : barray1 a) (ret : OutPtr (barray1 a)) -> Store =
      case x of mk_barray1 @a (y : array1 a_ref).
@@ -2425,7 +2425,7 @@ repr_barray1 @(a : bare) -> Repr (barray1 a)
 repr_barray2 @(a : bare) -> Repr (barray2 a)
   attribute(inline, inline_postfinal) =
 
-  let type a_ref = StuckRef (BoxedType a) in
+  let type a_ref = StuckRef (AsBox a) in
 
   letfun copy_barray (x : barray2 a) (ret : OutPtr (barray2 a)) -> Store =
      case x of mk_barray2 @a (y : array2 a_ref).
@@ -2451,7 +2451,7 @@ repr_barray2 @(a : bare) -> Repr (barray2 a)
 repr_barray3 @(a : bare) -> Repr (barray3 a)
   attribute(inline, inline_postfinal) =
 
-  let type a_ref = StuckRef (BoxedType a) in
+  let type a_ref = StuckRef (AsBox a) in
 
   letfun copy_barray (x : barray3 a) (ret : OutPtr (barray3 a)) -> Store =
      case x of mk_barray3 @a (y : array3 a_ref).
@@ -2478,7 +2478,7 @@ repr_barray3 @(a : bare) -> Repr (barray3 a)
 repr_blist @(a : bare) -> Repr (blist a)
   attribute(inline, inline_postfinal) =
 
-  let type ref_a = StuckRef (BoxedType a) in
+  let type ref_a = StuckRef (AsBox a) in
 
   letfun copy_list (x : blist a) (ret : OutPtr (blist a)) -> Store =
      case x of make_blist @a (l : list ref_a).
@@ -2516,14 +2516,14 @@ repr_Tuple2 @(a b : bare) (rep_a : Repr a) (rep_b : Repr b)
 
   case rep_a of
     repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
-            (tboxed_a : Init a -> BoxedType a)
-            (fboxed_a : BoxedType a -> Init a)
+            (tboxed_a : Init a -> AsBox a)
+            (fboxed_a : AsBox a -> Init a)
             (pl_a : bool).
 
   case rep_b of
     repr @b (sa_b : SizeAlign b) (copy_b : b -> Init b)
-            (tboxed_b : Init b -> BoxedType b)
-            (fboxed_b: BoxedType b -> Init b)
+            (tboxed_b : Init b -> AsBox b)
+            (fboxed_b: AsBox b -> Init b)
             (pl_b : bool).
 
   letfun
@@ -2552,20 +2552,20 @@ repr_Tuple3 @(a b c : bare) (rep_a : Repr a) (rep_b : Repr b) (rep_c : Repr c)
 
   case rep_a of
     repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
-            (tboxed_a : Init a -> BoxedType a)
-            (fboxed_a : BoxedType a -> Init a)
+            (tboxed_a : Init a -> AsBox a)
+            (fboxed_a : AsBox a -> Init a)
             (pl_a : bool).
 
   case rep_b of
     repr @b (sa_b : SizeAlign b) (copy_b : b -> Init b)
-            (tboxed_b : Init b -> BoxedType b)
-            (fboxed_b: BoxedType b -> Init b)
+            (tboxed_b : Init b -> AsBox b)
+            (fboxed_b: AsBox b -> Init b)
             (pl_b : bool).
 
   case rep_c of
     repr @c (sa_c : SizeAlign c) (copy_c : c -> Init c)
-            (tboxed_c : Init c -> BoxedType c)
-            (fboxed_c: BoxedType c -> Init c)
+            (tboxed_c : Init c -> AsBox c)
+            (fboxed_c: AsBox c -> Init c)
             (pl_c : bool).
 
   letfun
@@ -2596,26 +2596,26 @@ repr_Tuple4 @(a b c d : bare)
 
   case rep_a of
     repr @a (sa_a : SizeAlign a) (copy_a : a -> Init a)
-            (tboxed_a : Init a -> BoxedType a)
-            (fboxed_a : BoxedType a -> Init a)
+            (tboxed_a : Init a -> AsBox a)
+            (fboxed_a : AsBox a -> Init a)
             (pl_a : bool).
 
   case rep_b of
     repr @b (sa_b : SizeAlign b) (copy_b : b -> Init b)
-            (tboxed_b : Init b -> BoxedType b)
-            (fboxed_b: BoxedType b -> Init b)
+            (tboxed_b : Init b -> AsBox b)
+            (fboxed_b: AsBox b -> Init b)
             (pl_b : bool).
 
   case rep_c of
     repr @c (sa_c : SizeAlign c) (copy_c : c -> Init c)
-            (tboxed_c : Init c -> BoxedType c)
-            (fboxed_c: BoxedType c -> Init c)
+            (tboxed_c : Init c -> AsBox c)
+            (fboxed_c: AsBox c -> Init c)
             (pl_c : bool).
 
   case rep_d of
     repr @d (sa_d : SizeAlign d) (copy_d : d -> Init d)
-            (tboxed_d : Init d -> BoxedType d)
-            (fboxed_d : BoxedType d -> Init d)
+            (tboxed_d : Init d -> AsBox d)
+            (fboxed_d : AsBox d -> Init d)
             (pl_d : bool).
 
   letfun
@@ -2642,7 +2642,7 @@ repr_Tuple4 @(a b c d : bare)
 repr_intset : Repr intset;
 
 -- Representation of any boxed object
-repr_Box : (a : box) -> Repr (BareType a);
+repr_Box : (a : box) -> Repr (AsBare a);
 
 repr_Ref @(a : box) -> Repr (Ref a)
   attribute(inline, inline_postfinal) =
@@ -2669,10 +2669,10 @@ repr_StuckRef @(a : box) -> Repr (StuckRef a)
     copy_StuckRef @a rx r)
   False;
 
-repr_Any : Repr (BareType Any);
-repr_Stream : (sh : box) -> (a : bare) -> Repr (BareType (Stream sh a));
-repr_view : (sh : box) -> (a : bare) -> Repr (BareType (view sh a));
-repr_Scatter : (a b : bare) -> Repr (BareType (Scatter a b));
+repr_Any : Repr (AsBare Any);
+repr_Stream : (sh : box) -> (a : bare) -> Repr (AsBare (Stream sh a));
+repr_view : (sh : box) -> (a : bare) -> Repr (AsBare (view sh a));
+repr_Scatter : (a b : bare) -> Repr (AsBare (Scatter a b));
 
 -- Representation of a referenced object that contains nothing and will
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,
@@ -2687,8 +2687,8 @@ repr_arr @(n : intindex) @(e : bare)
     repr @e
     (sa : SizeAlign e)
     (copy_e : e -> Init e)
-    (to_boxed_e : Init e -> BoxedType e)
-    (to_bare_e : BoxedType e -> Init e)
+    (to_boxed_e : Init e -> AsBox e)
+    (to_bare_e : AsBox e -> Init e)
     (pointerless_e : bool).
 
   letfun
@@ -2879,8 +2879,8 @@ TraversableDict_list_traverse @(a : bare) (rep : Repr a) (ls : list a)
     repr @a
     (sa : SizeAlign a)
     (copy_a : a -> Init a)
-    (to_boxed_a : Init a -> BoxedType a)
-    (to_bare_a : BoxedType a -> Init a)
+    (to_boxed_a : Init a -> AsBox a)
+    (to_bare_a : AsBox a -> Init a)
     (pointerless_a : bool).
 
   viewStream @a
@@ -2931,8 +2931,8 @@ TraversableDict_array1_traverse
     repr @a
     (sa : SizeAlign a)
     (copy_a : a -> Init a)
-    (to_boxed_a : Init a -> BoxedType a)
-    (to_bare_a : BoxedType a -> Init a)
+    (to_boxed_a : Init a -> AsBox a)
+    (to_bare_a : AsBox a -> Init a)
     (pointerless_a : bool).
 
   view_generate @dim1 ShapeDict_dim1 @a rep
@@ -3115,13 +3115,13 @@ TraversableDict_blist_build @(a : bare)
   (repr : Repr a) (s : Stream list_dim a) (ret : OutPtr (blist a))
   -> Store attribute(inline) =
 
-  let type boxed_a = StuckRef (BoxedType a) in
-  let repr_boxed : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
+  let repr_boxed : Repr boxed_a = repr_StuckRef @(AsBox a) in
   -- Wrap all sequence elements in boxes
   let s2 : Stream list_dim boxed_a =
-        ShapeDict_list_dim_map @a @boxed_a repr (repr_StuckRef @(BoxedType a))
+        ShapeDict_list_dim_map @a @boxed_a repr (repr_StuckRef @(AsBox a))
         (\ (x : a) -> Init boxed_a.
-           stuckRef @(BoxedType a) (convertToBoxed @a repr (copy @a repr x)))
+           stuckRef @(AsBox a) (asbox @a repr (copy @a repr x)))
         s in 
   case s2 of {
     sequenceStream @boxed_a (sq : Sequence boxed_a).
@@ -3134,7 +3134,7 @@ TraversableDict_blist_build @(a : bare)
 -- Loop over all list indices and return the corresponding array element.
 TraversableDict_blist_traverse @(a : bare) (repr : Repr a) (ls : blist a)
   -> Stream list_dim a attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ls of make_blist @a (ls2 : list boxed_a).
   case ls2 of make_list @boxed_a @(N : intindex)
                        (size : FIInt N) (aref : StuckBox (arr N boxed_a)).
@@ -3142,7 +3142,7 @@ TraversableDict_blist_traverse @(a : bare) (repr : Repr a) (ls : blist a)
   case size of fiInt @N (size_i : int).
 
   let shp : list_dim = mk_list_dim (justVal @int size_i) in
-  let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let repr_box : Repr boxed_a = repr_StuckRef @(AsBox a) in
 
   viewStream @a
   (view_generate @list_dim
@@ -3150,28 +3150,28 @@ TraversableDict_blist_traverse @(a : bare) (repr : Repr a) (ls : blist a)
    (\ (si : Stored int) (ret : OutPtr a) -> Store.
      case si of stored @int (i : int).
      case subscript @N @boxed_a (reprSizeAlign @boxed_a repr_box) ay i of
-       stuckRef @(BoxedType a) (val : BoxedType a).
-     convertToBare @a repr val ret));
+       stuckRef @(AsBox a) (val : AsBox a).
+     asbare @a repr val ret));
 
 
 TraversableDict_barray1_build
   @(a : bare) (repr : Repr a) (s : view dim1 a) (ret : OutPtr (barray1 a))
   -> Store attribute(inline, inline_dimensionality) =
-  let type boxed_a = StuckRef (BoxedType a) in
-  let brepr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
+  let brepr : Repr boxed_a = repr_StuckRef @(AsBox a) in
   mk_barray1 @a
   (build_dim1_array @boxed_a brepr
    (view_map @dim1 ShapeDict_dim1 @a @boxed_a
     repr brepr (\ (x : a) -> Init boxed_a.
-                  stuckRef @(BoxedType a)
-                  (convertToBoxed @a repr (copy @a repr x))) s))
+                  stuckRef @(AsBox a)
+                  (asbox @a repr (copy @a repr x))) s))
   ret;
 
 
 TraversableDict_barray1_traverse
   @(a : bare) (repr : Repr a) (ar : barray1 a)
   -> view dim1 a attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ar of mk_barray1 @a (ar2 : array1 boxed_a).
   case ar2 of mk_array1 @boxed_a @(N : intindex)
     (lo : int) (stride : int) (size : FIInt N)
@@ -3179,7 +3179,7 @@ TraversableDict_barray1_traverse
   case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
 
   let linear_map : LinearMap = linearMap stride lo in
-  let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let repr_box : Repr boxed_a = repr_StuckRef @(AsBox a) in
 
   view_generate @dim1 ShapeDict_dim1 @a repr
   (arrayDescToDim1 @N lo stride size)
@@ -3188,8 +3188,8 @@ TraversableDict_barray1_traverse
 
     let real_ix : int = invEvalLM ix_i linear_map in
     case subscript @N @boxed_a (reprSizeAlign @boxed_a repr_box) ay real_ix of 
-      stuckRef @(BoxedType a) (val : BoxedType a).
-    convertToBare @a repr val ret);
+      stuckRef @(AsBox a) (val : AsBox a).
+    asbare @a repr val ret);
 
 
 TraversableDict_barray2_build
@@ -3211,10 +3211,10 @@ TraversableDict_barray2_build
 
         let linear_map_y : LinearMap = linearMap stride_y lb_y in
         let linear_map_x : LinearMap = linearMap stride_x lb_x in
-        let type boxed_a = StuckRef (BoxedType a) in
+        let type boxed_a = StuckRef (AsBox a) in
         let type out_arr = arr M (arr N boxed_a) in
         let type Sint = Stored int in
-        let box_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+        let box_repr : Repr boxed_a = repr_StuckRef @(AsBox a) in
 
         mk_barray2 @a
         (mk_array2 @boxed_a @M @N lb_y stride_y size_y lb_x stride_x size_x
@@ -3229,8 +3229,8 @@ TraversableDict_barray2_build
                 boxed @(Tuple2 Sint Sint) (ix : Tuple2 Sint Sint).
 
               -- Evaluate the function and box its result
-              stuckRef @(BoxedType a)
-                (convertToBoxed @a repr (f ix)) ret))))
+              stuckRef @(AsBox a)
+                (asbox @a repr (f ix)) ret))))
          ret)
      ret)
   ret;
@@ -3239,7 +3239,7 @@ TraversableDict_barray2_build
 TraversableDict_barray2_traverse
   @(a : bare) (repr : Repr a) (ar : barray2 a)
   -> view dim2 a attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ar of mk_barray2 @a (ar2 : array2 boxed_a).
   case ar2 of
     mk_array2 @boxed_a @(M N : intindex)
@@ -3251,7 +3251,7 @@ TraversableDict_barray2_traverse
   let linear_map_y : LinearMap = linearMap stride_y lo_y in
   let linear_map_x : LinearMap = linearMap stride_x lo_x in
   case size_x of fiInt @N (width : int).
-  let box_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let box_repr : Repr boxed_a = repr_StuckRef @(AsBox a) in
   let row_repr : Repr (arr N boxed_a) = repr_arr @N @boxed_a size_x box_repr in
   let type Sint = Stored int in
 
@@ -3266,16 +3266,16 @@ TraversableDict_barray2_traverse
      let real_ix_x : int = invEvalLM ix_x_i linear_map_x in
      case subscript @N @boxed_a (reprSizeAlign @boxed_a box_repr)
           (subscript @M @(arr N boxed_a) (reprSizeAlign @(arr N boxed_a) row_repr) ay real_ix_y) real_ix_x of
-       stuckRef @(BoxedType a) (val : BoxedType a).
-     convertToBare @a repr val ret);
+       stuckRef @(AsBox a) (val : AsBox a).
+     asbare @a repr val ret);
 
 
 TraversableDict_barray3_build
   @(a : bare) (repr : Repr a) (s : view dim3 a) (ret : OutPtr (barray3 a))
   -> Store attribute(inline, inline_dimensionality) =
 
-  let type boxed_a = StuckRef (BoxedType a) in
-  let brepr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
+  let brepr : Repr boxed_a = repr_StuckRef @(AsBox a) in
   case s of mk_view @dim3 @a (dom : dim3) (f : index dim3 -> Init a).
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
 
@@ -3318,8 +3318,8 @@ TraversableDict_barray3_build
                          (ix : Tuple3 Sint Sint Sint).
 
                  -- Evaluate the function and box its result
-                 stuckRef @(BoxedType a)
-                 (convertToBoxed @a repr (f ix))
+                 stuckRef @(AsBox a)
+                 (asbox @a repr (f ix))
                  ret))))
             ret)
         ret)
@@ -3330,7 +3330,7 @@ TraversableDict_barray3_build
 TraversableDict_barray3_traverse
   @(a : bare) (repr : Repr a) (ar : barray3 a)
   -> view dim3 a attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ar of mk_barray3 @a (ar2 : array3 boxed_a).
   case ar2 of
     mk_array3 @boxed_a @(L M N : intindex)
@@ -3349,7 +3349,7 @@ TraversableDict_barray3_traverse
   let linear_map_x : LinearMap = linearMap stride_x lo_x in
   case size_y of fiInt @M (height : int).
   case size_x of fiInt @N (width : int).
-  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(AsBox a) in
   let row_repr : Repr arr1d = repr_arr @N @boxed_a size_x boxed_repr in
   let plane_repr : Repr arr2d = repr_arr @M @arr1d size_y row_repr in
   let type Sint = Stored int in
@@ -3372,8 +3372,8 @@ TraversableDict_barray3_traverse
            (subscript @L @arr2d (reprSizeAlign @arr2d plane_repr) ay real_ix_z)
            real_ix_y)
           real_ix_x of
-      stuckRef @(BoxedType a) (val : BoxedType a).
-     convertToBare @a repr val ret);
+      stuckRef @(AsBox a) (val : AsBox a).
+     asbare @a repr val ret);
 
 
 -------------------------------------------------------------------------------
@@ -4575,21 +4575,21 @@ IndexableDict_array3_get_shape @(a : bare)
 IndexableDict_blist_at_point @(a : bare)
   (repr : Repr a) (ls : blist a) (ix : Stored int) (ret : OutPtr a) -> Store
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ls of make_blist @a (ls2 : list boxed_a).
   case ls2 of make_list @boxed_a @(N : intindex)
              (n : FIInt N) (ayref : StuckBox (arr N boxed_a)).
   case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
-  let repr_box : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let repr_box : Repr boxed_a = repr_StuckRef @(AsBox a) in
   case ix of stored @int (ix_i : int).
   case subscript @N @boxed_a (reprSizeAlign @boxed_a repr_box) ay ix_i of
-    stuckRef @(BoxedType a) (val : BoxedType a).
-  convertToBare @a repr val ret;
+    stuckRef @(AsBox a) (val : AsBox a).
+  asbare @a repr val ret;
 
 
 IndexableDict_blist_get_shape @(a : bare) (ls : blist a) -> list_dim
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ls of make_blist @a (ls2 : list boxed_a).
   case ls2 of make_list @boxed_a @(N : intindex)
               (n : FIInt N) (ayref : StuckBox (arr N boxed_a)).
@@ -4601,26 +4601,26 @@ IndexableDict_barray1_at_point @(a : bare)
   (repr : Repr a) (ay : barray1 a) (ix : Stored int) (ret : OutPtr a)
   -> Store
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ay of mk_barray1 @a (ay2 : array1 boxed_a).
   case ay2 of mk_array1 @boxed_a @(N : intindex)
              (lb : int) (stride : int) (size : FIInt N)
              (ayref : StuckBox (arr N boxed_a)).
   case ayref of stuckBox @(arr N boxed_a) (ay : arr N boxed_a).
-  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(AsBox a) in
 
   -- Compute real array index
   case ix of stored @int (ix_i : int).
   let real_index : int = (ix_i -# lb) //# stride in
   case subscript @N @boxed_a (reprSizeAlign @boxed_a boxed_repr) ay real_index
-    of stuckRef @(BoxedType a) (val : BoxedType a).
-  convertToBare @a repr val ret;
+    of stuckRef @(AsBox a) (val : AsBox a).
+  asbare @a repr val ret;
 
 
 IndexableDict_barray1_get_shape @(a : bare)
   (ay : barray1 a) -> dim1
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ay of mk_barray1 @a (ay2 : array1 boxed_a).
   case ay2 of mk_array1 @boxed_a @(N : intindex)
              (lb : int) (stride : int) (size : FIInt N)
@@ -4635,14 +4635,14 @@ IndexableDict_barray2_at_point @(a : bare)
   (ret : OutPtr a)
   -> Store
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ay of mk_barray2 @a (ay2 : array2 boxed_a).
   case ay2 of mk_array2 @boxed_a @(M N : intindex)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
              (lb_x : int) (stride_x : int) (size_x : FIInt N)
              (ayref : StuckBox (arr M (arr N boxed_a))).
   case ayref of stuckBox @(arr M (arr N boxed_a)) (ay : arr M (arr N boxed_a)).
-  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(AsBox a) in
   let row_repr : Repr (arr N boxed_a) =
         repr_arr @N @boxed_a size_x boxed_repr in
 
@@ -4658,14 +4658,14 @@ IndexableDict_barray2_at_point @(a : bare)
   case subscript @N @boxed_a (reprSizeAlign @boxed_a boxed_repr)
        (subscript @M @(arr N boxed_a)
        (reprSizeAlign @(arr N boxed_a) row_repr) ay real_index_y) real_index_x
-    of stuckRef @(BoxedType a) (val : BoxedType a).
-  convertToBare @a repr val ret;
+    of stuckRef @(AsBox a) (val : AsBox a).
+  asbare @a repr val ret;
 
 
 IndexableDict_barray2_get_shape @(a : bare)
   (ay : barray2 a) -> dim2
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in 
+  let type boxed_a = StuckRef (AsBox a) in 
   case ay of mk_barray2 @a (ay2 : array2 boxed_a).
   case ay2 of mk_array2 @boxed_a @(M N : intindex)
              (lb_y : int) (stride_y : int) (size_y : FIInt M)
@@ -4682,7 +4682,7 @@ IndexableDict_barray3_at_point @(a : bare)
   (ret : OutPtr a)
   -> Store
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in
+  let type boxed_a = StuckRef (AsBox a) in
   case ay of mk_barray3 @a (ay2 : array3 boxed_a).
   case ay2 of mk_array3 @boxed_a @(L M N : intindex)
              (lb_z : int) (stride_z : int) (size_z : FIInt L)
@@ -4691,7 +4691,7 @@ IndexableDict_barray3_at_point @(a : bare)
              (ayref : StuckBox (arr L (arr M (arr N boxed_a)))).
   case ayref of stuckBox @(arr L (arr M (arr N boxed_a)))
                 (ay : arr L (arr M (arr N boxed_a))).
-  let boxed_repr : Repr boxed_a = repr_StuckRef @(BoxedType a) in
+  let boxed_repr : Repr boxed_a = repr_StuckRef @(AsBox a) in
   let row_repr : Repr (arr N boxed_a) =
         repr_arr @N @boxed_a size_x boxed_repr in
   let plane_repr : Repr (arr M (arr N boxed_a)) =
@@ -4714,14 +4714,14 @@ IndexableDict_barray3_at_point @(a : bare)
         (subscript @L @(arr M (arr N boxed_a))
          (reprSizeAlign @(arr M (arr N boxed_a)) plane_repr)
          ay real_index_z) real_index_y) real_index_x
-    of stuckRef @(BoxedType a) (val : BoxedType a).
-  convertToBare @a repr val ret;
+    of stuckRef @(AsBox a) (val : AsBox a).
+  asbare @a repr val ret;
 
 
 IndexableDict_barray3_get_shape @(a : bare)
   (ay : barray3 a) -> dim3
   attribute(inline) =
-  let type boxed_a = StuckRef (BoxedType a) in 
+  let type boxed_a = StuckRef (AsBox a) in 
   case ay of mk_barray3 @a (ay2 : array3 boxed_a).
   case ay2 of mk_array3 @boxed_a @(L M N : intindex)
              (lb_z : int) (stride_z : int) (size_z : FIInt L)
@@ -6471,9 +6471,9 @@ boxedPermute1D_list_dim @(a : bare)
   -> Store
   attribute(inline, inline_dimensionality) =
 
-  let type Boxed_a = StuckRef (BoxedType a) in
+  let type Boxed_a = StuckRef (AsBox a) in
 
-  let rep_Ref : Repr (StuckRef (BoxedType a)) = repr_StuckRef @(BoxedType a) in
+  let rep_Ref : Repr (StuckRef (AsBox a)) = repr_StuckRef @(AsBox a) in
 
   let rep_tuple : Repr (Tuple2 (Stored int) a) =
         repr_Tuple2 @(Stored int) @a repr_int rep in
@@ -6526,8 +6526,8 @@ boxedPermute1D_list_dim @(a : bare)
                if or (real_index <# 0) (real_index >=# count_int) then except @Store else
 
                -- Write it to the output
-               stuckRef @(BoxedType a)
-               (convertToBoxed @a rep (copy @a rep val))
+               stuckRef @(AsBox a)
+               (asbox @a rep (copy @a rep val))
                (subscript_out @N @Boxed_a (reprSizeAlign @Boxed_a rep_Ref) ret real_index))
         ; nothingVal @int.
             except @Store
@@ -6794,8 +6794,8 @@ Sequence_generate @(a : bare)
 	  case state of boxed @Sint (state_s : Sint).
 	  case state_s of stored @int (state_u : int).
 	  if state_u <# list_size
-	  then let next_value : BoxedType a =
-	             convertToBoxed @a repr (f state_s) in
+	  then let next_value : AsBox a =
+	             asbox @a repr (f state_s) in
 	       let next_state : st =
 	             boxed @Sint (stored @int (state_u +# 1)) in
 	       streamValue @st @a next_state next_value
@@ -6809,8 +6809,8 @@ Sequence_generate @(a : bare)
         next (state : st) -> StreamNext st a =
 	  case state of boxed @Sint (state_s : Stored int).
 	  case state_s of stored @int (state_u : int).
-	  let next_value : BoxedType a =
-	        convertToBoxed @a repr (f state_s) in
+	  let next_value : AsBox a =
+	        asbox @a repr (f state_s) in
 	  let next_state : st =
 	        boxed @Sint (stored @int (state_u +# 1)) in
 	  streamValue @st @a next_state next_value
@@ -6825,7 +6825,7 @@ Sequence_from_llist @(a : bare) (repr : Repr a) (l : llist a)
   (\ (l : llist a) -> StreamNext (llist a) a.
      case l of {
        cons @a (h : a) (t : llist a).
-         streamValue @(llist a) @a t (convertToBoxed @a repr (copy @a repr h))
+         streamValue @(llist a) @a t (asbox @a repr (copy @a repr h))
      ; nil @a. streamEmpty @(llist a) @a
      });
 
@@ -6839,10 +6839,10 @@ Sequence_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
   letfun
     go (state : st) -> StreamNext st b =
       case next state of {
-        streamValue @st @a (next_state : st) (value : BoxedType a).
-          let output_value : BoxedType b =
-                case boxed @a (convertToBare @a repr_a value) of boxed @a (x : a).
-		convertToBoxed @b repr_b (transformer x)
+        streamValue @st @a (next_state : st) (value : AsBox a).
+          let output_value : AsBox b =
+                case boxed @a (asbare @a repr_a value) of boxed @a (x : a).
+		asbox @b repr_b (transformer x)
           in streamValue @st @b next_state output_value;
 
         streamEmpty @st @a.
@@ -6878,18 +6878,18 @@ Sequence_zipWith
       -- Get next value of stream A
       case next_a state_a of {
         streamValue @st_a @a
-          (next_state_a : st_a) (value_a : BoxedType a).
+          (next_state_a : st_a) (value_a : AsBox a).
           
 	  -- Get next value of stream B
 	  case next_b state_b of {
             streamValue @st_b @b
-	      (next_state_b : st_b) (value_b : BoxedType b).
+	      (next_state_b : st_b) (value_b : AsBox b).
 
 	      -- Create output value
-	      let value : BoxedType c =
-	            case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
-	            case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
-		    convertToBoxed @c repr_c (transformer x y) in
+	      let value : AsBox c =
+	            case boxed @a (asbare @a repr_a value_a) of boxed @a (x : a).
+	            case boxed @b (asbare @b repr_b value_b) of boxed @b (y : b).
+		    asbox @c repr_c (transformer x y) in
 	      let next_state : Boxed st_c =
 	            boxed @st_c (stored @(st_a, st_b) (next_state_a, next_state_b)) in
 	      streamValue @(Boxed st_c) @c next_state value;
@@ -6937,24 +6937,24 @@ Sequence_zipWith3
       -- Get next value of stream A
       case next_a state_a of {
         streamValue @st_a @a
-          (next_state_a : st_a) (value_a : BoxedType a).
+          (next_state_a : st_a) (value_a : AsBox a).
 
 	  -- Get next value of stream B
 	  case next_b state_b of {
             streamValue @st_b @b
-	      (next_state_b : st_b) (value_b : BoxedType b).
+	      (next_state_b : st_b) (value_b : AsBox b).
 
               -- Get next value of stream C
               case next_c state_c of {
                 streamValue @st_c @c
-                  (next_state_c : st_c) (value_c : BoxedType c).
+                  (next_state_c : st_c) (value_c : AsBox c).
 
                   -- Create output value
-                  let value : BoxedType d =
-                        case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
-                        case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
-                        case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
-                        convertToBoxed @d repr_d (transformer x y z) in
+                  let value : AsBox d =
+                        case boxed @a (asbare @a repr_a value_a) of boxed @a (x : a).
+                        case boxed @b (asbare @b repr_b value_b) of boxed @b (y : b).
+                        case boxed @c (asbare @c repr_c value_c) of boxed @c (z : c).
+                        asbox @d repr_d (transformer x y z) in
                   let next_state : Boxed st_d =
                         boxed @st_d (stored @(st_a, st_b, st_c) (next_state_a, next_state_b, next_state_c)) in
                   streamValue @(Boxed st_d) @d next_state value;
@@ -7010,30 +7010,30 @@ Sequence_zipWith4
       -- Get next value of stream A
       case next_a state_a of {
         streamValue @st_a @a
-          (next_state_a : st_a) (value_a : BoxedType a).
+          (next_state_a : st_a) (value_a : AsBox a).
 
 	  -- Get next value of stream B
 	  case next_b state_b of {
             streamValue @st_b @b
-	      (next_state_b : st_b) (value_b : BoxedType b).
+	      (next_state_b : st_b) (value_b : AsBox b).
 
               -- Get next value of stream C
               case next_c state_c of {
                 streamValue @st_c @c
-                  (next_state_c : st_c) (value_c : BoxedType c).
+                  (next_state_c : st_c) (value_c : AsBox c).
 
                   -- Get next value of stream D
                   case next_d state_d of {
                     streamValue @st_d @d
-                      (next_state_d : st_d) (value_d : BoxedType d).
+                      (next_state_d : st_d) (value_d : AsBox d).
 
                       -- Create output value
-                      let value : BoxedType e =
-                            case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
-                            case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
-                            case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
-                            case boxed @d (convertToBare @d repr_d value_d) of boxed @d (w : d).
-                            convertToBoxed @e repr_e (transformer x y z w) in
+                      let value : AsBox e =
+                            case boxed @a (asbare @a repr_a value_a) of boxed @a (x : a).
+                            case boxed @b (asbare @b repr_b value_b) of boxed @b (y : b).
+                            case boxed @c (asbare @c repr_c value_c) of boxed @c (z : c).
+                            case boxed @d (asbare @d repr_d value_d) of boxed @d (w : d).
+                            asbox @e repr_e (transformer x y z w) in
                       let next_state : Boxed st_e =
                             boxed @st_e (stored @(st_a, st_b, st_c, st_d) (next_state_a, next_state_b, next_state_c, next_state_d)) in
                       streamValue @(Boxed st_e) @e next_state value;
@@ -7088,8 +7088,8 @@ Sequence_reduce1 @(a : bare)
     sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
 
   case next state of {
-    streamValue @st @a (next_state : st) (init : BoxedType a).
-      case boxed @a (convertToBare @a repr init) of boxed @a (u_init : a).
+    streamValue @st @a (next_state : st) (init : AsBox a).
+      case boxed @a (asbare @a repr init) of boxed @a (u_init : a).
       let new_sequence : Sequence a =
             sequence @a @st next_state next in
       Sequence_fold @a @a repr repr f u_init new_sequence ret;
@@ -7198,9 +7198,9 @@ Sequence_boxedPermute1D @(a : bare)
   -> Store
   attribute(inline, inline_final) =
 
-  let type Boxed_a = StuckRef (BoxedType a) in
+  let type Boxed_a = StuckRef (AsBox a) in
 
-  let rep_Ref : Repr Boxed_a = repr_StuckRef @(BoxedType a) in
+  let rep_Ref : Repr Boxed_a = repr_StuckRef @(AsBox a) in
 
   let rep_tuple : Repr (Tuple2 (Stored int) a) =
         repr_Tuple2 @(Stored int) @a repr_int rep in
@@ -7247,8 +7247,8 @@ Sequence_boxedPermute1D @(a : bare)
                  let new_acc : EffTok =
                        seqEffTok u_acc
                        (toEffTok @Boxed_a
-                        (stuckRef @(BoxedType a)
-                         (convertToBoxed @a rep (copy @a rep val))
+                        (stuckRef @(AsBox a)
+                         (asbox @a rep (copy @a rep val))
                          (subscript_out @N @Boxed_a (reprSizeAlign @Boxed_a rep_Ref) ret real_index))) in
                  stored @EffTok new_acc eff_ret)
               eff_tok_in s) of
@@ -7273,27 +7273,27 @@ Sequence_fold @(a acc : bare)
     sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
 
   letfun
-    go (state : st) (accumulator : BoxedType acc) (ret : OutPtr acc)
+    go (state : st) (accumulator : AsBox acc) (ret : OutPtr acc)
       -> Store =
       case next state of {
 
         -- Obtain value from stream
-        streamValue @st @a (next_state : st) (result : BoxedType a).
+        streamValue @st @a (next_state : st) (result : AsBox a).
           -- Compute the new value
-          let new_accumulator : BoxedType acc =
-                case boxed @a (convertToBare @a repr_a result)
+          let new_accumulator : AsBox acc =
+                case boxed @a (asbare @a repr_a result)
                 of boxed @a (y : a).
-                case boxed @acc (convertToBare @acc repr_acc accumulator)
+                case boxed @acc (asbare @acc repr_acc accumulator)
                 of boxed @acc (x : acc).
-                convertToBoxed @acc repr_acc (f x y)
+                asbox @acc repr_acc (f x y)
 
           in go next_state new_accumulator ret;
 
 	-- Stream is depleted
 	streamEmpty @st @a.
-	  convertToBare @acc repr_acc accumulator ret
+	  asbare @acc repr_acc accumulator ret
       }
-  in go state (convertToBoxed @acc repr_acc (copy @acc repr_acc init)) ret;
+  in go state (asbox @acc repr_acc (copy @acc repr_acc init)) ret;
 
 
 Sequence_parallel_reduce @(a : bare)
@@ -7308,21 +7308,21 @@ Sequence_parallel_reduce @(a : bare)
   case list_size of {
     justVal @int (size : int).
       -- Create combiner and reducer functions using 'f' and 'g'
-      let type b = BoxedType a in
+      let type b = AsBox a in
       letfun
         combiner (x : b) (y : b) -> b =
-          case boxed @a (convertToBare @a repr x) of boxed @a (bx : a).
-          case boxed @a (convertToBare @a repr y) of boxed @a (by : a).
-          convertToBoxed @a repr (f bx by)
+          case boxed @a (asbare @a repr x) of boxed @a (bx : a).
+          case boxed @a (asbare @a repr y) of boxed @a (by : a).
+          asbox @a repr (f bx by)
       in
       letfun
         reducer @(range_N : intindex)
           (lb : int) (count : FIInt range_N) (acc_in : b) -> b =
 
           -- Reduce over the sequence [lb, lb + count)
-          case boxed @a (convertToBare @a repr acc_in) of boxed @a (acc : a).
+          case boxed @a (asbare @a repr acc_in) of boxed @a (acc : a).
           case count of fiInt @range_N (count_i : int).
-          convertToBoxed @a repr
+          asbox @a repr
           (Sequence_reduce @a repr f acc
            (Sequence_generate_bind @a (mk_list_dim (justVal @int count_i))
             (\ (si : Stored int) -> Sequence a.
@@ -7333,8 +7333,8 @@ Sequence_parallel_reduce @(a : bare)
                g real_si)))
       in
       case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
-      let boxed_init : b = convertToBoxed @a repr (copy @a repr init) in
-      convertToBare @a repr
+      let boxed_init : b = asbox @a repr (copy @a repr init) in
+      asbare @a repr
       (blocked_1d_reduce @N @b count combiner boxed_init reducer)
       ret
 
@@ -8281,12 +8281,12 @@ parallel_list_dim_reduce @(a : bare)
   case list_size of {
     justVal @int (size : int).
       -- Create combiner and reducer functions using 'f' and 'g'
-      let type b = BoxedType a in
+      let type b = AsBox a in
       letfun
         combiner (x : b) (y : b) -> b =
-          case boxed @a (convertToBare @a repr x) of boxed @a (bx : a).
-          case boxed @a (convertToBare @a repr y) of boxed @a (by : a).
-          convertToBoxed @a repr (f bx by)
+          case boxed @a (asbare @a repr x) of boxed @a (bx : a).
+          case boxed @a (asbare @a repr y) of boxed @a (by : a).
+          asbox @a repr (f bx by)
       in
       letfun
         reducer @(range_N : intindex)
@@ -8298,14 +8298,14 @@ parallel_list_dim_reduce @(a : bare)
               boxed @(Stored int) (real_index : Stored int).
 
             -- Call 'g' to compute a value, and 'f' to combine it
-            case boxed @a (convertToBare @a repr acc_loop) of
+            case boxed @a (asbare @a repr acc_loop) of
               boxed @a (x : a).
             case boxed @a (g real_index) of boxed @a (y : a).
-            convertToBoxed @a repr (f x y))
+            asbox @a repr (f x y))
       in
       case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
-      let boxed_init : b = convertToBoxed @a repr (copy @a repr init) in
-      convertToBare @a repr
+      let boxed_init : b = asbox @a repr (copy @a repr init) in
+      asbare @a repr
       (blocked_1d_reduce @N @b count combiner boxed_init reducer)
       ret
 
@@ -8333,12 +8333,12 @@ parallel_dim1_reduce @(a : bare)
       case upper_bound of {
         justVal @int (ub : int).          
           -- Create combiner and reducer functions using 'f' and 'g'
-          let type b = BoxedType a in
+          let type b = AsBox a in
           letfun
             combiner (x : b) (y : b) -> b =
-              case boxed @a (convertToBare @a repr x) of boxed @a (bx : a).
-              case boxed @a (convertToBare @a repr y) of boxed @a (by : a).
-              convertToBoxed @a repr (f bx by)
+              case boxed @a (asbare @a repr x) of boxed @a (bx : a).
+              case boxed @a (asbare @a repr y) of boxed @a (by : a).
+              asbox @a repr (f bx by)
           in
           letfun
             reducer @(range_N : intindex)
@@ -8351,16 +8351,16 @@ parallel_dim1_reduce @(a : bare)
                   boxed @(Stored int) (real_index : Stored int).
 
                 -- Call 'g' to compute a value, and 'f' to combine it
-                case boxed @a (convertToBare @a repr acc_loop) of
+                case boxed @a (asbare @a repr acc_loop) of
                   boxed @a (x : a).
                 case boxed @a (g real_index) of boxed @a (y : a).
-                convertToBoxed @a repr (f x y))
+                asbox @a repr (f x y))
           in
           let size : int = (ub -# lb) //# stride in
           case defineIntIndex size of
             someIInt @(N : intindex) (count : FIInt N).
-          let boxed_init : b = convertToBoxed @a repr (copy @a repr init) in
-          convertToBare @a repr
+          let boxed_init : b = asbox @a repr (copy @a repr init) in
+          asbare @a repr
           (blocked_1d_reduce @N @b count combiner boxed_init reducer)
           ret
 
@@ -8386,18 +8386,18 @@ parallel_list_dim_reduce1 @(a : bare)
     justVal @int (size : int).
       -- Create combiner and reducer functions using 'f' and 'g'
       let type ma = Maybe a in
-      let type b = BoxedType ma in
+      let type b = AsBox ma in
       letfun
         combiner (x : b) (y : b) -> b =
           -- Combine 'Maybe' values.  Use 'f' if both values are 'Just'.
-          case boxed @ma (convertToBare @ma mrepr x) of
+          case boxed @ma (asbare @ma mrepr x) of
             boxed @ma (maybe_x : ma).
           case maybe_x of {
             just @a (bx : a).
-              case boxed @ma (convertToBare @ma mrepr y) of
+              case boxed @ma (asbare @ma mrepr y) of
                 boxed @ma (maybe_y : ma).
               case maybe_y of {
-                just @a (by : a). convertToBoxed @ma mrepr (just @a (f bx by))
+                just @a (by : a). asbox @ma mrepr (just @a (f bx by))
               ; nothing @a. x
             }
           ; nothing @a. y
@@ -8406,7 +8406,7 @@ parallel_list_dim_reduce1 @(a : bare)
       letfun
         reducer @(range_N : intindex)
           (lb : int) (count : FIInt range_N) (acc_in : b) -> b =
-          case boxed @ma (convertToBare @ma mrepr acc_in) of
+          case boxed @ma (asbare @ma mrepr acc_in) of
             boxed @ma (m_acc_in : ma).
 
           letfun
@@ -8415,7 +8415,7 @@ parallel_list_dim_reduce1 @(a : bare)
               (subrange_count : FIInt subrange_N)
               (subrange_acc : a)
               -> b =
-            convertToBoxed @ma mrepr
+            asbox @ma mrepr
             (just @a
              (for @subrange_N @a repr subrange_count subrange_acc
               (\ (i : int) (x : a) (ret : OutPtr a) -> Store.
@@ -8445,9 +8445,9 @@ parallel_list_dim_reduce1 @(a : bare)
           }
       in
       case defineIntIndex size of someIInt @(N : intindex) (count : FIInt N).
-      let boxed_init : b = convertToBoxed @ma mrepr (nothing @a) in
+      let boxed_init : b = asbox @ma mrepr (nothing @a) in
       case boxed @ma
-           (convertToBare @ma mrepr
+           (asbare @ma mrepr
             (blocked_1d_reduce @N @b count combiner boxed_init reducer)) of
         boxed @ma (m_result : Maybe a).
       case m_result of {
@@ -9205,18 +9205,18 @@ boxedStencil2D @(t : bare -> bare) @(a b : bare)
   attribute(inline, inline_dimensionality) =
 
   -- This function is defined in terms of stencil2D.
-  let type boxed_b = StuckRef (BoxedType b) in
-  let repr_boxed_b : Repr boxed_b = repr_StuckRef @(BoxedType b) in
+  let type boxed_b = StuckRef (AsBox b) in
+  let repr_boxed_b : Repr boxed_b = repr_StuckRef @(AsBox b) in
 
   mk_barray2 @b
-  (stencil2D @t @a @(StuckRef (BoxedType b))
+  (stencil2D @t @a @(StuckRef (AsBox b))
    indexable is_2d repr_a repr_boxed_b
    output_dom stencil_dom
    (\ (vw : view dim2 a) (ret : OutPtr boxed_b) -> Store.
 
       -- Call 'gen_f' and re-box the result
-      stuckRef @(BoxedType b)
-      (convertToBoxed @b repr_b (gen_f vw)) ret)
+      stuckRef @(AsBox b)
+      (asbox @b repr_b (gen_f vw)) ret)
    input)
   ret;
 
@@ -9331,18 +9331,18 @@ boxedStencil3D @(t : bare -> bare) @(a b : bare)
   attribute(inline, inline_dimensionality) =
 
   -- This function is defined in terms of stencil3D.
-  let type boxed_b = StuckRef (BoxedType b) in
-  let repr_boxed_b : Repr boxed_b = repr_StuckRef @(BoxedType b) in
+  let type boxed_b = StuckRef (AsBox b) in
+  let repr_boxed_b : Repr boxed_b = repr_StuckRef @(AsBox b) in
 
   mk_barray3 @b
-  (stencil3D @t @a @(StuckRef (BoxedType b))
+  (stencil3D @t @a @(StuckRef (AsBox b))
    indexable is_3d repr_a repr_boxed_b
    output_dom stencil_dom
    (\ (vw : view dim3 a) (ret : OutPtr boxed_b) -> Store.
 
       -- Call 'gen_f' and re-box the result
-      stuckRef @(BoxedType b)
-      (convertToBoxed @b repr_b (gen_f vw)) ret)
+      stuckRef @(AsBox b)
+      (asbox @b repr_b (gen_f vw)) ret)
    input)
   ret;
 
@@ -9935,12 +9935,12 @@ histogram @(sh : box)
            -> Init (Ref (Stream sh a)).
            ref @(Stream sh a) x) in
 
-  case boxed @(BareType (Stream sh Sint)) (ref @(Stream sh Sint) input) of
-    boxed @(BareType (Stream sh Sint)) (b_input : Ref (Stream sh Sint)).
+  case boxed @(AsBare (Stream sh Sint)) (ref @(Stream sh Sint) input) of
+    boxed @(AsBare (Stream sh Sint)) (b_input : Ref (Stream sh Sint)).
 
   -- For each input value x, create a tuple (x, None)
-  case boxed @(BareType (Stream sh (Tuple2 Sint SNone)))
-       (fun_map @(\ (a : bare). BareType (Stream sh a))
+  case boxed @(AsBare (Stream sh (Tuple2 Sint SNone)))
+       (fun_map @(\ (a : bare). AsBare (Stream sh a))
                 @Sint @(Tuple2 Sint SNone)
                 traversable
                 shape_dict
@@ -9950,10 +9950,10 @@ histogram @(sh : box)
                   tuple2 @Sint @SNone
                   (copy @Sint repr_int x) (stored @NoneType None))
                 b_input)
-  of boxed @(BareType (Stream sh (Tuple2 Sint SNone)))
-     (b_input2 : BareType (Stream sh (Tuple2 Sint SNone))).
+  of boxed @(AsBare (Stream sh (Tuple2 Sint SNone)))
+     (b_input2 : AsBare (Stream sh (Tuple2 Sint SNone))).
 
-  fun_scatter @(\ (a : bare). BareType (Stream sh a))
+  fun_scatter @(\ (a : bare). AsBare (Stream sh a))
   @(Tuple2 Sint SNone) @(array1 Sint)
   shape_dict
   traversable
@@ -10056,7 +10056,7 @@ Sequence_return @(a : bare)
      then streamEmpty @st @a
      else streamValue @st @a
      	  (boxed @(Stored bool) (stored @bool True))
-	  (convertToBoxed @a repr ret));
+	  (asbox @a repr ret));
 
 
 Sequence_chain @(a : bare)
@@ -10079,7 +10079,7 @@ Sequence_chain @(a : bare)
        pull_from_second (s2 : state2) -> StreamNext state a =
          -- Pull from second stream
          case f2 s2 of {
-           streamValue @state2 @a (new_s2 : state2) (result : BoxedType a).
+           streamValue @state2 @a (new_s2 : state2) (result : AsBox a).
              streamValue @state @a (chainFromNext @state1 @state2 new_s2) result
          ; streamEmpty @state2 @a.
              streamEmpty @state @a
@@ -10088,7 +10088,7 @@ Sequence_chain @(a : bare)
        chainFromFirst @state1 @state2 (s1 : state1) (s2 : state2).
          -- Pull from first stream
          case f1 s1 of {
-           streamValue @state1 @a (new_s1 : state1) (result : BoxedType a).
+           streamValue @state1 @a (new_s1 : state1) (result : AsBox a).
              streamValue @state @a (chainFromFirst @state1 @state2 new_s1 s2) result
          ; streamEmpty @state1 @a.
              pull_from_second s2
@@ -10120,8 +10120,8 @@ Sequence_bind @(a b : bare)
   letfun {
     next_from_source (src_state : src_st) -> StreamNext bind_state b =
       case src_next src_state of {
-        streamValue @src_st @a (src_next_state : src_st) (src_value : BoxedType a).
-          case boxed @a (convertToBare @a repr src_value) of boxed @a (x : a).
+        streamValue @src_st @a (src_next_state : src_st) (src_value : AsBox a).
+          case boxed @a (asbare @a repr src_value) of boxed @a (x : a).
 	  case trans x of
 	    sequence @b @(trans_st : box)
 	    (trans_state : trans_st)
@@ -10137,7 +10137,7 @@ Sequence_bind @(a b : bare)
       (trans_next : trans_st -> StreamNext trans_st b)
       -> StreamNext bind_state b =
       case trans_next trans_state of {
-        streamValue @trans_st @b (trans_next_state : trans_st) (trans_value : BoxedType b).
+        streamValue @trans_st @b (trans_next_state : trans_st) (trans_value : AsBox b).
           let next_state : bind_state =
 	        bindFromTrans @src_st @a @b @trans_st
 		src_state trans_next_state trans_next in

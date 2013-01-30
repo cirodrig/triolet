@@ -396,14 +396,14 @@ coerceType g_k e_k g_t =
               _ -> internalError "coerceType"
        | e_kv == valV && g_kv == boxV ->
            case fromVarApp g_t
-           of Just (op, [arg]) | op `isCoreBuiltin` The_BoxedType ->
+           of Just (op, [arg]) | op `isCoreBuiltin` The_AsBox ->
                 case fromVarApp arg
                 of Just (op, [arg2]) | op `isCoreBuiltin` The_Stored -> return arg2
                    _ -> internalError "coerceType"
               _ -> internalError "coerceType"
        | e_kv == boxV && g_kv == valV ->
            return $
-           varApp (coreBuiltin The_BoxedType)
+           varApp (coreBuiltin The_AsBox)
            [varApp (coreBuiltin The_Stored) [g_t]]
        | e_kv == boxV && g_kv == bareV ->
            return $ boxedType g_t
@@ -434,8 +434,8 @@ sameKind _ _ = False
 -- * bareType  : box  -> bare
 writeType, boxedType, bareType :: Type -> Type
 writeType t = varApp (coreBuiltin The_Init) [t]
-boxedType t = varApp (coreBuiltin The_BoxedType) [t]
-bareType t  = varApp (coreBuiltin The_BareType) [t]
+boxedType t = varApp (coreBuiltin The_AsBox) [t]
+bareType t  = varApp (coreBuiltin The_AsBare) [t]
 
 -- | Convert a System F type to its natural representation
 cvtNaturalType :: Type -> RI (Type, Kind)
@@ -629,23 +629,23 @@ fromStoredCoercion ty = Coercion $ \k e -> do
       cas = ExpM $ CaseE defaultExpInfo e [alt]
   k cas
 
--- | Coerce @writer -> box@ using the @convertToBoxed@ function.
+-- | Coerce @writer -> box@ using the @asbox@ function.
 --   The argument is the @bare@ type.
 toBoxedTypeCoercion :: Type -> Coercion
 toBoxedTypeCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
   k (ExpM $ AppE defaultExpInfo box_op [ty] [dict, e])
   where
-    box_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_convertToBoxed)
+    box_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_asbox)
 
--- | Coerce @box -> writer@ using the @convertToBare@ function.
+-- | Coerce @box -> writer@ using the @asbare@ function.
 --   The argument is the @bare@ type.
 toBareTypeCoercion :: Type -> Coercion
 toBareTypeCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
   k (ExpM $ AppE defaultExpInfo bare_op [ty] [dict, e])
   where
-    bare_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_convertToBare)
+    bare_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_asbare)
 
 -- | Coerce @read -> write@ using the @copy@ function.
 --   The argument is the @bare@ type.
@@ -689,6 +689,8 @@ functionCoercion :: [Binder] -> [Type] -> Type
 functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
   | length g_tydom /= length e_tydom ||
     length g_dom /= length e_dom =
+      traceShow (pprType (forallType e_tydom $ funType e_dom e_rng) $$
+                 pprType (forallType g_tydom $ funType g_dom g_rng)) $
       internalError "functionCoercion: Mismached function types"
   | null g_dom =
       internalError "functionCoercion: Not a function type"

@@ -61,8 +61,8 @@ builtinTypeNames =
   , "OutPtr"
   , "Store"
   , "Init"
-  , "BoxedType"
-  , "BareType"
+  , "AsBox"
+  , "AsBare"
     
     -- Container type functions
   , "cartesianDomain"
@@ -780,8 +780,8 @@ builtinVariableNames =
     
     -- Inserted by representation inference
   , "copy"
-  , "convertToBoxed"
-  , "convertToBare"
+  , "asbox"
+  , "asbare"
   , "reprSizeAlign"
   , "dynamicCopyError"
   , "copyArray"

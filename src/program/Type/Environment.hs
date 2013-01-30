@@ -579,8 +579,8 @@ isAdapterCon v = v `elem` adapters
                 coreBuiltin The_Stored,
                 coreBuiltin The_Ref,
                 coreBuiltin The_Boxed,
-                coreBuiltin The_BoxedType,
-                coreBuiltin The_BareType]
+                coreBuiltin The_AsBox,
+                coreBuiltin The_AsBare]
 
 initializerType t =
   varApp (coreBuiltin The_OutPtr) [t] `FunT` VarT (coreBuiltin The_Store)

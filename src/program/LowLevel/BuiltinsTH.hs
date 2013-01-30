@@ -177,9 +177,9 @@ builtinFunctions =
   , (CoreName module_memory_py "copy",
      Right [| coreBuiltin (SystemF.The_copy) |])
   , (CoreName module_prim "convertToBoxed",
-     Right [| coreBuiltin (SystemF.The_convertToBoxed) |])
+     Right [| coreBuiltin (SystemF.The_asbox) |])
   , (CoreName module_prim "convertToBare",
-     Right [| coreBuiltin (SystemF.The_convertToBare) |])
+     Right [| coreBuiltin (SystemF.The_asbare) |])
 {-  , (CoreName module_structures "makeComplex",
      Right [| coreBuiltin (SystemF.The_makeComplex) |]) -}
   --, (CoreName module_list "list_len",

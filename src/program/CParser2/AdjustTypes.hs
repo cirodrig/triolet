@@ -173,8 +173,8 @@ getSFInfo tbl =
       v_Stored    = lookupVariableByName tbl "Stored"
       v_Ref       = lookupVariableByName tbl "Ref"
       v_Boxed     = lookupVariableByName tbl "Boxed"
-      v_BoxedType = lookupVariableByName tbl "BoxedType"
-      v_BareType  = lookupVariableByName tbl "BareType"
+      v_BoxedType = lookupVariableByName tbl "AsBox"
+      v_BareType  = lookupVariableByName tbl "AsBare"
   in SFInfo v_Init v_Stored v_Ref v_Boxed v_BoxedType v_BareType
 
 isAdapterCon1 :: SFInfo -> Var -> Bool

@@ -66,8 +66,8 @@ builtinTypeFunctions =
   , ("index", BuiltinTypeFunction indexPureTF indexMemTF)
   , ("slice", BuiltinTypeFunction slicePureTF sliceMemTF)
   , ("Stream", BuiltinTypeFunction streamPureTF streamMemTF)
-  , ("BoxedType", BuiltinTypeFunction boxedPureTF boxedMemTF)
-  , ("BareType", BuiltinTypeFunction barePureTF bareMemTF)
+  , ("AsBox", BuiltinTypeFunction boxedPureTF boxedMemTF)
+  , ("AsBare", BuiltinTypeFunction barePureTF bareMemTF)
   ]
 
 -- | The integers extended with @+infinity@ and @-infinity@
@@ -497,9 +497,9 @@ streamMemTF = typeFunction 1 compute_stream
         return_con con args =
           return $ varApp (coreBuiltin con) (args ++ other_args)
 
--- | The 'BoxedType' data type should never appear in the pure type system
+-- | The 'AsBox' data type should never appear in the pure type system
 boxedPureTF =
-  typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'BoxedType'")
+  typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'AsBox'")
 
 -- | Compute the boxed representation corresponding to a bare type
 boxedMemTF = typeFunction 1 compute_boxed
@@ -510,17 +510,17 @@ boxedMemTF = typeFunction 1 compute_boxed
       eval =<< reduceToWhnf arg_type
 
     compute_boxed args =
-      internalError $ "Kind error in application of 'BoxedType' (" ++ show (sep (punctuate (text ",") $ map pprType args)) ++ ")"
+      internalError $ "Kind error in application of 'AsBox' (" ++ show (sep (punctuate (text ",") $ map pprType args)) ++ ")"
 
 
     eval :: forall m. EvalMonad m => Type -> m Type
     eval arg =
       case fromVarApp arg
       of Just (op, args')
-           | op `isCoreBuiltin` The_BareType ||
+           | op `isCoreBuiltin` The_AsBare ||
              op `isCoreBuiltin` The_Ref ->
-               -- BoxedType (BareType t)   =  t
-               -- BoxedType (StoredBox t)  =  t
+               -- AsBox (AsBare t)   =  t
+               -- AsBox (StoredBox t)  =  t
                case args'
                of [arg'] -> reduceToWhnf arg'
 
@@ -534,7 +534,7 @@ boxedMemTF = typeFunction 1 compute_boxed
          _ -> cannot_reduce
       where
         cannot_reduce =
-          return $ varApp (coreBuiltin The_BoxedType) [arg]
+          return $ varApp (coreBuiltin The_AsBox) [arg]
           
 -- | The 'BareType' data type should never appear in the pure type system
 barePureTF =
@@ -558,10 +558,10 @@ bareMemTF = typeFunction 1 compute_bare
          AllT {} -> stored_type -- Forall'd types are naturally boxed
          _ -> case fromVarApp arg
               of Just (op, args')
-                   | op `isCoreBuiltin` The_BoxedType ||
+                   | op `isCoreBuiltin` The_AsBox ||
                      op `isCoreBuiltin` The_Boxed ->
-                       -- BareType (BoxedType t)  =  t
-                       -- BareType (Boxed t)      =  t
+                       -- AsBare (AsBox t)  =  t
+                       -- AsBare (Boxed t)      =  t
                        case args'
                        of [arg'] -> reduceToWhnf arg'
 
@@ -583,4 +583,4 @@ bareMemTF = typeFunction 1 compute_bare
         stored_type =
           return $ varApp (coreBuiltin The_Ref) [arg]
         cannot_reduce =
-          return $ varApp (coreBuiltin The_BareType) [arg]
+          return $ varApp (coreBuiltin The_AsBare) [arg]

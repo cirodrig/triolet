@@ -328,8 +328,8 @@ getVariableReplacements rs =
 generalRewrites :: RewriteRuleSet
 generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
   where
-    table = [ (coreBuiltin The_convertToBare, rwConvertToBare)
-            , (coreBuiltin The_convertToBoxed, rwConvertToBoxed)
+    table = [ (coreBuiltin The_asbare, rwAsBare)
+            , (coreBuiltin The_asbox, rwAsBox)
             -- , (coreBuiltin The_stencil2D, rwStencil2D)
             --, (coreBuiltin The_darr1_reduce, rwDarr1Reduce)
             --, (coreBuiltin The_darr1_reduce1, rwDarr1Reduce1)
@@ -467,18 +467,18 @@ rewriteApp ruleset int_env id_supply tenv inf op_var ty_args args =
           let old_exp = pprExp $ appE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args subst_args
           traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x-}
 
--- | Turn a call of 'convertToBare' into a constructor application or
+-- | Turn a call of 'asbare' into a constructor application or
 --   case statement, if the type is known.  Also, cancel applications of
---   'convertToBare' with 'convertToBoxed'.
-rwConvertToBare :: RewriteRule
-rwConvertToBare inf [bare_type] [repr, arg] 
+--   'asbare' with 'asbox'.
+rwAsBare :: RewriteRule
+rwAsBare inf [bare_type] [repr, arg] 
   | Just (op, _, [_, arg']) <- unpackVarAppM arg,
-    op `isCoreBuiltin` The_convertToBoxed =
+    op `isCoreBuiltin` The_asbox =
       -- Cancel applications of these constructors 
-      -- convertToBare (repr, convertToBoxed (_, e)) = e
+      -- asbare (repr, asbox (_, e)) = e
       return $ Just arg'
   | otherwise = do
-      -- If the bare type is "StoredBox t", then construct the value
+      -- If the bare type is "Ref t", then construct the value
       whnf_type <- reduceToWhnf bare_type
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
@@ -488,7 +488,7 @@ rwConvertToBare inf [bare_type] [repr, arg]
           -- If the boxed type is "Boxed t", then
           -- deconstruct and copy the value
           boxed_type <-
-            reduceToWhnf $ varApp (coreBuiltin The_BoxedType) [whnf_type]
+            reduceToWhnf $ varApp (coreBuiltin The_AsBox) [whnf_type]
           case fromVarApp boxed_type of
             Just (ty_op, [_])
               | ty_op `isCoreBuiltin` The_Boxed ->
@@ -515,26 +515,26 @@ rwConvertToBare inf [bare_type] [repr, arg]
            varAppE (coreBuiltin The_copy) [whnf_type]
            [return repr, mkVarE unboxed_ref])]
 
-rwConvertToBare inf [ty] [repr, arg, ret] = do
+rwAsBare inf [ty] [repr, arg, ret] = do
   -- Convert the partial application
-  m_result <- rwConvertToBare inf [ty] [repr, arg]
+  m_result <- rwAsBare inf [ty] [repr, arg]
 
   -- If successful, apply the converted expression to the return value
   return $! case m_result
             of Nothing -> Nothing
                Just e  -> Just $ appE inf e [] [ret]
 
-rwConvertToBare _ _ _ = return Nothing
+rwAsBare _ _ _ = return Nothing
 
-rwConvertToBoxed :: RewriteRule
-rwConvertToBoxed inf [bare_type] [repr, arg] 
+rwAsBox :: RewriteRule
+rwAsBox inf [bare_type] [repr, arg] 
   | Just (op, _, [_, arg']) <- unpackVarAppM arg,
-    op `isCoreBuiltin` The_convertToBare = 
+    op `isCoreBuiltin` The_asbare = 
       -- Cancel applications of these constructors 
-      -- convertToBoxed (_, convertToBare (_, e)) = e
+      -- asbox (_, asbare (_, e)) = e
       return $ Just arg'
   | otherwise = do
-      -- If the bare type is "StoredBox t", then deconstruct the value
+      -- If the bare type is "Ref t", then deconstruct the value
       whnf_type <- reduceToWhnf bare_type
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
@@ -543,7 +543,7 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
         _ -> do
           -- If the boxed type is "Boxed t", then construct the value
           boxed_type <-
-            reduceToWhnf $ varApp (coreBuiltin The_BoxedType) [whnf_type]
+            reduceToWhnf $ varApp (coreBuiltin The_AsBox) [whnf_type]
           case fromVarApp boxed_type of
             Just (ty_op, [_])
               | ty_op `isCoreBuiltin` The_Boxed ->
@@ -552,7 +552,7 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
               -- Otherwise, cannot simplify
               return Nothing
   where
-    -- Argument is an initializer expression whose output has 'StoredBox' type.
+    -- Argument is an initializer expression whose output has 'Ref' type.
     -- Bind it to a temporary value, then deconstruct it.
     deconstruct_stored_box boxed_type = do
       tenv <- getTypeEnv
@@ -566,7 +566,7 @@ rwConvertToBoxed inf [bare_type] [repr, arg]
     construct_boxed whnf_type = do
       conE inf (VarCon (coreBuiltin The_boxed) [whnf_type] []) [arg]
 
-rwConvertToBoxed _ _ _ = return Nothing
+rwAsBox _ _ _ = return Nothing
 
 {-
 -- | Rewrite 'stencil2D' to 'viewStencil2D' if the argument is a view.
