@@ -372,6 +372,22 @@ builtinVariableNames =
   , "IndexableDict_barray2_get_shape"
   , "IndexableDict_barray3_at_point"
   , "IndexableDict_barray3_get_shape"
+
+    -- Comparisons on numeric values
+  , "eqI"
+  , "neI"
+  , "ltI"
+  , "leI"
+  , "gtI"
+  , "geI"
+  , "eqF"
+  , "neF"
+  , "ltF"
+  , "leF"
+  , "gtF"
+  , "geF"
+
+    -- Type class dictionary members
   , "EqDict_int"
   , "EqDict_int_eq"
   , "EqDict_int_ne"

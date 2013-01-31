@@ -225,16 +225,20 @@ data Repr (a : bare) : box
                                 -- (True if an 'a' definitely doesn't contain pointers)
 };
 
-data EqDict (a : bare) : box
+data EqDict (a : box) : box
 {
   eqDict ()
-  (a -> a -> bool, a -> a -> bool);
+  (a -> a -> Boxed (Stored bool), a -> a -> Boxed (Stored bool));
 };
 
 data OrdDict (a : bare) : box
 {
   ordDict ()
-  (EqDict a, a -> a -> bool, a -> a -> bool, a -> a -> bool, a -> a -> bool);
+  (EqDict a,
+   a -> a -> Boxed (Stored bool),
+   a -> a -> Boxed (Stored bool),
+   a -> a -> Boxed (Stored bool),
+   a -> a -> Boxed (Stored bool));
 };
 
 data AdditiveDict (a : bare) : box
@@ -4736,63 +4740,142 @@ IndexableDict_barray3_get_shape @(a : bare)
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
 
-EqDict_int : EqDict (Stored int);
-EqDict_int_eq : int -> int -> bool;
-EqDict_int_ne : int -> int -> bool;
-
-EqDict_float : EqDict (Stored float);
-EqDict_float_eq : float -> float -> bool;
-EqDict_float_ne : float -> float -> bool;
-
-EqDict_Tuple2 : (a b : bare) -> EqDict a -> EqDict b -> EqDict (Tuple2 a b);
-EqDict_Tuple2_eq @(a b : bare)
-  (eqA : EqDict a) (eqB : EqDict b) (x : Tuple2 a b) (y : Tuple2 a b)
-  -> bool
+EqDict_int : EqDict (Boxed (Stored int));
+EqDict_int_eq (bsx : Boxed (Stored int)) (bsy : Boxed (Stored int))
+  -> Boxed (Stored bool)
   attribute(inline) =
-  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
-  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
-  case x of tuple2 @a @b (xa : a) (xb : b).
-  case y of tuple2 @a @b (ya : a) (yb : b).
-  and (eq_a xa ya) (eq_b xb yb);
+  boxBoolValue (eqI (unboxIntValue bsx) (unboxIntValue bsy));
 
-
-EqDict_Tuple2_ne @(a b : bare)
-  (eqA : EqDict a) (eqB : EqDict b) (x : Tuple2 a b) (y : Tuple2 a b)
-  -> bool
+EqDict_int_ne (bsx : Boxed (Stored int)) (bsy : Boxed (Stored int))
+  -> Boxed (Stored bool)
   attribute(inline) =
-  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
-  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
-  case x of tuple2 @a @b (xa : a) (xb : b).
-  case y of tuple2 @a @b (ya : a) (yb : b).
-  and (ne_a xa ya) (ne_b xb yb);
+  boxBoolValue (neI (unboxIntValue bsx) (unboxIntValue bsy));
+
+EqDict_float : EqDict (Boxed (Stored float));
+EqDict_float_eq (bsx : Boxed (Stored float)) (bsy : Boxed (Stored float))
+  -> Boxed (Stored bool)
+  attribute(inline) =
+  boxBoolValue (eqF (unboxFloatValue bsx) (unboxFloatValue bsy));
+
+EqDict_float_ne (bsx : Boxed (Stored float)) (bsy : Boxed (Stored float))
+  -> Boxed (Stored bool)
+  attribute(inline) =
+  boxBoolValue (neF (unboxFloatValue bsx) (unboxFloatValue bsy));
+
+EqDict_Tuple2 : (a b : box) -> Repr a -> Repr b -> EqDict a -> EqDict b
+             -> EqDict (Boxed (Tuple2 (AsBare a) (AsBare b)));
+EqDict_Tuple2_eq @(a b : box)
+  (repA : Repr (AsBare a)) (repB : Repr (AsBare b))
+  (eqA : EqDict a) (eqB : EqDict b)
+  (bx : Boxed (Tuple2 (AsBare a) (AsBare b)))
+  (by : Boxed (Tuple2 (AsBare a) (AsBare b)))
+  -> Boxed (Stored bool)
+  attribute(inline) =
+  let type ba = AsBare a in
+  let type bb = AsBare b in
+  case eqA of eqDict @a (eq_a : a -> a -> Boxed (Stored bool)) (ne_a : a -> a -> Boxed (Stored bool)).
+  case eqB of eqDict @b (eq_b : b -> b -> Boxed (Stored bool)) (ne_b : b -> b -> Boxed (Stored bool)).
+  case bx of boxed @(Tuple2 ba bb) (x : Tuple2 ba bb).
+  case by of boxed @(Tuple2 ba bb) (y : Tuple2 ba bb).
+  case x of tuple2 @ba @bb (xa : ba) (xb : bb).
+  case y of tuple2 @ba @bb (ya : ba) (yb : bb).
+
+  boxBoolValue
+  (and (unboxBoolValue
+        (eq_a (asbox @ba repA (copy @ba repA xa))
+              (asbox @ba repA (copy @ba repA ya))))
+       (unboxBoolValue
+        (eq_b (asbox @bb repB (copy @bb repB xb))
+              (asbox @bb repB (copy @bb repB yb)))));
 
 
-EqDict_Tuple3 : (a b c : bare) -> EqDict a -> EqDict b -> EqDict c
-             -> EqDict (Tuple3 a b c);
-EqDict_Tuple3_eq @(a b c : bare)
+EqDict_Tuple2_ne @(a b : box)
+  (repA : Repr (AsBare a)) (repB : Repr (AsBare b))
+  (eqA : EqDict a) (eqB : EqDict b)
+  (bx : Boxed (Tuple2 (AsBare a) (AsBare b)))
+  (by : Boxed (Tuple2 (AsBare a) (AsBare b)))
+  -> Boxed (Stored bool)
+  attribute(inline) =
+  let type ba = AsBare a in
+  let type bb = AsBare b in
+  case eqA of eqDict @a (eq_a : a -> a -> Boxed (Stored bool)) (ne_a : a -> a -> Boxed (Stored bool)).
+  case eqB of eqDict @b (eq_b : b -> b -> Boxed (Stored bool)) (ne_b : b -> b -> Boxed (Stored bool)).
+  case bx of boxed @(Tuple2 ba bb) (x : Tuple2 ba bb).
+  case by of boxed @(Tuple2 ba bb) (y : Tuple2 ba bb).
+  case x of tuple2 @ba @bb (xa : ba) (xb : bb).
+  case y of tuple2 @ba @bb (ya : ba) (yb : bb).
+
+  boxBoolValue
+  (and (unboxBoolValue
+        (ne_a (asbox @ba repA (copy @ba repA xa))
+              (asbox @ba repA (copy @ba repA ya))))
+       (unboxBoolValue
+        ((ne_b (asbox @bb repB (copy @bb repB xb))
+              (asbox @bb repB (copy @bb repB yb))))));
+
+
+EqDict_Tuple3 : (a b c : box)
+             -> Repr (AsBare a) -> Repr (AsBare b) -> Repr (AsBare c)
+             -> EqDict a -> EqDict b -> EqDict c
+             -> EqDict (Boxed (Tuple3 (AsBare a) (AsBare b) (AsBare c)));
+EqDict_Tuple3_eq @(a b c : box)
+  (repA : Repr (AsBare a)) (repB : Repr (AsBare b)) (repC : Repr (AsBare c))
   (eqA : EqDict a) (eqB : EqDict b) (eqC : EqDict c)
-  (x : Tuple3 a b c) (y : Tuple3 a b c)
-  -> bool
+  (bx : Boxed (Tuple3 (AsBare a) (AsBare b) (AsBare c)))
+  (by : Boxed (Tuple3 (AsBare a) (AsBare b) (AsBare c)))
+  -> Boxed (Stored bool)
   attribute(inline) =
-  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
-  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
-  case eqC of eqDict @c (eq_c : c -> c -> bool) (ne_c : c -> c -> bool).
-  case x of tuple3 @a @b @c (xa : a) (xb : b) (xc : c).
-  case y of tuple3 @a @b @c (ya : a) (yb : b) (yc : c).
-  and (and (eq_a xa ya) (eq_b xb yb)) (eq_c xc yc);
+  let type ba = AsBare a in
+  let type bb = AsBare b in
+  let type bc = AsBare c in
+  case eqA of eqDict @a (eq_a : a -> a -> Boxed (Stored bool)) (ne_a : a -> a -> Boxed (Stored bool)).
+  case eqB of eqDict @b (eq_b : b -> b -> Boxed (Stored bool)) (ne_b : b -> b -> Boxed (Stored bool)).
+  case eqC of eqDict @c (eq_c : c -> c -> Boxed (Stored bool)) (ne_c : c -> c -> Boxed (Stored bool)).
+  case bx of boxed @(Tuple3 ba bb bc) (x : Tuple3 ba bb bc).
+  case by of boxed @(Tuple3 ba bb bc) (y : Tuple3 ba bb bc).
+  case x of tuple3 @ba @bb @bc (xa : ba) (xb : bb) (xc : bc).
+  case y of tuple3 @ba @bb @bc (ya : ba) (yb : bb) (yc : bc).
+
+  let eq1 : bool = unboxBoolValue
+                   (eq_a (asbox @ba repA (copy @ba repA xa))
+                         (asbox @ba repA (copy @ba repA ya))) in
+  let eq2 : bool = unboxBoolValue
+                   (eq_b (asbox @bb repB (copy @bb repB xb))
+                         (asbox @bb repB (copy @bb repB yb))) in
+  let eq3 : bool = unboxBoolValue
+                   (eq_c (asbox @bc repC (copy @bc repC xc))
+                         (asbox @bc repC (copy @bc repC yc))) in
+  boxBoolValue (and (and eq1 eq2) eq3);
 
 
-EqDict_Tuple3_ne @(a b c : bare)
+EqDict_Tuple3_ne @(a b c : box)
+  (repA : Repr (AsBare a)) (repB : Repr (AsBare b)) (repC : Repr (AsBare c))
   (eqA : EqDict a) (eqB : EqDict b) (eqC : EqDict c)
-  (x : Tuple3 a b c) (y : Tuple3 a b c)
-  -> bool
+  (bx : Boxed (Tuple3 (AsBare a) (AsBare b) (AsBare c)))
+  (by : Boxed (Tuple3 (AsBare a) (AsBare b) (AsBare c)))
+  -> Boxed (Stored bool)
   attribute(inline) =
-  case eqA of eqDict @a (eq_a : a -> a -> bool) (ne_a : a -> a -> bool).
-  case eqB of eqDict @b (eq_b : b -> b -> bool) (ne_b : b -> b -> bool).
-  case eqC of eqDict @c (eq_c : c -> c -> bool) (ne_c : c -> c -> bool).
-  case x of tuple3 @a @b @c (xa : a) (xb : b) (xc : c).
-  case y of tuple3 @a @b @c (ya : a) (yb : b) (yc : c).
-  and (and (ne_a xa ya) (ne_b xb yb)) (ne_c xc yc);
+  let type ba = AsBare a in
+  let type bb = AsBare b in
+  let type bc = AsBare c in
+  case eqA of eqDict @a (eq_a : a -> a -> Boxed (Stored bool)) (ne_a : a -> a -> Boxed (Stored bool)).
+  case eqB of eqDict @b (eq_b : b -> b -> Boxed (Stored bool)) (ne_b : b -> b -> Boxed (Stored bool)).
+  case eqC of eqDict @c (eq_c : c -> c -> Boxed (Stored bool)) (ne_c : c -> c -> Boxed (Stored bool)).
+  case bx of boxed @(Tuple3 ba bb bc) (x : Tuple3 ba bb bc).
+  case by of boxed @(Tuple3 ba bb bc) (y : Tuple3 ba bb bc).
+  case x of tuple3 @ba @bb @bc (xa : ba) (xb : bb) (xc : bc).
+  case y of tuple3 @ba @bb @bc (ya : ba) (yb : bb) (yc : bc).
+
+  let ne1 : bool = unboxBoolValue
+                   (ne_a (asbox @ba repA (copy @ba repA xa))
+                         (asbox @ba repA (copy @ba repA ya))) in
+  let ne2 : bool = unboxBoolValue
+                   (ne_b (asbox @bb repB (copy @bb repB xb))
+                         (asbox @bb repB (copy @bb repB yb))) in
+  let ne3 : bool = unboxBoolValue
+                   (ne_c (asbox @bc repC (copy @bc repC xc))
+                         (asbox @bc repC (copy @bc repC yc))) in
+  boxBoolValue (and (and ne1 ne2) ne3);
 
 
 OrdDict_int : OrdDict (Stored int);
@@ -5615,7 +5698,45 @@ CartesianDict_dim3_unbounded :
     dim3;
 
 -------------------------------------------------------------------------------
+-- Boxing/unboxing helper functions
+
+boxIntValue (n : int) -> Boxed (Stored int) =
+  boxed @(Stored int) (stored @int n);
+
+unboxIntValue (n : Boxed (Stored int)) -> int =
+  case n of boxed @(Stored int) (sn : Stored int).
+  case sn of stored @int (un : int). un;
+
+boxFloatValue (n : float) -> Boxed (Stored float) =
+  boxed @(Stored float) (stored @float n);
+
+unboxFloatValue (n : Boxed (Stored float)) -> float =
+  case n of boxed @(Stored float) (sn : Stored float).
+  case sn of stored @float (un : float). un;
+
+boxBoolValue (n : bool) -> Boxed (Stored bool) =
+  boxed @(Stored bool) (stored @bool n);
+
+unboxBoolValue (n : Boxed (Stored bool)) -> bool =
+  case n of boxed @(Stored bool) (sn : Stored bool).
+  case sn of stored @bool (un : bool). un;
+
+-------------------------------------------------------------------------------
 -- other arithmetic
+
+eqI : int -> int -> bool;
+neI : int -> int -> bool;
+ltI : int -> int -> bool;
+leI : int -> int -> bool;
+gtI : int -> int -> bool;
+geI : int -> int -> bool;
+
+eqF : float -> float -> bool;
+neF : float -> float -> bool;
+ltF : float -> float -> bool;
+leF : float -> float -> bool;
+gtF : float -> float -> bool;
+geF : float -> float -> bool;
 
 min_int : int -> int -> int;
 max_int : int -> int -> int;
@@ -10270,10 +10391,10 @@ for @(N : intindex) @(acc : bare)
   -- Main loop
   letfun
     loop (i : int) (x : acc) (r : OutPtr acc) -> Store =
-      if EqDict_int_eq i bound
+      if i ==# bound
       then copy @acc repr x r
       else case boxed @acc (f i x) of boxed @acc (y : acc).
-           loop (AdditiveDict_int_add i 1) y r
+           loop (i +# 1) y r
   in loop 0 init ret;
 
 
@@ -10290,9 +10411,9 @@ for_box @(N : intindex) @(acc : box)
   -- Main loop
   letfun
     loop (i : int) (x : acc) -> acc =
-      if EqDict_int_eq i bound
+      if i ==# bound
       then x
-      else loop (AdditiveDict_int_add i 1) (f i x)
+      else loop (i +# 1) (f i x)
   in loop 0 init;
 
 

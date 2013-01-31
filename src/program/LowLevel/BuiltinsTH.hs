@@ -353,29 +353,29 @@ builtinFunctions =
 
     -- Functions that are replaced by primitive operations
   , (CoreName module_prim "eq_int",
-     Right [| coreBuiltin (SystemF.The_EqDict_int_eq) |])
+     Right [| coreBuiltin (SystemF.The_eqI) |])
   , (CoreName module_prim "ne_int",
-     Right [| coreBuiltin (SystemF.The_EqDict_int_ne) |])
+     Right [| coreBuiltin (SystemF.The_neI) |])
   , (CoreName module_prim "eq_float",
-     Right [| coreBuiltin (SystemF.The_EqDict_float_eq) |])
+     Right [| coreBuiltin (SystemF.The_eqF) |])
   , (CoreName module_prim "ne_float",
-     Right [| coreBuiltin (SystemF.The_EqDict_float_ne) |])
+     Right [| coreBuiltin (SystemF.The_neF) |])
   , (CoreName module_prim "lt_int",
-     Right [| coreBuiltin SystemF.The_OrdDict_int_lt |])
+     Right [| coreBuiltin SystemF.The_ltI |])
   , (CoreName module_prim "le_int",
-     Right [| coreBuiltin SystemF.The_OrdDict_int_le |])
+     Right [| coreBuiltin SystemF.The_leI |])
   , (CoreName module_prim "gt_int",
-     Right [| coreBuiltin SystemF.The_OrdDict_int_gt |])
+     Right [| coreBuiltin SystemF.The_gtI |])
   , (CoreName module_prim "ge_int",
-     Right [| coreBuiltin SystemF.The_OrdDict_int_ge |])
+     Right [| coreBuiltin SystemF.The_geI |])
   , (CoreName module_prim "lt_float",
-     Right [| coreBuiltin SystemF.The_OrdDict_float_lt |])
+     Right [| coreBuiltin SystemF.The_ltF |])
   , (CoreName module_prim "le_float",
-     Right [| coreBuiltin SystemF.The_OrdDict_float_le |])
+     Right [| coreBuiltin SystemF.The_leF |])
   , (CoreName module_prim "gt_float",
-     Right [| coreBuiltin SystemF.The_OrdDict_float_gt |])
+     Right [| coreBuiltin SystemF.The_gtF |])
   , (CoreName module_prim "ge_float",
-     Right [| coreBuiltin SystemF.The_OrdDict_float_ge |])
+     Right [| coreBuiltin SystemF.The_geF |])
     -- the_AdditiveDict_int_{add,sub} were replaced by intrinsics
   , (CoreName module_prim "negate_int",
      Right [| coreBuiltin (SystemF.The_AdditiveDict_int_negate) |])

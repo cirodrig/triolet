@@ -1711,7 +1711,7 @@ builtinFunctionSimplifiers =
   where
     entries =
       [ (coreBuiltin The_copy, 1, 2, rwCopyApp)
-      , (coreBuiltin The_EqDict_int_eq, 0, 2, rwIntEqApp)
+      , (coreBuiltin The_eqI, 0, 2, rwIntEqApp)
       , (coreBuiltin The_and, 0, 2, rwAndApp)
       ]
 
@@ -1896,7 +1896,7 @@ rwIntEqApp inf [] [arg1, arg2] = do
         _                       -> can't_simplify
     _ -> can't_simplify
   where
-    eq_op = varE inf (coreBuiltin The_EqDict_int_eq)
+    eq_op = varE inf (coreBuiltin The_eqI)
       
 rwAndApp inf [] [arg1, arg2] = do
   -- Evaluate arguments

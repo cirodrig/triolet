@@ -360,12 +360,12 @@ operExpTable =
   , [ infix_op "*#" "MultiplicativeDict_int_mul" AssocLeft]
   , [ infix_op "+#" "AdditiveDict_int_add" AssocLeft
     , infix_op "-#" "AdditiveDict_int_sub" AssocLeft]
-  , [ infix_op "<#" "OrdDict_int_lt" AssocNone
-    , infix_op ">#" "OrdDict_int_gt" AssocNone
-    , infix_op "<=#" "OrdDict_int_le" AssocNone
-    , infix_op ">=#" "OrdDict_int_ge" AssocNone
-    , infix_op "==#" "EqDict_int_eq" AssocNone
-    , infix_op "/=#" "EqDict_int_ne" AssocNone]
+  , [ infix_op "<#" "ltI" AssocNone
+    , infix_op ">#" "gtI" AssocNone
+    , infix_op "<=#" "leI" AssocNone
+    , infix_op ">=#" "geI" AssocNone
+    , infix_op "==#" "eqI" AssocNone
+    , infix_op "/=#" "neI" AssocNone]
   ]
   where
     infix_op operator_name function_name associativity =
