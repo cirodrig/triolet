@@ -172,8 +172,7 @@ mkListE pos elt_type elt_repr elts =
       -- The array type
       array_type = DelayedType $ do
         sf_elt_type <- case elt_type of DelayedType t -> t
-        return $ SF.varApp (SF.coreBuiltin SF.The_arr)
-          [SF.IntT $ fromIntegral n, sf_elt_type]
+        return $ SF.varApp SF.arrV [SF.IntT $ fromIntegral n, sf_elt_type]
 
       -- Indexed integer 
       fiint_repr = mkBuiltinCallE pos TIBoxed SF.The_repr_FIInt 
@@ -196,19 +195,19 @@ mkListE pos elt_type elt_repr elts =
      (SF.coreBuiltin SF.The_make_list) [elt_type] [size]
      [] [integer, array_box]
   where
-    sf_int_type = SF.VarT (SF.coreBuiltin SF.The_int)
+    sf_int_type = SF.intT
     fiint_con = SF.coreBuiltin SF.The_fiInt
 
 mkIntLitE pos n =
   let repr = mkVarE noSourcePos TIBoxed
              (SF.coreBuiltin SF.The_repr_int)
-      sf_int_type = SF.VarT (SF.coreBuiltin SF.The_int)
+      sf_int_type = SF.intT
   in LitTE (tiInfo pos repr) $ SF.IntL (fromIntegral n) sf_int_type
 
 mkFloatLitE pos n =
   let repr = mkVarE noSourcePos TIBoxed
              (SF.coreBuiltin SF.The_repr_float)
-      sf_float_type = SF.VarT (SF.coreBuiltin SF.The_float)
+      sf_float_type = SF.floatT
   in LitTE (tiInfo pos repr) $ SF.FloatL n sf_float_type
 
 mkLitE :: SourcePos -> Untyped.Lit -> TIExp

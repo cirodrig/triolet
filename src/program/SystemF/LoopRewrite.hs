@@ -163,7 +163,7 @@ replaceWithParallelApp inf op_var ty_args args =
         -- True if 't' is an 'OutPtr' type
         is_out_ptr t =
           case fromVarApp t
-          of Just (op, _) -> op `isCoreBuiltin` The_OutPtr
+          of Just (op, _) -> op == outPtrV
              _ -> False
 
     parallel_function_table =

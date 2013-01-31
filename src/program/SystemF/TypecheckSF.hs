@@ -31,7 +31,6 @@ import Globals
 import SystemF.Print
 import SystemF.Syntax
 import SystemF.Typecheck
-import Builtins.Builtins
 import Type.Eval
 import Type.Environment
 import Type.Type
@@ -347,7 +346,7 @@ typeInferArrayE inf ty es = do
 
   -- Return an array type
   let len = IntT $ fromIntegral $ length es
-  return $ varApp (coreBuiltin The_arr) [len, ty]
+  return $ arrT `typeApp` [len, ty]
 
 typeCheckEntity (FunEnt f) = void $ typeInferFun f
 

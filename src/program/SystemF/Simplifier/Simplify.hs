@@ -2889,7 +2889,7 @@ rwFun' (FunSM f) = do
             last_param_kind = toBaseKind $ typeKind tenv $ patMType last_param
             returns_store =
               case rtype
-              of VarT v -> v `isCoreBuiltin` The_Store
+              of VarT v -> v == storeV
                  _ -> False
         if last_param_kind == OutK && returns_store
           then setCurrentReturnParameter (Just last_param) k

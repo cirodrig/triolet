@@ -180,8 +180,8 @@ mkAlt tenv con ty_args mk_body =
        return $ AltM $ Alt decon patterns body
      _ -> internalError "mkAlt"
 
-outType t = varApp (coreBuiltin The_OutPtr) [t]
-initEffectType t = VarT (coreBuiltin The_Store)
+outType t = outPtrT `typeApp` [t]
+initEffectType t = storeT
 storedType t = varApp (coreBuiltin The_Stored) [t]
 
 writerType t = outType t `FunT` initEffectType t

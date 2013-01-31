@@ -48,6 +48,12 @@ lookupBuiltinCon thing m =
   of Just v -> ConTy v
      Nothing -> internalError $ "lookupBuiltinThing: Not defined:" ++ show (coreBuiltin thing)
 
+lookupBuiltinVar :: SF.Var -> TyConMap -> HMType
+lookupBuiltinVar v m =
+  case Map.lookup v m
+  of Just v -> ConTy v
+     Nothing -> internalError $ "lookupBuiltinThing: Not defined:" ++ show v
+
 type InitM a = MaybeT SF.TypeEvalM a
 
 runInitM = runMaybeT
@@ -304,39 +310,39 @@ initializerClass (TyConInitializer {}) = TCCCon
 initializerClass (TyFamInitializer {}) = TCCFun
 initializerClass (TyClsInitializer {}) = TCCCls
 
-tyConInitializers :: [(BuiltinTyCon, BuiltinThing, TyConInitializer)]
+tyConInitializers :: [(BuiltinTyCon, Either SF.Var BuiltinThing, TyConInitializer)]
 tyConInitializers =
   [(c, t, TyConInitializer) | (c, t) <- con_initializers] ++
-  [(c, t, TyFamInitializer f) | (c, t, f) <- fam_initializers] ++
-  [(c, t, TyClsInitializer b f) | (c, t, b, f) <- cls_initializers]
+  [(c, Right t, TyFamInitializer f) | (c, t, f) <- fam_initializers] ++
+  [(c, Right t, TyClsInitializer b f) | (c, t, b, f) <- cls_initializers]
   where
     con_initializers =
-      [ (TheTC_int,              The_int)
-      , (TheTC_float,            The_float)
-      , (TheTC_bool,             The_bool)
-      , (TheTC_NoneType,         The_NoneType)
-      , (TheTC_SliceObject,      The_SliceObject)
-      , (TheTC_StuckRef,         The_StuckRef)
-      , (TheTC_iter,             The_Stream)
-      , (TheTC_list,             The_list)
-      , (TheTC_array0,           The_array0)
-      , (TheTC_array1,           The_array1)
-      , (TheTC_array2,           The_array2)
-      , (TheTC_array3,           The_array3)
-      , (TheTC_blist,            The_blist)
-      , (TheTC_barray1,          The_barray1)
-      , (TheTC_barray2,          The_barray2)
-      , (TheTC_barray3,          The_barray3)
-      , (TheTC_Maybe,            The_Maybe)
-      , (TheTC_intset,           The_intset)
-      , (TheTC_llist,            The_llist)
-      , (TheTC_list_dim,         The_list_dim)
-      , (TheTC_dim0,             The_dim0)
-      , (TheTC_dim1,             The_dim1)
-      , (TheTC_dim2,             The_dim2)
-      , (TheTC_dim3,             The_dim3)
-      , (TheTC_view,             The_view)
-      , (TheTC_Scatter,          The_Scatter)
+      [ (TheTC_int,              Left SF.intV)
+      , (TheTC_float,            Left SF.floatV)
+      , (TheTC_bool,             Right The_bool)
+      , (TheTC_NoneType,         Right The_NoneType)
+      , (TheTC_SliceObject,      Right The_SliceObject)
+      , (TheTC_StuckRef,         Right The_StuckRef)
+      , (TheTC_iter,             Right The_Stream)
+      , (TheTC_list,             Right The_list)
+      , (TheTC_array0,           Right The_array0)
+      , (TheTC_array1,           Right The_array1)
+      , (TheTC_array2,           Right The_array2)
+      , (TheTC_array3,           Right The_array3)
+      , (TheTC_blist,            Right The_blist)
+      , (TheTC_barray1,          Right The_barray1)
+      , (TheTC_barray2,          Right The_barray2)
+      , (TheTC_barray3,          Right The_barray3)
+      , (TheTC_Maybe,            Right The_Maybe)
+      , (TheTC_intset,           Right The_intset)
+      , (TheTC_llist,            Right The_llist)
+      , (TheTC_list_dim,         Right The_list_dim)
+      , (TheTC_dim0,             Right The_dim0)
+      , (TheTC_dim1,             Right The_dim1)
+      , (TheTC_dim2,             Right The_dim2)
+      , (TheTC_dim3,             Right The_dim3)
+      , (TheTC_view,             Right The_view)
+      , (TheTC_Scatter,          Right The_Scatter)
       ]
 
     fam_initializers =
@@ -398,7 +404,7 @@ indexTyFamily tc_map = do
                   | (x, shape) <- insts]
   return instances
   where
-    int = lookupBuiltinCon The_int tc_map
+    int = lookupBuiltinVar SF.intV tc_map
     tuple2 = TupleTy 2 @@ int @@ int
     tuple3 = TupleTy 3 @@ int @@ int @@ int
     insts = [(The_list_dim, int),
@@ -426,7 +432,7 @@ cartesianTyFamily tc_map = do
                   | (container, x) <- insts]
   return instances
   where
-    int = lookupBuiltinCon The_int tc_map
+    int = lookupBuiltinVar SF.intV tc_map
     tuple2 = TupleTy 2 @@ int @@ int
     tuple3 = TupleTy 3 @@ int @@ int @@ int
     insts = [(lookupBuiltinCon The_NoneType tc_map, The_dim0),
@@ -480,8 +486,8 @@ reprClass tc_map = do
     instances1 ++ instances2 ++ instances3
   where
     monomorphic_instances =
-      [(lookupBuiltinCon The_int tc_map, The_repr_int),
-       (lookupBuiltinCon The_float tc_map, The_repr_float),
+      [(lookupBuiltinVar SF.intV tc_map, The_repr_int),
+       (lookupBuiltinVar SF.floatV tc_map, The_repr_float),
        (lookupBuiltinCon The_bool tc_map, The_repr_bool),
        (lookupBuiltinCon The_NoneType tc_map, The_repr_NoneType),
        (lookupBuiltinCon The_SliceObject tc_map, The_repr_SliceObject),
@@ -519,11 +525,11 @@ reprClass tc_map = do
 
 eqClass tc_map = do
   let int_instance =
-        monomorphicClassInstance (lookupBuiltinCon The_int tc_map)
+        monomorphicClassInstance (lookupBuiltinVar SF.intV tc_map)
         [coreBuiltin The_EqDict_int_eq,
          coreBuiltin The_EqDict_int_ne]
   let float_instance =
-        monomorphicClassInstance (lookupBuiltinCon The_float tc_map)
+        monomorphicClassInstance (lookupBuiltinVar SF.floatV tc_map)
         [coreBuiltin The_EqDict_float_eq,
          coreBuiltin The_EqDict_float_ne]
   tuple2_instance <-
@@ -548,13 +554,13 @@ eqClass tc_map = do
 
 ordClass tc_map = do
   let int_instance =
-        monomorphicClassInstance (lookupBuiltinCon The_int tc_map)
+        monomorphicClassInstance (lookupBuiltinVar SF.intV tc_map)
         [coreBuiltin The_OrdDict_int_lt,
          coreBuiltin The_OrdDict_int_le,
          coreBuiltin The_OrdDict_int_gt,
          coreBuiltin The_OrdDict_int_ge]
   let float_instance =
-        monomorphicClassInstance (lookupBuiltinCon The_float tc_map)
+        monomorphicClassInstance (lookupBuiltinVar SF.floatV tc_map)
         [coreBuiltin The_OrdDict_float_lt,
          coreBuiltin The_OrdDict_float_le,
          coreBuiltin The_OrdDict_float_gt,
@@ -868,7 +874,7 @@ createTyCons = do
   return (assocs, tc_map)
   where
     createTyCon (frontend_con, core_con, init) = do
-      let core_var = coreBuiltin core_con
+      let core_var = either id coreBuiltin core_con
       unless (SF.getLevel core_var == SF.TypeLevel) $
         internalError "createTyCons: Not a type variable"
       tycon <- translateVar core_var (initializerClass init)
@@ -918,7 +924,8 @@ mkTypeBindings tc_map core_type_env = do
   where
     mk_binding (_, sf_name, initializer) = do
       -- Look up the frontend type constructor
-      let Just tc_var = Map.lookup (coreBuiltin sf_name) tc_map
+      let sf_var = either id coreBuiltin sf_name
+          Just tc_var = Map.lookup sf_var tc_map
       binding <-
         case initializer
         of TyConInitializer ->

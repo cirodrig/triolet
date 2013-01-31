@@ -361,8 +361,64 @@ wiredInTypeEnv =
                (bareV, varTypeAssignment kindT),
                (outV, varTypeAssignment kindT),
                (initV, varTypeAssignment kindT),
+               (initConV, varTypeAssignment (bareT `FunT` initT)),
+               (outPtrV, varTypeAssignment (bareT `FunT` outT)),
+               (storeV, TyConTypeAssignment store_data_type),
                (posInftyV, varTypeAssignment intindexT),
-               (negInftyV, varTypeAssignment intindexT)]
+               (negInftyV, varTypeAssignment intindexT),
+               (arrV, TyConTypeAssignment arr_data_type),
+               (intV, TyConTypeAssignment int_data_type),
+               (uintV, TyConTypeAssignment uint_data_type),
+               (floatV, TyConTypeAssignment float_data_type)]
+
+    store_data_type =
+      DataType { dataTypeCon = storeV
+               , dataTypeParams = []
+               , dataTypeSizeParamTypes = Just []
+               , dataTypeKind = ValK
+               , dataTypeIsAbstract = True
+               , dataTypeIsAlgebraic = False
+               , dataTypeDataConstructors = []}
+
+    arr_data_type =
+      DataType { dataTypeCon = arrV
+               , dataTypeParams = [(arrTypeParameter1 ::: intindexT),
+                                   (arrTypeParameter2 ::: bareT)]
+               , dataTypeSizeParamTypes = Just [KindedType IntIndexK
+                                                (VarT arrTypeParameter1),
+                                                KindedType BareK
+                                                (VarT arrTypeParameter2)]
+               , dataTypeKind = BareK
+               , dataTypeIsAbstract = True
+               , dataTypeIsAlgebraic = False
+               , dataTypeDataConstructors = []}
+
+    int_data_type =
+      DataType { dataTypeCon = intV
+               , dataTypeParams = []
+               , dataTypeSizeParamTypes = Just []
+               , dataTypeKind = ValK
+               , dataTypeIsAbstract = True
+               , dataTypeIsAlgebraic = False
+               , dataTypeDataConstructors = []}
+
+    uint_data_type =
+      DataType { dataTypeCon = uintV
+               , dataTypeParams = []
+               , dataTypeSizeParamTypes = Just []
+               , dataTypeKind = ValK
+               , dataTypeIsAbstract = True
+               , dataTypeIsAlgebraic = False
+               , dataTypeDataConstructors = []}
+
+    float_data_type =
+      DataType { dataTypeCon = floatV
+               , dataTypeParams = []
+               , dataTypeSizeParamTypes = Just []
+               , dataTypeKind = ValK
+               , dataTypeIsAbstract = True
+               , dataTypeIsAlgebraic = False
+               , dataTypeDataConstructors = []}
 
 -- | Insert a variable type assignment
 insertType :: Var -> Type
@@ -575,15 +631,14 @@ pprDataConType c =
 isAdapterCon :: Var -> Bool
 isAdapterCon v = v `elem` adapters
   where
-    adapters = [coreBuiltin The_Init,
+    adapters = [initConV,       -- Init
                 coreBuiltin The_Stored,
                 coreBuiltin The_Ref,
                 coreBuiltin The_Boxed,
                 coreBuiltin The_AsBox,
                 coreBuiltin The_AsBare]
 
-initializerType t =
-  varApp (coreBuiltin The_OutPtr) [t] `FunT` VarT (coreBuiltin The_Store)
+initializerType t = typeApp outPtrT [t] `FunT` storeT
 
 -------------------------------------------------------------------------------
 

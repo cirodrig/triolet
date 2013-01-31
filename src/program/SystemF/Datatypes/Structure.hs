@@ -167,13 +167,13 @@ computeStructure t = liftTypeEvalM $ do
   case fromVarApp t' of
     -- Non-algebraic type constructors and Bool are handled specially
     Just (con, [])
-      | con `isCoreBuiltin` The_int -> return $ PrimStruct trioletIntType
-      | con `isCoreBuiltin` The_uint -> return $ PrimStruct trioletUintType
-      | con `isCoreBuiltin` The_float -> return $ PrimStruct trioletFloatType
+      | con == intV -> return $ PrimStruct trioletIntType
+      | con == uintV -> return $ PrimStruct trioletUintType
+      | con == floatV -> return $ PrimStruct trioletFloatType
       | con `isCoreBuiltin` The_bool -> return BoolStruct
 
     Just (con, [size, element])
-      | con `isCoreBuiltin` The_arr -> return $ ArrStruct size element
+      | con == arrV -> return $ ArrStruct size element
 
     -- Others are either variables or data type constructors
     Just (con, args) -> do

@@ -6,7 +6,7 @@ kind val;
 kind box;
 kind bare;
 kind out;
-kind write;
+kind init;
 kind sideeffect;
 
 -}
@@ -55,23 +55,9 @@ data Any : box
 {
 };
 
--- A pointer used for initializing data
-data OutPtr (a : bare) : out
-  attribute(abstract, nonalgebraic) {};
-
--- A dummy value representing the effect of initializing an object
-data Store : val
-  attribute(abstract)
-{
-  store () ();
-};
-
 -- Type functions to convert between representations
 type AsBox : bare -> box;
 type AsBare : box -> bare;
-
--- Designates an initializer function for a bare object
-type Init : bare -> write;
 
 -- Normal data types
 
@@ -80,10 +66,6 @@ data bool : val
   True () ();
   False () ();
 };
-
-data int : val attribute(abstract, nonalgebraic) {};
-data uint : val attribute(abstract, nonalgebraic) {};
-data float : val attribute(abstract, nonalgebraic) {};
 
 data NoneType : val
 {
@@ -167,10 +149,6 @@ data Complex (a : bare) : bare
 {
   complex () (a, a);
 };
-
-data arr (n : intindex) (a : bare) : bare
-  attribute(abstract, nonalgebraic)
-{};
 
 data Tuple0 : bare
 {
@@ -526,8 +504,8 @@ intUpdateInPlace_finalizer : UpdateInPlaceFinalizer (Stored int) (Stored int) =
 intUpdateInPlace_combiner (x : Stored int) (y : Stored int)
   (ret : OutPtr (Stored int))
   -> Store =
-  case x of stored @int (ux : int).
-  case y of stored @int (uy : int).
+  case x of stored @int ux.
+  case y of stored @int uy.
   stored @int (ux +# uy) ret;
 
 
@@ -4773,8 +4751,8 @@ EqDict_Tuple2_eq @(a b : box)
   attribute(inline) =
   let type ba = AsBare a in
   let type bb = AsBare b in
-  case eqA of eqDict @a (eq_a : a -> a -> Boxed (Stored bool)) (ne_a : a -> a -> Boxed (Stored bool)).
-  case eqB of eqDict @b (eq_b : b -> b -> Boxed (Stored bool)) (ne_b : b -> b -> Boxed (Stored bool)).
+  case eqA of eqDict @a eq_a ne_a.
+  case eqB of eqDict @b eq_b ne_b.
   case bx of boxed @(Tuple2 ba bb) (x : Tuple2 ba bb).
   case by of boxed @(Tuple2 ba bb) (y : Tuple2 ba bb).
   case x of tuple2 @ba @bb (xa : ba) (xb : bb).
@@ -6278,25 +6256,7 @@ internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
 
 
 -------------------------------------------------------------------------------
--- propositions
-
--- Proof objects
-data Pf (p : prop) : val
-  attribute(abstract)
-{
-  pf () ();
-};
-
-type eqZ : intindex -> intindex -> prop;
-type neZ : intindex -> intindex -> prop;
-type trueP : prop;
-
-eqZ_refl : (n : intindex) -> Pf (eqZ n n);
-
--- Construct an arbitrary proof value.  This function is only called to
--- construct proofs that are never used.  Since the value is not used, it is
--- safe to construct such a value.
-deadProof : (p : prop) -> Pf p;
+-- Coercions
 
 -- Construct an identity coercion.  This function is safe.
 idCoercion : (a : box) -> coerce @box a a;

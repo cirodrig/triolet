@@ -120,7 +120,23 @@ data Type ix =
 type LType ix = Located (Type ix)
 
 -- | A variable binder, binding a type or a value depending on how it's used.
-data Domain ix = Domain (Identifier ix) (LType ix)
+--
+--   The bound variable's type or kind may be omitted in some contexts where
+--   it can be inferred.  An omitted type is 'Nothing'.
+data Domain ix = Domain (Identifier ix) (Maybe (LType ix))
+
+boundVar :: Domain ix -> Identifier ix
+boundVar (Domain v _) = v
+
+boundType :: Domain ix -> Maybe (LType ix)
+boundType (Domain _ t) = t
+
+-- | Get the type of a bound variable.  Report an error if no type was given.
+boundType' :: SourcePos -> (Identifier ix -> String) -> Domain ix -> LType ix
+boundType' pos get_name (Domain _ (Just t)) = t
+boundType' pos get_name (Domain v Nothing) =
+  let message = show pos ++ ": Type must be given for variable " ++ get_name v
+  in error message
 
 -- | An expression
 data Exp a =
@@ -182,9 +198,10 @@ data Fun ix =
   , fBody :: LExp ix
   }
 
-funType :: SourcePos -> Fun ix -> LType ix
-funType pos f =
-  let monotype = Prelude.foldr fun_type (fRange f) [t | Domain _ t <- fParams f]
+funType :: SourcePos -> (Identifier ix -> String) -> Fun ix -> LType ix
+funType pos id_name f =
+  let param_types = map (boundType' pos id_name) $ fParams f
+      monotype = Prelude.foldr fun_type (fRange f) param_types
       polytype = Prelude.foldr forall_type monotype (fTyParams f)
   in polytype
   where

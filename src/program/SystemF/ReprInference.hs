@@ -54,8 +54,8 @@ printWhenDebug = whenDebug . print
 --   The constructors should never be seen.  This function is for debugging.
 checkForOutPtr :: Type -> Bool
 checkForOutPtr (VarT t)
-  | t `isCoreBuiltin` The_OutPtr = True
-  | t `isCoreBuiltin` The_Store = True
+  | t == outPtrV = True
+  | t == storeV = True
   | otherwise = False
 checkForOutPtr (AppT op arg) =
   checkForOutPtr op || checkForOutPtr arg
@@ -433,7 +433,7 @@ sameKind _ _ = False
 -- * boxedType : bare -> box
 -- * bareType  : box  -> bare
 writeType, boxedType, bareType :: Type -> Type
-writeType t = varApp (coreBuiltin The_Init) [t]
+writeType t = varApp initConV [t]
 boxedType t = varApp (coreBuiltin The_AsBox) [t]
 bareType t  = varApp (coreBuiltin The_AsBare) [t]
 
@@ -1280,7 +1280,7 @@ reprExp expression =
 
        -- Return an initializer type
        let len = IntT (fromIntegral $ length exps)
-           ret_type = writeType $ varApp (coreBuiltin The_arr) [len, elt_ty]
+           ret_type = writeType $ typeApp arrT [len, elt_ty]
        return (ExpM $ ArrayE inf elt_ty exps', ret_type)
 
 reprArrayElt elt_ty e = do
@@ -1459,10 +1459,7 @@ representationInference mod = do
     runReaderT (unRI (reprModule mod)) context
   
   -- Convert from specification types to mem types
-  let v_Init = coreBuiltin The_Init
-      v_OutPtr = coreBuiltin The_OutPtr 
-      v_Store = coreBuiltin The_Store
-      mem_mod = convertSpecToMemTypes v_Init v_OutPtr v_Store repr_mod
+  let mem_mod = convertSpecToMemTypes repr_mod
 
   -- Eta-expand functions
   etaExpandModule mem_mod

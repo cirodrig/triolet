@@ -228,11 +228,19 @@ pParenType = do
   pos <- locatePosition
   either id (\ts -> L pos (TupleT ts)) `liftM` parenOrTuple pType
 
+-- | Parse a variable binding with an explicit type
 pDomain :: P PDomain
 pDomain = do
   v <- identifier
   match ColonTok
   ty <- pType
+  return (Domain v (Just ty))
+
+-- | Parse a variable binding with an optional type
+pOptDomain :: P PDomain
+pOptDomain = do
+  v <- identifier
+  ty <- optionMaybe (match ColonTok *> pType)
   return (Domain v ty)
 
 -- | Parse one or more variable bindings that may appear on the LHS of a 
@@ -243,7 +251,19 @@ pDomains = do
   vs <- many1 identifier
   match ColonTok
   ty <- pType
+  return [Domain v (Just ty) | v <- vs]
+
+pOptDomains :: P [PDomain]
+pOptDomains = do
+  vs <- many1 identifier
+  ty <- optionMaybe (match ColonTok *> pType)
   return [Domain v ty | v <- vs]
+
+-- | A variable binding without a type and without parentheses.
+pUnlabeledDomain :: P [PDomain]
+pUnlabeledDomain = do
+  v <- identifier
+  return [Domain v Nothing]
 
 -------------------------------------------------------------------------------
 -- * Expressions
@@ -295,7 +315,7 @@ letE = located $ do
   let_type_expr <|> let_expr
   where
     let_expr = do
-      binder <- pDomain
+      binder <- pOptDomain
       match EqualTok
       rhs <- pExp
       match InTok
@@ -434,15 +454,15 @@ pattern = con_pattern <|> tuple_pattern
     -- A constructor pattern starts with an identifier
     con_pattern =
       ConPattern <$>
-      identifier <*> many type_arg <*> typeParameters <*> parameters
+      identifier <*> many type_arg <*> optTypeParameters <*> optParameters
 
     type_arg = PS.try (match AtTok >> pTypeAtom)
 
     -- A tuple pattern starts with a parenthesis
     tuple_pattern = parens $ do
-      x <- pDomain
+      x <- pOptDomain
       match CommaTok
-      xs <- pDomain `sepBy` match CommaTok
+      xs <- pOptDomain `sepBy` match CommaTok
       return $ TuplePattern (x : xs)
 
 typeParameters :: P [PDomain]
@@ -450,6 +470,15 @@ typeParameters = fmap concat $ many (match AtTok >> parens pDomains)
 
 parameters :: P [PDomain]
 parameters = fmap concat $ many (parens pDomains)
+
+-- | Type parameter bindings with optional types
+optTypeParameters :: P [PDomain]
+optTypeParameters =
+  fmap concat $ many (match AtTok *> parens pOptDomains)
+
+-- | Variable bindings with optional types
+optParameters :: P [PDomain]
+optParameters = fmap concat $ many (pUnlabeledDomain <|> parens pOptDomains)
 
 -- | Parse a function signature.
 --

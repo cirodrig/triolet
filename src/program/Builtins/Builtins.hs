@@ -28,21 +28,7 @@ $(do let cons = [mkName ("The_" ++ nm)
      -- Declare a data type
      data_decl <-
        dataD (cxt []) (mkName "BuiltinThing") [] con_decls [mkName "Enum"]
-
-     -- Declare a function to initialize the global variable
-     initializer_decl <-
-       [d| createBuiltins var_ids = do
-             type_vars <-
-               mapM (mk_builtin_var TypeLevel) builtinTypeNames
-             obj_vars <-
-               mapM (mk_builtin_var ObjectLevel) builtinVariableNames
-             return $ listArray (0, num_cons - 1) (type_vars ++ obj_vars)
-             where
-               mk_builtin_var lv nm = do
-                 var_id <- supplyValue var_ids
-                 return $ mkVar var_id (Just $ builtinLabel nm) lv
-       |]
-     return $ data_decl : initializer_decl)
+     return [data_decl])
 
 allBuiltinVars :: [Var]
 allBuiltinVars = elems builtins
@@ -139,18 +125,9 @@ the_CoreBuiltins :: MVar CoreBuiltins
 {-# NOINLINE the_CoreBuiltins #-}
 the_CoreBuiltins = unsafePerformIO newEmptyMVar
 
-initializeBuiltins :: IdentSupply Var -> IO ()
-initializeBuiltins id_supply = do
-  -- Ensure that we haven't already initialized these
-  bi_is_empty <- isEmptyMVar the_CoreBuiltins
-  unless bi_is_empty $ internalError "Attempted to re-initialize core builtins"
-
-  bi <- createBuiltins id_supply
-  putMVar the_CoreBuiltins bi
-
 -- | Look up builtin variable names in the map
-initializeBuiltins2 :: Map.Map String Var -> IO ()
-initializeBuiltins2 name_environment = do
+initializeBuiltins :: Map.Map String Var -> IO ()
+initializeBuiltins name_environment = do
   -- Ensure that we haven't already initialized these
   bi_is_empty <- isEmptyMVar the_CoreBuiltins
   unless bi_is_empty $ internalError "Attempted to re-initialize core builtins"

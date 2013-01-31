@@ -16,10 +16,13 @@ module Type.Type(module Type.Var,
                  getBaseKind, discardBaseKind,
 
                  -- * Predefined types
-                 kindT, intindexT, valT, boxT, bareT, outT, initT, propT,
-                 posInftyT, negInftyT,
-                 kindV, intindexV, valV, boxV, bareV, outV, initV, propV,
-                 posInftyV, negInftyV,
+                 kindT, intindexT, valT, boxT, bareT, outT, initT,
+                 initConT,
+                 outPtrT, storeT, posInftyT, negInftyT, arrT, intT, uintT, floatT,
+                 kindV, intindexV, valV, boxV, bareV, outV, initV,
+                 initConV,
+                 outPtrV, storeV, posInftyV, negInftyV, arrV, intV, uintV, floatV,
+                 arrTypeParameter1, arrTypeParameter2,
                  firstAvailableVarID,
 
                  -- * Kinds
@@ -138,7 +141,10 @@ instance HasLevel Var => HasLevel Type where
   getLevel (CoT _)  = TypeLevel
   getLevel (UTupleT _) = TypeLevel
 
-kindT, intindexT, valT, boxT, bareT, outT, initT, propT, posInftyT, negInftyT :: Type
+kindT, intindexT, valT, boxT, bareT, outT, initT,
+  initConT, outPtrT, storeT, posInftyT, negInftyT, arrT,
+  intT, uintT, floatT :: Type
+
 kindT = VarT kindV
 intindexT = VarT intindexV
 valT = VarT valV
@@ -146,11 +152,19 @@ boxT = VarT boxV
 bareT = VarT bareV
 outT = VarT outV
 initT = VarT initV
-propT = VarT propV
+initConT = VarT initConV
+outPtrT = VarT outPtrV
+storeT = VarT storeV
 posInftyT = VarT posInftyV      -- Positive infinity
 negInftyT = VarT negInftyV
+arrT = VarT arrV
+intT = VarT intV
+uintT = VarT uintV
+floatT = VarT floatV
 
-kindV, intindexV, valV, boxV, bareV, outV, initV, propV, posInftyV, negInftyV :: Var
+kindV, intindexV, valV, boxV, bareV, outV, initV,
+  initConV, outPtrV, storeV, posInftyV, negInftyV, arrV, intV, uintV, floatV,
+  arrTypeParameter1, arrTypeParameter2 :: Var
 
 kindV = mkVar kindVarID (Just $ plainLabel builtinModuleName "kind") SortLevel
 intindexV = mkVar intindexVarID (Just $ plainLabel builtinModuleName "intindex") KindLevel
@@ -158,10 +172,20 @@ valV = mkVar valVarID (Just $ plainLabel builtinModuleName "val") KindLevel
 boxV = mkVar boxVarID (Just $ plainLabel builtinModuleName "box") KindLevel
 bareV = mkVar bareVarID (Just $ plainLabel builtinModuleName "bare") KindLevel
 outV = mkVar outVarID (Just $ plainLabel builtinModuleName "out") KindLevel
-initV = mkVar writeVarID (Just $ plainLabel builtinModuleName "write") KindLevel
-propV = mkVar propVarID (Just $ plainLabel builtinModuleName "prop") KindLevel
+initV = mkVar writeVarID (Just $ plainLabel builtinModuleName "init") KindLevel
+initConV = mkVar initConVarID (Just $ plainLabel builtinModuleName "Init") TypeLevel
+outPtrV = mkVar outPtrVarID (Just $ plainLabel builtinModuleName "OutPtr") TypeLevel
+storeV = mkVar storeVarID (Just $ plainLabel builtinModuleName "Store") TypeLevel
 posInftyV = mkVar posInftyVarID (Just $ plainLabel builtinModuleName "pos_infty") TypeLevel
-negInftyV = mkVar posInftyVarID (Just $ plainLabel builtinModuleName "neg_infty") TypeLevel
+negInftyV = mkVar negInftyVarID (Just $ plainLabel builtinModuleName "neg_infty") TypeLevel
+arrV = mkVar arrVarID (Just $ plainLabel builtinModuleName "arr") TypeLevel
+intV = mkVar intVarID (Just $ plainLabel builtinModuleName "int") TypeLevel
+uintV = mkVar uintVarID (Just $ plainLabel builtinModuleName "uint") TypeLevel
+floatV = mkVar floatVarID (Just $ plainLabel builtinModuleName "float") TypeLevel
+
+-- Used to construct the built-in data type definition for arrays
+arrTypeParameter1 = mkVar arrTypeParameter1ID (Just $ plainLabel builtinModuleName "n") TypeLevel
+arrTypeParameter2 = mkVar arrTypeParameter2ID (Just $ plainLabel builtinModuleName "a") TypeLevel
 
 kindVarID = toIdent 1
 intindexVarID = toIdent 2
@@ -170,13 +194,21 @@ boxVarID = toIdent 4
 bareVarID = toIdent 5
 outVarID = toIdent 6
 writeVarID = toIdent 7
-propVarID = toIdent 9
-posInftyVarID = toIdent 10
-negInftyVarID = toIdent 11
+initConVarID = toIdent 8
+outPtrVarID = toIdent 9
+storeVarID = toIdent 10
+posInftyVarID = toIdent 11
+negInftyVarID = toIdent 12
+arrVarID = toIdent 13
+intVarID = toIdent 14
+uintVarID = toIdent 15
+floatVarID = toIdent 16
+arrTypeParameter1ID = toIdent 17
+arrTypeParameter2ID = toIdent 18
 
 -- | The first variable ID that's not reserved for predefined variables
 firstAvailableVarID :: VarID
-firstAvailableVarID = toIdent 12
+firstAvailableVarID = toIdent 19
 
 -------------------------------------------------------------------------------
 -- Convenience functions for kinds
@@ -193,7 +225,6 @@ data BaseKind =
   | OutK
   | WriteK
   | IntIndexK
-  | PropK
     deriving(Eq, Ord, Show)
 
 -- | Convert a kind to a base kind.  Raises an error if the argument is not a
@@ -206,8 +237,7 @@ toBaseKind (VarT kind_var) =
   where
     table = [(valV, ValK), (boxV, BoxK), (bareV, BareK), (outV, OutK),
              (initV, WriteK),
-             (intindexV, IntIndexK),
-             (propV, PropK)]
+             (intindexV, IntIndexK)]
 
 toBaseKind _ = internalError "toBaseKind: Unrecognized type"
 
@@ -220,7 +250,6 @@ fromBaseKind k =
      OutK -> outT
      WriteK -> initT
      IntIndexK -> intindexT
-     PropK -> propT
 
 -------------------------------------------------------------------------------
 -- Pretty-printing

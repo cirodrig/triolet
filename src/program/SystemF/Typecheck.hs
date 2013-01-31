@@ -119,6 +119,10 @@ data TypeError =
     , errorMessage    :: Doc
     }
 
+genericTypeMismatch :: SourcePos -> Level -> Type -> Type -> TypeError
+genericTypeMismatch pos lv expected actual =
+  TypeMismatch pos lv (text "unspecified location") expected actual
+
 typeArgKindMismatch :: SourcePos -> Int -> Type -> Type -> TypeError
 typeArgKindMismatch pos index expected actual = let
   ord = text $ showOrdinal index ++ " type argument of a type application"
@@ -143,6 +147,12 @@ conFieldTypeMismatch :: SourcePos -> Int -> Type -> Type -> TypeError
 conFieldTypeMismatch pos index expected actual = let
   ord = text $ showOrdinal index ++ " constructor field"
   in TypeMismatch pos TypeLevel ord expected actual
+
+conFieldLengthMismatch :: SourcePos -> Int -> Int -> TypeError
+conFieldLengthMismatch pos expected actual = let
+  message = "Expecting " ++ show expected ++ "constructor arguments, got " ++
+            show actual
+  in MiscError pos (text message)
 
 badUnboxedTupleField :: SourcePos -> Int -> Type -> TypeError
 badUnboxedTupleField pos index actual = let
@@ -275,8 +285,8 @@ checkLiteralType l =
            -- Based on the literal, check whether the type constructor is 
            -- acceptable
            case lit
-           of IntL _ _ -> v `isCoreBuiltin` The_int
-              FloatL _ _ -> v `isCoreBuiltin` The_float
+           of IntL _ _ -> v == intV
+              FloatL _ _ -> v == floatV
          Nothing ->
            -- Literals cannot have other types 
            False

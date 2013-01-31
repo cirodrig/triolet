@@ -4,9 +4,6 @@ module Builtins.BuiltinsTH where
        
 builtinTypeNames =
   [ "bool"
-  , "int"
-  , "uint"
-  , "float"
   , "Complex"
   , "list"
   , "append_list"
@@ -45,9 +42,7 @@ builtinTypeNames =
   , "FIInt"
   , "IInt"
   , "SomeIInt"
-  , "arr"
   , "EffTok"
-  , "Pf"
   , "UpdateInPlaceFinalizer"
   , "Scatter"
   , "PBTree"
@@ -58,9 +53,6 @@ builtinTypeNames =
   , "StuckRef"
   , "StuckBox"
   , "Boxed"
-  , "OutPtr"
-  , "Store"
-  , "Init"
   , "AsBox"
   , "AsBare"
     
@@ -85,11 +77,6 @@ builtinTypeNames =
   , "min_i"
   , "max_i"
     
-    -- Propositions
-  , "eqZ"
-  , "neZ"
-  , "trueP"
-
     -- Dictionary types
   , "SizeAlign"
   , "SizeAlignVal"
@@ -106,6 +93,51 @@ builtinTypeNames =
   , "FloatingDict"
   , "VectorDict"
   , "CartesianDict"
+  ]
+
+-- | Builtin type names that are also used in type functions.
+--   This list overlaps with the list of builtin types.
+builtinTypeNamesForTypeFunctions =
+  [ "NoneType"
+  , "Tuple2"
+  , "Tuple3"
+  , "SliceObject"
+  , "Stored"
+  , "Ref"
+  , "StuckRef"
+  , "StuckBox"
+  , "Boxed"
+  , "AsBox"
+  , "AsBare"
+  , "cartesianDomain"
+  , "index"
+  , "slice"
+  , "array"
+  , "shape"
+  , "list_dim"
+  , "dim0"
+  , "dim1"
+  , "dim2"
+  , "dim3"
+  , "arr_shape"
+  , "plus_i"
+  , "minus_i"
+  , "min_i"
+  , "max_i"
+  , "Stream"
+  , "Stream1"
+  , "Sequence"
+  , "list"
+  , "blist"
+  , "array0"
+  , "array1"
+  , "array2"
+  , "array3"
+  , "barray1"
+  , "barray2"
+  , "barray3"
+  , "llist"
+  , "view"
   ]
 
 builtinVariableNames =
@@ -133,7 +165,6 @@ builtinVariableNames =
   , "stuckRef"
   , "stuckBox"
   , "boxed"
-  , "store"
   , "fiInt"
   , "iInt"
   , "iPosInfty"
@@ -163,7 +194,6 @@ builtinVariableNames =
   , "nil"
   , "mk_view"
   , "effTok"
-  , "pf"
   , "mk_list_dim"
   , "mk_dim0"
   , "mk_dim1"
@@ -555,8 +585,6 @@ builtinVariableNames =
   , "min_ii"
   , "max_ii"
   , "range_nonempty_ii"
-  , "eqZ_refl"
-  , "deadProof"
 
     -- Integer arithmetic
   , "sizealign_arr"

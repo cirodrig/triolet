@@ -21,7 +21,6 @@ import LowLevel.InitializeBuiltins
 import Builtins.Builtins
 import Type.Environment
 import qualified SystemF.TypecheckMem
-import SystemF.Datatypes.TypeLayout
 import SystemF.Datatypes.Structure
 import SystemF.Datatypes.Size
 import qualified Untyped.InitializeBuiltins2 as Untyped
@@ -49,7 +48,7 @@ loadBuiltins cl_globals = do
     initializeGlobalVar the_specTypes (return spec_types)
     initializeGlobalVar the_memTypes (return mem_types)
     initializeGlobalVar the_coreModule (return core_module)
-    Builtins.Builtins.initializeBuiltins2 core_variables
+    Builtins.Builtins.initializeBuiltins core_variables
 
   -- Check core module for type errors
   when (useCoreIR cl_globals) $ do
@@ -78,10 +77,4 @@ loadBuiltins cl_globals = do
 
     withTheLLVarIdentSupply $ \ll_supply -> do
       testMemoryLayout supply ll_supply mem_types
-  
-  {- -- IN DEVELOPMENT: Compute size and alignment of each built-in type
-  mem_types <- readInitGlobalVarIO the_memTypes
-  withTheNewVarIdentSupply $ \supply -> do
-    layouts <- computeTypeLayouts supply mem_types
-    initializeGlobalVar the_layouts (return layouts) -}
 

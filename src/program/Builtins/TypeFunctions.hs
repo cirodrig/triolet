@@ -1,12 +1,14 @@
 
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE Rank2Types, TemplateHaskell #-}
 module Builtins.TypeFunctions(builtinTypeFunctions) where
 
 import Control.Monad
+import Data.Array
 import qualified Data.Map as Map
+import Language.Haskell.TH(mkName, dataD, cxt, Dec(DataD), Con(NormalC))
 import Text.PrettyPrint.HughesPJ
 
-import Builtins.Builtins
+import Builtins.BuiltinsTH
 import Common.MonadLogic
 import Common.Error
 import Type.Type
@@ -14,12 +16,58 @@ import Type.Environment
 import Type.Compare
 import Type.Eval
 
+-------------------------------------------------------------------------------
+-- The builtin module may not be available while evaluating type functions,
+-- so any needed variables are looked up from the type environment.
+
+$(do let cons = [mkName ("The_" ++ nm)
+                | nm <- builtinTypeNamesForTypeFunctions]
+         num_cons = length cons
+         con_decls = [return $ NormalC c [] | c <- cons]
+
+     -- Declare a data type
+     data_decl <-
+       dataD (cxt []) (mkName "BuiltinThing") [] con_decls [mkName "Enum"]
+
+     return [data_decl])
+
+-- | Look up builtin variable names and insert them into the array
+createBuiltinsArray :: Map.Map String Var -> Array Int Var
+createBuiltinsArray name_environment =
+  -- Force evaluation of all array elements, then return the array
+  foldr seq builtin_array $ elems builtin_array
+  where
+    -- Look up each builtin type and variable
+    get_variable level name =
+      case Map.lookup name name_environment
+      of Just v
+           | getLevel v == level -> v
+           | otherwise -> internalError $
+                          "Wrong level for builtin variable: " ++ name
+         Nothing -> internalError $ "Missing builtin variable: " ++ name
+
+    builtin_list =
+      map (get_variable TypeLevel) builtinTypeNamesForTypeFunctions
+
+    builtin_array = listArray (0, num_builtins-1) builtin_list
+
+    num_builtins = length builtinTypeNamesForTypeFunctions
+
+getBuiltin :: Array Int Var -> BuiltinThing -> Var
+getBuiltin builtins thing = builtins ! fromEnum thing
+
+isBuiltin :: Array Int Var -> BuiltinThing -> Var -> Bool
+isBuiltin builtins thing v = v == getBuiltin builtins thing
+
+-------------------------------------------------------------------------------
+
 -- | A type function based on the shape of a container of type @(* -> *)@.
 --   Attempt to compute a shape based on the deconstructed, fully applied
 --   type.
-shapeLike :: (forall m. EvalMonad m => Var -> [Type] -> m (Maybe Type))
+shapeLike :: Array Int Var
+          -> (forall m. EvalMonad m => Var -> [Type] -> m (Maybe Type))
           -> TypeFunction
-shapeLike f = typeFunction 1 compute_shape
+shapeLike bi f = typeFunction 1 compute_shape
   where
     compute_shape :: forall m. EvalMonad m => [Type] -> m Type
     compute_shape (container_type : other_types) = do
@@ -36,39 +84,34 @@ shapeLike f = typeFunction 1 compute_shape
         Nothing -> cannot_reduce container_type
       where
         cannot_reduce container_type =
-          return $ varApp (coreBuiltin The_shape) (container_type : other_types)
-
-unpackArrayShapeArgs :: EvalMonad m => [Type] -> m [Type]
-unpackArrayShapeArgs [size, next] = liftM (size :) $ unpackArrayShape next
-
-unpackArrayShape :: EvalMonad m => Type -> m [Type]
-unpackArrayShape ty = do
-  ty' <- reduceToWhnf ty
-  case fromVarApp ty' of
-    Just (op, args)
-      | op `isCoreBuiltin` The_arr_shape -> unpackArrayShapeArgs args
-      | op `isCoreBuiltin` The_dim0 -> return []
-    _ -> internalError "unpackArrayShape: Argument is not an array shape"
+          return $ varApp (getBuiltin bi The_shape) (container_type : other_types)
 
 -- Create a 1D array shape expression
-array_shape sh =
-  varApp (coreBuiltin The_arr_shape) [sh, VarT $ coreBuiltin The_dim0]
+array_shape bi sh =
+  varApp (getBuiltin bi The_arr_shape) [sh, VarT $ getBuiltin bi The_dim0]
 
-builtinTypeFunctions :: Map.Map String BuiltinTypeFunction
-builtinTypeFunctions =
-  Map.fromList
-  [ ("minus_i", BuiltinTypeFunction minusTF minusTF)
-  , ("plus_i", BuiltinTypeFunction plusTF plusTF)
-  , ("min_i", BuiltinTypeFunction minTF minTF)
-  , ("max_i", BuiltinTypeFunction maxTF maxTF)
-  , ("shape", BuiltinTypeFunction shapePureTF shapeMemTF)
-  , ("cartesianDomain", BuiltinTypeFunction cartPureTF cartMemTF)
-  , ("index", BuiltinTypeFunction indexPureTF indexMemTF)
-  , ("slice", BuiltinTypeFunction slicePureTF sliceMemTF)
-  , ("Stream", BuiltinTypeFunction streamPureTF streamMemTF)
-  , ("AsBox", BuiltinTypeFunction boxedPureTF boxedMemTF)
-  , ("AsBare", BuiltinTypeFunction barePureTF bareMemTF)
-  ]
+-- | Construct the builtin type functions. 
+--   The type variables referenced by builtin type functions are passed in
+--   as parameters.
+builtinTypeFunctions :: Map.Map String Var
+                     -> Map.Map String BuiltinTypeFunction
+builtinTypeFunctions name_environment =
+  let bi = createBuiltinsArray name_environment
+  in Map.fromList
+     [ (name, BuiltinTypeFunction (pure_f bi) (mem_f bi))
+     | (name, pure_f, mem_f) <-
+          [ ("minus_i", minusTF, minusTF)
+          , ("plus_i", plusTF, plusTF)
+          , ("min_i", minTF, minTF)
+          , ("max_i", maxTF, maxTF)
+          , ("shape", shapePureTF, shapeMemTF)
+          , ("cartesianDomain", cartPureTF, cartMemTF)
+          , ("index", indexPureTF, indexMemTF)
+          , ("slice", slicePureTF, sliceMemTF)
+          , ("Stream", streamPureTF, streamMemTF)
+          , ("AsBox", boxedPureTF, boxedMemTF)
+          , ("AsBare", barePureTF, bareMemTF)
+          ]]
 
 -- | The integers extended with @+infinity@ and @-infinity@
 data ExtInt = Fin Integer | NegInf | PosInf deriving(Eq)
@@ -137,7 +180,8 @@ binaryIntTF operator left_unit right_unit f = typeFunction 2 $ \args ->
 
 -- | Subtract type-level integers.
 --   This function works the same in System F and Mem.
-minusTF = binaryIntTF (coreBuiltin The_minus_i) (Just fin0) (Just fin0) function
+minusTF bi =
+  binaryIntTF (getBuiltin bi The_minus_i) (Just fin0) (Just fin0) function
   where
     function (Fin x) (Fin y) = Just (Fin (x - y))
     function (Fin _) NegInf  = Just PosInf
@@ -149,7 +193,8 @@ minusTF = binaryIntTF (coreBuiltin The_minus_i) (Just fin0) (Just fin0) function
 
 -- | Add type-level integers.
 --   This function works the same in System F and Mem.
-plusTF = binaryIntTF (coreBuiltin The_plus_i) (Just fin0) (Just fin0) function
+plusTF bi =
+  binaryIntTF (getBuiltin bi The_plus_i) (Just fin0) (Just fin0) function
   where
     function (Fin x) (Fin y) = Just (Fin (x + y))
     function (Fin _) NegInf  = Just NegInf
@@ -161,7 +206,8 @@ plusTF = binaryIntTF (coreBuiltin The_plus_i) (Just fin0) (Just fin0) function
 
 -- | Take the minimum of type-level integers.
 --   This function works the same in System F and Mem.
-minTF = binaryIntTF (coreBuiltin The_min_i) (Just PosInf) (Just PosInf) function
+minTF bi =
+  binaryIntTF (getBuiltin bi The_min_i) (Just PosInf) (Just PosInf) function
   where
     function (Fin x) (Fin y) = Just (Fin (min x y))
     function _       NegInf  = Just NegInf
@@ -171,7 +217,8 @@ minTF = binaryIntTF (coreBuiltin The_min_i) (Just PosInf) (Just PosInf) function
 
 -- | Take the maximum of type-level integers.
 --   This function works the same in System F and Mem.
-maxTF = binaryIntTF (coreBuiltin The_max_i) (Just NegInf) (Just NegInf) function
+maxTF bi =
+  binaryIntTF (getBuiltin bi The_max_i) (Just NegInf) (Just NegInf) function
   where
     function (Fin x) (Fin y) = Just (Fin (max x y))
     function _       PosInf  = Just PosInf
@@ -180,59 +227,56 @@ maxTF = binaryIntTF (coreBuiltin The_max_i) (Just NegInf) (Just NegInf) function
     function NegInf  x       = Just x
 
 -- | Compute the shape of a data type in the pure type system
-shapePureTF = shapeLike $ \op args ->
+shapePureTF bi = shapeLike bi $ \op args ->
   case ()
-  of () | op `isCoreBuiltin` The_Stream ->
+  of () | isBuiltin bi The_Stream op ->
             case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-        | op `isCoreBuiltin` The_view ->
+        | isBuiltin bi The_view op ->
             case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-        | op `isCoreBuiltin` The_Stream1 -> return_list_dim
-        | op `isCoreBuiltin` The_Sequence -> return_list_dim
-        | op `isCoreBuiltin` The_list -> return_list_dim
-        | op `isCoreBuiltin` The_llist -> return_list_dim
-        | op `isCoreBuiltin` The_array0 -> return_dim0
-        | op `isCoreBuiltin` The_array1 -> return_dim1
-        | op `isCoreBuiltin` The_array2 -> return_dim2
-        | op `isCoreBuiltin` The_array3 -> return_dim3
-        | op `isCoreBuiltin` The_blist -> return_list_dim
-        | op `isCoreBuiltin` The_barray1 -> return_dim1
-        | op `isCoreBuiltin` The_barray2 -> return_dim2
-        | op `isCoreBuiltin` The_barray3 -> return_dim3
-        | op `isCoreBuiltin` The_array ->
+        | isBuiltin bi The_Stream1 op -> return_list_dim
+        | isBuiltin bi The_Sequence op -> return_list_dim
+        | isBuiltin bi The_list op -> return_list_dim
+        | isBuiltin bi The_llist op -> return_list_dim
+        | isBuiltin bi The_array0 op -> return_dim0
+        | isBuiltin bi The_array1 op -> return_dim1
+        | isBuiltin bi The_array2 op -> return_dim2
+        | isBuiltin bi The_array3 op -> return_dim3
+        | isBuiltin bi The_blist op -> return_list_dim
+        | isBuiltin bi The_barray1 op -> return_dim1
+        | isBuiltin bi The_barray2 op -> return_dim2
+        | isBuiltin bi The_barray3 op -> return_dim3
+        | isBuiltin bi The_array op ->
             case args
             of [dim, _] -> do
                  dim' <- reduceToWhnf dim
                  case dim' of
-                   VarT v | v `isCoreBuiltin` The_dim0 -> return_dim0
-                          | v `isCoreBuiltin` The_dim1 -> return_dim1
-                          | v `isCoreBuiltin` The_dim2 -> return_dim2
-                          | v `isCoreBuiltin` The_dim3 -> return_dim3
+                   VarT v | isBuiltin bi The_dim0 v -> return_dim0
+                          | isBuiltin bi The_dim1 v -> return_dim1
+                          | isBuiltin bi The_dim2 v -> return_dim2
+                          | isBuiltin bi The_dim3 v -> return_dim3
                    _ -> return Nothing
-        | op `isCoreBuiltin` The_arr ->
-            case args
-            of [arg, _] -> return $ Just $ array_shape arg
      _ -> return Nothing
   where
     return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
-    return_list_dim = return $ Just $ VarT (coreBuiltin The_list_dim)
-    return_dim0 = return $ Just $ VarT (coreBuiltin The_dim0)
-    return_dim1 = return $ Just $ VarT (coreBuiltin The_dim1)
-    return_dim2 = return $ Just $ VarT (coreBuiltin The_dim2)
-    return_dim3 = return $ Just $ VarT (coreBuiltin The_dim3)
+    return_list_dim = return $ Just $ VarT (getBuiltin bi The_list_dim)
+    return_dim0 = return $ Just $ VarT (getBuiltin bi The_dim0)
+    return_dim1 = return $ Just $ VarT (getBuiltin bi The_dim1)
+    return_dim2 = return $ Just $ VarT (getBuiltin bi The_dim2)
+    return_dim3 = return $ Just $ VarT (getBuiltin bi The_dim3)
 
-cartPureTF = typeFunction 1 $ \[index_type] -> do
+cartPureTF bi = typeFunction 1 $ \[index_type] -> do
   index_type' <- reduceToWhnf index_type
   let can't_reduce =
-        return $ varApp (coreBuiltin The_cartesianDomain) [index_type]
+        return $ varApp (getBuiltin bi The_cartesianDomain) [index_type]
   case fromVarApp index_type' of
     Just (op, [])
-      | op `isCoreBuiltin` The_NoneType -> return_dim0
-      | op `isCoreBuiltin` The_int -> return_dim1
+      | isBuiltin bi The_NoneType op -> return_dim0
+      | op == intV -> return_dim1
     Just (op, [t1, t2])
-      | op `isCoreBuiltin` The_Tuple2 ->
+      | isBuiltin bi The_Tuple2 op ->
           ifM (is_int t1 >&&> is_int t2) return_dim2 can't_reduce
     Just (op, [t1, t2, t3])
-      | op `isCoreBuiltin` The_Tuple3 ->
+      | isBuiltin bi The_Tuple3 op ->
           ifM (is_int t1 >&&> is_int t2 >&&> is_int t3) return_dim3 can't_reduce
     _ -> can't_reduce
   where
@@ -240,32 +284,32 @@ cartPureTF = typeFunction 1 $ \[index_type] -> do
     is_int ty = do
       ty' <- reduceToWhnf ty
       return $! case ty
-                of VarT v -> v `isCoreBuiltin` The_int
+                of VarT v -> v == intV
                    _      -> False
     return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m Type
-    return_dim0 = return $ VarT (coreBuiltin The_dim0)
-    return_dim1 = return $ VarT (coreBuiltin The_dim1)
-    return_dim2 = return $ VarT (coreBuiltin The_dim2)
-    return_dim3 = return $ VarT (coreBuiltin The_dim3)
+    return_dim0 = return $ VarT (getBuiltin bi The_dim0)
+    return_dim1 = return $ VarT (getBuiltin bi The_dim1)
+    return_dim2 = return $ VarT (getBuiltin bi The_dim2)
+    return_dim3 = return $ VarT (getBuiltin bi The_dim3)
 
-cartMemTF = typeFunction 1 $ \[index_type] -> do
+cartMemTF bi = typeFunction 1 $ \[index_type] -> do
   index_type' <- reduceToWhnf index_type
   let can't_reduce =
-        return $ varApp (coreBuiltin The_cartesianDomain) [index_type]
+        return $ varApp (getBuiltin bi The_cartesianDomain) [index_type]
   case fromVarApp index_type' of
     Just (op, [arg_ty])
-      | op `isCoreBuiltin` The_Stored -> do
+      | isBuiltin bi The_Stored op -> do
            arg_ty' <- reduceToWhnf arg_ty
            case fromVarApp arg_ty' of
              Just (op, [])
-               | op `isCoreBuiltin` The_NoneType -> return_dim0
-               | op `isCoreBuiltin` The_int -> return_dim1
+               | isBuiltin bi The_NoneType op -> return_dim0
+               | op == intV -> return_dim1
              _ -> can't_reduce
     Just (op, [t1, t2])
-      | op `isCoreBuiltin` The_Tuple2 ->
+      | isBuiltin bi The_Tuple2 op ->
           ifM (is_int t1 >&&> is_int t2) return_dim2 can't_reduce
     Just (op, [t1, t2, t3])
-      | op `isCoreBuiltin` The_Tuple3 ->
+      | isBuiltin bi The_Tuple3 op ->
           ifM (is_int t1 >&&> is_int t2 >&&> is_int t3) return_dim3 can't_reduce
     _ -> can't_reduce
   where
@@ -274,58 +318,58 @@ cartMemTF = typeFunction 1 $ \[index_type] -> do
       ty' <- reduceToWhnf ty
       case fromVarApp ty' of
         Just (op, [arg_ty]) 
-          | op `isCoreBuiltin` The_Stored -> do
+          | isBuiltin bi The_Stored op -> do
               arg_ty' <- reduceToWhnf arg_ty
               return $! case arg_ty'
-                        of VarT v -> v `isCoreBuiltin` The_int
+                        of VarT v -> v == intV
                            _      -> False
         _ -> return False
 
     return_dim0, return_dim1, return_dim2 :: EvalMonad m => m Type
-    return_dim0 = return $ VarT (coreBuiltin The_dim0)
-    return_dim1 = return $ VarT (coreBuiltin The_dim1)
-    return_dim2 = return $ VarT (coreBuiltin The_dim2)
-    return_dim3 = return $ VarT (coreBuiltin The_dim3)
+    return_dim0 = return $ VarT (getBuiltin bi The_dim0)
+    return_dim1 = return $ VarT (getBuiltin bi The_dim1)
+    return_dim2 = return $ VarT (getBuiltin bi The_dim2)
+    return_dim3 = return $ VarT (getBuiltin bi The_dim3)
 
 -- | Compute the shape of a data type in the memory type system
-shapeMemTF = shapeLike $ \op args ->
+shapeMemTF bi = shapeLike bi $ \op args ->
   case ()
-  of () | op `isCoreBuiltin` The_Ref ->
+  of () | isBuiltin bi The_Ref op ->
           case args
           of [arg] ->
                case fromVarApp arg 
                of Just (op, [arg2, _]) 
-                    | op `isCoreBuiltin` The_Stream ->
+                    | isBuiltin bi The_Stream op ->
                         liftM Just $ reduceToWhnf arg2
-                    | op `isCoreBuiltin` The_view ->
+                    | isBuiltin bi The_view op ->
                         liftM Just $ reduceToWhnf arg2
                   Just (op, [_])
-                    | op `isCoreBuiltin` The_Stream1 -> return_list_dim
-                    | op `isCoreBuiltin` The_Sequence -> return_list_dim
-                    | op `isCoreBuiltin` The_llist -> return_list_dim
+                    | isBuiltin bi The_Stream1 op -> return_list_dim
+                    | isBuiltin bi The_Sequence op -> return_list_dim
+                    | isBuiltin bi The_llist op -> return_list_dim
                   _ -> return Nothing
-        | op `isCoreBuiltin` The_list -> return_list_dim
-        | op `isCoreBuiltin` The_array0 -> return_dim0
-        | op `isCoreBuiltin` The_array1 -> return_dim1
-        | op `isCoreBuiltin` The_array2 -> return_dim2
-        | op `isCoreBuiltin` The_array3 -> return_dim3
-        | op `isCoreBuiltin` The_blist -> return_list_dim
-        | op `isCoreBuiltin` The_barray1 -> return_dim1
-        | op `isCoreBuiltin` The_barray2 -> return_dim2
-        | op `isCoreBuiltin` The_barray3 -> return_dim3
-        | op `isCoreBuiltin` The_array ->
+        | isBuiltin bi The_list op -> return_list_dim
+        | isBuiltin bi The_array0 op -> return_dim0
+        | isBuiltin bi The_array1 op -> return_dim1
+        | isBuiltin bi The_array2 op -> return_dim2
+        | isBuiltin bi The_array3 op -> return_dim3
+        | isBuiltin bi The_blist op -> return_list_dim
+        | isBuiltin bi The_barray1 op -> return_dim1
+        | isBuiltin bi The_barray2 op -> return_dim2
+        | isBuiltin bi The_barray3 op -> return_dim3
+        | isBuiltin bi The_array op ->
             case args
-            of [arg, _] -> return $ Just $ array_shape arg
+            of [arg, _] -> return $ Just $ array_shape bi arg
      _ -> return Nothing
   where
     return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
-    return_list_dim = return $ Just $ VarT (coreBuiltin The_list_dim)
-    return_dim0 = return $ Just $ VarT (coreBuiltin The_dim0)
-    return_dim1 = return $ Just $ VarT (coreBuiltin The_dim1)
-    return_dim2 = return $ Just $ VarT (coreBuiltin The_dim2)
-    return_dim3 = return $ Just $ VarT (coreBuiltin The_dim3)
+    return_list_dim = return $ Just $ VarT (getBuiltin bi The_list_dim)
+    return_dim0 = return $ Just $ VarT (getBuiltin bi The_dim0)
+    return_dim1 = return $ Just $ VarT (getBuiltin bi The_dim1)
+    return_dim2 = return $ Just $ VarT (getBuiltin bi The_dim2)
+    return_dim3 = return $ Just $ VarT (getBuiltin bi The_dim3)
 
-indexPureTF = typeFunction 1 compute_eliminator
+indexPureTF bi = typeFunction 1 compute_eliminator
   where
     compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
     compute_eliminator [shape_arg] = do
@@ -333,19 +377,19 @@ indexPureTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isCoreBuiltin` The_list_dim -> return int_type
-           | op `isCoreBuiltin` The_dim0 -> return none_type
-           | op `isCoreBuiltin` The_dim1 -> return int_type
-           | op `isCoreBuiltin` The_dim2 -> return int2_type
-           | op `isCoreBuiltin` The_dim3 -> return int3_type
-        _ -> return $ varApp (coreBuiltin The_index) [shape_arg']
+           | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_dim0 op -> return none_type
+           | isBuiltin bi The_dim1 op -> return int_type
+           | isBuiltin bi The_dim2 op -> return int2_type
+           | isBuiltin bi The_dim3 op -> return int3_type
+        _ -> return $ varApp (getBuiltin bi The_index) [shape_arg']
 
-    none_type = VarT (coreBuiltin The_NoneType)
-    int_type = VarT (coreBuiltin The_int)
-    int2_type = varApp (coreBuiltin The_Tuple2) [int_type, int_type]
-    int3_type = varApp (coreBuiltin The_Tuple3) [int_type, int_type, int_type]
+    none_type = VarT (getBuiltin bi The_NoneType)
+    int_type = intT
+    int2_type = varApp (getBuiltin bi The_Tuple2) [int_type, int_type]
+    int3_type = varApp (getBuiltin bi The_Tuple3) [int_type, int_type, int_type]
 
-indexMemTF = typeFunction 1 compute_eliminator
+indexMemTF bi = typeFunction 1 compute_eliminator
   where
     compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
     compute_eliminator [shape_arg] = do
@@ -353,24 +397,24 @@ indexMemTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isCoreBuiltin` The_list_dim -> return int_type
-           | op `isCoreBuiltin` The_dim0 -> return none_type
-           | op `isCoreBuiltin` The_dim1 -> return int_type
-           | op `isCoreBuiltin` The_dim2 -> return int2_type
-           | op `isCoreBuiltin` The_dim3 -> return int3_type
-        _ -> return $ varApp (coreBuiltin The_index) [shape_arg']
+           | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_dim0 op -> return none_type
+           | isBuiltin bi The_dim1 op -> return int_type
+           | isBuiltin bi The_dim2 op -> return int2_type
+           | isBuiltin bi The_dim3 op -> return int3_type
+        _ -> return $ varApp (getBuiltin bi The_index) [shape_arg']
 
     compute_eliminator ts =
       internalError "Error in type application when reducing a type function"
 
-    none_type = varApp (coreBuiltin The_Stored) [VarT (coreBuiltin The_NoneType)]
-    int_type = varApp (coreBuiltin The_Stored) [VarT (coreBuiltin The_int)]
-    int2_type = varApp (coreBuiltin The_Tuple2)
+    none_type = varApp (getBuiltin bi The_Stored) [VarT (getBuiltin bi The_NoneType)]
+    int_type = varApp (getBuiltin bi The_Stored) [intT]
+    int2_type = varApp (getBuiltin bi The_Tuple2)
                 [int_type, int_type]
-    int3_type = varApp (coreBuiltin The_Tuple3)
+    int3_type = varApp (getBuiltin bi The_Tuple3)
                 [int_type, int_type, int_type]
 
-slicePureTF = typeFunction 1 compute_eliminator
+slicePureTF bi = typeFunction 1 compute_eliminator
   where
     compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
     compute_eliminator [shape_arg] = do
@@ -378,21 +422,21 @@ slicePureTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isCoreBuiltin` The_list_dim -> return slice_type
-           | op `isCoreBuiltin` The_dim0 -> return none_type
-           | op `isCoreBuiltin` The_dim1 -> return slice_type
-           | op `isCoreBuiltin` The_dim2 -> return slice2_type
-           | op `isCoreBuiltin` The_dim3 -> return slice3_type
-        _ -> return $ varApp (coreBuiltin The_slice) [shape_arg']
+           | isBuiltin bi The_list_dim op -> return slice_type
+           | isBuiltin bi The_dim0 op -> return none_type
+           | isBuiltin bi The_dim1 op -> return slice_type
+           | isBuiltin bi The_dim2 op -> return slice2_type
+           | isBuiltin bi The_dim3 op -> return slice3_type
+        _ -> return $ varApp (getBuiltin bi The_slice) [shape_arg']
 
-    none_type = VarT (coreBuiltin The_NoneType)
-    slice_type = VarT (coreBuiltin The_SliceObject)
-    slice2_type = varApp (coreBuiltin The_Tuple2)
+    none_type = VarT (getBuiltin bi The_NoneType)
+    slice_type = VarT (getBuiltin bi The_SliceObject)
+    slice2_type = varApp (getBuiltin bi The_Tuple2)
                   [slice_type, slice_type]
-    slice3_type = varApp (coreBuiltin The_Tuple3)
+    slice3_type = varApp (getBuiltin bi The_Tuple3)
                   [slice_type, slice_type, slice_type]
 
-sliceMemTF = typeFunction 1 compute_eliminator
+sliceMemTF bi = typeFunction 1 compute_eliminator
   where
     compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
     compute_eliminator [shape_arg] = do
@@ -400,19 +444,19 @@ sliceMemTF = typeFunction 1 compute_eliminator
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isCoreBuiltin` The_list_dim -> return slice_type
-           | op `isCoreBuiltin` The_dim0 -> return none_type
-           | op `isCoreBuiltin` The_dim1 -> return slice_type
-           | op `isCoreBuiltin` The_dim2 -> return slice2_type
-           | op `isCoreBuiltin` The_dim3 -> return slice3_type
-        _ -> return $ varApp (coreBuiltin The_slice) [shape_arg']
+           | isBuiltin bi The_list_dim op -> return slice_type
+           | isBuiltin bi The_dim0 op -> return none_type
+           | isBuiltin bi The_dim1 op -> return slice_type
+           | isBuiltin bi The_dim2 op -> return slice2_type
+           | isBuiltin bi The_dim3 op -> return slice3_type
+        _ -> return $ varApp (getBuiltin bi The_slice) [shape_arg']
 
-    none_type = varApp (coreBuiltin The_Stored)
-                [VarT (coreBuiltin The_NoneType)]
-    slice_type = VarT (coreBuiltin The_SliceObject)
-    slice2_type = varApp (coreBuiltin The_Tuple2)
+    none_type = varApp (getBuiltin bi The_Stored)
+                [VarT (getBuiltin bi The_NoneType)]
+    slice_type = VarT (getBuiltin bi The_SliceObject)
+    slice2_type = varApp (getBuiltin bi The_Tuple2)
                   [slice_type, slice_type]
-    slice3_type = varApp (coreBuiltin The_Tuple3)
+    slice3_type = varApp (getBuiltin bi The_Tuple3)
                   [slice_type, slice_type, slice_type]
 
 {-
@@ -425,14 +469,14 @@ viewPureTF = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | op `isCoreBuiltin` The_list_dim ->
-             return $ varApp (coreBuiltin The_list_view) other_args
+             return $ varApp (getBuiltin bi The_list_view) other_args
            | op `isCoreBuiltin` The_dim0 ->
-             return $ varApp (coreBuiltin The_view0) other_args
+             return $ varApp (getBuiltin bi The_view0) other_args
            | op `isCoreBuiltin` The_dim1 ->
-             return $ varApp (coreBuiltin The_view1) other_args
+             return $ varApp (getBuiltin bi The_view1) other_args
            | op `isCoreBuiltin` The_dim2 ->
-             return $ varApp (coreBuiltin The_view2) other_args
-        _ -> return $ varApp (coreBuiltin The_view) (shape_arg' : other_args)
+             return $ varApp (getBuiltin bi The_view2) other_args
+        _ -> return $ varApp (getBuiltin bi The_view) (shape_arg' : other_args)
 
 viewMemTF = typeFunction 1 compute_eliminator
   where
@@ -443,17 +487,17 @@ viewMemTF = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | op `isCoreBuiltin` The_list_dim ->
-             return $ varApp (coreBuiltin The_list_view) other_args
+             return $ varApp (getBuiltin bi The_list_view) other_args
            | op `isCoreBuiltin` The_dim0 ->
-             return $ varApp (coreBuiltin The_view0) other_args
+             return $ varApp (getBuiltin bi The_view0) other_args
            | op `isCoreBuiltin` The_dim1 ->
-             return $ varApp (coreBuiltin The_view1) other_args
+             return $ varApp (getBuiltin bi The_view1) other_args
            | op `isCoreBuiltin` The_dim2 ->
-             return $ varApp (coreBuiltin The_view2) other_args
-        _ -> return $ varApp (coreBuiltin The_view) (shape_arg' : other_args)
+             return $ varApp (getBuiltin bi The_view2) other_args
+        _ -> return $ varApp (getBuiltin bi The_view) (shape_arg' : other_args)
 -}
 
-streamPureTF = typeFunction 1 compute_stream
+streamPureTF bi = typeFunction 1 compute_stream
   where
     compute_stream :: forall m. EvalMonad m => [Type] -> m Type
     compute_stream (shape_arg : other_args) = do
@@ -461,21 +505,21 @@ streamPureTF = typeFunction 1 compute_stream
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-          | op `isCoreBuiltin` The_list_dim ->
+          | isBuiltin bi The_list_dim op ->
             return_con The_Stream1 []
-          | op `isCoreBuiltin` The_dim0 ||
-            op `isCoreBuiltin` The_dim1 ||
-            op `isCoreBuiltin` The_dim2 ||
-            op `isCoreBuiltin` The_dim3 ->
+          | isBuiltin bi The_dim0 op ||
+            isBuiltin bi The_dim1 op ||
+            isBuiltin bi The_dim2 op ||
+            isBuiltin bi The_dim3 op ->
               return_con The_view [shape_arg']
         _ -> return_con The_Stream [shape_arg']
       where
         return_con :: forall m. EvalMonad m =>
                       BuiltinThing -> [Type] -> m Type
         return_con con args =
-          return $ varApp (coreBuiltin con) (args ++ other_args)
+          return $ varApp (getBuiltin bi con) (args ++ other_args)
 
-streamMemTF = typeFunction 1 compute_stream
+streamMemTF bi = typeFunction 1 compute_stream
   where
     compute_stream :: forall m. EvalMonad m => [Type] -> m Type
     compute_stream (shape_arg : other_args) = do
@@ -483,26 +527,26 @@ streamMemTF = typeFunction 1 compute_stream
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-          | op `isCoreBuiltin` The_list_dim ->
+          | isBuiltin bi The_list_dim op ->
               return_con The_Stream1 []
-          | op `isCoreBuiltin` The_dim0 ||
-            op `isCoreBuiltin` The_dim1 ||
-            op `isCoreBuiltin` The_dim2 ||
-            op `isCoreBuiltin` The_dim3 ->
+          | isBuiltin bi The_dim0 op ||
+            isBuiltin bi The_dim1 op ||
+            isBuiltin bi The_dim2 op ||
+            isBuiltin bi The_dim3 op ->
               return_con The_view [shape_arg']
         _ -> return_con The_Stream [shape_arg']
       where
         return_con :: forall m. EvalMonad m =>
                       BuiltinThing -> [Type] -> m Type
         return_con con args =
-          return $ varApp (coreBuiltin con) (args ++ other_args)
+          return $ varApp (getBuiltin bi con) (args ++ other_args)
 
 -- | The 'AsBox' data type should never appear in the pure type system
-boxedPureTF =
+boxedPureTF bi =
   typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'AsBox'")
 
 -- | Compute the boxed representation corresponding to a bare type
-boxedMemTF = typeFunction 1 compute_boxed
+boxedMemTF bi = typeFunction 1 compute_boxed
   where
     compute_boxed :: forall m. EvalMonad m => [Type] -> m Type
     compute_boxed [arg_type] =
@@ -517,8 +561,8 @@ boxedMemTF = typeFunction 1 compute_boxed
     eval arg =
       case fromVarApp arg
       of Just (op, args')
-           | op `isCoreBuiltin` The_AsBare ||
-             op `isCoreBuiltin` The_Ref ->
+           | isBuiltin bi The_AsBare op ||
+             isBuiltin bi The_Ref op ->
                -- AsBox (AsBare t)   =  t
                -- AsBox (StoredBox t)  =  t
                case args'
@@ -529,19 +573,19 @@ boxedMemTF = typeFunction 1 compute_boxed
                -- use 'Boxed' as the adapter type
                tenv <- getTypeEnv
                case lookupDataType op tenv of
-                 Just _ -> return $ varApp (coreBuiltin The_Boxed) [arg]
+                 Just _ -> return $ varApp (getBuiltin bi The_Boxed) [arg]
                  _ -> cannot_reduce
          _ -> cannot_reduce
       where
         cannot_reduce =
-          return $ varApp (coreBuiltin The_AsBox) [arg]
+          return $ varApp (getBuiltin bi The_AsBox) [arg]
           
 -- | The 'BareType' data type should never appear in the pure type system
-barePureTF =
+barePureTF bi =
   typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'BareType'")
 
 -- | Compute the bare representation corresponding to a boxed type
-bareMemTF = typeFunction 1 compute_bare
+bareMemTF bi = typeFunction 1 compute_bare
   where
     compute_bare :: forall m. EvalMonad m => [Type] -> m Type
     compute_bare [arg_type] =
@@ -558,14 +602,14 @@ bareMemTF = typeFunction 1 compute_bare
          AllT {} -> stored_type -- Forall'd types are naturally boxed
          _ -> case fromVarApp arg
               of Just (op, args')
-                   | op `isCoreBuiltin` The_AsBox ||
-                     op `isCoreBuiltin` The_Boxed ->
+                   | isBuiltin bi The_AsBox op ||
+                     isBuiltin bi The_Boxed op ->
                        -- AsBare (AsBox t)  =  t
                        -- AsBare (Boxed t)      =  t
                        case args'
                        of [arg'] -> reduceToWhnf arg'
 
-                   | op `isCoreBuiltin` The_Stream ->
+                   | isBuiltin bi The_Stream op ->
                        -- All fully applied 'Stream' types are naturally
                        -- boxed
                        stored_type
@@ -581,6 +625,6 @@ bareMemTF = typeFunction 1 compute_bare
                  _ -> cannot_reduce
       where
         stored_type =
-          return $ varApp (coreBuiltin The_Ref) [arg]
+          return $ varApp (getBuiltin bi The_Ref) [arg]
         cannot_reduce =
-          return $ varApp (coreBuiltin The_AsBare) [arg]
+          return $ varApp (getBuiltin bi The_AsBare) [arg]

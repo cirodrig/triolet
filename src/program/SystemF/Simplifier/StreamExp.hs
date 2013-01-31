@@ -256,7 +256,7 @@ streamIndexType st =
      ArrViewType 2 -> ix2
   where
     ix0 = varApp (coreBuiltin The_Stored) [VarT $ coreBuiltin The_NoneType]
-    ix1 = varApp (coreBuiltin The_Stored) [VarT $ coreBuiltin The_int]
+    ix1 = varApp (coreBuiltin The_Stored) [intT]
     ix2 = varApp (coreBuiltin The_Tuple2) [ix1, ix1]
 
 data ConsumerOp =
@@ -1188,7 +1188,8 @@ restructureListIfNeeded locals es cont = go es cont
 -- Then a top-down simplification pass is performed.
 simplifyStreamExp :: ExpS -> TypeEvalM ExpS
 simplifyStreamExp expression = do
-  simplifyExp =<< restructureStreamExp expression
+  e' <- simplifyExp =<< restructureStreamExp expression
+  traceShow (text "SIMPLIFY" <+> (pprExpS expression $$ text "----" $$ pprExpS e')) $ return e'
   
 -- | Recursively transform a stream expression
 simplifyExp :: ExpS -> TypeEvalM ExpS
@@ -1304,7 +1305,7 @@ fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
              Just (var, s) -> do
                (_, s') <- fuse_with_producer SequenceType s
                let stored_int_type =
-                     varApp (coreBuiltin The_Stored) [VarT $ coreBuiltin The_int]
+                     varApp (coreBuiltin The_Stored) [intT]
                    return_type = varApp (coreBuiltin The_Sequence) [ty]
                progress $ OpSE inf (GenerateBindOp ty) [] [shp]
                  [mkUnaryStreamFunction defaultExpInfo var stored_int_type return_type s'] Nothing
@@ -1642,7 +1643,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
 
          -- Create a stored 'zero' value
          zero_var <- newAnonymousVar ObjectLevel
-         let zero_exp = ExpM (LitE defaultExpInfo (IntL 0 int_type))
+         let zero_exp = ExpM (LitE defaultExpInfo (IntL 0 intT))
 
          -- Call 'f' to create a value
          let value_exp = as_stored_int zero_exp zero_var $
@@ -1666,10 +1667,10 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
                let add_expression =
                      appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
                      [varE' value_i,
-                      ExpM (LitE defaultExpInfo (IntL 1 int_type))]
+                      ExpM (LitE defaultExpInfo (IntL 1 intT))]
 
                return $ ExpM $ CaseE defaultExpInfo (varE' i)
-                 [AltM $ Alt stored_decon [patM (value_i ::: int_type)]
+                 [AltM $ Alt stored_decon [patM (value_i ::: intT)]
                   (as_stored_int add_expression i' $
                    appE' f [] [varE' i', varE' r])])
 
@@ -1687,7 +1688,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
     make_body_function inner_stream =
       lamE $
       mkFun []
-      (\ [] -> return ([int_type, list_dim_type, cont_type, outType a_ty],
+      (\ [] -> return ([intT, list_dim_type, cont_type, outType a_ty],
                        initEffectType a_ty))
       (\ [] [index, leftover_domain, loop_cont, r] -> do
          stored_index <- newAnonymousVar ObjectLevel
@@ -1750,11 +1751,11 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
               appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
               [ appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
                 [varE' outer_index, varE' value_i]
-              , ExpM (LitE defaultExpInfo (IntL 1 int_type))
+              , ExpM (LitE defaultExpInfo (IntL 1 intT))
               ]
         let inner_stream_exp =
               CaseSE defaultExpInfo (varE' i)
-              [AltS $ Alt stored_decon [PatS $ patM (value_i ::: int_type)]
+              [AltS $ Alt stored_decon [PatS $ patM (value_i ::: intT)]
                (as_stored_int_stream add_expression i' inner_body')]
             adjusted_inner_stream =
               mkUnaryStreamFunction defaultExpInfo i stored_int_type
@@ -1781,14 +1782,13 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
       (conE' boxed_con [conE' stored_con [int_e]])
       [AltS $ Alt boxed_decon [PatS $ patM (int_var ::: stored_int_type)] body_s]
 
-    int_type = VarT (coreBuiltin The_int)
-    stored_int_type = varApp (coreBuiltin The_Stored) [int_type]
+    stored_int_type = varApp (coreBuiltin The_Stored) [intT]
     list_dim_type = VarT (coreBuiltin The_list_dim)
     cont_type = writerType ret_ty
 
-    stored_decon = VarDeCon (coreBuiltin The_stored) [int_type] []
+    stored_decon = VarDeCon (coreBuiltin The_stored) [intT] []
     boxed_decon = VarDeCon (coreBuiltin The_boxed) [stored_int_type] []
-    stored_con = VarCon (coreBuiltin The_stored) [int_type] []
+    stored_con = VarCon (coreBuiltin The_stored) [intT] []
     boxed_con = VarCon (coreBuiltin The_boxed) [stored_int_type] []
 
 
@@ -1938,9 +1938,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
      OtherSE _ -> mzero
      LamSE {} -> internalError "sequentializeFold: Unexpected lambda function"
   where
-    int_type = VarT (coreBuiltin The_int)
-    stored_int_type =
-      varApp (coreBuiltin The_Stored) [VarT (coreBuiltin The_int)]
+    stored_int_type = varApp (coreBuiltin The_Stored) [intT]
 
 -- Turn a one-parameter stream function into a combining function for a fold.
 --

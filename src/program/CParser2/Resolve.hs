@@ -166,11 +166,23 @@ wrongLevelError pos name expected actual =
       a_level = show actual
   in name ++ " has level " ++ a_level ++ ", expecting " ++ e_level ++ location
 
+levelCheck :: SourcePos -> Level -> Level -> NR ()
+levelCheck pos expected actual = logErrorIf (e_level /= a_level) message
+  where
+    location = "(" ++ show pos ++ ")"
+    e_level = show expected
+    a_level = show actual
+    message = location ++ ": got level " ++ a_level ++ ", expecting " ++ e_level
+
 -------------------------------------------------------------------------------
 -- Name resolution
 
 resolveL :: (SourcePos -> a -> NR b) -> Located a -> NR (Located b)
 resolveL f (L pos x) = L pos <$> f pos x
+
+resolveMaybe :: (a -> NR b) -> Maybe a -> NR (Maybe b) 
+resolveMaybe f (Just x) = liftM Just $ f x
+resolveMaybe _ Nothing  = return Nothing
 
 -- | Create and define a new variable inhabiting the current module.
 newRVar :: Level -> Identifier Parsed -> NR ResolvedVar
@@ -182,58 +194,64 @@ newRVar lv parsed_name = do
   def parsed_name v
   return v
 
-resolveLType (L pos t) = do
-  (t', lv) <- resolveType pos t 
-  return (L pos t', lv)
+-- | Resolve a type expression.  The expression must have the specified level.
+resolveLType :: Level -> PLType -> NR RLType
+resolveLType level (L pos t) = do
+  t' <- resolveType pos level t 
+  return $ L pos t'
 
 -- | Resolve a type expression.  Return the type and the inferred level.
 --   The level is used for error checking.
-resolveType :: SourcePos -> PType -> NR (RType, Level)
-resolveType pos ty =
+resolveType :: SourcePos -> Level -> PType -> NR RType
+resolveType pos level ty =
   case ty
-  of VarT v      -> do v' <- use v pos
-                       check_level (getLevel v')
-                       return (VarT v', getLevel v')
-     IntIndexT n -> return (IntIndexT n, TypeLevel)
-     TupleT ts -> do (args, arg_lvs) <- mapAndUnzipM resolveLType ts
-                     logErrorIf (any (TypeLevel /=) arg_lvs) $
-                       "Arguments of tuple type must be types"
-                     return (TupleT args, TypeLevel)
-     AppT op arg -> do (op', op_lv) <- resolveLType op
-                       (arg', _) <- resolveLType arg
-                       return (AppT op' arg', op_lv)
-     FunT d r    -> do (d', d_lv) <- resolveLType d
-                       (r', r_lv) <- resolveLType r
-                       logErrorIf (d_lv /= r_lv) $
-                         "Domain and range of function type must have same level"
-                       return (FunT d' r', r_lv)
-     AllT d r    -> fmap fst $ resolveDomain d $ \d' -> do
-                      (r', lv) <- resolveLType r
-                      return (AllT d' r', lv)
-     LamT d r    -> withMany (resolveDomainT pos) d $ \d' -> do
-                      (r', lv) <- resolveLType r
-                      return (LamT d' r', lv)
-     CoT k d r   -> do (k', k_lv) <- resolveLType k
-                       (d', d_lv) <- resolveLType d
-                       (r', r_lv) <- resolveLType r
-                       logErrorIf (k_lv /= KindLevel) $
-                         "First argument of coercion type must be a kind"
-                       logErrorIf (d_lv /= TypeLevel || r_lv /= TypeLevel) $
-                         "Arguments to coercion type must have same level"
-                       return (CoT k' d' r', TypeLevel)
+  of VarT v -> do
+       v' <- use v pos
+       check_level $ getLevel v'
+       return $ VarT v'
+     IntIndexT n -> do
+       check_level TypeLevel
+       return $ IntIndexT n
+     TupleT ts -> do
+       check_level TypeLevel
+       args <- mapM (resolveLType TypeLevel) ts
+       return $ TupleT args
+     AppT op arg -> do
+       op' <- resolveLType level op
+       arg' <- resolveLType level arg
+       return $ AppT op' arg'
+     FunT d r -> do
+       d' <- resolveLType level d
+       r' <- resolveLType level r
+       return $ FunT d' r'
+     AllT d r -> resolveDomain level d $ \d' -> do
+       r' <- resolveLType level r
+       return $ AllT d' r'
+     LamT d r -> withMany (resolveDomain level) d $ \d' -> do
+       r' <- resolveLType level r
+       return $ LamT d' r'
+     CoT k d r -> do
+       check_level TypeLevel
+       k' <- resolveLType KindLevel k
+       d' <- resolveLType TypeLevel d
+       r' <- resolveLType TypeLevel r
+       return $ CoT k' d' r'
   where
+    check_level actual_level = levelCheck pos level actual_level
+    {-
     check_level lv =
       logErrorIf (lv == ObjectLevel) $
-      "Term must be higher than Object level (" ++ show pos ++ ")"
+      "Term must be higher than Object level (" ++ show pos ++ ")" -}
 
--- | Resolve a variable binding.  Return the level of the variable's type.
-resolveDomain :: Domain Parsed -> (Domain Resolved -> NR a) -> NR (a, Level)
-resolveDomain (Domain binder t) k = do
-  (t', lv) <- resolveLType t
-  x <- enter $ do binder' <- newRVar (pred lv) binder
-                  k (Domain binder' t')
-  return (x, lv)
+-- | Resolve a variable binding.
+--   The variable must have the specified level.
+resolveDomain :: Level -> Domain Parsed -> (Domain Resolved -> NR a) -> NR a
+resolveDomain level (Domain binder t) k = do
+  t' <- resolveMaybe (resolveLType (succ level)) t
+  enter $ do binder' <- newRVar level binder
+             k (Domain binder' t')
 
+{-
 -- | Resolve a variable binding, and also check its level.
 resolveDomain' :: Level
                -> String
@@ -246,12 +264,11 @@ resolveDomain' expected_level error_message pos d k = do
   logErrorIf (lv /= expected_level) $
     error_message ++ " (" ++ show pos ++ ")"
   return x
+-}
 
-resolveDomainT = resolveDomain' KindLevel 
-                 "Bad level in type parameter of data constructor"
+resolveDomainT = resolveDomain TypeLevel
 
-resolveDomainV = resolveDomain' TypeLevel
-                 "Bad level in field of data constructor" 
+resolveDomainV = resolveDomain ObjectLevel
 
 resolveExp :: SourcePos -> Exp Parsed -> NR (Exp Resolved)
 resolveExp pos expression = 
@@ -262,22 +279,18 @@ resolveExp pos expression =
      TupleE ts -> TupleE <$> mapM (resolveL resolveExp) ts
      TAppE e t -> do
        e' <- resolveL resolveExp e 
-       (t', t_lv) <- resolveLType t
-       logErrorIf (t_lv /= TypeLevel) $
-         "Parameter of type application is not a type (" ++ show pos ++ ")"
+       t' <- resolveLType TypeLevel t
        return $ TAppE e' t'
      AppE e1 e2 -> AppE <$> resolveL resolveExp e1 <*> resolveL resolveExp e2
      LamE f -> LamE <$> resolveFun pos f
      LetE binder rhs body -> do
        rhs' <- resolveL resolveExp rhs
-       resolveDomain' TypeLevel "Bad level in let binding" pos binder $ \binder' -> do
+       resolveDomainV binder $ \binder' -> do
          body' <- resolveL resolveExp body
          return $ LetE binder' rhs' body'
      LetTypeE lhs rhs body -> do
-       (rhs', rhs_lv) <- resolveLType rhs 
-       logErrorIf (rhs_lv == ObjectLevel) $
-         "Bad level in right-hand side of type let"
-       enter $ do lhs' <- newRVar rhs_lv lhs
+       rhs' <- resolveLType TypeLevel rhs 
+       enter $ do lhs' <- newRVar TypeLevel lhs
                   body' <- resolveL resolveExp body
                   return $ LetTypeE lhs' rhs' body'
      LetfunE defs e ->
@@ -285,18 +298,12 @@ resolveExp pos expression =
      CaseE scr alts -> CaseE <$> resolveL resolveExp scr <*>
                        mapM (resolveL resolveAlt) alts
      ExceptE t -> do
-       (t', t_lv) <- resolveLType t
-       logErrorIf (t_lv /= TypeLevel) $
-         "Result type of exception is not a type"
+       t' <- resolveLType TypeLevel t
        return $ ExceptE t'
      
      CoerceE from_t to_t body -> do
-       (from_t', from_t_lv) <- resolveLType from_t
-       (to_t', to_t_lv) <- resolveLType to_t
-       logErrorIf (from_t_lv /= TypeLevel) $
-         "Source type of coercion is not a type"
-       logErrorIf (to_t_lv /= TypeLevel) $
-         "Result type of coercion is not a type"
+       from_t' <- resolveLType TypeLevel from_t
+       to_t' <- resolveLType TypeLevel to_t
        body' <- resolveL resolveExp body
        return $ CoerceE from_t' to_t' body'
 
@@ -321,24 +328,20 @@ resolveAlt pos (Alt pattern body) = do
 
 resolvePattern pos (ConPattern con ty_args ex_types fields) k = do
   con' <- use con pos
-  (ty_args', ty_lvs) <- mapAndUnzipM resolveLType ty_args
-  logErrorIf (any (TypeLevel /=) ty_lvs) $
-    "Type parameter is not a type (" ++ show pos ++ ")"
-  withMany (resolveDomainT pos) ex_types $ \ex_types' ->
-    withMany (resolveDomainV pos) fields $ \fields' ->
+  ty_args' <- mapM (resolveLType TypeLevel) ty_args
+  withMany resolveDomainT ex_types $ \ex_types' ->
+    withMany resolveDomainV fields $ \fields' ->
     k (ConPattern con' ty_args' ex_types' fields')
 
 resolvePattern pos (TuplePattern fields) k =
-    withMany (resolveDomainV pos) fields $ \fields' ->
+    withMany resolveDomainV fields $ \fields' ->
     k (TuplePattern fields')
 
 resolveFun :: SourcePos -> PFun -> NR RFun
 resolveFun pos f =
-  withMany (resolveDomainT pos) (fTyParams f) $ \tparams ->
-  withMany (resolveDomainV pos) (fParams f) $ \params -> do
-    (range, range_lv) <- resolveLType $ fRange f
-    logErrorIf (range_lv /= TypeLevel) $
-      "Function range is not a type"
+  withMany resolveDomainT (fTyParams f) $ \tparams ->
+  withMany resolveDomainV (fParams f) $ \params -> do
+    range <- resolveLType TypeLevel $ fRange f
     body <- resolveL resolveExp $ fBody f
     return $ Fun tparams params range body  
 
@@ -348,46 +351,29 @@ resolveDataConDecl :: SourcePos
                    -> NR (DataConDecl Resolved)
 resolveDataConDecl pos v' (DataConDecl _ ex_types args) = do
   enter $
-    withMany (resolveDomainT pos) ex_types $ \ex_types' -> do
-      (unzip -> (args', arg_levels)) <- mapM resolveLType args
-      mapM_ check_arg_level arg_levels
+    withMany resolveDomainT ex_types $ \ex_types' -> do
+      args' <- mapM (resolveLType TypeLevel) args
       return $ DataConDecl v' ex_types' args'
-  where
-    check_arg_level lv =
-      logErrorIf (lv /= TypeLevel) $
-      "Bad level in field of data constructor (" ++ show pos ++ ")"
-
-    check_rng_level lv =
-      logErrorIf (lv /= TypeLevel) $
-      "Bad level in range of data constructor (" ++ show pos ++ ")"
 
 resolveEntity :: SourcePos -> ResolvedDeclName -> Entity Parsed
               -> NR (Entity Resolved)
 resolveEntity _ _ (VarEnt ty attrs) = do
-  (ty', lv) <- resolveLType ty
-  logErrorIf (lv /= TypeLevel) $
-    "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
+  ty' <- resolveLType TypeLevel ty
   return $ VarEnt ty' attrs
 
 resolveEntity _ (GlobalName r_name) (TypeEnt ty) = do
-  (ty', lv) <- resolveLType ty
-  logErrorIf (lv /= KindLevel) $
-    "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
+  ty' <- resolveLType KindLevel ty
   return $ TypeEnt ty'
 
 resolveEntity pos (DataConNames _ data_con_names) (DataEnt params ty cons attrs) = do
-  (ty', lv) <- resolveLType ty
-  logErrorIf (lv /= KindLevel) $
-    "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
-  withMany (resolveDomainT pos) params $ \params' -> do
+  ty' <- resolveLType KindLevel ty
+  withMany resolveDomainT params $ \params' -> do
     cons' <- sequence [L pos <$> resolveDataConDecl pos v con
                       | (v, L pos con) <- zip data_con_names cons]
     return $ DataEnt params' ty' cons' attrs
 
 resolveEntity _ _ (ConstEnt ty e attrs) = do
-  (ty', lv) <- resolveLType ty
-  logErrorIf (lv /= TypeLevel) $
-    "Expecting a type (" ++ show (getSourcePos ty) ++ ")"
+  ty' <- resolveLType TypeLevel ty
   e' <- resolveL resolveExp e
   return $ ConstEnt ty' e' attrs
 

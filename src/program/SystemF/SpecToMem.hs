@@ -16,13 +16,10 @@ import SystemF.MemoryIR
 import Type.Type
 
 -- | Hold some type constructors in variables so we can use them.
-data Info = Info { var_Init   :: !Var
-                 , var_OutPtr :: !Var
-                 , var_Store  :: !Var
-                 }
+data Info = Info
 
 isInit :: Info -> Var -> Bool
-isInit ctx v = var_Init ctx == v
+isInit ctx v = v == initConV
 
 convertKind :: Type -> Type
 convertKind (k1 `FunT` k2) =
@@ -38,7 +35,7 @@ convertType :: Info -> Type -> Type
 convertType ctx ty
   | Just (op, [arg]) <- fromVarApp ty, isInit ctx op =
       let arg' = convertType ctx arg
-      in varApp (var_OutPtr ctx) [arg'] `FunT` VarT (var_Store ctx)
+      in typeApp outPtrT [arg'] `FunT` storeT
 
   | otherwise =
       case ty
@@ -57,7 +54,6 @@ convertType ctx ty
 
 convertTyParam (TyPat (v ::: k)) = TyPat (v ::: convertKind k)
 
-convertSpecToMemTypes :: Var -> Var -> Var -> Module Mem -> Module Mem
-convertSpecToMemTypes v_Init v_OutPtr v_Store mod =
-  let ctx = Info v_Init v_OutPtr v_Store
-  in mapModuleTypes convertKind (convertType ctx) mod
+convertSpecToMemTypes :: Module Mem -> Module Mem
+convertSpecToMemTypes mod =
+  mapModuleTypes convertKind (convertType Info) mod

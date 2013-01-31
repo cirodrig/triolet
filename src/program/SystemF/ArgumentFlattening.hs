@@ -71,10 +71,10 @@ fromProductTyCon tenv ty_op =
 fromOutPtrType :: Type -> Type
 fromOutPtrType t =
   case fromVarApp t
-  of Just (op, [arg]) | op `isCoreBuiltin` The_OutPtr -> arg
+  of Just (op, [arg]) | op == outPtrV -> arg
      _ -> internalError "fromOutPtrType: Not an output pointer"
 
-storeType = VarT $ coreBuiltin The_Store
+storeType = storeT
 
 -- | Bind a variable to a value.
 --
@@ -1063,13 +1063,11 @@ deadValue t = do
       of (VarT con, [])
            | con `isCoreBuiltin` The_NoneType ->
                return noneValue
-           | con `isCoreBuiltin` The_int ->
+           | con == intV ->
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
-           | con `isCoreBuiltin` The_float ->
+           | con == floatV ->
                return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
          (VarT con, [p])
-           | con `isCoreBuiltin` The_Pf ->
-               return $ ExpM $ ConE defaultExpInfo (dead_proof_op p) []
            | con `isCoreBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor
                -- Get types of data constructor parameters
@@ -1114,7 +1112,6 @@ deadValue t = do
     dead_bare = appE' dead_bare_op [t] []
     dead_box_op = varE' (coreBuiltin The_deadBox)
     dead_bare_op = varE' (coreBuiltin The_deadRef)
-    dead_proof_op p = VarCon (coreBuiltin The_deadProof) [p] []
     dead_finindint_op i = VarCon (coreBuiltin The_fiInt) [i] []
     dead_indint_op i = VarCon (coreBuiltin The_iInt) [i] []
     make_x_coercion_op = varE' (coreBuiltin The_unsafeMakeCoercion)
@@ -1140,10 +1137,7 @@ planOutputReturn :: (ReprDictMonad m, EvalMonad m) =>
                     PatM -> m PlanRet
 planOutputReturn pat = do
   tenv <- getTypeEnv
-  let return_type =
-        case fromVarApp $ patMType pat
-        of Just (op, [arg]) | op `isCoreBuiltin` The_OutPtr -> arg
-           _ -> internalError "planOutputReturn: Expecting an output pointer"
+  let return_type = fromOutPtrType $ patMType pat
   flat_ret <- planReturn mode Used return_type
 
   -- Only perform decomposition if everything was converted to a value

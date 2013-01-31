@@ -266,8 +266,7 @@ defineArray elt_type size_ix size elt_repr writer =
     array_type =
       varApp (coreBuiltin The_arr) [size_ix, elt_type] -}
 
-intType = VarT (coreBuiltin The_int)
-storedIntType = storedType intType
+storedIntType = storedType intT
 
 shapeOfType :: Type -> Type
 shapeOfType t = varApp (coreBuiltin The_shape) [t]
@@ -405,16 +404,16 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
         mk_list_dim =
           VarCon (coreBuiltin The_mk_list_dim) [] []
         nothing_val =
-          VarCon (coreBuiltin The_nothingVal) [VarT $ coreBuiltin The_int] []
+          VarCon (coreBuiltin The_nothingVal) [intT] []
         mk_view =
           VarCon (coreBuiltin The_mk_view)
           [VarT $ coreBuiltin The_list_dim, storedIntType] []
 
-    int0_expr = return $ litE' $ IntL 0 (VarT $ coreBuiltin The_int)
-    int1_expr = return $ litE' $ IntL 1 (VarT $ coreBuiltin The_int)
-    float0_expr = return $ litE' $ FloatL 0 (VarT $ coreBuiltin The_float)
-    float1_expr = return $ litE' $ FloatL 1 (VarT $ coreBuiltin The_float)
-    floatpi_expr = return $ litE' $ FloatL pi (VarT $ coreBuiltin The_float)
+    int0_expr = return $ litE' $ IntL 0 intT
+    int1_expr = return $ litE' $ IntL 1 intT
+    float0_expr = return $ litE' $ FloatL 0 floatT
+    float1_expr = return $ litE' $ FloatL 1 floatT
+    floatpi_expr = return $ litE' $ FloatL pi floatT
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
@@ -1283,7 +1282,7 @@ rwFloatFromInt :: RewriteRule
 rwFloatFromInt inf [] [integer_value@(ExpM (LitE _ lit))] =
   let IntL m _ = lit
       f = fromIntegral m
-      float_exp = ExpM $ LitE inf (FloatL f (VarT $ coreBuiltin The_float))
+      float_exp = ExpM $ LitE inf (FloatL f floatT)
   in f `seq` return $ Just float_exp
 
 rwFloatFromInt _ _ _ = return Nothing
@@ -1337,8 +1336,7 @@ rwSubInt inf [] [e1, e2]
   | ExpM (VarE _ v1) <- e1, ExpM (VarE _ v2) <- e2, v1 == v2 =
     return $ Just zero_lit
   where
-    zero_lit = ExpM $ LitE inf (IntL 0 int_type)
-    int_type = VarT $ coreBuiltin The_int
+    zero_lit = ExpM $ LitE inf (IntL 0 intT)
 
 rwSubInt _ _ _ = return Nothing
 
@@ -1357,8 +1355,7 @@ rwMulInt inf [] [e1, e2]
   | ExpM (LitE _ (IntL 1 _)) <- e1 = return $ Just e2
   | ExpM (LitE _ (IntL 1 _)) <- e2 = return $ Just e1
   where
-    zero_lit = ExpM $ LitE inf (IntL 0 int_type)
-    int_type = VarT $ coreBuiltin The_int
+    zero_lit = ExpM $ LitE inf (IntL 0 intT)
 
 rwMulInt _ _ _ = return Nothing
 
@@ -1390,8 +1387,7 @@ rwModInt inf [] [e1, e2]
   | ExpM (LitE _ (IntL 1 _)) <- e2 = return $ Just $ zero_lit
   | ExpM (LitE _ (IntL (-1) _)) <- e2 = return $ Just $ zero_lit
   where
-    zero_lit = ExpM $ LitE inf (IntL 0 int_type)
-    int_type = VarT $ coreBuiltin The_int
+    zero_lit = ExpM $ LitE inf (IntL 0 intT)
 
 rwModInt _ _ _ = return Nothing
 
@@ -1411,8 +1407,7 @@ rwGcd inf [] [e1, e2]
   | ExpM (VarE _ v1) <- e1, ExpM (VarE _ v2) <- e2, v1 == v2 =
     return $ Just e1
   where
-    one_lit = ExpM $ LitE inf (IntL 1 int_type)
-    int_type = VarT $ coreBuiltin The_int
+    one_lit = ExpM $ LitE inf (IntL 1 intT)
 
 rwGcd _ _ _ = return Nothing
 

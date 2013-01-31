@@ -1186,11 +1186,10 @@ getValAlgLayout ty =
   of TypeLevel ->
        case fromTypeApp ty
        of (VarT op, args)
-            | op `isCoreBuiltin` The_bool  -> return boolLayout
-            | op `isCoreBuiltin` The_int   -> not_algebraic
-            | op `isCoreBuiltin` The_uint  -> not_algebraic
-            | op `isCoreBuiltin` The_float -> not_algebraic
-            | op `isCoreBuiltin` The_Pf    -> return AVErased
+            | op `isCoreBuiltin` The_bool -> return boolLayout
+            | op == intV                  -> not_algebraic
+            | op == uintV                 -> not_algebraic
+            | op == floatV                -> not_algebraic
             | otherwise -> do
                 tenv <- getTypeEnv
                 case lookupDataTypeForLayout tenv ty of
@@ -1315,10 +1314,11 @@ getRefAlgLayout ty =
 -- | Get the algebraic layout of a bare data type, based on an algebraic
 --   data type definition.
 getRefDataTypeLayout :: InstantiatedDataType -> Lower AlgMemLayout
-getRefDataTypeLayout (_, ty_args, datacons)
+getRefDataTypeLayout (data_type, ty_args, datacons)
   | null datacons =
       -- Uninhabited type
-      internalError "refDataTypeLayout: Type is uninhabited"
+      internalError $ "refDataTypeLayout: Data type is uninhabited: " ++
+      show (dataTypeCon data_type)
 
   | [datacon] <- datacons = do
       -- Singleton object.  It's a product with no tag.
@@ -1356,11 +1356,11 @@ getValLayout ty
       ty' <- Substitute.freshen ty
       case fromTypeApp ty' of
          (VarT op, args)
-           | op `isCoreBuiltin` The_bool  -> prim_layout LL.BoolType
-           | op `isCoreBuiltin` The_int   -> prim_layout LL.trioletIntType
-           | op `isCoreBuiltin` The_uint  -> prim_layout LL.trioletUintType
-           | op `isCoreBuiltin` The_float -> prim_layout LL.trioletFloatType
-           | op `isCoreBuiltin` The_Pf    -> return VErased
+           | op `isCoreBuiltin` The_bool -> prim_layout LL.BoolType
+           | op == intV                  -> prim_layout LL.trioletIntType
+           | op == uintV                 -> prim_layout LL.trioletUintType
+           | op == floatV                -> prim_layout LL.trioletFloatType
+           | op == storeV                -> prim_layout LL.UnitType
            | otherwise -> do
                tenv <- getTypeEnv
                case toBaseKind $ typeKind tenv ty' of
@@ -1408,7 +1408,7 @@ getRefLayout ty = do
        | op `isCoreBuiltin` The_Referenced -> do
            return IndirectMemLayout-}
      (VarT op, [arg1, arg2])
-       | op `isCoreBuiltin` The_arr -> do
+       | op == arrV -> do
            field_layout <- getRefLayout =<< reduceToWhnf arg2
            return $ arrayLayout (lookupIndexedInt arg1) field_layout
      (AllT (v ::: k) rng, []) ->

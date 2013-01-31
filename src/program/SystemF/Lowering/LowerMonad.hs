@@ -102,10 +102,8 @@ mkGlobalReprEnv = do
     (varApp (coreBuiltin The_Ref) [VarT arg], mk_boxed_dict arg)
 
   -- Value dictionaries
-  let int_dict =
-        mono_dict (stored_type $ VarT $ coreBuiltin The_int) LL.the_bivar_repr_int
-  let float_dict =
-        mono_dict (stored_type $ VarT $ coreBuiltin The_float) LL.the_bivar_repr_float
+  let int_dict = mono_dict (stored_type intT) LL.the_bivar_repr_int
+  let float_dict = mono_dict (stored_type floatT) LL.the_bivar_repr_float
 
   -- Bare object dictionaries
   (tuple2_dict, tuple3_dict, tuple4_dict) <- do

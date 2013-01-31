@@ -3,6 +3,7 @@ module CParser2.AdjustTypes
        (VariableNameTable,
         expandInitTypeInModule,
         expandInitType,
+        expandType,
         toMemEnv,
         convertMemToSpec,
         convertSpecToSF)
@@ -25,44 +26,31 @@ lookupVariableByName tbl name =
   of Just v -> v
      Nothing -> internalError $ "lookupVariableByName: " ++ name
 
--- | Hold some type constructors in variables so we can use them.
-data Info = Info { var_Init   :: !Var
-                 , var_OutPtr :: !Var
-                 , var_Store  :: !Var
-                 }
-
-getInfo :: VariableNameTable -> Info
-getInfo tbl =
-  let v_Init   = lookupVariableByName tbl "Init"
-      v_OutPtr = lookupVariableByName tbl "OutPtr"
-      v_Store  = lookupVariableByName tbl "Store"
-  in Info v_Init v_OutPtr v_Store
+data Info = Info
 
 isInit :: Info -> Var -> Bool
-isInit ctx v = var_Init ctx == v
+isInit ctx v = v == initConV
 
 isOutPtr :: Info -> Var -> Bool
-isOutPtr ctx v = var_OutPtr ctx == v
+isOutPtr ctx v = v == outPtrV
 
 isStore :: Info -> Var -> Bool
-isStore ctx v = var_Store ctx == v
+isStore ctx v = v == storeV
 
 -------------------------------------------------------------------------------
 -- Expand the 'Init' type in a module.
 -- Wherever 'Init a' appears, replace it with 'Out a -> Store'.
 
-expandTypes ctx ts = map (expandType ctx) ts
-
-expandType :: Info -> Type -> Type
-expandType ctx ty
-  | Just (op, [arg]) <- fromVarApp ty, isInit ctx op =
-      let arg' = expandType ctx arg
-      in varApp (var_OutPtr ctx) [arg'] `FunT` VarT (var_Store ctx)
+expandType :: Type -> Type
+expandType ty
+  | Just (op, [arg]) <- fromVarApp ty, isInit Info op =
+      let arg' = expandType arg
+      in typeApp outPtrT [arg'] `FunT` storeT
 
   | otherwise =
       case ty
       of VarT v
-           | isInit ctx v -> internalError "expandType: Unexpected 'Init'"
+           | isInit Info v -> internalError "expandType: Unexpected 'Init'"
            | otherwise -> ty
          AppT op arg -> AppT (continue op) (continue arg)
          FunT dom rng -> FunT (continue dom) (continue rng)
@@ -73,26 +61,26 @@ expandType ctx ty
          CoT _ -> ty
          UTupleT _ -> ty
   where
-    continue t = expandType ctx t
+    continue t = expandType t
 
 expandParams ctx p = map (expandParam ctx) p
 
 expandParam :: Info -> PatM -> PatM
-expandParam ctx (PatM (v ::: t) _) = patM (v ::: expandType ctx t)
+expandParam ctx (PatM (v ::: t) _) = patM (v ::: expandType t)
 
 expandExps ctx es = map (expandExp ctx) es
 
 expandExp :: Info -> ExpM -> ExpM
-expandExp ctx exp = mapExpTypes id (expandType ctx) exp
+expandExp ctx exp = mapExpTypes id expandType exp
 
 expandFun :: Info -> FunM -> FunM
-expandFun ctx f = mapFunTypes id (expandType ctx) f
+expandFun ctx f = mapFunTypes id expandType f
 
 expandDef :: Info -> FDef Mem -> FDef Mem
 expandDef ctx def = mapDefiniens (expandFun ctx) def
 
 expandData ctx (Constant inf ty e) =
-  Constant inf (expandType ctx ty) (expandExp ctx e)
+  Constant inf (expandType ty) (expandExp ctx e)
 
 expandGlobalDef ctx def = mapDefiniens (expandEntity ctx) def
 
@@ -102,9 +90,9 @@ expandEntity ctx (DataEnt d) = DataEnt $ expandData ctx d
 expandExport :: Info -> Export Mem -> Export Mem
 expandExport ctx e = e {exportFunction = expandFun ctx $ exportFunction e}
 
-expandInitTypeInModule :: VariableNameTable -> Module Mem -> Module Mem
-expandInitTypeInModule tbl mod =
-  let ctx = getInfo tbl
+expandInitTypeInModule :: Module Mem -> Module Mem
+expandInitTypeInModule mod =
+  let ctx = Info
       Module mod_name [] defss exports = mod
       defss' = map (fmap (expandGlobalDef ctx)) defss
       exports' = map (expandExport ctx) exports
@@ -112,15 +100,15 @@ expandInitTypeInModule tbl mod =
 
 -------------------------------------------------------------------------------
 
-expandInitType :: VariableNameTable -> SpecTypeEnv -> SpecTypeEnv
-expandInitType tbl env =
-  let ctx = getInfo tbl
-  in specializeTypeEnv id Just Just (Just . expandType ctx) env
+expandInitType :: SpecTypeEnv -> SpecTypeEnv
+expandInitType env =
+  let ctx = Info
+  in specializeTypeEnv id Just Just (Just . expandType) env
 
 -------------------------------------------------------------------------------
 
-toMemEnv :: VariableNameTable -> SpecTypeEnv -> TypeEnv
-toMemEnv tbl env =
+toMemEnv :: SpecTypeEnv -> TypeEnv
+toMemEnv env =
   specializeTypeEnv builtinMemTypeFunction Just Just Just env
 
 -------------------------------------------------------------------------------
@@ -133,11 +121,11 @@ toMemEnv tbl env =
 -- type variable bindings and data type definitions, and Init is not
 -- a first-class type, the kind 'init' does not appear in any types.
 -- (This is true even though the type 'Init' does appear.)
-convertMemToSpec :: VariableNameTable -> SpecTypeEnv -> SpecTypeEnv
-convertMemToSpec tbl env = 
+convertMemToSpec :: SpecTypeEnv -> SpecTypeEnv
+convertMemToSpec env = 
   specializeTypeEnv id Just Just do_type env
   where
-    ctx = getInfo tbl
+    ctx = Info
     do_type ty =
       case ty
       of VarT v 
@@ -149,7 +137,7 @@ convertMemToSpec tbl env =
          FunT (AppT (VarT v1) t) (VarT v2)
            | isOutPtr ctx v1 && isStore ctx v2 -> do
                t' <- do_type t
-               pure $ AppT (VarT $ var_Init ctx) t
+               pure $ AppT (VarT initConV) t
          FunT d r -> FunT <$> do_type d <*> do_type r
          AllT b t -> AllT b <$> do_type t
          AnyT t -> AnyT <$> do_type t
@@ -169,7 +157,7 @@ data SFInfo = SFInfo { sf_Init      :: !Var
 
 getSFInfo :: VariableNameTable -> SFInfo
 getSFInfo tbl =
-  let v_Init      = lookupVariableByName tbl "Init"
+  let v_Init      = initConV
       v_Stored    = lookupVariableByName tbl "Stored"
       v_Ref       = lookupVariableByName tbl "Ref"
       v_Boxed     = lookupVariableByName tbl "Boxed"

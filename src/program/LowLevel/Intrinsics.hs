@@ -100,14 +100,10 @@ lowerIntrinsicOp v
          fin_indexed_int_constant 1)
       , (coreBuiltin The_emptyEffTok,
          empty_eff_tok)
-      , (coreBuiltin The_eqZ_refl,
-         proof_object)
       , (coreBuiltin The_deadRef,
          dead_reference)
       , (coreBuiltin The_deadBox,
          dead_box)
-      , (coreBuiltin The_deadProof,
-         proof_object)
       , (coreBuiltin The_unsafeMakeCoercion,
          proof_object)
       , (coreBuiltin The_sizealign_int,

@@ -237,12 +237,12 @@ lowerLit lit =
   of IntL n ty ->
        case fromVarApp ty
        of Just (con, [])
-            | con `isCoreBuiltin` The_int ->
+            | con == intV ->
               LL.LitV $ LL.IntL LL.Signed LL.trioletIntSize n
      FloatL n ty ->
        case fromVarApp ty
        of Just (con, [])
-            | con `isCoreBuiltin` The_float ->
+            | con == floatV ->
               LL.LitV $ LL.FloatL LL.trioletFloatSize n
 
 -- | Lower a data constructor application.  Generate code to construct a value.

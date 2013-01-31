@@ -10,7 +10,6 @@ import Common.Supply
 import Common.Identifier
 import qualified Untyped.TIMonad as Untyped
 import qualified SystemF.Syntax as SystemF
-import qualified SystemF.Datatypes.TypeLayout as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import qualified LowLevel.Syntax as LowLevel
 import GlobalVar
@@ -71,12 +70,6 @@ the_coreModule = defineInitGlobalVar ()
 the_loweringMap :: InitGlobalVar (Map.Map Var LowLevel.Var)
 {-# NOINLINE the_loweringMap #-}
 the_loweringMap = defineInitGlobalVar ()
-
--- | Data type layout information for data types.
---   This information is generated from 'the_memTypes' during initialization.
-the_layouts :: InitGlobalVar (Map.Map Var SystemF.TypeLayout)
-{-# NOINLINE the_layouts #-}
-the_layouts = defineInitGlobalVar ()
 
 -- | Fuel, which controls how many transformations the optimizer performs.
 --   Some transformations consume fuel.  When the fuel is decreased to zero,

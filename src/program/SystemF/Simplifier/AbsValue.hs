@@ -778,7 +778,7 @@ initializerValue data_value ty =
 initializerValueHelper :: AbsComputation -> Type -> TypeEvalM AbsCode
 initializerValueHelper data_comp ty = do
   param <- newAnonymousVar ObjectLevel
-  let param_type = varApp (coreBuiltin The_OutPtr) [ty]
+  let param_type = outPtrT `typeApp` [ty]
       pattern = patM (param ::: param_type)
   computation <- interpretComputation data_comp $ \data_value ->
     return $ ReturnAC $ valueCode $ HeapAV $ AbsHeap (HeapMap [(param, data_value)])
@@ -948,8 +948,7 @@ concretizeDataConApp (AbsData con fs) = do
   where
     concretize_field BareK ty f = do
       -- Create and concretize an initializer value
-      let init_type = varApp (coreBuiltin The_OutPtr) [ty] `FunT`
-                      VarT (coreBuiltin The_Store)
+      let init_type = typeApp outPtrT [ty] `FunT` storeT
       concretize' init_type =<< lift (initializerValue f ty)
 
     concretize_field BoxK ty f = concretize' ty f

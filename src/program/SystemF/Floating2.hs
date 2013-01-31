@@ -139,8 +139,8 @@ isFloatableDataType tenv data_type con_type compute_field_types
            ValK ->
              -- Only allow types that are known to fit in a register
              case field_type
-             of VarT a -> a `isCoreBuiltin` The_int ||
-                          a `isCoreBuiltin` The_float ||
+             of VarT a -> a == intV ||
+                          a == floatV ||
                           a `isCoreBuiltin` The_bool
                 _ -> False
   where

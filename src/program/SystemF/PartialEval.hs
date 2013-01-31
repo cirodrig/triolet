@@ -169,15 +169,15 @@ pevalExp expression =
        -- Replace constants with literal values.  This helps 
        -- representation selection represent these as values.
        | v `isCoreBuiltin` The_AdditiveDict_int_zero ->
-           return_lit inf $ IntL 0 int_type
+           return_lit inf $ IntL 0 intT
        | v `isCoreBuiltin` The_AdditiveDict_float_zero ->
-           return_lit inf $ FloatL 0 float_type
+           return_lit inf $ FloatL 0 floatT
        | v `isCoreBuiltin` The_MultiplicativeDict_int_one ->
-           return_lit inf $ IntL 1 int_type
+           return_lit inf $ IntL 1 intT
        | v `isCoreBuiltin` The_MultiplicativeDict_float_one ->
-           return_lit inf $ FloatL 1 float_type
+           return_lit inf $ FloatL 1 floatT
        | v `isCoreBuiltin` The_FloatingDict_float_pi ->
-           return_lit inf $ FloatL pi float_type
+           return_lit inf $ FloatL pi floatT
        | otherwise -> lookupVarDefault expression v
      ConE inf op args -> do
        args' <- mapM pevalExp args
@@ -229,8 +229,6 @@ pevalExp expression =
        return $ ExpSF $ ArrayE inf ty es'
   where
     return_lit inf l = return $ ExpSF $ LitE inf l
-    int_type = VarT $ coreBuiltin The_int
-    float_type = VarT $ coreBuiltin The_float
 
 -- | Attempt to statically evalaute a known function.  The operands have
 --   already been evaluated.
@@ -248,7 +246,7 @@ pevalApp inf op tys args =
            case args
            of [ExpSF (LitE {expLit = IntL n _})] ->
                 ExpSF $ LitE { expInfo = inf
-                             , expLit = FloatL (fromIntegral n) float_type}
+                             , expLit = FloatL (fromIntegral n) floatT}
               _ -> rebuild_call
      _ ->
        -- Can't evaluate; rebuild the call expression
@@ -268,8 +266,6 @@ pevalApp inf op tys args =
         find_known_oper _ = Nothing
                       
     rebuild_call = ExpSF $ AppE inf op tys args
-    
-    float_type = VarT $ coreBuiltin The_float
 
 -- | Attempt to eliminate a case statement.  If the scrutinee is a constructor
 -- application and it matches an alternative, replace the case statement

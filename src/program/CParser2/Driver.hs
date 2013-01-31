@@ -28,8 +28,9 @@ import Globals
 
 predefinedVarDetails :: [(String, Var)]
 predefinedVarDetails =
-  [(name v, v) | v <- [valV, boxV, bareV, outV, intindexV, initV, propV,
-                       posInftyV, negInftyV]]
+  [(name v, v) | v <- [valV, boxV, bareV, outV, intindexV, initV,
+                       initConV, outPtrV, storeV, posInftyV, negInftyV,
+                       arrV, intV, uintV, floatV]]
   where
     name v =
       case varName v

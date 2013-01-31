@@ -133,10 +133,8 @@ lookupIndexedInt ty = do
     create_indexed_int :: forall. Integer -> m (Maybe ExpM)
     create_indexed_int n =
       let e = conE defaultExpInfo (VarCon (coreBuiltin The_fiInt) [IntT n] [])
-              [ExpM $ LitE defaultExpInfo (IntL n int_type)]
+              [ExpM $ LitE defaultExpInfo (IntL n intT)]
       in return $ Just e
-
-    int_type = VarT $ coreBuiltin The_int
 
 lookupIndexedInt' :: ReprDictMonad m => Type -> m ExpM
 lookupIndexedInt' ty = lookupIndexedInt ty >>= check
@@ -223,19 +221,19 @@ createDictEnv = do
   let bool_dict =
         valueDict (VarT $ coreBuiltin The_bool) (coreBuiltin The_repr_bool)
   let int_dict =
-        valueDict (VarT $ coreBuiltin The_int) (coreBuiltin The_repr_int)
+        valueDict intT (coreBuiltin The_repr_int)
   let uint_dict =
-        valueDict (VarT $ coreBuiltin The_uint) (coreBuiltin The_repr_uint)
+        valueDict uintT (coreBuiltin The_repr_uint)
   let none_dict =
         valueDict (VarT $ coreBuiltin The_NoneType) (coreBuiltin The_repr_NoneType)
   let maybeint_dict =
-        valueDict (varApp (coreBuiltin The_MaybeVal) [VarT $ coreBuiltin The_int])
+        valueDict (varApp (coreBuiltin The_MaybeVal) [intT])
         (coreBuiltin The_repr_MaybeVal_int)
   let maybemaybeint_dict =
-        valueDict (varApp (coreBuiltin The_MaybeVal) [varApp (coreBuiltin The_MaybeVal) [VarT $ coreBuiltin The_int]])
+        valueDict (varApp (coreBuiltin The_MaybeVal) [varApp (coreBuiltin The_MaybeVal) [intT]])
         (coreBuiltin The_repr_MaybeVal_MaybeVal_int)
   let float_dict =
-        valueDict (VarT $ coreBuiltin The_float) (coreBuiltin The_repr_float)
+        valueDict floatT (coreBuiltin The_repr_float)
   let efftok_dict =
         valueDict (VarT $ coreBuiltin The_EffTok) (coreBuiltin The_repr_EffTok)
       sliceobj_dict =
@@ -307,7 +305,7 @@ createDictEnv = do
     (varApp (coreBuiltin The_Complex) [VarT arg],
      createDict_complex arg)
   array_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (coreBuiltin The_arr) [VarT arg1, VarT arg2],
+    (arrT `typeApp` [VarT arg1, VarT arg2],
      createDict_array arg1 arg2)
   ref_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (coreBuiltin The_Ref) [VarT arg],
@@ -511,7 +509,7 @@ createDict_array param_var1 param_var2 subst = MkDict $
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
     
-    data_type = varApp (coreBuiltin The_arr) [param1, param2]
+    data_type = arrT `typeApp` [param1, param2]
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_arr)
 
 createDict_ref :: Var -> TypeSubst -> MkDict

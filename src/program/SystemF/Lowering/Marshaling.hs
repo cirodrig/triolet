@@ -38,8 +38,8 @@ pyonType (ArrayET n False ty) =
               3 -> coreBuiltin The_array3
   in varApp op [pyonType ty]
 pyonType TrioletNoneET = VarT (coreBuiltin The_NoneType)
-pyonType TrioletIntET = VarT (coreBuiltin The_int)
-pyonType TrioletFloatET = VarT (coreBuiltin The_float)
+pyonType TrioletIntET = intT
+pyonType TrioletFloatET = floatT
 pyonType TrioletBoolET = VarT (coreBuiltin The_bool)
 
 -- | Construct a representation dictionary for a marshalable type.
@@ -65,9 +65,9 @@ computeReprDict ty =
            polymorphic_repr 3 args (LL.llBuiltin LL.the_fun_repr_Tuple3)
        | op `isCoreBuiltin` The_Tuple4 ->
            polymorphic_repr 4 args (LL.llBuiltin LL.the_fun_repr_Tuple4)
-       | op `isCoreBuiltin` The_int ->
+       | op == intV ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_int
-       | op `isCoreBuiltin` The_float ->
+       | op == floatV ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_float
        | op `isCoreBuiltin` The_bool ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_bool
@@ -434,7 +434,7 @@ getFunctionInputsAndOutputs tenv ty =
     output_return t =
       case kind t
       of ValK -> case t
-                 of VarT v | v `isCoreBuiltin` The_Store -> False
+                 of VarT v | v == storeV -> False
                     _ -> True
          BoxK -> True
          _  -> internalError "getCExportSig: Unexpected type"
@@ -456,7 +456,7 @@ getFunctionInputsAndOutputs tenv ty =
           then Nothing
           else case fromVarApp $ last params
                of Just (con, [arg])
-                    | con `isCoreBuiltin` The_OutPtr -> Just arg
+                    | con == outPtrV -> Just arg
                   _ -> Nothing
 
 getCExportType :: TypeEnv -> Type -> ExportDataType
@@ -464,8 +464,8 @@ getCExportType tenv ty =
   case fromVarApp ty
   of Just (con, args)
        | con `isCoreBuiltin` The_NoneType -> TrioletNoneET
-       | con `isCoreBuiltin` The_int -> TrioletIntET
-       | con `isCoreBuiltin` The_float -> TrioletFloatET
+       | con == intV -> TrioletIntET
+       | con == floatV -> TrioletFloatET
        | con `isCoreBuiltin` The_bool -> TrioletBoolET
        | con `isCoreBuiltin` The_list ->
            case args
@@ -489,8 +489,8 @@ getCxxExportType tenv ty =
            -- in their natural reprsentation, so we can ignore them.
            case args of [arg] -> getCxxExportType tenv arg
        | con `isCoreBuiltin` The_NoneType -> TrioletNoneET
-       | con `isCoreBuiltin` The_int -> TrioletIntET
-       | con `isCoreBuiltin` The_float -> TrioletFloatET
+       | con == intV -> TrioletIntET
+       | con == floatV -> TrioletFloatET
        | con `isCoreBuiltin` The_bool -> TrioletBoolET
        | con `isCoreBuiltin` The_Tuple2 ->
            if length args /= 2
