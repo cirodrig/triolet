@@ -167,7 +167,6 @@ data Alt a =
 data Pattern a =
     ConPattern
     { altCon :: Identifier a
-    , altTyArgs :: [LType a] 
     , _altExTypes :: [Domain a]
     , altFields :: [Domain a]
     }

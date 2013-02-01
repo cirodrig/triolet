@@ -294,8 +294,8 @@ ifE = located $ do
   else_pos <- locatePosition
   match ElseTok
   y <- pExp
-  return $ CaseE scrutinee [ L then_pos $ Alt (ConPattern "True" [] [] []) x
-                           , L else_pos $ Alt (ConPattern "False" [] [] []) y]
+  return $ CaseE scrutinee [ L then_pos $ Alt (ConPattern "True" [] []) x
+                           , L else_pos $ Alt (ConPattern "False" [] []) y]
 
 lamE :: P PLExp
 lamE = located $ do
@@ -453,8 +453,7 @@ pattern = con_pattern <|> tuple_pattern
   where
     -- A constructor pattern starts with an identifier
     con_pattern =
-      ConPattern <$>
-      identifier <*> many type_arg <*> optTypeParameters <*> optParameters
+      ConPattern <$> identifier <*> optTypeParameters <*> optParameters
 
     type_arg = PS.try (match AtTok >> pTypeAtom)
 
@@ -475,6 +474,7 @@ parameters = fmap concat $ many (parens pDomains)
 optTypeParameters :: P [PDomain]
 optTypeParameters =
   fmap concat $ many (match AtTok *> parens pOptDomains)
+  -- fmap concat $ many (match AtTok *> (pUnlabeledDomain <|> parens pOptDomains))
 
 -- | Variable bindings with optional types
 optParameters :: P [PDomain]

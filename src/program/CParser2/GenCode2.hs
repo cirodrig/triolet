@@ -159,20 +159,20 @@ typeKind ty = do
 
 -- | Translate a domain that must have an explicit type
 domain :: (HasLetSynonym m, TypeEnvMonad m) =>
-          Domain Resolved -> (Type.Binder -> m a) -> m a
-domain (Domain param (Just ty)) k = do
+          SourcePos -> Domain Resolved -> (Type.Binder -> m a) -> m a
+domain _ (Domain param (Just ty)) k = do
   let v = toVar param
   t <- typeExpr ty
   assume v t $ k (v ::: t)
 
-domain (Domain _ Nothing) _ =
+domain pos (Domain _ Nothing) _ =
   -- This error should have been caught during parsing
-  internalError "domain: Missing type annotation"
+  internalError $ show pos ++ ": Missing type annotation in domain"
 
 -- | Translate a list of domains that must have explicit types
 domains :: (HasLetSynonym m, TypeEnvMonad m) =>
-           [Domain Resolved] -> ([Type.Binder] -> m a) -> m a
-domains = withMany domain
+           SourcePos -> [Domain Resolved] -> ([Type.Binder] -> m a) -> m a
+domains pos = withMany (domain pos)
 
 typeExprs = mapM typeExpr
 
@@ -209,12 +209,12 @@ typeExpr lty =
        Type.AppT `liftM` typeExpr op `ap` typeExpr arg
      FunT dom rng ->
        Type.FunT `liftM` typeExpr dom `ap` typeExpr rng
-     AllT dom rng -> domain dom $ \dom' ->
+     AllT dom rng -> domain (getSourcePos lty) dom $ \dom' ->
        Type.AllT dom' `liftM` typeExpr rng
      LamT doms body ->
        -- Do one parameter at a type
        let mk_lambda (dom : doms) body =
-             domain dom $ \dom' ->
+             domain (getSourcePos lty) dom $ \dom' ->
              Type.LamT dom' `liftM` mk_lambda doms body
            mk_lambda [] body = typeExpr body
        in mk_lambda doms body
@@ -224,9 +224,10 @@ typeExpr lty =
        rng' <- typeExpr rng
        return $ Type.typeApp (Type.CoT kind') [dom', rng']
 
-translateDataConDecl :: Var -> DataConDecl Resolved -> TransT DataConDescr
-translateDataConDecl data_type_con decl =
-  domains (dconExTypes decl) $ \ex_types -> do
+translateDataConDecl :: Var -> Located (DataConDecl Resolved)
+                     -> TransT DataConDescr
+translateDataConDecl data_type_con (L pos decl) =
+  domains pos (dconExTypes decl) $ \ex_types -> do
     args_and_kinds <- mapM typeAndKind $ dconArgs decl
     let fields = [(t, Type.toBaseKind k) | (t, k) <- args_and_kinds]
         dcon_var = toVar $ dconVar decl
@@ -249,29 +250,28 @@ typeEnt ident ty = do
   return $ UpdateTypeEnv
     (maybe (insertType ident ty') (insertTypeFunction ident ty') type_function)
 
-dataEnt core_name dom ty data_cons attrs = do
+dataEnt pos core_name dom ty data_cons attrs = do
   kind <- typeExpr ty
   let abstract = AbstractAttr `elem` attrs
       algebraic = not $ NonalgebraicAttr `elem` attrs
 
-  domains dom $ \params -> do
+  domains pos dom $ \params -> do
     data_con_descrs <-
-      mapM (translateDataConDecl core_name . unLoc) data_cons
+      mapM (translateDataConDecl core_name) data_cons
     let descr = DataTypeDescr core_name params (Type.toBaseKind kind) data_con_descrs abstract algebraic
     return $ UpdateTypeEnv (insertDataType descr)
 
 -- | Translate a global type-related declaration.
 typeLevelDecl :: LDecl Resolved -> TransT UpdateTypeEnv
-typeLevelDecl ldecl = do 
-  let Decl ident ent = unLoc ldecl
-      core_name = toVar ident
+typeLevelDecl (L pos (Decl ident ent)) = do
+  let core_name = toVar ident
   case ent of
     VarEnt ty attrs ->
       varEnt core_name ty attrs
     TypeEnt ty ->
       typeEnt core_name ty
     DataEnt dom ty data_cons attrs ->
-      dataEnt core_name dom ty data_cons attrs
+      dataEnt pos core_name dom ty data_cons attrs
 
     -- Translate only the types of functions and constants
     FunEnt (L pos f) attrs ->
@@ -401,19 +401,21 @@ assumeDefGroup defs m = do
 
 -- | Translate a domain that must have an explicit type.
 --   Convert to mem types.
-domainInExp :: Domain Resolved -> (Type.Binder -> TransE a) -> TransE a
-domainInExp (Domain param (Just ty)) k = do
+domainInExp :: SourcePos -> Domain Resolved -> (Type.Binder -> TransE a)
+            -> TransE a
+domainInExp _ (Domain param (Just ty)) k = do
   let v = toVar param
   t <- typeInExp ty
   assume v t $ k (v ::: t)
 
-domainInExp (Domain _ Nothing) _ =
+domainInExp pos (Domain _ Nothing) _ =
   -- This error should have been caught during parsing
-  internalError "domain: Missing type annotation"
+  internalError $ show pos ++ ": Missing type annotation in domain"
 
 -- | Translate a list of domains that must have explicit types
-domainsInExp :: [Domain Resolved] -> ([Type.Binder] -> TransE a) -> TransE a
-domainsInExp = withMany domainInExp
+domainsInExp :: SourcePos -> [Domain Resolved] -> ([Type.Binder] -> TransE a)
+             -> TransE a
+domainsInExp pos = withMany (domainInExp pos)
 
 -- | Translate a domain that must have an explicit type
 optDomainInExp :: SourcePos -> Type.Type -> Domain Resolved
@@ -635,7 +637,7 @@ translateLAlt s_ty_op s_ty_args (L pos (Alt pattern body)) =
                           , SystemF.altBody = body'}
     return (alt, body_type)
   where
-    with_pattern (ConPattern con _ ex_types fields) k = do
+    with_pattern (ConPattern con ex_types fields) k = do
       tenv <- getTypeEnv
       let Just dcon_type = lookupDataCon (toVar con) tenv
 
@@ -644,9 +646,11 @@ translateLAlt s_ty_op s_ty_args (L pos (Alt pattern body)) =
         Type.VarT op_var | op_var == dataConTyCon dcon_type ->
           return ()
         _ -> error $ show pos ++ ": Case alternative's data constructor does not match scrutinee type"
-      ty_args' <- return s_ty_args -- mapM typeInExp ty_args
+      ty_args' <- return s_ty_args
 
       -- Infer types of other fields
+      when (length (dataConExTypes dcon_type) /= length ex_types) $
+        error $ show pos ++ ": Wrong number of existential variables in pattern"
       (ty_binders, field_types, _) <-
         Type.Eval.instantiateDataConType
         dcon_type ty_args' [toVar $ boundVar d | d <- ex_types]
@@ -659,13 +663,13 @@ translateLAlt s_ty_op s_ty_args (L pos (Alt pattern body)) =
           in k new_con val_binders
 
     with_pattern (TuplePattern fields) k =
-      domainsInExp fields $ \val_binders ->
+      optDomainsInExp pos s_ty_args fields $ \val_binders ->
         let new_con = SystemF.TupleDeCon [t | _ ::: t <- val_binders]
         in k new_con val_binders
 
 translateFun pos f =
-  domainsInExp (fTyParams f) $ \ty_binders ->
-  domainsInExp (fParams f) $ \val_binders -> do
+  domainsInExp pos (fTyParams f) $ \ty_binders ->
+  domainsInExp pos (fParams f) $ \val_binders -> do
     range <- typeInExp $ fRange f
     (body, _) <- expr $ fBody f
     return $ SystemF.FunM $

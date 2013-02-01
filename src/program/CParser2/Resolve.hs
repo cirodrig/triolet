@@ -326,12 +326,11 @@ resolveAlt pos (Alt pattern body) = do
     body' <- resolveL resolveExp body
     return $ Alt pattern' body'
 
-resolvePattern pos (ConPattern con ty_args ex_types fields) k = do
+resolvePattern pos (ConPattern con ex_types fields) k = do
   con' <- use con pos
-  ty_args' <- mapM (resolveLType TypeLevel) ty_args
   withMany resolveDomainT ex_types $ \ex_types' ->
     withMany resolveDomainV fields $ \fields' ->
-    k (ConPattern con' ty_args' ex_types' fields')
+    k (ConPattern con' ex_types' fields')
 
 resolvePattern pos (TuplePattern fields) k =
     withMany resolveDomainV fields $ \fields' ->
