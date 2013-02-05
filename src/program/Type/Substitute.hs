@@ -53,8 +53,9 @@ union (S r1) (S r2) = S (IntMap.union r1 r2)
 
 -- | @s2 `compose` s1@ is a substitution equivalent to applying @s1@, then
 --   applying @s2@.
-compose :: EvalMonad m => TypeSubst -> TypeSubst -> m TypeSubst
-s2 `compose` s1 = liftTypeEvalM $ do
+compose :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+           TypeSubst -> TypeSubst -> m TypeSubst
+s2 `compose` s1 = do
   -- Apply s2 to the range of s1
   s1' <- traverse (substitute s2) (unS s1)
   
@@ -80,14 +81,17 @@ instance SubstitutionMap TypeSubst where
 -- | Push a substitution through a binder.  The substitution is applied to the
 --   binder, and the binder is renamed if there is a name conflict with the
 --   environment.  Renaming is performed even if the substitution is empty.
-substituteBinder :: EvalMonad m =>
+substituteBinder :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                     TypeSubst
                  -> Binder
                  -> (TypeSubst -> Binder -> m a)
                  -> m a
 {-# SPECIALIZE substituteBinder :: TypeSubst -> Binder
-                                -> (TypeSubst -> Binder -> TypeEvalM a) 
-                                -> TypeEvalM a #-}
+                                -> (TypeSubst -> Binder -> BoxedTypeEvalM a) 
+                                -> BoxedTypeEvalM a #-}
+{-# SPECIALIZE substituteBinder :: TypeSubst -> Binder
+                                -> (TypeSubst -> Binder -> UnboxedTypeEvalM a) 
+                                -> UnboxedTypeEvalM a #-}
 substituteBinder rn (x ::: t) k = do
   t' <- substitute rn t
   
@@ -106,14 +110,17 @@ substituteBinder rn (x ::: t) k = do
       let rn' = extend x (VarT x') rn
       assume x' t' $ k rn' (x' ::: t')
 
-substituteBinders :: EvalMonad m =>
+substituteBinders :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                       TypeSubst
                    -> [Binder]
                    -> (TypeSubst -> [Binder] -> m a)
                    -> m a
 {-# SPECIALIZE substituteBinders :: TypeSubst -> [Binder]
-                                 -> (TypeSubst -> [Binder] -> TypeEvalM a) 
-                                 -> TypeEvalM a #-}
+                                 -> (TypeSubst -> [Binder] -> BoxedTypeEvalM a)
+                                 -> BoxedTypeEvalM a #-}
+{-# SPECIALIZE substituteBinders :: TypeSubst -> [Binder]
+                                 -> (TypeSubst -> [Binder] -> UnboxedTypeEvalM a)
+                                 -> UnboxedTypeEvalM a #-}
 substituteBinders s (b:bs) k =
   substituteBinder s b $ \s' b' ->
   substituteBinders s' bs $ \s'' bs' ->
@@ -129,18 +136,25 @@ class SubstitutionMap (Substitution a) => Substitutable a where
 
   -- | Apply the substitution to the argument, and rename any variable 
   --   bindings in the outermost term that shadow an in-scope variable.
-  substituteWorker :: EvalMonad m => Substitution a -> a -> m a
+  substituteWorker :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                      Substitution a -> a -> m a
 
 -- | Rename variables bound in the outermost term to new, fresh names
 --   if they would shadow the in-scope variables.
-freshen :: forall m a. (EvalMonad m, Substitutable a) => a -> m a
-{-# SPECIALIZE freshen :: Substitutable a => a -> TypeEvalM a #-}
-freshen = substituteWorker emptySubstitution
+freshen :: forall m a. (TypeEnvMonad m, Supplies m (Ident Var),
+                        Substitutable a) => a -> m a
+{-# SPECIALIZE freshen :: Substitutable a => a -> BoxedTypeEvalM a #-}
+{-# SPECIALIZE freshen :: Substitutable a => a -> UnboxedTypeEvalM a #-}
+freshen x = {-# SCC freshen #-} substituteWorker emptySubstitution x
 
 -- | Apply the substitution to the argument.
-substitute :: forall m a. (EvalMonad m, Substitutable a) =>
+substitute :: forall m a. (TypeEnvMonad m, Supplies m (Ident Var),
+                           Substitutable a) =>
               Substitution a -> a -> m a
-{-# SPECIALIZE substitute :: Substitutable a => Substitution a -> a -> TypeEvalM a #-}
+{-# SPECIALIZE substitute :: Substitutable a =>
+                             Substitution a -> a -> BoxedTypeEvalM a #-}
+{-# SPECIALIZE substitute :: Substitutable a =>
+                             Substitution a -> a -> UnboxedTypeEvalM a #-}
 substitute s x 
   | isEmptySubstitution s = return x
   | otherwise = {-# SCC substitute #-} substituteWorker s x 
@@ -195,31 +209,35 @@ instance Substitutable Type where
 --   The outermost term is always freshened.
 unifyBoundVariables :: EvalMonad m =>
                        Type -> Type -> m (Type, Type)
-{-# SPECIALIZE unifyBoundVariables :: Type -> Type -> TypeEvalM (Type, Type) #-}
-unifyBoundVariables (LamT (v1 ::: dom1) body1) (LamT (v2 ::: dom2) body2) = do
-  v' <- newClonedVar v1
-  let t1 = LamT (v' ::: dom1) (rename (Rename.singleton v1 v') body1)
-      t2 = LamT (v' ::: dom2) (rename (Rename.singleton v2 v') body2)
-  return (t1, t2)
+{-# SPECIALIZE unifyBoundVariables :: Type -> Type -> BoxedTypeEvalM (Type, Type) #-}
+{-# SPECIALIZE unifyBoundVariables :: Type -> Type -> UnboxedTypeEvalM (Type, Type) #-}
+unifyBoundVariables t1 t2 = {-# SCC "unifyBoundVariables" #-}
+  case (t1, t2)
+  of (LamT (v1 ::: dom1) body1, LamT (v2 ::: dom2) body2) -> do
+       v' <- newClonedVar v1
+       let t1' = LamT (v' ::: dom1) (rename (Rename.singleton v1 v') body1)
+           t2' = LamT (v' ::: dom2) (rename (Rename.singleton v2 v') body2)
+       return (t1', t2')
       
-unifyBoundVariables (AllT (v1 ::: dom1) rng1) (AllT (v2 ::: dom2) rng2) = do
-  v' <- newClonedVar v1
-  let t1 = AllT (v' ::: dom1) (rename (Rename.singleton v1 v') rng1)
-      t2 = AllT (v' ::: dom2) (rename (Rename.singleton v2 v') rng2)
-  return (t1, t2)
+     (AllT (v1 ::: dom1) rng1, AllT (v2 ::: dom2) rng2) -> do
+       v' <- newClonedVar v1
+       let t1' = AllT (v' ::: dom1) (rename (Rename.singleton v1 v') rng1)
+           t2' = AllT (v' ::: dom2) (rename (Rename.singleton v2 v') rng2)
+       return (t1', t2')
 
--- Otherwise, they don't bind a common variable
-unifyBoundVariables t1 t2 = do
-  t1' <- freshen t1
-  t2' <- freshen t2
-  return (t1', t2')
+     -- Otherwise, they don't bind a common variable
+     _ -> do
+       t1' <- freshen t1
+       t2' <- freshen t2
+       return (t1', t2')
 
 -- | Like 'unifyBoundVariables', but variables from the first type are not
 --   renamed.  Variables bound in the second type are renamed to match the
 --   corresponding variables bound in the first type.
 leftUnifyBoundVariables :: EvalMonad m =>
                            Type -> Type -> m (Type, Type)
-{-# SPECIALIZE leftUnifyBoundVariables :: Type -> Type -> TypeEvalM (Type, Type) #-}
+{-# SPECIALIZE leftUnifyBoundVariables :: Type -> Type -> BoxedTypeEvalM (Type, Type) #-}
+{-# SPECIALIZE leftUnifyBoundVariables :: Type -> Type -> UnboxedTypeEvalM (Type, Type) #-}
 leftUnifyBoundVariables t1@(LamT (v1 ::: _) _) (LamT (v2 ::: dom2) body2) =
   let t2 = LamT (v1 ::: dom2) (rename (Rename.singleton v2 v1) body2)
   in return (t1, t2)

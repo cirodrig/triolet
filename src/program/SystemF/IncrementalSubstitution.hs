@@ -1,5 +1,5 @@
 
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 module SystemF.IncrementalSubstitution
        (SM,
         Pat(..), Alt(..), Fun(..),
@@ -26,6 +26,8 @@ import Control.Applicative
 import Control.Monad hiding(mapM)
 import Data.Traversable(mapM)
 
+import Common.Identifier
+import Common.Supply
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Rename
@@ -56,12 +58,12 @@ newtype instance Fun SM = FunSM {fromFunSM :: BaseFun SM}
 data instance Exp SM = ExpSM !Subst ExpM
 
 -- | 'PatSM' behaves like 'PatM'
-substitutePatSM :: EvalMonad m =>
+substitutePatSM :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                    Subst -> PatSM -> (Subst -> PatSM -> m a) -> m a
 substitutePatSM s pat k =
   substitutePatM s (fromPatSM pat) $ \s' p' -> k s' (PatSM p')
 
-substitutePatSMs :: EvalMonad m =>
+substitutePatSMs :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                     Subst -> [PatSM] -> (Subst -> [PatSM] -> m a) -> m a
 substitutePatSMs = renameMany substitutePatSM
 
@@ -119,14 +121,15 @@ deferAlt (AltM (Alt decon params body)) =
 
 -- | Apply a substitution to an 'ExpSM'.  The actual substitution is
 --   performed later.
-addDeferredSubstitution :: EvalMonad m => Subst -> ExpSM -> m ExpSM
+addDeferredSubstitution :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                           Subst -> ExpSM -> m ExpSM
 addDeferredSubstitution subst (ExpSM s e) = do
   s' <- subst `composeSubst` s
   return $ ExpSM s' e
 
 -- | Freshen the outermost term, then convert the expression by
 --   inserting empty substitutions
-freshenAndDeferInnerTerms :: ExpM -> TypeEvalM (BaseExp SM)
+freshenAndDeferInnerTerms :: BoxingMode b => ExpM -> TypeEvalM b (BaseExp SM)
 freshenAndDeferInnerTerms e = liftM deferInnerTerms $ freshen e
 
 -- | Convert the expression by inserting empty substitutions
@@ -268,7 +271,7 @@ applySubstitutionAlt (AltSM (Alt decon params body)) = do
 freshenFullyExp :: EvalMonad m => ExpSM -> m ExpM
 freshenFullyExp e = liftTypeEvalM $ freshenFullyExp' e
 
-freshenFullyExp' :: ExpSM -> TypeEvalM ExpM
+freshenFullyExp' :: forall b. BoxingMode b => ExpSM -> TypeEvalM b ExpM
 freshenFullyExp' expression = do
   expression' <- freshenHead expression
   case expression' of
@@ -286,7 +289,7 @@ freshenFullyExp' expression = do
     LetfunE inf defs body -> do
       let freshen_defs = mapM (mapMDefiniens freshenFullyFun') defs
           freshen_body = recurse body
-          assume_defs :: forall a. TypeEvalM a -> TypeEvalM a 
+          assume_defs :: forall a. TypeEvalM b a -> TypeEvalM b a
           assume_defs m = foldr assume_def m (defGroupMembers defs)
             where
               assume_def def m =
@@ -312,6 +315,7 @@ freshenFullyExp' expression = do
 
 -- | Eliminate name shadowing in a function body.  The function parameters
 --   have already been renamed.
+freshenFullyFun' :: forall b. BoxingMode b => FunSM -> TypeEvalM b FunM
 freshenFullyFun' (FunSM f) =
   assumeTyPats (funTyParams f) $ assumePatMs (map fromPatSM $ funParams f) $ do
     body <- freshenFullyExp' $ funBody f
@@ -321,6 +325,7 @@ freshenFullyFun' (FunSM f) =
                         , funReturn = funReturn f
                         , funBody = body}
 
+freshenFullyAlt' :: forall b. BoxingMode b => AltSM -> TypeEvalM b AltM
 freshenFullyAlt' (AltSM alt) =
   assumeBinders (deConExTypes $ altCon alt) $
   assumePatMs (map fromPatSM $ altParams alt) $ do

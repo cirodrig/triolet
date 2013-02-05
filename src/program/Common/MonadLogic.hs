@@ -1,6 +1,7 @@
 {-| Useful monad versions of logical operations.
 -} 
 
+{-# OPTIONS_GHC -no-auto-all #-}
 module Common.MonadLogic where
 
 import Control.Monad

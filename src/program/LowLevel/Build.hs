@@ -2,6 +2,7 @@
 {-# LANGUAGE ViewPatterns, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables, DoRec #-}
 module LowLevel.Build where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Writer
 import Data.Bits
@@ -20,6 +21,8 @@ import LowLevel.Syntax
 import LowLevel.CodeTypes
 import LowLevel.Records
 import LowLevel.Print
+import qualified Type.Type as Type
+import qualified Type.Environment as Type
 
 newtype MkStm = MkStm (Stm -> Stm)
 
@@ -33,9 +36,14 @@ instance Monoid MkStm where
 -- statement as a side effect.
 newtype Gen m a = Gen {runGen :: [ValueType] -> m (a, MkStm)}
 
-instance Monad m => Functor (Gen m) where
-  fmap f (Gen m) = Gen (\rt -> do (x, stms) <- m rt
-                                  return (f x, stms))
+instance Functor m => Functor (Gen m) where
+  fmap f (Gen m) = Gen (\rt -> fmap app (m rt)) 
+    where app (x, stms) = (f x, stms)
+
+instance Applicative m => Applicative (Gen m) where
+  pure x = Gen (\_ -> pure (x, mempty))
+  Gen x <*> Gen y = Gen (\rt -> app <$> x rt <*> y rt) 
+    where app (f, mk1) (z, mk2) = (f z, mk1 `mappend` mk2)
 
 instance Monad m => Monad (Gen m) where
   return x = Gen (\_ -> return (x, mempty))
@@ -66,6 +74,13 @@ instance Monad m => MonadWriter (Gen m) where
 
 instance (Supplies m (Ident Var)) => Supplies (Gen m) (Ident Var) where
   fresh = lift fresh
+
+instance Type.TypeEnvMonad m => Type.TypeEnvMonad (Gen m) where
+  type EvalBoxingMode (Gen m) = Type.EvalBoxingMode m
+  getTypeEnv = lift Type.getTypeEnv
+  assumeWithProperties v t b m =
+    Gen $ \env -> Type.assumeWithProperties v t b (runGen m env)
+
 
 execBuild :: Monad m => [ValueType] -> Gen m Stm -> m Stm
 execBuild return_type m = do

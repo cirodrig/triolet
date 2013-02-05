@@ -47,11 +47,6 @@ withMany f xs k = go xs k
     go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
     go []     k = k []
 
-instance TypeEnvMonad (Gen Lower) where
-  type TypeFunctionInfo (Gen Lower) = TypeFunctionInfo Lower
-  getTypeEnv = lift getTypeEnv
-  assumeWithProperties v t b m = liftT (assumeWithProperties v t b) m
-
 -- | Called by 'assumeVar' and related functions.  If the type is a
 --   Repr dictionary passed as a boxed pointer or an IndexedInt passed as
 --   a value, record the dictionary in the environment.

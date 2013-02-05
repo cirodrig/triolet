@@ -1,10 +1,6 @@
 
 module CParser2.AdjustTypes
        (VariableNameTable,
-        expandInitTypeInModule,
-        expandInitType,
-        expandType,
-        toMemEnv,
         convertMemToSpec,
         convertSpecToSF)
 where
@@ -26,90 +22,11 @@ lookupVariableByName tbl name =
   of Just v -> v
      Nothing -> internalError $ "lookupVariableByName: " ++ name
 
-data Info = Info
+isOutPtr :: Var -> Bool
+isOutPtr v = v == outPtrV
 
-isInit :: Info -> Var -> Bool
-isInit ctx v = v == initConV
-
-isOutPtr :: Info -> Var -> Bool
-isOutPtr ctx v = v == outPtrV
-
-isStore :: Info -> Var -> Bool
-isStore ctx v = v == storeV
-
--------------------------------------------------------------------------------
--- Expand the 'Init' type in a module.
--- Wherever 'Init a' appears, replace it with 'Out a -> Store'.
-
-expandType :: Type -> Type
-expandType ty
-  | Just (op, [arg]) <- fromVarApp ty, isInit Info op =
-      let arg' = expandType arg
-      in typeApp outPtrT [arg'] `FunT` storeT
-
-  | otherwise =
-      case ty
-      of VarT v
-           | isInit Info v -> internalError "expandType: Unexpected 'Init'"
-           | otherwise -> ty
-         AppT op arg -> AppT (continue op) (continue arg)
-         FunT dom rng -> FunT (continue dom) (continue rng)
-         LamT (a ::: k) rng -> LamT (a ::: k) (continue rng)
-         AllT (a ::: k) rng -> AllT (a ::: k) (continue rng)
-         AnyT k -> AnyT k
-         IntT _ -> ty
-         CoT _ -> ty
-         UTupleT _ -> ty
-  where
-    continue t = expandType t
-
-expandParams ctx p = map (expandParam ctx) p
-
-expandParam :: Info -> PatM -> PatM
-expandParam ctx (PatM (v ::: t) _) = patM (v ::: expandType t)
-
-expandExps ctx es = map (expandExp ctx) es
-
-expandExp :: Info -> ExpM -> ExpM
-expandExp ctx exp = mapExpTypes id expandType exp
-
-expandFun :: Info -> FunM -> FunM
-expandFun ctx f = mapFunTypes id expandType f
-
-expandDef :: Info -> FDef Mem -> FDef Mem
-expandDef ctx def = mapDefiniens (expandFun ctx) def
-
-expandData ctx (Constant inf ty e) =
-  Constant inf (expandType ty) (expandExp ctx e)
-
-expandGlobalDef ctx def = mapDefiniens (expandEntity ctx) def
-
-expandEntity ctx (FunEnt f) = FunEnt $ expandFun ctx f
-expandEntity ctx (DataEnt d) = DataEnt $ expandData ctx d
-
-expandExport :: Info -> Export Mem -> Export Mem
-expandExport ctx e = e {exportFunction = expandFun ctx $ exportFunction e}
-
-expandInitTypeInModule :: Module Mem -> Module Mem
-expandInitTypeInModule mod =
-  let ctx = Info
-      Module mod_name [] defss exports = mod
-      defss' = map (fmap (expandGlobalDef ctx)) defss
-      exports' = map (expandExport ctx) exports
-  in Module mod_name [] defss' exports'
-
--------------------------------------------------------------------------------
-
-expandInitType :: SpecTypeEnv -> SpecTypeEnv
-expandInitType env =
-  let ctx = Info
-  in specializeTypeEnv id Just Just (Just . expandType) env
-
--------------------------------------------------------------------------------
-
-toMemEnv :: SpecTypeEnv -> TypeEnv
-toMemEnv env =
-  specializeTypeEnv builtinMemTypeFunction Just Just Just env
+isStore :: Var -> Bool
+isStore v = v == storeV
 
 -------------------------------------------------------------------------------
 -- Convert mem types to spec types
@@ -117,25 +34,30 @@ toMemEnv env =
 -- Replace all types of the form (OutPtr a -> Store) by (Init a).
 -- Discard all other occurrences of OutPtr and Store.
 --
+-- Insert the special type 'Init' and kind 'init' into the environment.
+--
 -- There's no need to transform kinds.  Since kinds only appear in
 -- type variable bindings and data type definitions, and Init is not
 -- a first-class type, the kind 'init' does not appear in any types.
 -- (This is true even though the type 'Init' does appear.)
-convertMemToSpec :: SpecTypeEnv -> SpecTypeEnv
-convertMemToSpec env = 
-  specializeTypeEnv id Just Just do_type env
+convertMemToSpec :: TypeEnvBase UnboxedMode -> TypeEnvBase SpecMode
+convertMemToSpec env =
+  insert_init_types $ specializeTypeEnv Just Just do_type env
   where
-    ctx = Info
+    insert_init_types env =
+      insertType initV kindT $
+      insertType initConV (bareT `FunT` initT) env
+
     do_type ty =
       case ty
       of VarT v 
-           | isOutPtr ctx v -> Nothing
-           | isStore ctx v -> Nothing
+           | isOutPtr v -> Nothing
+           | isStore v -> Nothing
            | otherwise -> pure ty
          AppT t1 t2 -> AppT <$> do_type t1 <*> do_type t2
          LamT b t -> LamT b <$> do_type t
          FunT (AppT (VarT v1) t) (VarT v2)
-           | isOutPtr ctx v1 && isStore ctx v2 -> do
+           | isOutPtr v1 && isStore v2 -> do
                t' <- do_type t
                pure $ AppT (VarT initConV) t
          FunT d r -> FunT <$> do_type d <*> do_type r
@@ -170,9 +92,10 @@ isAdapterCon1 env v =
   v == sf_Init env || v == sf_Stored env || v == sf_Ref env || 
   v == sf_Boxed env || v == sf_BoxedType env || v == sf_BareType env
 
-convertSpecToSF :: VariableNameTable -> SpecTypeEnv -> TypeEnv
+convertSpecToSF :: VariableNameTable
+                -> TypeEnvBase SpecMode -> TypeEnvBase FullyBoxedMode
 convertSpecToSF tbl env =
-  specializeTypeEnv builtinPureTypeFunction do_base_kind do_kind do_type env
+  specializeTypeEnv do_base_kind do_kind do_type env
   where
     ctx = getSFInfo tbl
 

@@ -247,7 +247,7 @@ unboxedTupleStructure ks fs =
 --   whose head is a free variable or a type function application.
 --
 --   It is an error if any subterms depend on a bound type.
-variableStructuralSubterms :: Type -> TypeEvalM [KindedType]
+variableStructuralSubterms :: Type -> UnboxedTypeEvalM [KindedType]
 variableStructuralSubterms ty = do
   l <- computeStructure ty
   case l of
@@ -281,13 +281,13 @@ variableStructuralSubterms ty = do
       concatVariableStructuralSubterms $
       valAndBareFields [KindedType k t | (k, t) <- fields]
 
-concatVariableStructuralSubterms :: [Type] -> TypeEvalM [KindedType]
+concatVariableStructuralSubterms :: [Type] -> UnboxedTypeEvalM [KindedType]
 concatVariableStructuralSubterms ts =
   liftM mconcat $ mapM variableStructuralSubterms ts
 
 -- | If the type-level integer term is constant, return an empty list.
 --   Otherwise, return a list containing the term.
-isVariableIntSubterm :: Type -> TypeEvalM Bool
+isVariableIntSubterm :: Type -> UnboxedTypeEvalM Bool
 isVariableIntSubterm ty = do
   ty' <- reduceToWhnf ty
   case ty' of
@@ -319,7 +319,7 @@ invariantStructure bs = StructuralTypeVariance bs [] []
 -- | Compute size information for a data type constructor.
 --   Returns a list of size parameter types and a list of statically fixed
 --   types.
-computeDataSizes :: DataType -> TypeEvalM StructuralTypeVariance
+computeDataSizes :: DataType -> UnboxedTypeEvalM StructuralTypeVariance
 computeDataSizes dtype
   | not $ dataTypeIsAlgebraic dtype =
     internalError "computeDataSizes: nonalgebraic type"
@@ -356,7 +356,7 @@ computeDataSizes dtype
       v' <- newClonedVar v
       return (v' ::: k)
 
-computeAltSizes ::  Alternative -> TypeEvalM ([KindedType], [Type])
+computeAltSizes ::  Alternative -> UnboxedTypeEvalM ([KindedType], [Type])
 computeAltSizes (Alternative decon fields) =
   withIndependentTypes (deConExTypes decon) $ do
     -- Bare fields produce size parameters
@@ -390,7 +390,7 @@ computeAllDataSizes var_supply env = do
 
 
 -- | Remove duplicate types from the list
-nubTypeList :: [Type] -> TypeEvalM [Type]
+nubTypeList :: [Type] -> UnboxedTypeEvalM [Type]
 nubTypeList xs = go id xs
   where
     go h (x:xs) =
@@ -402,7 +402,7 @@ nubTypeList xs = go id xs
     search x xs = anyM (compareTypes x) xs
 
 -- | Remove duplicate types from the list
-nubKindTypeList :: [KindedType] -> TypeEvalM [KindedType]
+nubKindTypeList :: [KindedType] -> UnboxedTypeEvalM [KindedType]
 nubKindTypeList xs = go id xs
   where
     go h (x:xs) =

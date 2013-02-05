@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 module SystemF.Datatypes.Util where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
 import Debug.Trace
@@ -22,24 +23,18 @@ import qualified LowLevel.Print as L
 
 -- | A monad for generating low-level size-computing code.
 newtype SizeComputing a =
-  SizeComputing (ReaderT (IdentSupply L.Var) TypeEvalM a)
-  deriving(Monad, MonadIO)
+  SizeComputing (ReaderT (IdentSupply L.Var) (TypeEvalM UnboxedMode) a)
+  deriving(Functor, Applicative, Monad, MonadIO)
 
-runSC :: IdentSupply L.Var -> SizeComputing a -> TypeEvalM a
+runSC :: IdentSupply L.Var -> SizeComputing a -> TypeEvalM UnboxedMode a
 runSC supply (SizeComputing m) = runReaderT m supply
 
 instance TypeEnvMonad SizeComputing where
-  type TypeFunctionInfo SizeComputing = TypeFunction
+  type EvalBoxingMode SizeComputing = UnboxedMode
   getTypeEnv = SizeComputing (lift getTypeEnv)
   assumeWithProperties v t b (SizeComputing m) =
     SizeComputing $ ReaderT $ \env ->
     assumeWithProperties v t b $ runReaderT m env
-
-instance TypeEnvMonad m => TypeEnvMonad (Gen m) where
-  type TypeFunctionInfo (Gen m) = TypeFunctionInfo m
-  getTypeEnv = lift getTypeEnv
-  assumeWithProperties v t b m =
-    Gen $ \env -> assumeWithProperties v t b (runGen m env)
 
 instance EvalMonad SizeComputing where
   liftTypeEvalM m = SizeComputing $ lift m
@@ -59,7 +54,7 @@ instance Supplies SizeComputing (Ident Var) where
 type GenM a = Gen SizeComputing a
 
 runGenM :: IdentSupply L.Var -> [ValueType] -> GenM (L.Stm, a)
-        -> TypeEvalM (L.Stm, a)
+        -> TypeEvalM UnboxedMode (L.Stm, a)
 runGenM supply return_types m =
   runSC supply $ execBuild' return_types m
 

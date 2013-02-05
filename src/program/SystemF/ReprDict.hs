@@ -67,7 +67,7 @@ class EvalMonad m => ReprDictMonad m where
   withVarIDs :: (Supply VarID -> m a) -> m a
   withVarIDs f = getVarIDs >>= f
 
-  withTypeEnv :: (TypeEnv -> m a) -> m a
+  withTypeEnv :: (TypeEnvBase (EvalBoxingMode m) -> m a) -> m a
   withTypeEnv f = getTypeEnv >>= f
 
   getDictEnv :: m SingletonValueEnv
@@ -226,12 +226,6 @@ createDictEnv = do
         valueDict uintT (coreBuiltin The_repr_uint)
   let none_dict =
         valueDict (VarT $ coreBuiltin The_NoneType) (coreBuiltin The_repr_NoneType)
-  let maybeint_dict =
-        valueDict (varApp (coreBuiltin The_MaybeVal) [intT])
-        (coreBuiltin The_repr_MaybeVal_int)
-  let maybemaybeint_dict =
-        valueDict (varApp (coreBuiltin The_MaybeVal) [varApp (coreBuiltin The_MaybeVal) [intT]])
-        (coreBuiltin The_repr_MaybeVal_MaybeVal_int)
   let float_dict =
         valueDict floatT (coreBuiltin The_repr_float)
   let efftok_dict =
@@ -322,7 +316,6 @@ createDictEnv = do
                                   stream_dict,
                                   bool_dict, float_dict, int_dict,
                                   uint_dict, none_dict, efftok_dict, intset_dict,
-                                  maybeint_dict, maybemaybeint_dict,
                                   sliceobj_dict,
                                   stuckref_dict,
                                   list_dict, array1_dict, array2_dict, array3_dict,
@@ -426,7 +419,7 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
 createDict_list :: Var -> TypeSubst -> MkDict
 createDict_list param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_list)
@@ -441,7 +434,7 @@ createDict_blist param_var subst = MkDict $
 createDict_array1 :: Var -> TypeSubst -> MkDict
 createDict_array1 param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_array1)
@@ -456,7 +449,7 @@ createDict_barray1 param_var subst = MkDict $
 createDict_array2 :: Var -> TypeSubst -> MkDict
 createDict_array2 param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_array2)
@@ -471,7 +464,7 @@ createDict_barray2 param_var subst = MkDict $
 createDict_array3 :: Var -> TypeSubst -> MkDict
 createDict_array3 param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
+  return $ ExpM $ AppE defaultExpInfo oper [param] []
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_array3)

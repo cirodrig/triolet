@@ -14,8 +14,10 @@ import Export
 
 #let alignment t = "%lu", (unsigned long)offsetof(struct {char x__; t (y__); }, y__)
 
-data PyonTypes                  -- ^ Array of 'ExportDataType' in C
-data PyonSignature              -- ^ Function signature type in C
+-- | Array of 'ExportDataType' in C
+data PyonTypes
+-- | Function signature type in C
+data PyonSignature
 
 data PyonTypeTag = PyonIntTag | PyonFloatTag | PyonBoolTag | PyonNoneTag
 

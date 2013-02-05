@@ -291,11 +291,6 @@ builtinFunctions =
     --Right [| SystemF.coreBuiltin SystemF.The_repr_Referenced |])
   , (CoreName module_structures "repr_Maybe",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Maybe |])
-  {-, (CoreName module_structures "complex_pass_conv",
-     Left $
-     closureFunctionType [PrimType UnitType,
-                          PrimType PointerType,
-                          PrimType PointerType] []) -}
   , (CoreName module_structures "repr_Tuple1",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple1 |])
   , (CoreName module_structures "repr_Tuple2",
@@ -378,40 +373,24 @@ builtinFunctions =
      Right [| coreBuiltin SystemF.The_geF |])
     -- the_AdditiveDict_int_{add,sub} were replaced by intrinsics
   , (CoreName module_prim "negate_int",
-     Right [| coreBuiltin (SystemF.The_AdditiveDict_int_negate) |])
+     Right [| coreBuiltin (SystemF.The_negI) |])
     -- zero_int was replaced by a literal value
     -- the_AdditiveDict_float_{add,sub} were replaced by intrinsics
   , (CoreName module_prim "negate_float",
-     Right [| coreBuiltin (SystemF.The_AdditiveDict_float_negate) |])
+     Right [| coreBuiltin (SystemF.The_negF) |])
     -- zero_float was replaced by a literal value
-  {-, (CoreName module_complex "AdditiveDict_Complex_add",
-     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_add) |])
-  , (CoreName module_complex "AdditiveDict_Complex_sub",
-     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_sub) |])
-  , (CoreName module_complex "AdditiveDict_Complex_negate",
-     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_negate) |])
-  , (CoreName module_complex "AdditiveDict_Complex_zero",
-     Right [| coreBuiltin (SystemF.The_AdditiveDict_Complex_zero) |])-}
-    -- the_MultiplicativeDict_int_* are intrinsics
-    -- the_MultiplicativeDict_float_mul is intrinsic
   , (CoreName module_prim "fromint_float",
-     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_float_fromInt) |])
-  {-, (CoreName module_complex "MultiplicativeDict_Complex_mul",
-     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_Complex_mul) |])
-  , (CoreName module_complex "MultiplicativeDict_Complex_fromInt",
-     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_Complex_fromInt) |])
-  , (CoreName module_complex "MultiplicativeDict_Complex_one",
-     Right [| coreBuiltin (SystemF.The_MultiplicativeDict_Complex_one) |])-}
+     Right [| coreBuiltin (SystemF.The_fromintF) |])
   , (CoreName module_prim "mod_int",
-     Right [| coreBuiltin SystemF.The_RemainderDict_int_mod |])
+     Right [| coreBuiltin SystemF.The_modI |])
   , (CoreName module_prim "floordiv_int",
-     Right [| coreBuiltin SystemF.The_RemainderDict_int_floordiv |])
+     Right [| coreBuiltin SystemF.The_floordivI |])
   , (CoreName module_prim "mod_float",
-     Right [| coreBuiltin SystemF.The_RemainderDict_float_mod |])
+     Right [| coreBuiltin SystemF.The_modF |])
   , (CoreName module_prim "floordiv_float",
-     Right [| coreBuiltin SystemF.The_RemainderDict_float_floordiv |])
+     Right [| coreBuiltin SystemF.The_floordivF |])
   , (CoreName module_prim "div_float",
-     Right [| coreBuiltin SystemF.The_FractionalDict_float_div |])
+     Right [| coreBuiltin SystemF.The_divF |])
     -- one_float was replaced by a literal value
 {-  , (CoreName builtinModuleName "load_int",
      Right [| coreBuiltin (SystemF.The_fun_load_int) |])

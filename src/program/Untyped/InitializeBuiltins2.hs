@@ -54,7 +54,7 @@ lookupBuiltinVar v m =
   of Just v -> ConTy v
      Nothing -> internalError $ "lookupBuiltinThing: Not defined:" ++ show v
 
-type InitM a = MaybeT SF.TypeEvalM a
+type InitM a = MaybeT SF.BoxedTypeEvalM a
 
 runInitM = runMaybeT
 
@@ -866,7 +866,7 @@ cartesianClass tc_map = do
   
 
 -- | Create all type constructors
-createTyCons :: SF.TypeEvalM ([(BuiltinTyCon, TyCon)], TyConMap)
+createTyCons :: SF.BoxedTypeEvalM ([(BuiltinTyCon, TyCon)], TyConMap)
 createTyCons = do
   m_results <- mapM (runMaybeT . createTyCon) tyConInitializers
   let tc_map = Map.fromList [(sf, tc) | (_, tc, sf) <- catMaybes m_results]
@@ -893,7 +893,7 @@ translateVar v cls = do
         case cls
         of TCCFun ->
              let Just tf = SF.lookupTypeFunction v tenv
-             in SF.typeFunctionArity tf
+             in SF.typeFunctionArity $ SF.builtinPureTypeFunction tf
            _ -> 0
 
   -- Create type constructor
@@ -917,7 +917,7 @@ translateTyVars m [] = return ([], m)
 -- | After translating type variables, create type bindings
 mkTypeBindings :: TyConMap
                -> SF.TypeEnv    -- ^ Core type environment
-               -> SF.TypeEvalM (Map.Map TyCon TypeBinding)
+               -> SF.BoxedTypeEvalM (Map.Map TyCon TypeBinding)
 mkTypeBindings tc_map core_type_env = do
   assocs <- mapM (runMaybeT . mk_binding) tyConInitializers
   return $ Map.fromList $ catMaybes assocs
@@ -951,7 +951,7 @@ mkTypeFamilyBinding tycon mk_instances = do
   let sf_var = tyConSFVar tycon
       Just kind = SF.lookupType sf_var tenv
       Just type_function = SF.lookupTypeFunction sf_var tenv
-      arity = SF.typeFunctionArity type_function
+      arity = SF.typeFunctionArity $ SF.builtinPureTypeFunction type_function
 
   kind' <- frontendKind kind
   instances <- mk_instances
@@ -1143,8 +1143,8 @@ varInitializers =
 -- | Create all variables and their value bindings
 createVars :: TyConMap
            -> Map.Map TyCon TypeBinding
-           -> SF.TypeEvalM ([(BuiltinVar, Variable)],
-                            Map.Map Variable ValueBinding)
+           -> SF.BoxedTypeEvalM ([(BuiltinVar, Variable)],
+                                 Map.Map Variable ValueBinding)
 createVars tc_map t_bindings = do
   results <- mapM (runMaybeT . createVar) varInitializers
   let m = Map.fromList [(v, binding) | (_, v, binding) <- catMaybes results]
@@ -1226,7 +1226,7 @@ translateGlobalVar tc_map v ty = do
 -- Exported top-level routines
 
 setupTypeEnvironment :: IdentSupply SF.Var
-                     -> SF.TypeEnv     -- ^ System F type environment
+                     -> SF.BoxedTypeEnv -- ^ System F type environment
                      -> SF.TypeEnv     -- ^ Core type nvironment
                      -> IO Environment
 setupTypeEnvironment id_supply sf_type_env core_type_env = do
@@ -1243,7 +1243,7 @@ setupTypeEnvironment id_supply sf_type_env core_type_env = do
   
   return $ Environment tc_bindings v_bindings id_supply
   where
-    run_type_action :: SF.TypeEvalM a -> IO a
+    run_type_action :: SF.BoxedTypeEvalM a -> IO a
     run_type_action m = SF.runTypeEvalM m id_supply sf_type_env
 
 -- | Dump the type environment in human-readable form.

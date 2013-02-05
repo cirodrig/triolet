@@ -10,6 +10,7 @@ represented by a 'DataAV' term.
 -}
 
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
+{-# LANGUAGE FlexibleContexts #-}
 module SystemF.Simplifier.AbsValue
        (-- * Abstract values
         AbsCode,
@@ -384,7 +385,8 @@ lookupAbsValue v s = IntMap.lookup (fromIdent $ varID v) (absSubst s)
 
 -- | Modify a substitution and bound variable name if necessary.
 --   See 'substituteBinder'.
-renameIfBound :: EvalMonad m => AbsSubst -> Var -> m (AbsSubst, Var)
+renameIfBound :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                 AbsSubst -> Var -> m (AbsSubst, Var)
 renameIfBound s x = do
   -- Is the bound variable in scope?
   type_assignment <- askTypeEnv (lookupType x)
@@ -404,7 +406,7 @@ renameIfBound s x = do
 -- | Apply a substitution to a binder that binds a value to a variable.
 --
 -- See 'substituteBinder'.
-substituteValueBinder :: EvalMonad m =>
+substituteValueBinder :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                          AbsSubst -> Binder
                        -> (AbsSubst -> Binder -> m a)
                        -> m a
@@ -423,13 +425,13 @@ substituteDeConInst s (TupleDeCon ty_args) k = do
   k s (TupleDeCon ty_args')
 
 -- | Apply a substitution to a pattern
-substitutePatM :: EvalMonad m =>
+substitutePatM :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                   AbsSubst -> PatM -> (AbsSubst -> PatM -> m a) -> m a
 substitutePatM s (PatM binder uses) k = do
   uses' <- substitute (typeSubst s) uses
   substituteValueBinder s binder $ \s' binder' -> k s' (PatM binder' uses')
 
-substitutePatMs :: EvalMonad m =>
+substitutePatMs :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                    AbsSubst -> [PatM] -> (AbsSubst -> [PatM] -> m a) -> m a
 substitutePatMs = renameMany substitutePatM
 
@@ -439,6 +441,11 @@ substituteTyPatM s (TyPat binder) k =
 
 substituteTyPatMs = renameMany substituteTyPatM
 
+substituteDefGroup :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                      AbsSubst
+                   -> DefGroup (FDef Mem)
+                   -> (AbsSubst -> DefGroup (FDef Mem) -> MaybeT m a)
+                   -> MaybeT m a
 substituteDefGroup s g k =
   case g
   of NonRec def -> do
@@ -472,12 +479,14 @@ substituteDefGroup s g k =
                         | (def, v) <- zip defs' renamed_definienda]
          k s' (Rec new_defs)
 
-substituteType :: (Substitutable a, Substitution a ~ TypeSubst) => 
-                  AbsSubst -> a -> MaybeT TypeEvalM a
+substituteType :: (TypeEnvMonad m, Supplies m (Ident Var),
+                   Substitutable a, Substitution a ~ TypeSubst) => 
+                  AbsSubst -> a -> MaybeT m a
 substituteType s t = lift $ substitute (typeSubst s) t
 
 -- | Apply a substitution to an expression
-substituteExp :: AbsSubst -> ExpM -> MaybeT TypeEvalM ExpM
+substituteExp :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                 AbsSubst -> ExpM -> MaybeT m ExpM
 substituteExp s expression =
   case fromExpM expression
   of VarE inf v ->
@@ -520,6 +529,8 @@ substituteExp s expression =
         substituteType s t2 <*>
         substituteExp s body)
 
+substituteFun :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                 AbsSubst -> FunM -> MaybeT m FunM
 substituteFun s (FunM f) =
   substituteTyPatMs s (funTyParams f) $ \s' ty_params ->
   substitutePatMs s' (funParams f) $ \s'' params -> do
@@ -527,6 +538,8 @@ substituteFun s (FunM f) =
     body <- substituteExp s'' (funBody f)
     return $ FunM $ Fun (funInfo f) ty_params params ret body
 
+substituteAlt :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                 AbsSubst -> AltM -> MaybeT m AltM
 substituteAlt s (AltM (Alt decon params body)) =
   substituteDeConInst s decon $ \s' decon' ->
   substitutePatMs s' params $ \s'' params' -> do
@@ -572,7 +585,7 @@ instance Substitutable AbsCode where
          Nothing ->
            case _codeLabel code
            of Nothing -> return Nothing
-              Just e -> liftTypeEvalM $ runMaybeT $ substituteExp s e
+              Just e -> runMaybeT $ substituteExp s e
     value <- substitute s (_codeValue code)
     return $ AbsCode label var_label value
 
@@ -626,7 +639,8 @@ substituteAbsProp s prop =
     conjunction Nothing  (Just q) = Just q
     conjunction Nothing  Nothing  = Nothing
 
-substituteAbsHeap :: EvalMonad m => AbsSubst -> AbsHeap -> m (Maybe AbsHeap)
+substituteAbsHeap :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                     AbsSubst -> AbsHeap -> m (Maybe AbsHeap)
 substituteAbsHeap s (AbsHeap (HeapMap xs)) = do
     m_xs' <- mapM substitute_entry xs
     case sequence m_xs' of
@@ -676,7 +690,7 @@ lookupAbstractValue v (AbsEnv m) =
 --
 --   Application should only occur in a well-typed manner.  An error is raised
 --   otherwise.
-applyCode :: AbsCode -> [Type] -> [AbsCode] -> TypeEvalM AbsComputation
+applyCode :: AbsCode -> [Type] -> [AbsCode] -> UnboxedTypeEvalM AbsComputation
 applyCode fun ty_args fields =
   case codeValue fun
   of TopAV   -> return TopAC
@@ -687,7 +701,7 @@ applyCode fun ty_args fields =
 -- | Apply an abstract function to arguments and compute the result.
 --
 --   The result may be to raise an exception or return a new abstract value.
-applyAbsFun :: AbsFun -> [Type] -> [AbsCode] -> TypeEvalM AbsComputation
+applyAbsFun :: AbsFun -> [Type] -> [AbsCode] -> UnboxedTypeEvalM AbsComputation
 applyAbsFun (AbsFun ty_params params body) ty_args args
   | n_ty_args > n_ty_params =
       type_error
@@ -768,14 +782,14 @@ funValue typarams params body =
 -- corresponding initializer function.
 --
 -- The value is a one-parameter function returning a heap fragment.
-initializerValue :: AbsCode -> Type -> TypeEvalM AbsCode
+initializerValue :: AbsCode -> Type -> UnboxedTypeEvalM AbsCode
 initializerValue data_value ty =
   initializerValueHelper (ReturnAC data_value) ty
 
 -- | A helper function that handles exception-raising computations.
 --   The computation that's passed as a parameter doesn't correspond to
 --   a realizable program value.
-initializerValueHelper :: AbsComputation -> Type -> TypeEvalM AbsCode
+initializerValueHelper :: AbsComputation -> Type -> UnboxedTypeEvalM AbsCode
 initializerValueHelper data_comp ty = do
   param <- newAnonymousVar ObjectLevel
   let param_type = outPtrT `typeApp` [ty]
@@ -790,7 +804,7 @@ initializerValueHelper data_comp ty = do
 --   the field values, the functions are each applied to a nonce
 --   parameter representing the address of the constructor field.
 --   For other fields, the argument value is exactly the field value.
-interpretCon :: ConInst -> [AbsCode] -> TypeEvalM AbsComputation
+interpretCon :: ConInst -> [AbsCode] -> UnboxedTypeEvalM AbsComputation
 interpretCon con fields =
   case con
   of VarCon op _ _ -> do
@@ -824,7 +838,7 @@ interpretCon con fields =
        | otherwise ->
            return $ ReturnAC $ valueCode (datacon_value fields)
   where
-    type_error :: TypeEvalM a
+    type_error :: UnboxedTypeEvalM a
     type_error = internalError "constructorDataValue: Type error detected"
     
     datacon_value field_values = DataAV (AbsData con field_values)
@@ -837,7 +851,7 @@ interpretCon con fields =
 
 -- | Interpret a data constructor application that is certain not to raise
 --   an exception.
-interpretConAsValue :: ConInst -> [AbsCode] -> TypeEvalM AbsCode
+interpretConAsValue :: ConInst -> [AbsCode] -> UnboxedTypeEvalM AbsCode
 interpretConAsValue cinst fields = do
   comp <- interpretCon cinst fields
   case comp of
@@ -846,7 +860,7 @@ interpretConAsValue cinst fields = do
     ExceptAC -> internalError "interpretConAsValue: Not a value"
 
 -- | Compute the value produced by an initializer function
-interpretInitializer :: AbsCode -> TypeEvalM AbsComputation
+interpretInitializer :: AbsCode -> UnboxedTypeEvalM AbsComputation
 interpretInitializer code = do
   -- Create a new variable to stand for the location where the result will
   -- be written
@@ -886,7 +900,7 @@ interpretConstant c = interpret_exp $ constExp c
 
 -- | Compute the value of a case scrutinee, given that it matched a pattern
 --   in a case alternative.
-scrutineeDataValue :: DeConInst -> [PatM] -> TypeEvalM AbsCode
+scrutineeDataValue :: DeConInst -> [PatM] -> UnboxedTypeEvalM AbsCode
 scrutineeDataValue decon params = do
   let con = case decon
             of TupleDeCon ts -> TupleCon ts
@@ -902,7 +916,7 @@ scrutineeDataValue decon params = do
 
 -- | Create an expression whose result has the given abstract value, where
 --   the abstract value has the given type.
-concretize :: Type -> AbsCode -> TypeEvalM (Maybe ExpM)
+concretize :: Type -> AbsCode -> UnboxedTypeEvalM (Maybe ExpM)
 concretize ty e = runMaybeT (concretize' ty e)
 
 concretize' ty e
@@ -918,7 +932,7 @@ concretize' ty e
 --   data constructor application.  For each bare field, create a constructor
 --   application or \'copy\' function call.  For each other field, use the
 --   field's value.
-concretizeData :: AbsData -> MaybeT TypeEvalM ExpM
+concretizeData :: AbsData -> MaybeT UnboxedTypeEvalM ExpM
 concretizeData data_value@(AbsData con fs) = do
   -- Ensure that the data value is not a bare data value.
   -- It's an error to attempt to concretize a bare value.
@@ -954,7 +968,7 @@ concretizeDataConApp (AbsData con fs) = do
     concretize_field BoxK ty f = concretize' ty f
     concretize_field ValK ty f = concretize' ty f
 
-concretizeFun :: Type -> AbsFun -> MaybeT TypeEvalM ExpM
+concretizeFun :: Type -> AbsFun -> MaybeT UnboxedTypeEvalM ExpM
 concretizeFun fun_type (AbsFun ty_params params body) =
   case body
   of TopAC -> mzero             -- Unknown behavior
@@ -999,7 +1013,7 @@ unpackFunctionType fun_type ty_params params =
     type_error = internalError "concretizeFun: Type error detected"
 
 -- | Concretize a heap map.  For each entry in the map, write to the heap.
-concretizeHeap :: AbsHeap -> MaybeT TypeEvalM ExpM
+concretizeHeap :: AbsHeap -> MaybeT UnboxedTypeEvalM ExpM
 concretizeHeap (AbsHeap (HeapMap [(addr, val)])) =
   concretizeHeapItem addr val
 
@@ -1007,7 +1021,7 @@ concretizeHeap _ =
   -- Support for multiple heap contents have not been implemented
   internalError "concretizeHeap: Not implemented for this value"
 
-concretizeHeapItem :: Var -> AbsCode -> MaybeT TypeEvalM ExpM
+concretizeHeapItem :: Var -> AbsCode -> MaybeT UnboxedTypeEvalM ExpM
 concretizeHeapItem addr val
   -- Cannot simplify trivial expressions
   | Just exp <- codeTrivialExp val = mzero

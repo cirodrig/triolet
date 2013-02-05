@@ -40,7 +40,7 @@ the_TITypes :: InitGlobalVar Untyped.Environment
 the_TITypes = defineInitGlobalVar () 
 
 -- | The types of System F terms.
-the_systemFTypes :: InitGlobalVar Type.Environment.TypeEnv
+the_systemFTypes :: InitGlobalVar Type.Environment.BoxedTypeEnv
 {-# NOINLINE the_systemFTypes #-}
 the_systemFTypes = defineInitGlobalVar ()
 
@@ -56,7 +56,7 @@ the_memTypes = defineInitGlobalVar ()
 
 -- | The specification types of global variables.
 --   Replaces functionality formerly provided by 'the_newCoreTypes'.
-the_specTypes :: InitGlobalVar Type.Environment.SpecTypeEnv
+the_specTypes :: InitGlobalVar (Type.Environment.TypeEnvBase Type.Environment.SpecMode)
 {-# NOINLINE the_specTypes #-}
 the_specTypes = defineInitGlobalVar ()
 

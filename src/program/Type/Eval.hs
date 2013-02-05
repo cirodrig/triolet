@@ -2,12 +2,19 @@
 module Type.Eval
        (reduceToWhnf,
         normalize,
+
+        -- * Computing and checking types
         typeKind,
         typeCheckType,
-        TypeAppResult(..),
         typeOfTypeApp,
-        AppResult(..),
         typeOfApp,
+
+        -- * Deconstructing types
+        deconForallType,
+        deconFunType,
+        deconForallFunType,
+
+        -- * Other functions
         unboxedTupleTyCon,
         unboxedTupleType,
         instantiateDataConType,
@@ -29,6 +36,7 @@ import qualified Type.Rename as Rename
 import Type.Substitute(TypeSubst, Substitutable(..), substitute)
 import qualified Type.Substitute as Substitute
 import Type.Type
+import Type.Error
 
 -- | Evaluate a type as much as possible.
 --   The type is assumed to be well-kinded.
@@ -89,7 +97,7 @@ typeKind tenv ty =
 -- | Typecheck a type or kind.  If the term is valid, return its type,
 --   which is the same as what 'typeKind' returns.  Otherwise, raise an
 --   error.
-typeCheckType :: Type -> TypeEvalM Type
+typeCheckType :: BoxingMode b => Type -> TypeEvalM b Type
 typeCheckType ty =
   case ty
   of VarT v -> do
@@ -104,10 +112,7 @@ typeCheckType ty =
        arg_k <- typeCheckType arg
            
        -- Get type of application
-       applied <- typeOfApp op_k arg_k
-       case applied of
-         AppOk result_t -> return result_t
-         _ -> internalError ("typeCheckType: Error in type application:\n" ++ show (pprType ty))
+       typeOfApp noSourcePos 1 op_k arg_k
 
      FunT dom rng -> do
        -- Check that types are valid
@@ -149,50 +154,77 @@ typeCheckType ty =
     valid_unboxed_tuple_field BoxK = True
     valid_unboxed_tuple_field _ = False
 
--- | The result of a type application is a new type or a type error
-data TypeAppResult =
-    TypeAppOk Type              -- ^ Result of successful type application
-  | KindMismatchErr Type Type   -- ^ Mismatch between expected and given kinds
-  | NotAForallErr               -- ^ Applied a non-forall term to an argument 
-
 -- | Compute the type produced by applying a value of type @op_type@ to
---   the type argument @arg@.  Verify that the application is well-typed.
-typeOfTypeApp :: Type               -- ^ Operator type
+--   the type argument @arg@.
+--   Raise an exception on type error.
+typeOfTypeApp :: BoxingMode b =>
+                 SourcePos          -- ^ Location of type application
+              -> Int                -- ^ Ordinal position of type argument,
+                                    --   for error reporting
+              -> Type               -- ^ Operator type
               -> Kind               -- ^ Argument kind
               -> Type               -- ^ Argument
-              -> TypeEvalM TypeAppResult
-typeOfTypeApp op_type arg_kind arg = do
+              -> TypeEvalM b Type
+typeOfTypeApp pos arg_index op_type arg_kind arg = do
   whnf_op_type <- reduceToWhnf op_type
   case whnf_op_type of
     AllT (x ::: dom) rng -> do
       type_ok <- compareTypes dom arg_kind
       if type_ok
-        then fmap TypeAppOk $ Substitute.substituteVar x arg rng
-        else return $ KindMismatchErr dom arg_kind
-    _ -> return NotAForallErr
-
--- | Computing the type of an application results in a type or a type error
-data AppResult =
-    AppOk Type                  -- ^ Type of a valid application
-  | TypeMismatchErr Type Type   -- ^ Mismatch between expected and given types
-  | NotAFunctionErr             -- ^ Applied a non-function value to an argument 
+        then Substitute.substituteVar x arg rng
+        else throwTypeError $ typeArgKindMismatch pos arg_index dom arg_kind
+    _ -> throwTypeError $ badTypeApplication pos whnf_op_type arg_kind
 
 -- | Compute the type produced by applying a value of type @op_type@ to
 --   a value of type @arg_type@, or a type of kind @op_type@ to a type of
 --   kind @arg_type@.  Verify that the application is well-typed or
 --   well-kinded.
-typeOfApp :: Type               -- ^ Operator type
+typeOfApp :: BoxingMode b =>
+             SourcePos          -- ^ Location of type application
+          -> Int                -- ^ Ordinal position of type argument,
+                                --   for error reporting
+          -> Type               -- ^ Operator type
           -> Type               -- ^ Argument type
-          -> TypeEvalM AppResult
-typeOfApp op_type arg_type = do
+          -> TypeEvalM b Type
+typeOfApp pos arg_index op_type arg_type = do
   whnf_op_type <- reduceToWhnf op_type
   case whnf_op_type of
     FunT dom rng -> do
       type_ok <- compareTypes dom arg_type
       if type_ok
-        then return $ AppOk rng
-        else return $ TypeMismatchErr dom arg_type
-    _ -> return NotAFunctionErr
+        then return rng
+        else throwTypeError $ argTypeMismatch pos arg_index dom arg_type
+    _ -> throwTypeError $ badApplication pos whnf_op_type arg_type
+
+-- | Given a type of the form @forall a b ... z. t@, extract all @forall@
+--   bindings and the rest of the type.
+deconForallType :: BoxingMode b => Type -> TypeEvalM b ([Binder], Type)
+deconForallType t = examine id t
+  where 
+    examine hd t = do
+      t' <- reduceToWhnf t
+      case t' of
+        AllT b t'' -> assumeBinder b $ examine (hd . (b:)) t''
+        _ -> return (hd [], t')
+
+-- | Given a type of the form @t1 -> ... -> tN@, get the domain and range
+--   types.
+deconFunType :: BoxingMode b => Type -> TypeEvalM b ([Type], Type)
+deconFunType t = examine id t
+  where 
+    examine hd t = do
+      t' <- reduceToWhnf t
+      case t' of
+        d `FunT` r -> examine (hd . (d:)) r
+        _ -> return (hd [], t')
+
+-- | Deconstruct a universally quantified function type.
+deconForallFunType :: BoxingMode b =>
+                      Type -> TypeEvalM b ([Binder], [Type], Type)
+deconForallFunType t = do
+  (binders, fntype) <- deconForallType t
+  (domain, range) <- assumeBinders binders $ deconFunType fntype
+  return (binders, domain, range)
 
 -- | Create an unboxed tuple type constructor that can hold 
 --   the given sequence of types.

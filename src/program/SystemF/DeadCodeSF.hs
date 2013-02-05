@@ -1,5 +1,5 @@
 
-module SystemF.DeadCodeSF(eliminateDeadCode)
+module SystemF.DeadCodeSF()
 where
 
 import Control.Monad.Writer
@@ -16,6 +16,10 @@ import Type.Type
 import Globals
 import GlobalVar
 
+-- This module is obsoleted by the simplifier
+-- TODO: remove this module
+
+{-
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
 eliminateDeadCode :: Module SF -> IO (Module SF)
@@ -175,3 +179,5 @@ edcLetE info lhs rhs body =
       if not lhs_mentioned then return body' else do
         rhs' <- edcExp rhs
         return $ ExpSF $ LetE info lhs' rhs' body'
+
+-}

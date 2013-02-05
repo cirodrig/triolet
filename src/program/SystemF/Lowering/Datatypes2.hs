@@ -987,10 +987,8 @@ lowerTypeList tenv tys = liftM catMaybes $ mapM (lowerType tenv) tys
 --   Uses the Mem type environment.
 lowerFunctionType :: LowerEnv -> Type -> IO LL.FunctionType
 lowerFunctionType env ty = runLowering env $ do
-  -- Deconstruct the type
-  let (ty_params, monotype) = fromForallType ty
-      (params, ret) = fromFunType monotype
-      local_tenv = foldr insert_type (typeEnvironment env) ty_params
+  (ty_params, params, ret) <- liftTypeEvalM $ deconForallFunType ty
+  let local_tenv = foldr insert_type (typeEnvironment env) ty_params
         where insert_type (a ::: k) e = insertType a k e
   when (null params) $ internalError "lowerFunctionType: Not a function type"
 

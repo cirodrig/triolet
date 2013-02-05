@@ -14,15 +14,22 @@ System F code after representation inference.
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, Rank2Types #-}
 {-# OPTIONS_GHC -no-auto #-}
 module Type.Environment
-       (TypeEnvMonad(..),
+       (BoxingMode(builtinTypeFunctionForEval),
+        FullyBoxedMode, fullyBoxedMode, 
+        UnboxedMode, unboxedMode,
+        SpecMode,
+        TypeEnvMonad(..),
         assume,
         assumeBinder,
         assumeBinders,
         EvalMonad(..),
+        getBoxingMode,
         TypeEvalM(..),
+        BoxedTypeEvalM,
+        UnboxedTypeEvalM,
         TypeEnvBase,
         TypeEnv,
-        SpecTypeEnv,
+        BoxedTypeEnv,
         DataType(..),
         dataTypeFullKind,
         DataConType(..),
@@ -82,18 +89,48 @@ import Type.Type
 -------------------------------------------------------------------------------
 -- Support for type-level computation
 
-type MonadTypeEnv m = TypeEnvBase (TypeFunctionInfo m)
+-- | The boxing mode to use for reduction.  Type functions are reduced
+--   differently depending on the mode.
+class BoxingMode m where
+  -- | Get the implementation of a builtin type function to use during
+  --   evaluation.
+  --   Gets either 'builtinPureTypeFunction' or 'builtinMemTypeFunction'.
+  --   The first argument is not used and may be 'undefined'.
+  builtinTypeFunctionForEval :: m -> BuiltinTypeFunction -> TypeFunction
+
+data FullyBoxedMode
+
+-- | This is used as a dummy parameter
+fullyBoxedMode :: FullyBoxedMode
+fullyBoxedMode = error "fullyBoxedMode"
+
+instance BoxingMode FullyBoxedMode where
+  builtinTypeFunctionForEval _ = builtinPureTypeFunction
+
+data UnboxedMode
+
+-- | This is used as a dummy parameter
+unboxedMode :: UnboxedMode
+unboxedMode = error "unboxedMode"
+
+instance BoxingMode UnboxedMode where
+  builtinTypeFunctionForEval _ = builtinMemTypeFunction
+
+-- | The specification type environment, with initializer types.
+--   This is going away eventually.
+data SpecMode
 
 -- | A monad that keeps track of the current type environment
-class Monad m => TypeEnvMonad m where
-  type TypeFunctionInfo m
+class (Monad m, Applicative m, BoxingMode (EvalBoxingMode m)) =>
+      TypeEnvMonad m where
+  type EvalBoxingMode m
 
   -- | Get the current type environment
-  getTypeEnv :: m (MonadTypeEnv m)
+  getTypeEnv :: m (TypeEnvBase (EvalBoxingMode m))
   getTypeEnv = askTypeEnv id
   
   -- | Query the current type environment
-  askTypeEnv :: (MonadTypeEnv m -> a) -> m a
+  askTypeEnv :: (TypeEnvBase (EvalBoxingMode m) -> a) -> m a
   askTypeEnv f = liftM f getTypeEnv
 
   -- | Add a variable to the type environment
@@ -110,15 +147,14 @@ assumeBinders :: TypeEnvMonad m => [Binder] -> m a -> m a
 assumeBinders bs m = foldr assumeBinder m bs
 
 instance TypeEnvMonad m => TypeEnvMonad (MaybeT m) where
-  type TypeFunctionInfo (MaybeT m) = TypeFunctionInfo m
+  type EvalBoxingMode (MaybeT m) = EvalBoxingMode m
   getTypeEnv = lift getTypeEnv
   askTypeEnv f = lift (askTypeEnv f)
   assumeWithProperties v t b (MaybeT m) = MaybeT (assumeWithProperties v t b m)
 
 -- | A monad supporting type-level computation
-class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m,
-       TypeFunctionInfo m ~ TypeFunction) => EvalMonad m where
-  liftTypeEvalM :: TypeEvalM a -> m a
+class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m where
+  liftTypeEvalM :: TypeEvalM (EvalBoxingMode m) a -> m a
 
 instance Supplies m (Ident Var) => Supplies (MaybeT m) (Ident Var) where
   fresh = lift fresh
@@ -127,20 +163,23 @@ instance EvalMonad m => EvalMonad (MaybeT m) where
   liftTypeEvalM = lift . liftTypeEvalM
 
 -- | A simple monad supporting type-level computation
-newtype TypeEvalM a =
-  TypeEvalM {runTypeEvalM :: IdentSupply Var -> TypeEnv -> IO a}
+newtype TypeEvalM boxing_mode a =
+  TypeEvalM {runTypeEvalM :: IdentSupply Var -> TypeEnvBase boxing_mode -> IO a}
 
-instance Functor TypeEvalM where
+type BoxedTypeEvalM = TypeEvalM FullyBoxedMode
+type UnboxedTypeEvalM = TypeEvalM UnboxedMode
+
+instance Functor (TypeEvalM boxing_mode) where
   {-# INLINE fmap #-}
   fmap f m = TypeEvalM $ \supply env -> fmap f (runTypeEvalM m supply env)
 
-instance Applicative TypeEvalM where
+instance Applicative (TypeEvalM boxing_mode) where
   {-# INLINE pure #-}
   {-# INLINE (<*>) #-}
   pure = return
   (<*>) = ap
 
-instance Monad TypeEvalM where
+instance Monad (TypeEvalM boxing_mode) where
   {-# INLINE return #-}
   {-# INLINE (>>=) #-}
   return x = TypeEvalM (\_ _ -> return x)
@@ -148,17 +187,16 @@ instance Monad TypeEvalM where
     x <- runTypeEvalM m supply env
     runTypeEvalM (k x) supply env
 
-instance MonadIO TypeEvalM where
+instance MonadIO (TypeEvalM boxing_mode) where
   {-# INLINE liftIO #-}
   liftIO m = TypeEvalM (\_ _ -> m)
 
-instance Supplies TypeEvalM (Ident Var) where
+instance Supplies (TypeEvalM boxing_mode) (Ident Var) where
   {-# INLINE fresh #-}
   fresh = TypeEvalM (\supply _ -> supplyValue supply)
 
-instance TypeEnvMonad TypeEvalM where
-  type TypeFunctionInfo TypeEvalM = TypeFunction
-
+instance BoxingMode boxing_mode => TypeEnvMonad (TypeEvalM boxing_mode) where
+  type EvalBoxingMode (TypeEvalM boxing_mode) = boxing_mode
   {-# INLINE getTypeEnv #-}
   getTypeEnv = TypeEvalM (\_ tenv -> return tenv)
   
@@ -166,8 +204,13 @@ instance TypeEnvMonad TypeEvalM where
     TypeEvalM $ \supply tenv ->
     runTypeEvalM m supply (insertTypeWithProperties v t b tenv)
 
-instance EvalMonad TypeEvalM where
+instance BoxingMode boxing_mode => EvalMonad (TypeEvalM boxing_mode) where
   liftTypeEvalM m = m
+
+-- | This computation's return value is used as a dummy parameter
+getBoxingMode :: forall m. EvalMonad m => m (EvalBoxingMode m)
+getBoxingMode =
+  return (internalError "getBoxingMode" :: forall. EvalBoxingMode m)
 
 -------------------------------------------------------------------------------
 
@@ -311,11 +354,13 @@ data TypeFunction =
     -- | How to evaluate a type function.  The length of the argument list
     --   is exactly the size given by _tyfunArity.  The arguments are not
     --   reduced.  The returned type should be in weak head-normal form.
-  , _tyfunReduction :: !([Type] -> TypeEvalM Type)
+  , _tyfunReduction :: !(forall b. BoxingMode b => [Type] -> TypeEvalM b Type)
   }
 
 -- | Create a type function
-typeFunction :: Int -> ([Type] -> TypeEvalM Type) -> TypeFunction
+typeFunction :: Int
+             -> (forall b. BoxingMode b => [Type] -> TypeEvalM b Type)
+             -> TypeFunction
 typeFunction = TypeFunction
 
 typeFunctionArity :: TypeFunction -> Int
@@ -337,21 +382,17 @@ data BuiltinTypeFunction =
 
 
 -- | A type environment maps variables to types
-newtype TypeEnvBase type_function =
-  TypeEnv (IntMap.IntMap (TypeAssignment type_function))
+newtype TypeEnvBase boxing_mode =
+  TypeEnv (IntMap.IntMap (TypeAssignment BuiltinTypeFunction))
 
-type TypeEnv = TypeEnvBase TypeFunction
-type SpecTypeEnv = TypeEnvBase BuiltinTypeFunction
+type TypeEnv = TypeEnvBase UnboxedMode
+type BoxedTypeEnv = TypeEnvBase FullyBoxedMode
 
-type PureTypeAssignment = TypeAssignment TypeFunction
-type MemTypeAssignment = TypeAssignment TypeFunction
-type SpecTypeAssignment = TypeAssignment BuiltinTypeFunction
-
-emptyTypeEnv :: TypeEnvBase type_function
+emptyTypeEnv :: TypeEnvBase b
 emptyTypeEnv = TypeEnv IntMap.empty
 
 -- | A Type environment containing the variables defined in "Type.Type"
-wiredInTypeEnv :: TypeEnvBase type_function
+wiredInTypeEnv :: TypeEnvBase UnboxedMode
 wiredInTypeEnv =
   TypeEnv $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- entries]
   where
@@ -360,8 +401,8 @@ wiredInTypeEnv =
                (boxV, varTypeAssignment kindT),
                (bareV, varTypeAssignment kindT),
                (outV, varTypeAssignment kindT),
-               (initV, varTypeAssignment kindT),
-               (initConV, varTypeAssignment (bareT `FunT` initT)),
+               -- (initV, varTypeAssignment kindT),
+               -- (initConV, varTypeAssignment (bareT `FunT` initT)),
                (outPtrV, varTypeAssignment (bareT `FunT` outT)),
                (storeV, TyConTypeAssignment store_data_type),
                (posInftyV, varTypeAssignment intindexT),
@@ -470,14 +511,14 @@ insertDataType (DataTypeDescr ty_con u_args range ctors is_abstract is_algebraic
       [ (v, DataConTypeAssignment (data_con dtor))
       | dtor@(DataConDescr v _ _) <- ctors]
     
-insertTypeFunction :: Var -> Type -> type_function
-                   -> TypeEnvBase type_function -> TypeEnvBase type_function
+insertTypeFunction :: Var -> Type -> BuiltinTypeFunction
+                   -> TypeEnvBase b -> TypeEnvBase b
 insertTypeFunction v ty f (TypeEnv env) =
   TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyFunTypeAssignment ty f) env
 
 -- | Set a data type's size parameters
 setSizeParameters :: Var -> [KindedType]
-                  -> TypeEnvBase type_function -> TypeEnvBase type_function
+                  -> TypeEnvBase b -> TypeEnvBase b
 setSizeParameters v size_params (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (TyConTypeAssignment dtype) ->
@@ -485,21 +526,21 @@ setSizeParameters v size_params (TypeEnv env) =
        in TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyConTypeAssignment dtype') env
      _ -> internalError "setSizeParameters: Not a data type constructor"
 
-lookupDataCon :: Var -> TypeEnvBase type_function -> Maybe DataConType
+lookupDataCon :: Var -> TypeEnvBase b -> Maybe DataConType
 {-# INLINE lookupDataCon #-}
 lookupDataCon v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (DataConTypeAssignment dtor) -> Just dtor
      _ -> Nothing
 
-lookupDataType :: Var -> TypeEnvBase type_function -> Maybe DataType
+lookupDataType :: Var -> TypeEnvBase b -> Maybe DataType
 {-# INLINE lookupDataType #-}
 lookupDataType v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (TyConTypeAssignment tc) -> Just tc
      _ -> Nothing
 
-lookupDataConWithType :: Var -> TypeEnvBase type_function
+lookupDataConWithType :: Var -> TypeEnvBase b
                       -> Maybe (DataType, DataConType)
 {-# INLINE lookupDataConWithType #-}
 lookupDataConWithType v env = do
@@ -507,7 +548,7 @@ lookupDataConWithType v env = do
   dtype <- lookupDataType (dataConTyCon dcon) env
   return (dtype, dcon)
 
-lookupTypeFunction :: Var -> TypeEnv -> Maybe TypeFunction
+lookupTypeFunction :: Var -> TypeEnvBase b -> Maybe BuiltinTypeFunction
 {-# INLINE lookupTypeFunction #-}
 lookupTypeFunction v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
@@ -515,7 +556,7 @@ lookupTypeFunction v (TypeEnv env) =
      _ -> Nothing
 
 -- | Look up the type of a variable
-lookupType :: Var -> TypeEnvBase type_function -> Maybe Type
+lookupType :: Var -> TypeEnvBase b -> Maybe Type
 {-# INLINE lookupType #-}
 lookupType v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
@@ -561,7 +602,7 @@ makeDataConType dtype dcon_type =
 -}
 
 -- | Look up the type and other properties of an ordinary variable
-lookupTypeWithProperties :: Var -> TypeEnvBase type_function
+lookupTypeWithProperties :: Var -> TypeEnvBase b
                          -> Maybe (Type, Bool)
 {-# INLINE lookupTypeWithProperties #-}
 lookupTypeWithProperties v (TypeEnv env) = do
@@ -583,7 +624,7 @@ getAllDataTypeConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env
     get_data_con _ = Nothing
 
 -- | Get kind of all types in the type environment
-getAllKinds :: TypeEnvBase type_function -> IntMap.IntMap Kind
+getAllKinds :: TypeEnvBase b -> IntMap.IntMap Kind
 getAllKinds (TypeEnv env) = IntMap.mapMaybe get_type env
   where
     get_type (VarTypeAssignment ty _)  
@@ -595,7 +636,7 @@ getAllKinds (TypeEnv env) = IntMap.mapMaybe get_type env
 
 -- | Get kinds of all types and types of all variables in the type
 --   environment.  Data constructors are not included in the result.
-getAllTypes :: TypeEnvBase type_function -> IntMap.IntMap Type
+getAllTypes :: TypeEnvBase b -> IntMap.IntMap Type
 getAllTypes (TypeEnv env) = IntMap.mapMaybe get_type env
   where
     get_type (VarTypeAssignment ty _)  = Just ty
@@ -604,7 +645,7 @@ getAllTypes (TypeEnv env) = IntMap.mapMaybe get_type env
     get_type (TyFunTypeAssignment k _) = Just k
 
 -- | Create a docstring showing all types in the type environment
-pprTypeEnv :: TypeEnvBase type_function -> Doc
+pprTypeEnv :: TypeEnvBase b -> Doc
 pprTypeEnv (TypeEnv tenv) =
   vcat [ hang (text (show n) <+> text "|->") 8 (pprTypeAssignment t)
        | (n, t) <- IntMap.toList tenv]
@@ -643,16 +684,14 @@ initializerType t = typeApp outPtrT [t] `FunT` storeT
 -------------------------------------------------------------------------------
 
 -- | Specialize a specification type environment for a particular use case.
-specializeTypeEnv :: (BuiltinTypeFunction -> a)
-                     -- ^ Choice of type function implementation
-                  -> (BaseKind -> Maybe BaseKind)
+specializeTypeEnv :: (BaseKind -> Maybe BaseKind)
                      -- ^ Transformation on base kinds
                   -> (Kind -> Maybe Kind)
                      -- ^ Transformation on kinds
                   -> (Type -> Maybe Type)
                      -- ^ Transformation on types
-                  -> SpecTypeEnv -> TypeEnvBase a
-specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) = new_type_env
+                  -> TypeEnvBase b1 -> TypeEnvBase b2
+specializeTypeEnv basekind_f kind_f type_f (TypeEnv m) = new_type_env
   where
     -- Data type constructors are looked up in the new type environment
     new_type_env = TypeEnv (IntMap.mapMaybe type_assignment m)
@@ -672,7 +711,7 @@ specializeTypeEnv tyfun_f basekind_f kind_f type_f (TypeEnv m) = new_type_env
       DataConTypeAssignment <$> data_con dcon
 
     type_assignment (TyFunTypeAssignment t f) =
-      TyFunTypeAssignment <$> kind_f t <*> pure (tyfun_f f)
+      TyFunTypeAssignment <$> kind_f t <*> pure f
 
     data_type (DataType con params size_params k
                is_abstract is_algebraic ctors) = do

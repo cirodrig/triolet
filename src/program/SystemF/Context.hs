@@ -12,6 +12,7 @@ context.  It is only the contexts themselves that are not allowed to refer
 to one another's variables.
 -}
 
+{-# LANGUAGE FlexibleContexts #-}
 module SystemF.Context
        (isUnfloatableCase,
         Contexted,
@@ -52,6 +53,8 @@ import Data.Maybe
 import qualified Data.Set as Set
 import Text.PrettyPrint.HughesPJ
 
+import Common.Identifier
+import Common.Supply
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Rename
@@ -244,7 +247,8 @@ ctxFreeBoundVariables ctx = free_variables Set.empty Set.empty ctx
 renameCtx :: Renaming -> Ctx -> (Renaming -> Ctx -> a) -> a
 renameCtx = renameMany renameCtxItem
 
-substituteCtx :: EvalMonad m => Subst -> Ctx -> (Subst -> Ctx -> m a) -> m a
+substituteCtx :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+                 Subst -> Ctx -> (Subst -> Ctx -> m a) -> m a
 substituteCtx = renameMany substituteCtxItem
 
 assumeCtx ctx m = foldr assumeCtxItem m ctx
@@ -503,7 +507,7 @@ splitContext _ ExceptingContext = return ExceptingContext
 --   The bindings are added to the expression inside the context.
 anchor :: EvalMonad m =>
           Set.Set Var           -- ^ Variables to anchor onto
-       -> TypeEvalM Type        -- ^ Computation of the expression's type
+       -> TypeEvalM (EvalBoxingMode m) Type -- ^ Computation of the expression's type
        -> Contexted ExpM        -- ^ Input expression and context
        -> m (Contexted ExpM)    -- ^ Computes the new expression with
                                 --   bindings anchored
@@ -530,7 +534,7 @@ anchor' anchor_vars compute_type cexp
 -- | A variant of 'anchor' that anchors on a single variable
 anchorVar :: EvalMonad m =>
           Var
-       -> TypeEvalM Type
+       -> TypeEvalM (EvalBoxingMode m) Type
        -> Contexted ExpM
        -> m (Contexted ExpM)
 anchorVar v = anchor (Set.singleton v)
@@ -538,7 +542,7 @@ anchorVar v = anchor (Set.singleton v)
 -- | A variant of 'anchor' that anchors on a list of variables
 anchorVarList :: EvalMonad m =>
                  [Var]
-              -> TypeEvalM Type
+              -> TypeEvalM (EvalBoxingMode m) Type
               -> Contexted ExpM
               -> m (Contexted ExpM)
 anchorVarList vs = anchor (Set.fromList vs)
@@ -673,7 +677,7 @@ mergeList (x:xs) = mergeWith (:) x =<< mergeList xs
 mergeList []     = return $ unitContext []
 
 -- | Find a value indexed by a type.  Analogous to 'lookup'.
-findByType :: Type -> [(Type, a)] -> TypeEvalM (Maybe a)
+findByType :: BoxingMode b => Type -> [(Type, a)] -> TypeEvalM b (Maybe a)
 findByType ptype assocs = search assocs
   where
     search ((ty, val) : assocs) = do
@@ -691,8 +695,9 @@ nubContext :: (Renameable a, Substitutable a, EvalMonad m,
               Contexted a -> m (Contexted a)
 nubContext ctx = liftTypeEvalM (nubContext' ctx)  
 
-nubContext' :: (Renameable a, Substitutable a, Substitution a ~ Subst) =>
-              Contexted a -> TypeEvalM (Contexted a)
+nubContext' :: (Renameable a, Substitutable a, Substitution a ~ Subst,
+                BoxingMode b) =>
+              Contexted a -> TypeEvalM b (Contexted a)
 nubContext' ExceptingContext = return ExceptingContext 
 
 nubContext' (ApplyContext {_ctxContext = ctx, _ctxBody = body_value}) =
@@ -706,12 +711,13 @@ nubContext' (ApplyContext {_ctxContext = ctx, _ctxBody = body_value}) =
     --   First, apply the renaming that has been computed so far.
     --   Then either include the current item in the output or
     --   rename the variable it defines.
-    nub_items :: [(Type, Var)]      -- ^ Dictionary types that are defined
+    nub_items :: BoxingMode b =>
+                 [(Type, Var)]      -- ^ Dictionary types that are defined
               -> Subst              -- ^ Renaming of variables
               -> Ctx                -- ^ Output context (reversed)
               -> Ctx                -- ^ Input context
-              -> (Subst -> Ctx -> TypeEvalM a)
-              -> TypeEvalM a
+              -> (Subst -> Ctx -> TypeEvalM b a)
+              -> TypeEvalM b a
     nub_items types subst new_ctx (c:cs) k =
       -- Rename this item
       substituteCtxItem subst c $ \subst' c' ->

@@ -11,6 +11,7 @@ system, in which values inhabit four different kinds: @val@, @box@,
 module SystemF.ReprInference(representationInference)
 where
 
+import Control.Applicative
 import Control.Monad.Reader
 import Data.Maybe
 import Data.Monoid
@@ -80,7 +81,7 @@ errorIfOutPtr msg ty x
 --   Specification types are tracked for variables that are in scope.
 --   New variables can be created.
 newtype RI a = RI {unRI :: ReaderT RIEnv IO a}
-             deriving(Functor, Monad)
+             deriving(Functor, Applicative, Monad, MonadIO)
 
 -- | A first-order type rewrite rule.  When the type on the left is matched,
 --   rewrite it to the type on the right.
@@ -106,17 +107,14 @@ data RIEnv =
   , riRewrites :: [TypeRewrite]
 
     -- | The system F type environment
-  , riSystemFTypeEnv :: TypeEnv
+  , riSystemFTypeEnv :: BoxedTypeEnv
   }
-
-instance MonadIO RI where
-  liftIO m = RI $ liftIO m
 
 instance Supplies RI (Ident Var) where
   fresh = RI $ ReaderT $ \env -> supplyValue (riVarSupply env)
 
 instance TypeEnvMonad RI where
-  type TypeFunctionInfo RI = TypeFunction
+  type EvalBoxingMode RI = UnboxedMode
   getTypeEnv = RI $ asks riTypeEnv
   assumeWithProperties v t b m = RI $ local insert_type (unRI m)
     where
@@ -224,7 +222,7 @@ normalizeSpecificationType ty = RI $ ReaderT $ \env ->
   in runTypeEvalM apply_coercions (riVarSupply env) (riTypeEnv env)
 
 -- | Apply a type coercion to a type, if its LHS exactly matches.
-applyTypeCoercion :: TypeRewrite -> Kind -> Type -> TypeEvalM (Bool, Type)
+applyTypeCoercion :: TypeRewrite -> Kind -> Type -> UnboxedTypeEvalM (Bool, Type)
 applyTypeCoercion (TR rewrite_kind lhs rhs) ty_kind ty = do
   -- We can only compare the types if they have the same kind
   same_kind <- compareTypes rewrite_kind ty_kind
@@ -237,7 +235,7 @@ applyTypeCoercion (TR rewrite_kind lhs rhs) ty_kind ty = do
     -- trace_rewrite = traceShow (text "Rewrite" <+> pprType lhs <+> text "==>" <+> pprType rhs)
 
 -- | Apply any matching type coercion to a type.
-applyTypeCoercions :: [TypeRewrite] -> Type -> TypeEvalM (Bool, Type)
+applyTypeCoercions :: [TypeRewrite] -> Type -> UnboxedTypeEvalM (Bool, Type)
 applyTypeCoercions rws ty = do
   tenv <- getTypeEnv
   let kind = typeKind tenv ty
@@ -251,7 +249,7 @@ applyTypeCoercions rws ty = do
   loop rws
 
 -- | Apply any matching type coercion to a type or any subexpression.
-applyTypeCoercionsRec :: [TypeRewrite] -> Type -> TypeEvalM (Bool, Type)
+applyTypeCoercionsRec :: [TypeRewrite] -> Type -> UnboxedTypeEvalM (Bool, Type)
 applyTypeCoercionsRec rws ty = do
   -- Rewrite this expression
   whnf_ty <- reduceToWhnf ty
@@ -284,7 +282,7 @@ applyTypeCoercionsRec rws ty = do
 
 -- | Apply type coercions until no further rewriting is possible.
 applyTypeCoercionsExhaustively :: [TypeRewrite] -> Type
-                               -> TypeEvalM (Bool, Type)
+                               -> UnboxedTypeEvalM (Bool, Type)
 applyTypeCoercionsExhaustively rws ty = do
   -- liftIO $ print $
   --   hang (text "Type coercions" <+> pprType ty) 4 (pprTypeRewrites rws)
@@ -343,7 +341,8 @@ coercionKind tenv natural_t =
 --
 --   If both types have variables or functions as their outermost term, 
 --   then Nothing is returned.
-mostSpecificNaturalHeadKind :: EvalMonad m => Type -> Type -> m BaseKind
+mostSpecificNaturalHeadKind :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
+                               Type -> Type -> m BaseKind
 mostSpecificNaturalHeadKind t1 t2 = do
   tenv <- getTypeEnv
   getMsnk tenv t1 $ getMsnk tenv t2 $ unknown_type
@@ -748,7 +747,7 @@ coerceExps _ _ _ = internalError "coerceExps: List length mismatch"
 coercion :: [TypeRewrite]
          -> Type                -- ^ Given type
          -> Type                -- ^ Expected type
-         -> TypeEvalM Coercion  -- ^ Computes the coercion
+         -> UnboxedTypeEvalM Coercion  -- ^ Computes the coercion
 coercion rewrites g_type e_type = do
   tenv <- getTypeEnv
 
@@ -1467,5 +1466,5 @@ representationInference mod = do
 -- | Convert a specification type environment to one where types can be
 --   compared.  The 'mem' variant of type functions is selected.  All types
 --   remain unchanged.
-specToTypeEnv :: SpecTypeEnv -> TypeEnv
-specToTypeEnv m = specializeTypeEnv builtinMemTypeFunction Just Just Just m
+specToTypeEnv :: TypeEnvBase SpecMode -> TypeEnv
+specToTypeEnv m = specializeTypeEnv Just Just Just m

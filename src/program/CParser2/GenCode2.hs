@@ -1,9 +1,14 @@
 
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE Rank2Types, GeneralizedNewtypeDeriving #-}
 module CParser2.GenCode2 (createCoreModule) where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
+import Data.List
+import Data.Maybe
+import Data.Monoid
+import qualified Data.Map as Map
 
 import Common.MonadLogic
 import Common.Identifier
@@ -14,21 +19,22 @@ import Common.Label
 import Builtins.TypeFunctions
 import CParser2.AST
 import CParser2.AdjustTypes
-import Data.List
-import Data.Maybe
-import Data.Monoid
-import qualified Data.Map as Map
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import qualified SystemF.SpecToMem as SystemF
 import qualified SystemF.Typecheck
 import qualified SystemF.TypecheckMem
 import Type.Environment
+import qualified Type.Error as Type
 import qualified Type.Compare
 import qualified Type.Eval
 import Type.Var
 import Type.Type(Binder(..), Level(..))
 import qualified Type.Type as Type
+
+import CParser2.GenCode.Util
+import CParser2.GenCode.Kind
+import CParser2.GenCode.Type
 
 -- | Partition a module into expression declarations and type declarations.
 partitionModule :: Module Resolved
@@ -42,298 +48,10 @@ partitionModule mod@(Module decls) =
          Decl _ (ConstEnt {}) -> True
          _                    -> False
 
-newtype UpdateTypeEnv = UpdateTypeEnv (SpecTypeEnv -> SpecTypeEnv)
+type TransE = TransT
 
-instance Monoid UpdateTypeEnv where
-  mempty = UpdateTypeEnv id
-  UpdateTypeEnv f `mappend` UpdateTypeEnv g = UpdateTypeEnv (f . g)
-
-applyUpdates :: UpdateTypeEnv -> SpecTypeEnv -> SpecTypeEnv
-applyUpdates (UpdateTypeEnv f) e = f e
-
-toVar (ResolvedVar v) = v
-
-showResolvedVar = show . toVar
-
--- | Extract information from an attribute list on a variable declaration
-fromVarAttrs :: [Attribute] -> Bool
-fromVarAttrs attrs =
-  -- Start with default attributes and modify given each attribute
-  foldl' interpret False attrs
-  where
-    interpret st ConlikeAttr = True
-
-    -- Ignore inlining attributes
-    interpret st InlineAttr = st
-    interpret st InlineSequentialAttr = st
-    interpret st InlineDimensionalityAttr = st
-    interpret st InlineFinalAttr = st
-    interpret st InlinePostfinalAttr = st
-
-    interpret st _ =
-      error "Unexpected attribute on type declaration"
-
--------------------------------------------------------------------------------
--- Type translation
-
--- | A mapping from "let type"-bound identifiers to types.
-type LetTypeEnv = Map.Map Var Type.Type
-
-data TransTEnv =
-  TransTEnv 
-  { envLetTypes :: LetTypeEnv 
-  , envSpecTypes :: SpecTypeEnv 
-  , envTypeFunctions :: Map.Map String BuiltinTypeFunction
-  }
-
-newtype TransT a = TransT (Reader TransTEnv a)
-
-instance Monad TransT where
-  return x = TransT (return x)
-  TransT m >>= k = TransT (m >>= \x -> case k x of TransT m' -> m')
-
-instance TypeEnvMonad TransT where
-  type TypeFunctionInfo TransT = BuiltinTypeFunction
-  getTypeEnv = TransT (asks envSpecTypes)
-  askTypeEnv f = TransT (asks (f . envSpecTypes))
-
-  assumeWithProperties v t b (TransT m) = TransT (local insert m)
-    where
-      insert e = e {envSpecTypes = insertTypeWithProperties v t b $
-                                   envSpecTypes e}
-
-runTypeTranslation :: SpecTypeEnv -> Map.Map String BuiltinTypeFunction
-                   -> TransT a -> a
-runTypeTranslation tenv type_functions (TransT m) =
-  runReader m (TransTEnv Map.empty tenv type_functions)
-
-class HasLetSynonym m where
-  lookupLetTypeSynonym :: ResolvedVar -> m (Maybe Type.Type)
-  withLetTypeSynonym :: ResolvedVar -> Type.Type -> m a -> m a
-
-instance HasLetSynonym TransT where
-  lookupLetTypeSynonym v = TransT $ asks (Map.lookup (toVar v) . envLetTypes)
-
-  withLetTypeSynonym v t (TransT m) = TransT $ local insert m
-    where
-      insert e = e {envLetTypes = Map.insert (toVar v) t $ envLetTypes e}
-
-lookupBuiltinTypeFunction :: String -> TransT (Maybe BuiltinTypeFunction)
-lookupBuiltinTypeFunction name = TransT $ asks lookup_name
-  where
-    lookup_name env = Map.lookup name $ envTypeFunctions env
-
--------------------------------------------------------------------------------
--- First-pass type translation.
---
--- Create a type environment containing kinds only.
-
--- | Translate a global type-related declaration.
-declKind :: LDecl Resolved -> TransT UpdateTypeEnv
-declKind (L loc (Decl ident ent)) = do
-  let make_update kind =
-        return $ UpdateTypeEnv $ insertType (toVar ident) kind
-  case ent of
-    TypeEnt   kind           -> typeExpr kind >>= make_update
-    DataEnt binders kind _ _ -> typeExpr (fun_kind binders kind) >>= make_update
-    _                        -> return mempty
-  where
-    fun_kind bs k = foldr fun_t k bs
-      where
-        fun_t (Domain _ (Just dom)) rng = L loc (dom `FunT` rng)
-
--- | Create a kind environment from the given declarations
-declKindEnvironment :: [LDecl Resolved] -> TransT UpdateTypeEnv
-declKindEnvironment decls = liftM mconcat $ mapM declKind decls
-
--------------------------------------------------------------------------------
--- Second-pass type translation.
---
--- Create a type environment containing type information.
-
--- | Compute the kind of a translated AST type
-typeKind :: TypeEnvMonad m => Type.Type -> m Type.Kind
-typeKind ty = do
-  tenv <- getTypeEnv 
-  return $ Type.Eval.typeKind tenv ty
-
--- | Translate a domain that must have an explicit type
-domain :: (HasLetSynonym m, TypeEnvMonad m) =>
-          SourcePos -> Domain Resolved -> (Type.Binder -> m a) -> m a
-domain _ (Domain param (Just ty)) k = do
-  let v = toVar param
-  t <- typeExpr ty
-  assume v t $ k (v ::: t)
-
-domain pos (Domain _ Nothing) _ =
-  -- This error should have been caught during parsing
-  internalError $ show pos ++ ": Missing type annotation in domain"
-
--- | Translate a list of domains that must have explicit types
-domains :: (HasLetSynonym m, TypeEnvMonad m) =>
-           SourcePos -> [Domain Resolved] -> ([Type.Binder] -> m a) -> m a
-domains pos = withMany (domain pos)
-
-typeExprs = mapM typeExpr
-
--- | Translate an AST type to a specification type and compute its kind.
-typeAndKind :: (HasLetSynonym m, TypeEnvMonad m) =>
-               RLType -> m (Type.Type, Type.Kind)
-typeAndKind lty = do
-  ty <- typeExpr lty
-  k <- typeKind ty
-  return (ty, k)
-
--- | Translate an AST type or kind to a specification type or kind.
-typeExpr :: (HasLetSynonym m, TypeEnvMonad m) => RLType -> m Type.Type
-typeExpr lty =
-  case unLoc lty
-  of VarT v -> do
-       -- Look up this type, if it's a @let type@ synonym
-       mtype <- lookupLetTypeSynonym v
-       case mtype of 
-         Just t -> return t
-         Nothing -> return $ Type.VarT (toVar v)
-     IntIndexT n -> return $ Type.IntT n
-     TupleT tuple_args -> do
-       -- Get types and kinds of type arguments
-       types_kinds <- mapM typeAndKind tuple_args
-       let (ts, ks) = unzip types_kinds
-           get_kind k =
-             case Type.toBaseKind k
-             of Type.BoxK -> Type.BoxK
-                Type.ValK -> Type.ValK
-                _ -> internalError "typeExpr: Not a valid tuple field type"
-       return $ Type.typeApp (Type.UTupleT $ map get_kind ks) ts
-     AppT op arg ->
-       Type.AppT `liftM` typeExpr op `ap` typeExpr arg
-     FunT dom rng ->
-       Type.FunT `liftM` typeExpr dom `ap` typeExpr rng
-     AllT dom rng -> domain (getSourcePos lty) dom $ \dom' ->
-       Type.AllT dom' `liftM` typeExpr rng
-     LamT doms body ->
-       -- Do one parameter at a type
-       let mk_lambda (dom : doms) body =
-             domain (getSourcePos lty) dom $ \dom' ->
-             Type.LamT dom' `liftM` mk_lambda doms body
-           mk_lambda [] body = typeExpr body
-       in mk_lambda doms body
-     CoT kind dom rng -> do
-       kind' <- typeExpr kind
-       dom' <- typeExpr dom
-       rng' <- typeExpr rng
-       return $ Type.typeApp (Type.CoT kind') [dom', rng']
-
-translateDataConDecl :: Var -> Located (DataConDecl Resolved)
-                     -> TransT DataConDescr
-translateDataConDecl data_type_con (L pos decl) =
-  domains pos (dconExTypes decl) $ \ex_types -> do
-    args_and_kinds <- mapM typeAndKind $ dconArgs decl
-    let fields = [(t, Type.toBaseKind k) | (t, k) <- args_and_kinds]
-        dcon_var = toVar $ dconVar decl
-    return (DataConDescr dcon_var ex_types fields)
-
-varEnt :: Var -> LType Resolved -> [Attribute] -> TransT UpdateTypeEnv
-varEnt ident ty attrs = do
-  let conlike = fromVarAttrs attrs
-  ty' <- typeExpr ty
-  let update = UpdateTypeEnv (insertTypeWithProperties ident ty' conlike)
-  return $! conlike `seq` update
-
-typeEnt ident ty = do
-  ty' <- typeExpr ty
-
-  -- Look up the type function by its name
-  let name = case varName ident
-             of Just l -> labelLocalNameAsString l
-  type_function <- lookupBuiltinTypeFunction name
-  return $ UpdateTypeEnv
-    (maybe (insertType ident ty') (insertTypeFunction ident ty') type_function)
-
-dataEnt pos core_name dom ty data_cons attrs = do
-  kind <- typeExpr ty
-  let abstract = AbstractAttr `elem` attrs
-      algebraic = not $ NonalgebraicAttr `elem` attrs
-
-  domains pos dom $ \params -> do
-    data_con_descrs <-
-      mapM (translateDataConDecl core_name) data_cons
-    let descr = DataTypeDescr core_name params (Type.toBaseKind kind) data_con_descrs abstract algebraic
-    return $ UpdateTypeEnv (insertDataType descr)
-
--- | Translate a global type-related declaration.
-typeLevelDecl :: LDecl Resolved -> TransT UpdateTypeEnv
-typeLevelDecl (L pos (Decl ident ent)) = do
-  let core_name = toVar ident
-  case ent of
-    VarEnt ty attrs ->
-      varEnt core_name ty attrs
-    TypeEnt ty ->
-      typeEnt core_name ty
-    DataEnt dom ty data_cons attrs ->
-      dataEnt pos core_name dom ty data_cons attrs
-
-    -- Translate only the types of functions and constants
-    FunEnt (L pos f) attrs ->
-      varEnt core_name (funType pos showResolvedVar f) attrs
-    ConstEnt ty _ attrs ->
-      varEnt core_name ty attrs
-
--- | Create a type environment from the given declarations
-declTypeEnvironment :: [LDecl Resolved] -> TransT UpdateTypeEnv
-declTypeEnvironment decls = liftM mconcat $ mapM typeLevelDecl decls
-
--------------------------------------------------------------------------------
--- Third-pass type translation. 
---
--- Translate global expressions and constants.
--- Type functions must be evaluated in this phase, so we provide
--- a Mem type environment.
-
-data TransEEnv = TransEEnv (IdentSupply Var) LetTypeEnv TypeEnv
-
-newtype TransE a = TransE (ReaderT TransEEnv IO a)
-
-instance Monad TransE where
-  return x = TransE (return x)
-  TransE m >>= k = TransE (m >>= \x -> case k x of TransE m' -> m')
-
-instance TypeEnvMonad TransE where
-  type TypeFunctionInfo TransE = TypeFunction
-  getTypeEnv = TransE (asks $ \(TransEEnv _ _ e) -> e)
-  askTypeEnv f = TransE (asks $ \(TransEEnv _ _ e) -> f e)
-
-  assumeWithProperties v t b (TransE m) = TransE (local insert m)
-    where
-      insert (TransEEnv s l env) =
-        TransEEnv s l (insertTypeWithProperties v t b env)
-
-instance MonadIO TransE where
-  liftIO m = TransE (liftIO m)
-
-instance Supplies TransE (Ident Var) where
-  fresh = TransE $ ReaderT $ \(TransEEnv s _ _) -> supplyValue s
-
-instance EvalMonad TransE where
-  liftTypeEvalM m = TransE $ ReaderT $ \(TransEEnv s _ e) ->
-    runTypeEvalM m s e
-
-instance HasLetSynonym TransE where
-  lookupLetTypeSynonym rv =
-    TransE $ asks (\(TransEEnv _ m _) -> Map.lookup (toVar rv) m)
-
-  withLetTypeSynonym v t (TransE m) =
-    TransE $ local (\(TransEEnv s m env) -> TransEEnv s (Map.insert (toVar v) t m) env) m
-
-runExprTranslation :: IdentSupply Var
-                   -> [(Var, Type.Type)] -- ^ Let type synonyms
-                   -> TypeEnv            -- ^ Starting type environment
-                   -> TransE a           -- ^ Computation to run
-                   -> IO a
-runExprTranslation s type_synonyms tenv (TransE m) =
-  let let_types = Map.fromList type_synonyms
-      env = TransEEnv s Map.empty tenv
-  in runReaderT m env
+runExprTranslation s type_synonyms type_functions tenv m =
+  runTypeTranslation s tenv type_synonyms type_functions m
 
 -- | Convert function definition attributes
 defAttributes :: [Attribute] -> (SystemF.DefAnn -> SystemF.DefAnn)
@@ -431,9 +149,9 @@ optDomainInExp pos given_type (Domain param (Just ty)) k = do
   annotated_ty <- typeInExp ty
   match <- Type.Compare.compareTypes annotated_ty given_type
   unless match $
-    let err = SystemF.Typecheck.genericTypeMismatch pos (Type.getLevel given_type)
+    let err = Type.genericTypeMismatch pos (Type.getLevel given_type)
               given_type annotated_ty
-    in SystemF.Typecheck.typeError err
+    in Type.throwTypeError err
 
   let v = toVar param
   assume v given_type $ k (v ::: given_type)
@@ -452,14 +170,11 @@ optDomainsInExp pos tys domains k
 -- | Generate code of a type appearing in an expression.
 --   'Init' terms are expanded so that type checking can proceed.
 typeInExp :: RLType -> TransE Type.Type
-typeInExp t = expandType `liftM` typeExpr t
+typeInExp t = fst `liftM` genType t
 
 -- | Translate an AST type to a specification type and compute its kind.
 typeKindInExp :: RLType -> TransE (Type.Type, Type.Kind)
-typeKindInExp lty = do
-  ty <- typeInExp lty
-  k <- typeKind ty
-  return (ty, k)
+typeKindInExp = genType
 
 exprs :: [RLExp] -> TransE ([SystemF.ExpM], [Type.Type])
 exprs = mapAndUnzipM expr
@@ -490,7 +205,7 @@ expr (L pos expression) =
      TupleE es -> do
        (es', types) <- exprs es
        tenv <- getTypeEnv
-       let kinds = [Type.toBaseKind $ Type.Eval.typeKind tenv t | t <- types]
+       kinds <- mapM (toBaseKind pos . Type.Eval.typeKind tenv) types
        let con = SystemF.TupleCon types
            tuple_type = Type.UTupleT kinds `Type.typeApp` types
        return (SystemF.ExpM $ SystemF.ConE inf con es', tuple_type)
@@ -581,26 +296,32 @@ translateCon :: SystemF.ExpInfo -> DataType -> DataConType
              -> Var -> [RLType] -> [RLExp] -> TransE (SystemF.ExpM, Type.Type)
 translateCon inf type_con data_con op ty_args args
   | length ty_args /= n_ty_args + n_ex_types =
-    error $ show (getSourcePos inf) ++ ": Wrong number of type arguments to data constructor"
+    error $ show pos ++ ": Wrong number of type arguments to data constructor"
   | length args < n_args =
     -- Instead of producing an error, the constructor could be eta-expanded.
-    error $ show (getSourcePos inf) ++ ": Too few arguments to data constructor"
+    error $ show pos ++ ": Too few arguments to data constructor"
   | otherwise = do
       -- Convert type arguments
-      arg_types <- mapM typeInExp ty_args
-      let con_ty_args = take n_ty_args arg_types
-          con_ex_args = drop n_ty_args arg_types
+      let u_ty_args = take n_ty_args ty_args
+          e_ty_args = drop n_ty_args ty_args
+      (u_ty_args', u_kinds) <- mapAndUnzipM typeKindInExp u_ty_args
+      sequence_ $ zipWith3 check_kind
+                  [1..] (map binderType $ dataConTyParams data_con) u_kinds
+      
+      (e_ty_args', e_kinds) <- mapAndUnzipM typeKindInExp e_ty_args
+      sequence_ $ zipWith3 check_kind
+                  [n_ty_args + 1..] (map binderType $ dataConExTypes data_con) e_kinds
 
       -- Convert constructor arguments
       let con_args = take n_args args
           other_args = drop n_args args
       (con_args', con_arg_tys) <- exprs con_args
-      let con = SystemF.VarCon op con_ty_args con_ex_args 
+      let con = SystemF.VarCon op u_ty_args' e_ty_args'
           con_exp = SystemF.ExpM $ SystemF.ConE inf con con_args'
 
       -- Compute type
       con_type <- liftTypeEvalM $
-                  SystemF.TypecheckMem.tcCon (getSourcePos inf) con con_arg_tys
+                  SystemF.TypecheckMem.tcCon pos con con_arg_tys
 
       -- If any arguments remain, apply them
       if null other_args
@@ -608,10 +329,17 @@ translateCon inf type_con data_con op ty_args args
         else translateAppWithOperator inf con_exp con_type [] other_args
     
   where
+    pos = getSourcePos inf
     n_ty_args = length $ dataConTyParams data_con
     n_ex_types = length $ dataConExTypes data_con
     n_args = length $ dataConFields data_con
 
+    -- Check the kind of a type parameter of the constructor
+    check_kind i expected given = do
+      eq <- Type.Compare.compareTypes expected given
+      if eq
+        then return ()
+        else Type.throwTypeError $ Type.typeArgKindMismatch pos i expected given
 
 uncurryTypeApp e ty_args =
   case unLoc e
@@ -639,7 +367,10 @@ translateLAlt s_ty_op s_ty_args (L pos (Alt pattern body)) =
   where
     with_pattern (ConPattern con ex_types fields) k = do
       tenv <- getTypeEnv
-      let Just dcon_type = lookupDataCon (toVar con) tenv
+      -- 'con' must be a data constructor
+      dcon_type <- case lookupDataCon (toVar con) tenv
+                   of Nothing -> error $ show pos ++ ": Expecting a data constructor"
+                      Just c  -> return c
 
       -- Check that the operator is this data constructor's type constructor
       case s_ty_op of
@@ -671,7 +402,13 @@ translateFun pos f =
   domainsInExp pos (fTyParams f) $ \ty_binders ->
   domainsInExp pos (fParams f) $ \val_binders -> do
     range <- typeInExp $ fRange f
-    (body, _) <- expr $ fBody f
+    (body, body_type) <- expr $ fBody f
+
+    -- Check return type
+    return_type_match <- Type.Compare.compareTypes range body_type
+    unless return_type_match $
+      Type.throwTypeError $ Type.returnTypeMismatch pos range body_type
+
     return $ SystemF.FunM $
       SystemF.Fun { SystemF.funInfo = SystemF.mkExpInfo pos
                   , SystemF.funTyParams = map SystemF.TyPat ty_binders
@@ -727,30 +464,33 @@ variableNameTable decls = Map.fromList keyvals
                          , Left name <- return $ labelLocalName lab]
 
 createCoreModule :: IdentSupply Var -> RModule
-                 -> IO (TypeEnv, SpecTypeEnv, TypeEnv,
+                 -> IO (BoxedTypeEnv, TypeEnvBase SpecMode, TypeEnv,
                         SystemF.Module SystemF.Mem, Map.Map String Var)
-createCoreModule var_supply (Module decls) = do
+createCoreModule var_supply mod@(Module decls) = do
   -- Create a table of variable names
   let name_table = variableNameTable decls
   let builtin_type_functions = builtinTypeFunctions name_table
+
+  -- Treat 'Init' as a shorthand for a function type
+  init_param <- do var_id <- supplyValue var_supply
+                   return $ mkAnonymousVar var_id TypeLevel
+  let init_type = Type.LamT
+                  (init_param Type.::: Type.bareT)
+                  (Type.FunT (Type.AppT Type.outPtrT (Type.VarT init_param))
+                   Type.storeT)
+  let type_subst = [(Type.initV, Type.boxT),
+                    (Type.initConV, init_type)]
       
   -- Create a type environment with kind information
-  let kind_env_updates =
-        runTypeTranslation wiredInTypeEnv builtin_type_functions $
-        declKindEnvironment decls
-      kind_env = applyUpdates kind_env_updates wiredInTypeEnv
+  kind_env <- kindTranslation var_supply type_subst builtin_type_functions mod
 
   -- Create a type environment with type information.
   -- The kind environment is used while gathering type information.
-  let type_env_updates =
-        runTypeTranslation kind_env builtin_type_functions $
-        declTypeEnvironment decls
-      type_env = expandInitType $
-                 applyUpdates type_env_updates wiredInTypeEnv
+  type_env <- typeTranslation var_supply type_subst kind_env builtin_type_functions mod
 
   -- Translate functions using this type environment
-  let mem_env = toMemEnv type_env
-  mem_module <- runExprTranslation var_supply [] mem_env $
+  let mem_env = type_env
+  mem_module <- runExprTranslation var_supply type_subst builtin_type_functions mem_env $
                  declGlobals decls
 
   -- Construct final expressions and type environments

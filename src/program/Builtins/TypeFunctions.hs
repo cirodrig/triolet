@@ -61,7 +61,7 @@ isBuiltin builtins thing v = v == getBuiltin builtins thing
 
 -------------------------------------------------------------------------------
 
--- | A type function based on the shape of a container of type @(* -> *)@.
+-- | A type function based on the shape of a container of type @(box -> box)@.
 --   Attempt to compute a shape based on the deconstructed, fully applied
 --   type.
 shapeLike :: Array Int Var
@@ -71,7 +71,7 @@ shapeLike bi f = typeFunction 1 compute_shape
   where
     compute_shape :: forall m. EvalMonad m => [Type] -> m Type
     compute_shape (container_type : other_types) = do
-      -- Apply to produce a type of kind *, which can be fully evaluated
+      -- Apply to produce a type of kind box, which can be fully evaluated
       arg_type <- newAnonymousVar TypeLevel
       app_container_type <- reduceToWhnf (AppT container_type (VarT arg_type)) 
       case fromVarApp app_container_type of
@@ -228,34 +228,24 @@ maxTF bi =
 
 -- | Compute the shape of a data type in the pure type system
 shapePureTF bi = shapeLike bi $ \op args ->
-  case ()
-  of () | isBuiltin bi The_Stream op ->
-            case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-        | isBuiltin bi The_view op ->
-            case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-        | isBuiltin bi The_Stream1 op -> return_list_dim
-        | isBuiltin bi The_Sequence op -> return_list_dim
-        | isBuiltin bi The_list op -> return_list_dim
-        | isBuiltin bi The_llist op -> return_list_dim
-        | isBuiltin bi The_array0 op -> return_dim0
-        | isBuiltin bi The_array1 op -> return_dim1
-        | isBuiltin bi The_array2 op -> return_dim2
-        | isBuiltin bi The_array3 op -> return_dim3
-        | isBuiltin bi The_blist op -> return_list_dim
-        | isBuiltin bi The_barray1 op -> return_dim1
-        | isBuiltin bi The_barray2 op -> return_dim2
-        | isBuiltin bi The_barray3 op -> return_dim3
-        | isBuiltin bi The_array op ->
-            case args
-            of [dim, _] -> do
-                 dim' <- reduceToWhnf dim
-                 case dim' of
-                   VarT v | isBuiltin bi The_dim0 v -> return_dim0
-                          | isBuiltin bi The_dim1 v -> return_dim1
-                          | isBuiltin bi The_dim2 v -> return_dim2
-                          | isBuiltin bi The_dim3 v -> return_dim3
-                   _ -> return Nothing
-     _ -> return Nothing
+  case () of
+    () | isBuiltin bi The_Stream op ->
+           case args of [arg, _] -> liftM Just $ reduceToWhnf arg
+       | isBuiltin bi The_view op ->
+           case args of [arg, _] -> liftM Just $ reduceToWhnf arg
+       | isBuiltin bi The_Stream1 op -> return_list_dim
+       | isBuiltin bi The_Sequence op -> return_list_dim
+       | isBuiltin bi The_list op -> return_list_dim
+       | isBuiltin bi The_array0 op -> return_dim0
+       | isBuiltin bi The_array1 op -> return_dim1
+       | isBuiltin bi The_array2 op -> return_dim2
+       | isBuiltin bi The_array3 op -> return_dim3
+       | isBuiltin bi The_blist op -> return_list_dim
+       | isBuiltin bi The_barray1 op -> return_dim1
+       | isBuiltin bi The_barray2 op -> return_dim2
+       | isBuiltin bi The_barray3 op -> return_dim3
+       | isBuiltin bi The_llist op -> return_list_dim
+    _ -> return Nothing
   where
     return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
     return_list_dim = return $ Just $ VarT (getBuiltin bi The_list_dim)
@@ -325,7 +315,7 @@ cartMemTF bi = typeFunction 1 $ \[index_type] -> do
                            _      -> False
         _ -> return False
 
-    return_dim0, return_dim1, return_dim2 :: EvalMonad m => m Type
+    return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m Type
     return_dim0 = return $ VarT (getBuiltin bi The_dim0)
     return_dim1 = return $ VarT (getBuiltin bi The_dim1)
     return_dim2 = return $ VarT (getBuiltin bi The_dim2)
@@ -333,35 +323,40 @@ cartMemTF bi = typeFunction 1 $ \[index_type] -> do
 
 -- | Compute the shape of a data type in the memory type system
 shapeMemTF bi = shapeLike bi $ \op args ->
-  case ()
-  of () | isBuiltin bi The_Ref op ->
-          case args
-          of [arg] ->
-               case fromVarApp arg 
-               of Just (op, [arg2, _]) 
-                    | isBuiltin bi The_Stream op ->
-                        liftM Just $ reduceToWhnf arg2
-                    | isBuiltin bi The_view op ->
-                        liftM Just $ reduceToWhnf arg2
-                  Just (op, [_])
-                    | isBuiltin bi The_Stream1 op -> return_list_dim
-                    | isBuiltin bi The_Sequence op -> return_list_dim
-                    | isBuiltin bi The_llist op -> return_list_dim
-                  _ -> return Nothing
-        | isBuiltin bi The_list op -> return_list_dim
-        | isBuiltin bi The_array0 op -> return_dim0
-        | isBuiltin bi The_array1 op -> return_dim1
-        | isBuiltin bi The_array2 op -> return_dim2
-        | isBuiltin bi The_array3 op -> return_dim3
-        | isBuiltin bi The_blist op -> return_list_dim
-        | isBuiltin bi The_barray1 op -> return_dim1
-        | isBuiltin bi The_barray2 op -> return_dim2
-        | isBuiltin bi The_barray3 op -> return_dim3
-        | isBuiltin bi The_array op ->
-            case args
-            of [arg, _] -> return $ Just $ array_shape bi arg
-     _ -> return Nothing
+  case () of
+    () | isBuiltin bi The_Boxed op ->
+           case args
+           of [arg] -> examine_bare_type =<< reduceToWhnf arg
+       | isBuiltin bi The_Stream op ->
+           case args of [shape, _] -> return_shape shape
+       | isBuiltin bi The_view op ->
+           case args of [shape, _] -> return_shape shape
+       | isBuiltin bi The_Stream1 op -> return_list_dim
+       | isBuiltin bi The_Sequence op -> return_list_dim
+       | isBuiltin bi The_llist op -> return_list_dim
+    _ -> return Nothing
   where
+    return_shape :: EvalMonad m => Type -> m (Maybe Type)
+    return_shape sh = liftM Just (reduceToWhnf sh)
+
+    -- Type was of the form @Boxed (t a)@
+    -- Examine the argument type, 't'
+    examine_bare_type :: EvalMonad m => Type -> m (Maybe Type)
+    examine_bare_type ty = 
+      case fromVarApp ty
+      of Just (op, [_])
+           | isBuiltin bi The_list op -> return_list_dim
+           | isBuiltin bi The_array0 op -> return_dim0
+           | isBuiltin bi The_array1 op -> return_dim1
+           | isBuiltin bi The_array2 op -> return_dim2
+           | isBuiltin bi The_array3 op -> return_dim3
+           | isBuiltin bi The_blist op -> return_list_dim
+           | isBuiltin bi The_barray1 op -> return_dim1
+           | isBuiltin bi The_barray2 op -> return_dim2
+           | isBuiltin bi The_barray3 op -> return_dim3
+         _ -> return Nothing
+    examine_bare_type _ = return Nothing
+
     return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
     return_list_dim = return $ Just $ VarT (getBuiltin bi The_list_dim)
     return_dim0 = return $ Just $ VarT (getBuiltin bi The_dim0)
@@ -458,44 +453,6 @@ sliceMemTF bi = typeFunction 1 compute_eliminator
                   [slice_type, slice_type]
     slice3_type = varApp (getBuiltin bi The_Tuple3)
                   [slice_type, slice_type, slice_type]
-
-{-
-viewPureTF = typeFunction 1 compute_eliminator
-  where
-    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
-    compute_eliminator (shape_arg : other_args) = do
-      -- Evaluate and inspect the shape argument
-      shape_arg' <- reduceToWhnf shape_arg
-      case fromVarApp shape_arg' of
-        Just (op, args')
-           | op `isCoreBuiltin` The_list_dim ->
-             return $ varApp (getBuiltin bi The_list_view) other_args
-           | op `isCoreBuiltin` The_dim0 ->
-             return $ varApp (getBuiltin bi The_view0) other_args
-           | op `isCoreBuiltin` The_dim1 ->
-             return $ varApp (getBuiltin bi The_view1) other_args
-           | op `isCoreBuiltin` The_dim2 ->
-             return $ varApp (getBuiltin bi The_view2) other_args
-        _ -> return $ varApp (getBuiltin bi The_view) (shape_arg' : other_args)
-
-viewMemTF = typeFunction 1 compute_eliminator
-  where
-    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
-    compute_eliminator (shape_arg : other_args) = do
-      -- Evaluate and inspect the shape argument
-      shape_arg' <- reduceToWhnf shape_arg
-      case fromVarApp shape_arg' of
-        Just (op, args')
-           | op `isCoreBuiltin` The_list_dim ->
-             return $ varApp (getBuiltin bi The_list_view) other_args
-           | op `isCoreBuiltin` The_dim0 ->
-             return $ varApp (getBuiltin bi The_view0) other_args
-           | op `isCoreBuiltin` The_dim1 ->
-             return $ varApp (getBuiltin bi The_view1) other_args
-           | op `isCoreBuiltin` The_dim2 ->
-             return $ varApp (getBuiltin bi The_view2) other_args
-        _ -> return $ varApp (getBuiltin bi The_view) (shape_arg' : other_args)
--}
 
 streamPureTF bi = typeFunction 1 compute_stream
   where

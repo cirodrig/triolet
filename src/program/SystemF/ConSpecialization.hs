@@ -494,7 +494,8 @@ specializeFromDecisionTree bindings binding_ctx out_params (Case v branches) = d
          binding_ctx' out_params
 
 -- | Convert the arguments of an 'AppE' to a 'CallPattern'.
-computeCallPattern :: EvalMonad m => [Type] -> [ExpM] -> m CallPattern
+computeCallPattern :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
+                      [Type] -> [ExpM] -> m CallPattern
 computeCallPattern ts es = do
   -- Separate arguments into input and output arguments
   e_types <- mapM inferExpType es
@@ -546,7 +547,7 @@ instance Supplies Specialize (Ident Var) where
   fresh = Specialize $ ReaderT $ \env -> supplyValue (varIdSupply env)
 
 instance TypeEnvMonad Specialize where
-  type TypeFunctionInfo Specialize = TypeFunction
+  type EvalBoxingMode Specialize = UnboxedMode
   getTypeEnv = Specialize $ asks typeEnvironment
   assumeWithProperties v t b (Specialize m) = Specialize $ local add_type m
     where
@@ -874,7 +875,7 @@ specializeModule (Module module_name imports defs exports) =
 --   the given set of specializations.
 specializeCallsExp :: IntMap.IntMap CreatedSpecializations
                 -> ExpM
-                -> TypeEvalM ExpM
+                -> UnboxedTypeEvalM ExpM
 specializeCallsExp spcl_map expression =
   case fromExpM expression
   of VarE {} -> return expression
@@ -953,7 +954,7 @@ specializeCallsExport spcl_map export = do
 specializeCallsTopLevel :: CreatedSpecializationsMap
                         -> [DefGroup (GDef Mem)]
                         -> [Export Mem]
-                        -> TypeEvalM ([DefGroup (GDef Mem)], [Export Mem])
+                        -> UnboxedTypeEvalM ([DefGroup (GDef Mem)], [Export Mem])
 specializeCallsTopLevel spcl_map (defs : defss) exports = do
   (defs', (defss', exports')) <-
     assumeGDefGroup defs

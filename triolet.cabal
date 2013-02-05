@@ -183,6 +183,9 @@ Executable triolet
     CParser2.AdjustTypes
     CParser2.AST
     CParser2.Driver
+    CParser2.GenCode.Kind
+    CParser2.GenCode.Type
+    CParser2.GenCode.Util
     CParser2.GenCode2
     CParser2.LexData
     CParser2.Lexer
@@ -234,6 +237,7 @@ Executable triolet
     LowLevel.Types
     Type.Compare
     Type.Environment
+    Type.Error
     Type.Eval
     Type.Level
     Type.Rename

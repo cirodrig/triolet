@@ -375,11 +375,11 @@ operExp = buildExpressionParser operExpTable appExp
 
 operExpTable :: OperatorTable Token () PLExp
 operExpTable =
-  [ [ infix_op "//#" "RemainderDict_int_floordiv" AssocNone
-    , infix_op "%#" "RemainderDict_int_mod" AssocNone]
-  , [ infix_op "*#" "MultiplicativeDict_int_mul" AssocLeft]
-  , [ infix_op "+#" "AdditiveDict_int_add" AssocLeft
-    , infix_op "-#" "AdditiveDict_int_sub" AssocLeft]
+  [ [ infix_op "//#" "floordivI" AssocNone
+    , infix_op "%#" "modI" AssocNone]
+  , [ infix_op "*#" "mulI" AssocLeft]
+  , [ infix_op "+#" "addI" AssocLeft
+    , infix_op "-#" "subI" AssocLeft]
   , [ infix_op "<#" "ltI" AssocNone
     , infix_op ">#" "gtI" AssocNone
     , infix_op "<=#" "leI" AssocNone

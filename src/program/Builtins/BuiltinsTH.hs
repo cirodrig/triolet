@@ -229,8 +229,6 @@ builtinVariableNames =
   , "repr_int"
   , "repr_uint"
   , "repr_float"
-  , "repr_MaybeVal_int"
-  , "repr_MaybeVal_MaybeVal_int"
   , "repr_FIInt"
   , "repr_list_dim"
   , "repr_dim0"
@@ -364,8 +362,6 @@ builtinVariableNames =
   , "ShapeDict_dim2_intersect"
   , "ShapeDict_dim2_generate"
   , "ShapeDict_dim2_flatten"
-  , "ShapeDict_dim2_flatten_helper"
-  , "ShapeDict_dim2_flatten_helper2"
   , "ShapeDict_dim2_map"
   , "ShapeDict_dim2_zipWith"
   , "ShapeDict_dim2_zipWith3"
@@ -375,8 +371,6 @@ builtinVariableNames =
   , "ShapeDict_dim3_intersect"
   , "ShapeDict_dim3_generate"
   , "ShapeDict_dim3_flatten"
-  , "ShapeDict_dim3_flatten_helper"
-  , "ShapeDict_dim3_flatten_helper2"
   , "ShapeDict_dim3_map"
   , "ShapeDict_dim3_zipWith"
   , "ShapeDict_dim3_zipWith3"
@@ -403,19 +397,41 @@ builtinVariableNames =
   , "IndexableDict_barray3_at_point"
   , "IndexableDict_barray3_get_shape"
 
-    -- Comparisons on numeric values
+    -- Primitive arithmetic functions
   , "eqI"
   , "neI"
   , "ltI"
   , "leI"
   , "gtI"
   , "geI"
+  , "addI"
+  , "subI"
+  , "negI"
+  , "mulI"
+  , "floordivI"
+  , "modI"
+  
   , "eqF"
   , "neF"
   , "ltF"
   , "leF"
   , "gtF"
   , "geF"
+  , "addF"
+  , "subF"
+  , "negF"
+  , "mulF"
+  , "fromintF"
+  , "floordivF"
+  , "modF"
+  , "divF"
+  , "powF"
+  , "expF"
+  , "logF"
+  , "sqrtF"
+  , "sinF"
+  , "cosF"
+  , "tanF"
 
     -- Type class dictionary members
   , "EqDict_int"
@@ -549,7 +565,6 @@ builtinVariableNames =
   , "CartesianDict_dim3_unbounded"
     
     -- Constructor-like functions
-  , "create_view2"
   , "fun_list_dim"
   , "fun_dim1"
   , "make_sliceObject"
@@ -601,7 +616,6 @@ builtinVariableNames =
   , "intersectLM"
   , "trimInterval"
   , "arrayDescToDim1"
-  , "dim1ToArrayDesc"
 
     -- Built-in functions
   , "floor"
@@ -747,7 +761,6 @@ builtinVariableNames =
   , "peel_generate_bind"
     
     -- Sequence functions
-  , "Stream1_empty"
   , "Stream1_return"
   , "Stream1_guard"
   , "Stream1_bind"
@@ -818,9 +831,6 @@ builtinVariableNames =
   --, "view1_reduce1"
   --, "view1_scatter"
   --, "view1_fold"
-  , "fun_from_MatrixView_Stream"
-  , "fun_asArray2_Stream"
-  , "histogramArray"
     
     -- Inserted by representation inference
   , "copy"
@@ -840,7 +850,6 @@ builtinVariableNames =
     -- Inserted by rewrite rules
   , "fromIndInt"
   , "defineIntIndex"
-  , "rangeIndexed"
   , "subscript"
   , "subscript_out"
   , "doall"
@@ -865,11 +874,4 @@ builtinVariableNames =
   , "toEffTok"
   , "seqEffTok"
   , "fromEffTok"
-  
-    -- Obsolete, will be eliminated
-  , "fun_map_Stream"
-  , "fun_zip_Stream"
-  , "fun_zip3_Stream"
-  , "fun_zip4_Stream"
-  , "fun_asMatrix_Stream"
   ]

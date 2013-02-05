@@ -164,6 +164,9 @@ pevalFun (FunSF f) = do
 -- | Partial evaluation of an expression.
 pevalExp :: ExpSF -> PE ExpSF
 pevalExp expression =
+  -- Since dictionary contents were changed to be boxed, this function's
+  -- partial evaluation rules are no longer correct.
+  error "This function is obsolete" $
   case fromExpSF (uncurryCall expression)
   of VarE {expInfo = inf, expVar = v}
        -- Replace constants with literal values.  This helps 

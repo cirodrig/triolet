@@ -4,6 +4,7 @@ module SystemF.Floating2
        (longRangeFloating)
 where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Trans
@@ -57,8 +58,8 @@ isFloatableFunction v args =
   where
     floatable_op =
       isReprCon v ||
-      v `isCoreBuiltin` The_AdditiveDict_int_add ||
-      v `isCoreBuiltin` The_AdditiveDict_int_sub ||
+      v `isCoreBuiltin` The_addI ||
+      v `isCoreBuiltin` The_subI ||
       v `isCoreBuiltin` The_max_int ||
       v `isCoreBuiltin` The_min_int
 
@@ -158,13 +159,13 @@ data FloatCtx =
            }
 
 newtype Flt a = Flt {unFlt :: ReaderT FloatCtx IO a}
-              deriving(Functor, Monad, MonadIO)
+              deriving(Functor, Applicative, Monad, MonadIO)
 
 runFlt :: Flt a -> IdentSupply Var -> TypeEnv -> IO a
 runFlt m id_supply tenv = runReaderT (unFlt m) (FloatCtx id_supply tenv)
 
 instance TypeEnvMonad Flt where
-  type TypeFunctionInfo Flt = TypeFunction
+  type EvalBoxingMode Flt = UnboxedMode
   getTypeEnv = Flt (asks fcTypeEnv)
   assumeWithProperties v ty b (Flt m) = Flt $ local insert_type m
     where
@@ -178,28 +179,28 @@ instance EvalMonad Flt where
   liftTypeEvalM m = Flt $ ReaderT $ \ctx ->
     runTypeEvalM m (fcVarSupply ctx) (fcTypeEnv ctx)
 
-enterScope1 :: PatM -> TypeEvalM Type
+enterScope1 :: PatM -> UnboxedTypeEvalM Type
             -> Flt (Contexted ExpM) -> Flt (Contexted ExpM)
 enterScope1 pat get_type m =
   assumePatM pat $ m >>= anchorVar (patMVar pat) get_type
 
-enterScopeOfVar :: Var -> Type -> TypeEvalM Type
+enterScopeOfVar :: Var -> Type -> UnboxedTypeEvalM Type
                 -> Flt (Contexted ExpM) -> Flt (Contexted ExpM)
 enterScopeOfVar v t get_type m =
   assume v t $ m >>= anchorVar v get_type
 
-enterScopeOfVars :: [Binder] -> TypeEvalM Type
+enterScopeOfVars :: [Binder] -> UnboxedTypeEvalM Type
                  -> Flt (Contexted ExpM) -> Flt (Contexted ExpM)
 enterScopeOfVars bindings get_type m =
   assumeBinders bindings $ m >>= anchorVarList [v | v ::: _ <- bindings] get_type
 
-enterScope :: [PatM] -> TypeEvalM Type
+enterScope :: [PatM] -> UnboxedTypeEvalM Type
            -> Flt (Contexted ExpM) -> Flt (Contexted ExpM)
 enterScope pats get_type m =
   assumePatMs pats $ m >>= anchorVarList (map patMVar pats) get_type
 
 -- | Enter a scope in which some type and value variables are bound
-enterScope' :: [Binder] -> [PatM] -> TypeEvalM Type
+enterScope' :: [Binder] -> [PatM] -> UnboxedTypeEvalM Type
             -> Flt (Contexted ExpM)
             -> Flt (Contexted ExpM)
 enterScope' ty_binders pats get_type m =

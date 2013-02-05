@@ -20,6 +20,7 @@ module SystemF.DemandAnalysis
 where
 
 import Control.Monad
+import Control.Applicative
 import Control.Monad.Reader.Class
 import Control.Monad.Writer.Class
 import qualified Data.Graph as Graph
@@ -61,6 +62,10 @@ evalDf m env = fst (runDf m env)
 instance Functor Df where
   fmap = liftM
 
+instance Applicative Df where
+  pure = return
+  (<*>) = ap
+
 instance Monad Df where
   return x = Df (\_ -> (x, IntMap.empty))
   m >>= k = Df (\env -> case runDf m env
@@ -79,7 +84,7 @@ instance MonadWriter Df where
   pass m = Df (\tenv -> let ((x, f), w) = runDf m tenv in (x, f w))
 
 instance TypeEnvMonad Df where
-  type TypeFunctionInfo Df = TypeFunction
+  type EvalBoxingMode Df = UnboxedMode
   getTypeEnv = ask
   assumeWithProperties v t b = local (insertTypeWithProperties v t b)
 

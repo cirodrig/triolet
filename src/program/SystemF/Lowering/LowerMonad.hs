@@ -3,6 +3,7 @@
     GeneralizedNewtypeDeriving, Rank2Types #-}
 module SystemF.Lowering.LowerMonad where
 
+import Control.Applicative
 import Control.Monad 
 import Control.Monad.Trans  
 import Control.Monad.Reader
@@ -29,7 +30,7 @@ import Type.Substitute(TypeSubst)
 import qualified Type.Substitute as Substitute
 
 newtype Lower a = Lower (ReaderT LowerEnv IO a)
-                deriving(Functor, Monad, MonadIO)
+                deriving(Functor, Applicative, Monad, MonadIO)
 
 runLowering :: LowerEnv -> Lower a -> IO a
 runLowering env (Lower m) = runReaderT m env
@@ -180,7 +181,7 @@ liftT1 t k = do
   return x
 
 instance TypeEnvMonad Lower where
-  type TypeFunctionInfo Lower = TypeFunction
+  type EvalBoxingMode Lower = UnboxedMode
   getTypeEnv = Lower $ asks typeEnvironment
   
   assumeWithProperties v t b (Lower m) = Lower $ local update m

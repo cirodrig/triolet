@@ -48,40 +48,40 @@ lowerIntrinsicOp v
          binary_int (PrimShiftL Signed S32))
       , (coreBuiltin The_rshift,
          binary_int (PrimShiftR Signed S32))
-      , (coreBuiltin The_AdditiveDict_int_add,
+      , (coreBuiltin The_addI,
          binary_int (PrimAddZ Signed S32))
-      , (coreBuiltin The_AdditiveDict_int_sub,
+      , (coreBuiltin The_subI,
          binary_int (PrimSubZ Signed S32))
-      , (coreBuiltin The_MultiplicativeDict_int_mul,
+      , (coreBuiltin The_mulI,
          binary_int (PrimMulZ Signed S32))
-      , (coreBuiltin The_MultiplicativeDict_int_fromInt,
-         id_int)
+      --, (coreBuiltin The_MultiplicativeDict_int_fromInt,
+      --   id_int)
       , (coreBuiltin The_min_int,
          binary_int (PrimMinZ Signed S32))
       , (coreBuiltin The_max_int,
          binary_int (PrimMaxZ Signed S32))
-      , (coreBuiltin The_AdditiveDict_float_add,
+      , (coreBuiltin The_addF,
          binary_float (PrimAddF S32))
-      , (coreBuiltin The_AdditiveDict_float_sub,
+      , (coreBuiltin The_subF,
          binary_float (PrimSubF S32))
-      , (coreBuiltin The_MultiplicativeDict_float_mul,
+      , (coreBuiltin The_mulF,
          binary_float (PrimMulF S32))
-      , (coreBuiltin The_FloatingDict_float_power,
+      , (coreBuiltin The_powF,
          binary_float (PrimPowF S32))
-      , (coreBuiltin The_FloatingDict_float_exp,
+      , (coreBuiltin The_expF,
          unary_float (PrimUnaryF ExpI S32))
-      , (coreBuiltin The_FloatingDict_float_log,
+      , (coreBuiltin The_logF,
          unary_float (PrimUnaryF LogI S32))
-      , (coreBuiltin The_FloatingDict_float_sqrt,
+      , (coreBuiltin The_sqrtF,
          unary_float (PrimUnaryF SqrtI S32))
-      , (coreBuiltin The_FloatingDict_float_sin,
+      , (coreBuiltin The_sinF,
          unary_float (PrimUnaryF SinI S32))
-      , (coreBuiltin The_FloatingDict_float_cos,
+      , (coreBuiltin The_cosF,
          unary_float (PrimUnaryF CosI S32))
-      , (coreBuiltin The_FloatingDict_float_tan,
+      , (coreBuiltin The_tanF,
          unary_float (PrimUnaryF TanI S32))
-      , (coreBuiltin The_FloatingDict_float_fromfloat,
-         id_float)
+      --, (coreBuiltin The_FloatingDict_float_fromfloat,
+      --   id_float)
       , (coreBuiltin The_VectorDict_float_scale,
          binary_float (PrimMulF S32))
       , (coreBuiltin The_VectorDict_float_magnitude,

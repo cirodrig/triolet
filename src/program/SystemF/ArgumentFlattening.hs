@@ -18,6 +18,7 @@ where
 
 import Prelude hiding (mapM, sequence)
 
+import Control.Applicative
 import Control.Monad.Reader hiding(mapM, forM, sequence)
 import Control.Monad.State hiding(mapM, sequence)
 import qualified Data.IntMap as IntMap
@@ -32,6 +33,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
+import Common.SourcePos
 import Common.Supply
 import Common.PrecDoc
 import Builtins.Builtins
@@ -105,7 +107,8 @@ data AFLVEnv a =
 
 -- | The monad for argument and local variable flattening
 newtype AFMonad e a =
-  AF {unAF :: ReaderT (AFLVEnv e) IO a} deriving(Monad, MonadIO)
+  AF {unAF :: ReaderT (AFLVEnv e) IO a}
+  deriving(Functor, Applicative, Monad, MonadIO)
 
 -- | The argument flattening monad
 type AF = AFMonad ()
@@ -117,7 +120,7 @@ liftFreshVarAF :: FreshVarM a -> AFMonad e a
 liftFreshVarAF m = AF $ ReaderT $ \env -> runFreshVarM (afVarSupply env) m
 
 instance TypeEnvMonad (AFMonad e) where
-  type TypeFunctionInfo (AFMonad e) = TypeFunction
+  type EvalBoxingMode (AFMonad e) = UnboxedMode
   getTypeEnv = AF $ asks afTypeEnv
   assumeWithProperties v t b m = AF $ local insert_type $ unAF m
     where
@@ -563,7 +566,8 @@ packParameterWrite' pat flat_arg =
     copy_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_copy)
 
 -- | Pack a parameter, so that the result is readable
-packParametersRead :: (ReprDictMonad m, EvalMonad m) =>
+packParametersRead :: (ReprDictMonad m, EvalMonad m,
+                       EvalBoxingMode m ~ UnboxedMode) =>
                       FlatArgs -> m (ExpM -> ExpM)
 packParametersRead (arg : args) = do
   ctx <- packParameterRead arg
@@ -576,7 +580,8 @@ packParametersRead [] = return id
 --
 --   TODO: Don't return the parameter expression.  It's always just the
 --   pattern variable.
-packParameterRead :: (ReprDictMonad m, EvalMonad m) =>
+packParameterRead :: (ReprDictMonad m, EvalMonad m,
+                      EvalBoxingMode m ~ UnboxedMode) =>
                      FlatArg -> m (ExpM -> ExpM)
 packParameterRead (FlatArg pat flat_arg) =
   case flat_arg
@@ -879,12 +884,14 @@ data ExistentialHandling =
     deriving(Eq)
 
 -- | Decide how to flatten a function arguments
-planParameters :: (ReprDictMonad m, EvalMonad m) =>
+planParameters :: (ReprDictMonad m, EvalMonad m,
+                   EvalBoxingMode m ~ UnboxedMode) =>
                   PlanMode -> [PatM] -> m [FlatArg]
 planParameters mode pats = do mapM (planParameter mode) pats
 
 -- | Decide how to flatten a function argument.
-planParameter :: (ReprDictMonad m, EvalMonad m) =>
+planParameter :: (ReprDictMonad m, EvalMonad m,
+                  EvalBoxingMode m ~ UnboxedMode) =>
                  PlanMode -> PatM -> m FlatArg
 planParameter mode pat = do
   (whnf_type, decomp) <-
@@ -899,7 +906,8 @@ planParameter mode pat = do
 --
 --   This function does the real work of 'planParameter', 'planReturn', and 
 --   'planLocal'.
-planFlattening :: (ReprDictMonad m, EvalMonad m) =>
+planFlattening :: (ReprDictMonad m, EvalMonad m,
+                   EvalBoxingMode m ~ UnboxedMode) =>
                   PlanMode -> Type -> Specificity -> m (Type, Decomp)
 planFlattening mode ty spc = do
   tenv <- getTypeEnv
@@ -1018,7 +1026,8 @@ planFlattening mode ty spc = do
 --   Specificity about the fields of the data value, if available, is used
 --   to direct the deconstruction plan.  Types inside the specificity are
 --   ignored.
-planDeconstructedValue :: (ReprDictMonad m, EvalMonad m) =>
+planDeconstructedValue :: (ReprDictMonad m, EvalMonad m,
+                           EvalBoxingMode m ~ UnboxedMode) =>
                           PlanMode -> Var -> [Type] -> Maybe [Specificity]
                        -> m Decomp
 planDeconstructedValue mode con ty_args maybe_fields = do
@@ -1073,7 +1082,8 @@ deadValue t = do
                -- Get types of data constructor parameters
                let Just datacon_type =
                      lookupType (coreBuiltin The_fiInt) tenv
-               TypeAppOk monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
+               monotype <- liftTypeEvalM $
+                           typeOfTypeApp noSourcePos 1 datacon_type intindexT p
                let (dom, _) = fromFunType monotype
 
                -- Create arguments to data constructor
@@ -1084,7 +1094,8 @@ deadValue t = do
                -- Use 'iInt' as the data constructor
                let Just datacon_type =
                      lookupType (coreBuiltin The_iInt) tenv
-               TypeAppOk monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
+               monotype <- liftTypeEvalM $
+                           typeOfTypeApp noSourcePos 1 datacon_type intindexT p
                let (dom, _) = fromFunType monotype
 
                -- Create arguments to data constructor
@@ -1117,7 +1128,8 @@ deadValue t = do
     make_x_coercion_op = varE' (coreBuiltin The_unsafeMakeCoercion)
     make_b_coercion_op = varE' (coreBuiltin The_unsafeMakeBareCoercion)
 
-planReturn :: (ReprDictMonad m, EvalMonad m) =>
+planReturn :: (ReprDictMonad m, EvalMonad m,
+               EvalBoxingMode m ~ UnboxedMode) =>
               PlanMode -> Specificity -> Type -> m FlatRet
 planReturn mode spc ty = do
   (whnf_type, decomp) <- planFlattening mode ty spc
@@ -1125,7 +1137,8 @@ planReturn mode spc ty = do
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming a return-by-value function only.
-planValueReturn :: (ReprDictMonad m, EvalMonad m) =>
+planValueReturn :: (ReprDictMonad m, EvalMonad m,
+                    EvalBoxingMode m ~ UnboxedMode) =>
                    Type -> m PlanRet
 planValueReturn ty = liftM PlanRetValue $ planReturn mode Used ty
   where
@@ -1133,7 +1146,8 @@ planValueReturn ty = liftM PlanRetValue $ planReturn mode Used ty
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming an initializer function only.
-planOutputReturn :: (ReprDictMonad m, EvalMonad m) =>
+planOutputReturn :: (ReprDictMonad m, EvalMonad m,
+                     EvalBoxingMode m ~ UnboxedMode) =>
                     PatM -> m PlanRet
 planOutputReturn pat = do
   tenv <- getTypeEnv
@@ -1179,7 +1193,8 @@ flattenBoxedValue boxed_var (FlatLocal arg) =
 
 -- | Create the original form of the local variable, using the flattened
 --   variables
-packLocal :: (ReprDictMonad m, EvalMonad m) => FlatLocal -> ExpM -> m ExpM
+packLocal :: (ReprDictMonad m, EvalMonad m,
+              EvalBoxingMode m ~ UnboxedMode) => FlatLocal -> ExpM -> m ExpM
 packLocal (FlatLocal flat_arg) consumer = do
   packing_context <- packParameterRead flat_arg
   return $ packing_context consumer
@@ -1187,7 +1202,8 @@ packLocal (FlatLocal flat_arg) consumer = do
 -- | Determine how to decompose a let-bound value based on its type.
 --
 --   The decomposition strategy is the same as for decomposing a return value.
-planLocal :: (ReprDictMonad m, EvalMonad m) => PatM -> m FlatLocal
+planLocal :: (ReprDictMonad m, EvalMonad m,
+              EvalBoxingMode m ~ UnboxedMode) => PatM -> m FlatLocal
 planLocal pat = do
   flat_arg <- planParameter mode pat
   tenv <- getTypeEnv

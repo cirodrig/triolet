@@ -17,6 +17,7 @@ module SystemF.Simplifier.Simplify
 where
 
 import Prelude hiding(mapM)
+import Control.Applicative
 import Control.Monad hiding(mapM)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
@@ -158,6 +159,13 @@ data LREnv =
 --   exception-raising statement.
 newtype LR a = LR {runLR :: LREnv -> IO (Maybe a)}
 
+instance Functor LR where
+  fmap f (LR g) = LR (\e -> fmap (fmap f) (g e))
+
+instance Applicative LR where
+  pure = return
+  (<*>) = ap
+
 instance Monad LR where
   {-# INLINE return #-}
   {-# INLINE (>>=) #-}
@@ -176,7 +184,7 @@ instance Supplies LR VarID where
   supplyToST = internalError "supplyToST: Not implemented for LR"
 
 instance TypeEnvMonad LR where
-  type TypeFunctionInfo LR = TypeFunction
+  type EvalBoxingMode LR = UnboxedMode 
   getTypeEnv = withTypeEnv return
 
   assumeWithProperties v rt b m = LR $ \env ->
@@ -235,7 +243,7 @@ interpretComputation TopAC           = return topCode
 interpretComputation (ReturnAC code) = return code
 interpretComputation ExceptAC        = propagateException
 
-interpretComputation' :: TypeEvalM AbsComputation -> LR AbsCode
+interpretComputation' :: UnboxedTypeEvalM AbsComputation -> LR AbsCode
 interpretComputation' m = liftTypeEvalM m >>= interpretComputation
 
 lookupKnownValue :: Var -> LR AbsCode
@@ -794,7 +802,7 @@ betaReduce' is_stream_arg inf (FunM fun) ty_args args
 -- scopes of temporary variables.  Let-expressions are floated out from the
 -- RHS of other let expressions and from inside function calls.
 
-type Restructure a = TypeEvalM (Contexted a)
+type Restructure a = UnboxedTypeEvalM (Contexted a)
 
 -- | Flatten an expression until it reaches a fixed point or until the
 --   expression satisfies the given test.

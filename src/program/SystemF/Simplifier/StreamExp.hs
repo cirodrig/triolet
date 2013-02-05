@@ -414,7 +414,7 @@ instance Substitutable ConsumerOp where
   substituteWorker s (Build t) = Build `liftM` substitute s t
 
 -- | Decompose a stream type into its shape and contents
-deconstructStreamType :: Type -> TypeEvalM (StreamType, Type)
+deconstructStreamType :: Type -> UnboxedTypeEvalM (StreamType, Type)
 deconstructStreamType ty = do
   ty' <- reduceToWhnf ty
   case fromVarApp ty' of
@@ -563,7 +563,7 @@ pprExpS e = pprExpSPrec e ? outerPrec
 -------------------------------------------------------------------------------
 -- Converting ordinary expressions to stream expressions
 
-interpretViewShape :: Type -> TypeEvalM (Maybe StreamType)
+interpretViewShape :: Type -> UnboxedTypeEvalM (Maybe StreamType)
 interpretViewShape ty = do
   ty' <- reduceToWhnf ty
   case ty' of
@@ -576,7 +576,7 @@ interpretViewShape ty = do
           return $ Just (ArrViewType 2)
     _ -> return Nothing
 
-interpretViewShape' :: Type -> TypeEvalM StreamType
+interpretViewShape' :: Type -> UnboxedTypeEvalM StreamType
 interpretViewShape' ty = interpretViewShape ty >>= check
   where
     check Nothing  = internalError "interpretViewShape': Unrecognized type"
@@ -585,7 +585,7 @@ interpretViewShape' ty = interpretViewShape ty >>= check
 data StreamOpInterpreter =
   StreamOpInterpreter
   { checkArity :: !(Int -> Int -> Bool)
-  , interpretOp :: !(ExpInfo -> [Type] -> [ExpM] -> TypeEvalM (Maybe ExpS))
+  , interpretOp :: !(ExpInfo -> [Type] -> [ExpM] -> UnboxedTypeEvalM (Maybe ExpS))
   }
 
 streamOpTable :: IntMap.IntMap StreamOpInterpreter
@@ -849,7 +849,7 @@ interpretEmptyView = StreamOpInterpreter check_arity interpret
       return $ OpSE inf (EmptyViewOp 1 ty) [] [repr] [] [] Nothing
 -}
 
-interpretStreamSubExp :: ExpM -> TypeEvalM ExpS
+interpretStreamSubExp :: ExpM -> UnboxedTypeEvalM ExpS
 interpretStreamSubExp expression =
   case fromExpM expression of
     AppE inf op ty_args args -> do
@@ -881,7 +881,7 @@ interpretStreamSubExp expression =
   where
     embed_expression = return $ OtherSE expression
 
-interpretStreamFun :: FunM -> TypeEvalM FunS
+interpretStreamFun :: FunM -> UnboxedTypeEvalM FunS
 interpretStreamFun (FunM fun) =
   assumeTyPats (funTyParams fun) $
   assumePatMs (funParams fun) $ do
@@ -892,7 +892,7 @@ interpretStreamFun (FunM fun) =
                         , funReturn = funReturn fun
                         , funBody = body }
 
-interpretStreamAlt :: AltM -> TypeEvalM AltS
+interpretStreamAlt :: AltM -> UnboxedTypeEvalM AltS
 interpretStreamAlt (AltM alt) =
   assumeBinders (deConExTypes $ altCon alt) $
   assumePatMs (altParams alt) $ do
@@ -902,7 +902,7 @@ interpretStreamAlt (AltM alt) =
 -- | Interpret a stream expression that is a function application.
 --   If the expression can't be interpeted as a stream, return Nothing.
 interpretStreamAppExp :: ExpInfo -> ExpM -> [Type] -> [ExpM]
-                      -> TypeEvalM (Maybe ExpS)
+                      -> UnboxedTypeEvalM (Maybe ExpS)
 interpretStreamAppExp inf op ty_args args =
   case op
   of -- Match a known function call
@@ -1089,7 +1089,7 @@ embedStreamAlt (AltS alt) =
 
 -------------------------------------------------------------------------------
 
-restructureStreamExp :: ExpS -> TypeEvalM ExpS
+restructureStreamExp :: ExpS -> UnboxedTypeEvalM ExpS
 restructureStreamExp e = restructureIfNeeded Set.empty e return
 
 -- | Restructure a stream expression by hoisting out all non-data-dependent
@@ -1106,8 +1106,8 @@ restructureStreamExp e = restructureIfNeeded Set.empty e return
 --   if we start hoisting in other situations.
 restructureIfNeeded :: Set.Set Var
                     -> ExpS
-                    -> (ExpS -> TypeEvalM ExpS)
-                    -> TypeEvalM ExpS
+                    -> (ExpS -> UnboxedTypeEvalM ExpS)
+                    -> UnboxedTypeEvalM ExpS
 restructureIfNeeded locals expression cont =
   case expression
   of OpSE {sexpStreamArgs = es} ->
@@ -1168,8 +1168,8 @@ restructureLam locals (FunS (Fun inf ty_params params ret body)) cont =
 -- | Restructure a list of stream expressions.
 restructureListIfNeeded :: Set.Set Var 
                         -> [ExpS]
-                        -> ([ExpS] -> TypeEvalM ExpS)
-                        -> TypeEvalM ExpS
+                        -> ([ExpS] -> UnboxedTypeEvalM ExpS)
+                        -> UnboxedTypeEvalM ExpS
 restructureListIfNeeded locals es cont = go es cont
   where
     go (e:es) k =
@@ -1186,13 +1186,13 @@ restructureListIfNeeded locals es cont = go es cont
 
 -- First, the expression is globally restructured.
 -- Then a top-down simplification pass is performed.
-simplifyStreamExp :: ExpS -> TypeEvalM ExpS
+simplifyStreamExp :: ExpS -> UnboxedTypeEvalM ExpS
 simplifyStreamExp expression = do
   e' <- simplifyExp =<< restructureStreamExp expression
   traceShow (text "SIMPLIFY" <+> (pprExpS expression $$ text "----" $$ pprExpS e')) $ return e'
   
 -- | Recursively transform a stream expression
-simplifyExp :: ExpS -> TypeEvalM ExpS
+simplifyExp :: ExpS -> UnboxedTypeEvalM ExpS
 simplifyExp input_expression = do
   expression <- freshen input_expression
   case expression of
@@ -1263,11 +1263,11 @@ simplifyStreamFun (FunS fun) =
 
 fuseMapWithProducer :: StreamType
                     -> Type -> Type -> ExpM -> ExpM -> ExpM -> ExpS
-                    -> TypeEvalM (Bool, ExpS)
+                    -> UnboxedTypeEvalM (Bool, ExpS)
 fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
   fuse_with_producer shape producer
   where
-    fuse_with_producer :: StreamType -> ExpS -> TypeEvalM (Bool, ExpS)
+    fuse_with_producer :: StreamType -> ExpS -> UnboxedTypeEvalM (Bool, ExpS)
     fuse_with_producer shape producer =
       case producer
       of OpSE inf (GenerateOp st producer_ty)
@@ -1393,7 +1393,7 @@ fuseMapWithProducer shape in_type ty in_repr repr map_f producer =
 
 -- | Convert a stream operation to an equivalent sequence operation, if
 --   possible.
-convertToSequenceOp :: ExpS -> TypeEvalM (Maybe ExpS)
+convertToSequenceOp :: ExpS -> UnboxedTypeEvalM (Maybe ExpS)
 convertToSequenceOp expression =
   case expression
   of OpSE inf (GenerateOp st ty) repr_args misc_args [] Nothing ->
@@ -1406,7 +1406,7 @@ convertToSequenceOp expression =
      _ -> return Nothing
 
 simplifyBindOp :: ExpInfo -> StreamOp -> ExpM -> ExpS -> ExpS
-               -> TypeEvalM ExpS
+               -> UnboxedTypeEvalM ExpS
 simplifyBindOp inf bind_op@(BindOp producer_ty transformer_ty) repr producer transformer = do
   producer' <- simplifyExp producer
   case producer' of
@@ -1469,7 +1469,7 @@ isEmptyStream _ = False
 -- | Convert a stream expression to a sequential loop.
 --   The conversion only succeeds if the outermost term is a consumer.
 --   The result is often better than simply inlining the stream operations.
-sequentializeStreamExp :: ExpS -> TypeEvalM (Maybe ExpM)
+sequentializeStreamExp :: ExpS -> UnboxedTypeEvalM (Maybe ExpM)
 sequentializeStreamExp expression =
   case expression
   of OpSE inf (ConsumeOp st op) repr_args misc_args [src] ret_arg ->
@@ -1549,16 +1549,16 @@ peelStream :: Type              -- ^ Stream contents type
            -> ExpM              -- ^ Repr dictionary for stream source
            -> Type              -- ^ Return type produced by continuations
            -> ExpM              -- ^ Repr dictionary for return values
-           -> (ExpS -> MaybeT TypeEvalM ExpM)
+           -> (ExpS -> MaybeT UnboxedTypeEvalM ExpM)
               -- ^ Continuation to process a peeled stream.
               --   The computed expression has type
               --   @ret -> OutPtr ret -> Store@.
-           -> MaybeT TypeEvalM ExpM
+           -> MaybeT UnboxedTypeEvalM ExpM
               -- ^ Continuation to process a missing value.
               --   The computed expression has type @OutPtr ret -> Store@.
            -> ExpS              -- ^ Input stream
            -> ExpM              -- ^ Output pointer
-           -> MaybeT TypeEvalM ExpM
+           -> MaybeT UnboxedTypeEvalM ExpM
 peelStream a_ty a_repr ret_ty ret_repr value_cont empty_cont source ret_ptr =
   -- This transformation may generate nested copies of the stream code
   -- (an outer copy to find the first element, and inner copies to process
@@ -1665,7 +1665,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
 
                -- Compute (i+1)
                let add_expression =
-                     appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
+                     appE' (varE' $ coreBuiltin The_addI) []
                      [varE' value_i,
                       ExpM (LitE defaultExpInfo (IntL 1 intT))]
 
@@ -1699,7 +1699,7 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
          assume stored_index stored_int_type $ do
            -- If peeling the inner stream produces a value, then construct
            -- a leftover stream and pass it to the value continuation
-           let body_value_cont :: ExpS -> MaybeT TypeEvalM ExpM
+           let body_value_cont :: ExpS -> MaybeT UnboxedTypeEvalM ExpM
                body_value_cont leftover_stream = do
                  s <- make_leftover_generate_bind_stream inner_stream index
                       leftover_domain leftover_stream
@@ -1748,8 +1748,8 @@ peelStream' a_ty a_repr ret_ty ret_repr value_cont empty_cont ret_ptr source =
 
         -- Create expressions
         let add_expression =
-              appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
-              [ appE' (varE' $ coreBuiltin The_AdditiveDict_int_add) []
+              appE' (varE' $ coreBuiltin The_addI) []
+              [ appE' (varE' $ coreBuiltin The_addI) []
                 [varE' outer_index, varE' value_i]
               , ExpM (LitE defaultExpInfo (IntL 1 intT))
               ]
@@ -1807,7 +1807,7 @@ sequentializeFold :: Type       -- ^ Accumulator type
                   -> ExpM       -- ^ Accumulator value
                   -> ExpM       -- ^ Combining function
                   -> ExpS       -- ^ Input stream
-                  -> MaybeT TypeEvalM ExpM
+                  -> MaybeT UnboxedTypeEvalM ExpM
 sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
   case source
   of OpSE inf (GenerateOp _ gen_ty) _ [shape, f] [] Nothing -> do
@@ -1944,7 +1944,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
 --
 -- Creates (\acc x r. T [| t |] acc c r)
 sequentializeCombiningFunction :: Type -> Type -> Var -> ExpM -> ExpM -> ExpS
-                               -> MaybeT TypeEvalM ExpM
+                               -> MaybeT UnboxedTypeEvalM ExpM
 sequentializeCombiningFunction
     acc_ty arg_ty acc_repr_var arg_repr combiner transformer = do
   (t_value_var, t_stream) <- freshenUnaryStreamFunction transformer
@@ -1966,7 +1966,7 @@ sequentializeCombiningFunction
 
 -- | Rename the parameter variable of a single-parameter stream function.
 --   The renamed parameter and the body are returned.
-freshenUnaryStreamFunction :: ExpS -> MaybeT TypeEvalM (Var, ExpS)
+freshenUnaryStreamFunction :: ExpS -> MaybeT UnboxedTypeEvalM (Var, ExpS)
 freshenUnaryStreamFunction (LamSE _ (FunS (Fun _ [] [pat] _ body))) = do
   let v = patMVar $ fromPatS pat
   v' <- newClonedVar v

@@ -59,7 +59,7 @@ instance Supplies LRW (Ident Var) where
   fresh = LRW $ ReaderT $ \env -> supplyValue (varSupply env)
 
 instance TypeEnvMonad LRW where
-  type TypeFunctionInfo LRW = TypeFunction
+  type EvalBoxingMode LRW = UnboxedMode  
   getTypeEnv = LRW $ asks typeEnv
   assumeWithProperties v t conlike (LRW m) = LRW (local insert_type m)
     where
@@ -102,7 +102,6 @@ otherLoopOperator v =
   v `elem` [coreBuiltin The_for,
             coreBuiltin The_doall,
             coreBuiltin The_histogram,
-            coreBuiltin The_histogramArray,
             coreBuiltin The_fun_reduce,
             coreBuiltin The_fun_reduce1,
             coreBuiltin The_TraversableDict_list_build,

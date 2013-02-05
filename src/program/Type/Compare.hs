@@ -71,8 +71,15 @@ typeMentionsAny t target = search t
 -- | Reduce a type to weak head-normal form.  Evaluate type functions
 --   that are in head position.  The type is assumed to be well-kinded.
 reduceToWhnf :: EvalMonad m => Type -> m Type
-{-# SPECIALIZE reduceToWhnf :: Type -> TypeEvalM Type #-}
-reduceToWhnf ty =
+{-# INLINE reduceToWhnf #-}
+reduceToWhnf ty = liftTypeEvalM $ reduceToWhnf' ty
+
+-- | The main work of 'reduceToWhnf' is in this function.  It's less 
+--   polymorphic for greater efficiency.
+reduceToWhnf' :: BoxingMode b => Type -> TypeEvalM b Type
+{-# SPECIALIZE reduceToWhnf' :: Type -> TypeEvalM FullyBoxedMode Type #-}
+{-# SPECIALIZE reduceToWhnf' :: Type -> TypeEvalM UnboxedMode Type #-}
+reduceToWhnf' ty =
   case fromTypeApp ty
   of (op_type, args) | not (null args) ->
        case op_type
@@ -87,7 +94,9 @@ reduceToWhnf ty =
       env <- getTypeEnv
       case lookupTypeFunction op_var env of
         Nothing    -> return ty
-        Just tyfun -> applyTypeFunction tyfun args
+        Just tyfun -> do b <- getBoxingMode
+                         let tf = builtinTypeFunctionForEval b tyfun
+                         applyTypeFunction tf args
 
     -- The operator is a lambda function; evaluate it
     reduce_lambda_fun v dom body (arg : other_args) = do
@@ -95,7 +104,7 @@ reduceToWhnf ty =
       body' <- substitute (Substitute.singleton v arg) body
             
       -- Continue to reduce
-      reduceToWhnf $ typeApp body' other_args
+      reduceToWhnf' $ typeApp body' other_args
 
 -- | Compare two types.  Return True if the given type is equal to or a subtype
 --   of the expected type, False otherwise.
@@ -106,21 +115,26 @@ compareTypes :: EvalMonad m =>
                 Type            -- ^ Expected type
              -> Type            -- ^ Given Type
              -> m Bool
+{-# INLINE compareTypes #-}
 compareTypes t1 t2 = liftTypeEvalM $ compareTypes' t1 t2
 
-compareTypes' :: Type -> Type -> TypeEvalM Bool
+-- | The main work of 'compareTypes' is in this function.  It's less 
+--   polymorphic for greater efficiency.
+compareTypes' :: BoxingMode m => Type -> Type -> TypeEvalM m Bool
+{-# SPECIALIZE compareTypes' :: Type -> Type -> TypeEvalM UnboxedMode Bool #-}
+{-# SPECIALIZE compareTypes' :: Type -> Type -> TypeEvalM FullyBoxedMode Bool #-}
 compareTypes' t1 t2 = do
   -- Ensure that the types are in weak head-normal form, then
   -- compare them structurally
-  t1' <- reduceToWhnf t1
-  t2' <- reduceToWhnf t2
+  t1' <- reduceToWhnf' t1
+  t2' <- reduceToWhnf' t2
   cmpType t1' t2'
 
 -- | Structurally compare types.
 --
 --   Arguments are assumed to be in weak head-normal form and are assumed to
 --   inhabit the same kind.
-cmpType :: Type -> Type -> TypeEvalM Bool
+cmpType :: BoxingMode m => Type -> Type -> TypeEvalM m Bool
 cmpType expected given =
   debug $ cmp =<< Substitute.unifyBoundVariables expected given
   where
@@ -188,7 +202,7 @@ type USubst = IntMap.IntMap (Maybe Type)
 --
 --   This is in the type evaluation monad because types may be reduced during
 --   unification.
-unify :: USubst -> Type -> Type -> TypeEvalM (Maybe USubst)
+unify :: BoxingMode b => USubst -> Type -> Type -> TypeEvalM b (Maybe USubst)
 unify subst expected given = do
   -- Evaluate both types to WHNF
   expected1 <- reduceToWhnf expected

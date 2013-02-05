@@ -49,6 +49,7 @@ import SystemF.PrintMemoryIR
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Typecheck
+import Type.Error
 import Type.Eval
 import Type.Environment
 import Type.Type
@@ -56,19 +57,21 @@ import qualified Type.Rename as Rename
 import qualified Type.Substitute as Substitute
 import Type.Compare
 
+type TC a = TCM UnboxedMode a
+
 arrayInitializerType len element_type =
   let length_type = IntT $ fromIntegral len
       arr_type = arrT `typeApp` [length_type, element_type]
   in typeApp outPtrT [arr_type] `FunT` storeT
 
-assumeAndAnnotatePat :: PatM -> TCM b -> TCM b
+assumeAndAnnotatePat :: PatM -> TC b -> TC b
 assumeAndAnnotatePat (PatM (v ::: ty) _) k = do
   typeCheckType ty              -- Verify that type is well-formed
   assume v ty k
 
 assumeAndAnnotatePats pats m = foldr assumeAndAnnotatePat m pats
 
-assumeAndAnnotateTyPat :: TyPat -> TCM b -> TCM b
+assumeAndAnnotateTyPat :: TyPat -> TC b -> TC b
 assumeAndAnnotateTyPat (TyPat (v ::: t)) k = do
   typeCheckType t               -- Verify that kind is well-formed
   assume v t k
@@ -76,11 +79,11 @@ assumeAndAnnotateTyPat (TyPat (v ::: t)) k = do
 assumeDefs defs m = foldr assumeFDef m (defGroupMembers defs)
 
 -- | Typecheck a type and return its kind
-tcType :: Type -> TCM Kind
+tcType :: Type -> TC Kind
 tcType = typeCheckType
 
 -- | Typecheck an expression and return its type
-tcExp :: ExpM -> TCM Type
+tcExp :: ExpM -> TC Type
 tcExp (ExpM expression) =
     case expression
     of VarE inf v -> tcVar pos v
@@ -108,7 +111,7 @@ tcExp (ExpM expression) =
     pos = getSourcePos $ expInfo expression
 
 -- To infer a variable's type, just look it up in the environment
-tcVar :: SourcePos -> Var -> TCM Type
+tcVar :: SourcePos -> Var -> TC Type
 tcVar pos var = do
   -- It's an internal error if a data constructor appears here
   tenv <- getTypeEnv
@@ -119,18 +122,18 @@ tcVar pos var = do
 
 -- Use the type that was attached to the literal value, but also verify that
 -- it's a valid type
-tcLit :: SourcePos -> Lit -> TCM Type
+tcLit :: SourcePos -> Lit -> TC Type
 tcLit pos l = do
   let literal_type = literalType l
   -- checkLiteralType l
   return literal_type
 
-typeInferConE :: ExpM -> SourcePos -> ConInst -> [ExpM] -> TCM Type
+typeInferConE :: ExpM -> SourcePos -> ConInst -> [ExpM] -> TC Type
 typeInferConE orig_exp pos con args = do
   arg_types <- mapM tcExp args
   tcCon pos con arg_types
 
-tcCon :: SourcePos -> ConInst -> [Type] -> TCM Type
+tcCon :: SourcePos -> ConInst -> [Type] -> TC Type
 tcCon pos con arg_tys = do
   (field_tys, result_ty) <- typeInferCon pos con
   
@@ -138,7 +141,7 @@ tcCon pos con arg_tys = do
   let num_fields = length field_tys
       num_args = length arg_tys
   when (num_fields /= num_args) $
-    typeError $ conFieldLengthMismatch pos num_fields num_args
+    throwTypeError $ conFieldLengthMismatch pos num_fields num_args
 
   -- Check argument types
   sequence_ [checkType (conFieldTypeMismatch pos index) field_ty arg_ty
@@ -176,7 +179,7 @@ typeInferCon pos con@(TupleCon types) = do
         | v == valV || v == boxV = Nothing -- No error
         | otherwise = Just $ badUnboxedTupleField pos i k
 
-  maybe (return ()) typeError $ msum $ zipWith check_kind [1..] kinds
+  maybe (return ()) throwTypeError $ msum $ zipWith check_kind [1..] kinds
 
   let tuple_type = typeApp (UTupleT $ map toBaseKind kinds) types
   return (types, tuple_type)
@@ -190,27 +193,21 @@ typeInferAppE orig_expr pos op ty_args args = do
   tcApp pos op_type (zip ty_arg_kinds ty_args) arg_types
 
 -- | Typecheck a type application and compute the result type
-tcApp :: SourcePos -> Type -> [(Kind, Type)] -> [Type] -> TCM Type
+tcApp :: SourcePos -> Type -> [(Kind, Type)] -> [Type] -> TC Type
 tcApp pos op_ty ty_args arg_tys = do
   inst_type <- computeInstantiatedType pos op_ty ty_args
   computeAppliedType Nothing pos inst_type arg_tys
 
 -- | Compute the type of the result of applying an operator to some
 --   type arguments.
-computeInstantiatedType :: SourcePos -> Type -> [(Kind, Type)] -> TCM Type
+computeInstantiatedType :: SourcePos -> Type -> [(Kind, Type)] -> TC Type
 computeInstantiatedType inf op_type args_ = go 1 op_type args_
   where
     go index op_type ((arg_kind, arg) : args) = do
-      app_result <- typeOfTypeApp op_type arg_kind arg
-      case app_result of
-        TypeAppOk result_type -> go (index+1) result_type args
-        KindMismatchErr e a   -> kind_mismatch index e a
-        NotAForallErr         -> not_a_forall op_type arg_kind
+      result_type <- typeOfTypeApp inf index op_type arg_kind arg
+      go (index+1) result_type args
 
     go _ op_type [] = return op_type
-
-    kind_mismatch i e a = typeError $ typeArgKindMismatch inf i e a
-    not_a_forall op_type arg_kind = typeError $ BadTyApp inf op_type arg_kind
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
@@ -218,23 +215,17 @@ computeAppliedType :: Maybe ExpM
                    -> SourcePos
                    -> Type
                    -> [Type]
-                   -> TCM Type
+                   -> TC Type
 computeAppliedType orig_expr pos op_type_ arg_types =
   apply 1 op_type_ arg_types
   where
     apply index op_type (arg_t:arg_ts) = do
-      result <- typeOfApp op_type arg_t
-      case result of
-        AppOk op_type'      -> apply (index + 1) op_type' arg_ts
-        TypeMismatchErr e a -> type_mismatch index e a
-        NotAFunctionErr     -> not_a_function op_type arg_t
+      op_type' <- typeOfApp pos index op_type arg_t
+      apply (index + 1) op_type' arg_ts
     
     apply _ op_type [] = return op_type
-    
-    type_mismatch i e a = typeError $ argTypeMismatch pos i e a
-    not_a_function op_type arg_type = typeError $ BadApp pos op_type arg_type
 
-typeInferFun :: FunM -> TCM Type
+typeInferFun :: FunM -> TC Type
 typeInferFun fun@(FunM (Fun { funInfo = info
                             , funTyParams = ty_params
                             , funParams = params
@@ -255,7 +246,7 @@ typeInferFun fun@(FunM (Fun { funInfo = info
     source_pos = getSourcePos info
     assumeTyParams m = foldr assumeAndAnnotateTyPat m ty_params
 
-typeInferLetE :: ExpInfo -> PatM -> ExpM -> ExpM -> TCM Type
+typeInferLetE :: ExpInfo -> PatM -> ExpM -> ExpM -> TC Type
 typeInferLetE inf pat expression body = do
   rhs_type <- tcExp expression
 
@@ -267,11 +258,11 @@ typeInferLetE inf pat expression body = do
   -- Assume the pattern while inferring the body; result is the body's type
   assumeAndAnnotatePat pat $ tcExp body
 
-typeInferLetfunE :: ExpInfo -> DefGroup (FDef Mem) -> ExpM -> TCM Type
+typeInferLetfunE :: ExpInfo -> DefGroup (FDef Mem) -> ExpM -> TC Type
 typeInferLetfunE inf defs body =
   typeCheckDefGroup defs $ tcExp body
 
-typeInferCaseE :: ExpInfo -> ExpM -> [AltM] -> TCM Type
+typeInferCaseE :: ExpInfo -> ExpM -> [AltM] -> TC Type
 typeInferCaseE inf scr alts = do
   let pos = getSourcePos inf
 
@@ -279,7 +270,7 @@ typeInferCaseE inf scr alts = do
   scr_type <- tcExp scr
 
   -- Match against each alternative
-  when (null alts) $ typeError (emptyCaseError pos)
+  when (null alts) $ throwTypeError (emptyCaseError pos)
   (first_alt_type : other_alt_types) <-
     mapM (typeCheckAlternative pos scr_type) alts
 
@@ -295,7 +286,7 @@ typeInferCaseE inf scr alts = do
 --   scrutinee type.
 typeInferDeCon :: SourcePos 
                -> DeConInst
-               -> TCM ([Type], Type)
+               -> TC ([Type], Type)
 typeInferDeCon pos decon@(VarDeCon op ty_args ex_types) = do
   env <- getTypeEnv
   data_con <- tcLookupDataCon op
@@ -315,12 +306,12 @@ typeInferDeCon pos decon@(TupleDeCon types) = do
         | v == valV || v == boxV = Nothing -- No error
         | otherwise = Just $ badUnboxedTupleField pos i k
 
-  maybe (return ()) typeError $ msum $ zipWith check_kind [1..] kinds
+  maybe (return ()) throwTypeError $ msum $ zipWith check_kind [1..] kinds
 
   let tuple_type = typeApp (UTupleT $ map toBaseKind kinds) types
   return (types, tuple_type)
 
-typeCheckAlternative :: SourcePos -> Type -> AltM -> TCM Type
+typeCheckAlternative :: SourcePos -> Type -> AltM -> TC Type
 typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
   -- Check constructor type
   (field_types, expected_scr_type) <- typeInferDeCon pos con
@@ -354,7 +345,7 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
       when (ret_type `typeMentionsAny` Set.fromList ex_vars) $
         -- Choose one escaping variable to report with the error message
         let Just v = List.find (ret_type `typeMentions`) ex_vars
-        in typeError $ typeVariableEscapes pos v
+        in throwTypeError $ typeVariableEscapes pos v
 
       return ret_type
   where
@@ -362,7 +353,7 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
       | length atypes /= length fields =
         let expected = length atypes
             got = length fields
-        in typeError $ wrongPatternBinderCount pos expected got
+        in throwTypeError $ wrongPatternBinderCount pos expected got
       | otherwise = return ()
 
     check_arg expected_rtype (pat_index, pat) =
@@ -397,13 +388,13 @@ typeInferArray inf ty es = do
 
   return $ arrayInitializerType (length es) ty
 
-checkConstant :: Constant Mem -> TCM ()
+checkConstant :: Constant Mem -> TC ()
 checkConstant (Constant inf ty e) = do
   typeCheckType ty
   g_type <- tcExp e
   checkType (constantTypeMismatch (getSourcePos inf)) ty g_type
 
-typeCheckDefGroup :: DefGroup (FDef Mem) -> TCM b -> TCM b
+typeCheckDefGroup :: DefGroup (FDef Mem) -> TC b -> TC b
 typeCheckDefGroup defgroup do_body = do
   (_, body_type) <-
     assumeFDefGroup defgroup
@@ -414,7 +405,7 @@ typeCheckDefGroup defgroup do_body = do
     -- To typecheck a definition, check the function it contains
     typeCheckDef def = typeInferFun $ definiens def
 
-typeCheckGlobalDefGroup :: DefGroup (GDef Mem) -> TCM b -> TCM b
+typeCheckGlobalDefGroup :: DefGroup (GDef Mem) -> TC b -> TC b
 typeCheckGlobalDefGroup defgroup do_body = do
   (_, body_type) <-
     assumeGDefGroup defgroup
@@ -428,7 +419,7 @@ typeCheckGlobalDefGroup defgroup do_body = do
       of FunEnt f -> void $ typeInferFun f
          DataEnt d -> checkConstant d
 
-typeCheckExport :: Export Mem -> TCM ()
+typeCheckExport :: Export Mem -> TC ()
 typeCheckExport (Export pos spec f) = do
   typeInferFun f
   return ()
@@ -453,7 +444,8 @@ typeCheckTopLevel imports defss exports =
 
 -- | Infer the type of an expression.  The expression is assumed to be
 --   well-typed; this function doesn't check for most errors.
-inferExpType :: forall m. EvalMonad m => ExpM -> m Type
+inferExpType :: forall m. (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
+                ExpM -> m Type
 inferExpType expression =
   liftTypeEvalM $ infer_exp expression
   where
@@ -489,7 +481,7 @@ inferExpType expression =
     debug = traceShow (text "inferExpType" <+> pprExp expression)
 
 -- | Infer the type of an application, with minimal error checking
-inferAppTypeQuickly :: ExpM -> [Type] -> [ExpM] -> TypeEvalM Type
+inferAppTypeQuickly :: ExpM -> [Type] -> [ExpM] -> UnboxedTypeEvalM Type
 inferAppTypeQuickly op ty_args args = do
   op_type <- inferExpType op
   tenv <- getTypeEnv
@@ -498,10 +490,8 @@ inferAppTypeQuickly op ty_args args = do
   where
     apply_types tenv op_type (arg:args) = do
       let kind = typeKind tenv arg
-      m_app_type <- typeOfTypeApp op_type kind arg
-      case m_app_type of
-        TypeAppOk t -> apply_types tenv t args
-        _           -> err
+      t <- typeOfTypeApp noSourcePos 1 op_type kind arg
+      apply_types tenv t args
     
     apply_types _ t [] = return t
   
@@ -541,7 +531,7 @@ inferConAppType (TupleCon ty_args) = do
 
 -- | Infer the type of an application, given the operator type and argument
 --   types.  If the application is not well-typed, an exception is raised.
-inferAppType :: EvalMonad m =>
+inferAppType :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
                 Type            -- ^ Operator type
              -> [Type]          -- ^ Type arguments
              -> [Type]          -- ^ Operand types
