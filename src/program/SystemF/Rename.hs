@@ -102,8 +102,7 @@ unionV (S r1) (S r2) = S (IntMap.union r1 r2)
 
 -- | @s2 `composeV` s1@ is a substitution equivalent to applying @s1@, then
 --   applying @s2@.
-composeV :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
-            Subst -> ValSubst -> m ValSubst
+composeV :: EvalMonad m => Subst -> ValSubst -> m ValSubst
 s2 `composeV` s1 = do
   -- Apply s2 to the range of s1
   s1' <- traverse substitute_in_assignment (unS s1)
@@ -135,9 +134,9 @@ emptySubst = Subst Substitute.empty emptyV
 
 isEmptySubst (Subst t v) = Substitute.null t && nullV v
 
-composeSubst :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+composeSubst :: EvalMonad m =>
                 Subst -> Subst -> m Subst
-s2 `composeSubst` Subst ts1 vs1 = do
+s2 `composeSubst` Subst ts1 vs1 = liftTypeEvalM $ do
   -- Compute the effect of applying vs1 followed by s2 on values
   vs1' <- s2 `composeV` vs1
   -- Compute the effect of applying ts1 followed by typeSubst s2 on types
@@ -264,7 +263,7 @@ deConFreeVariables (VarDeCon op ty_args ex_types) fv =
 deConFreeVariables (TupleDeCon ty_args) fv =
   Set.union (freeVariables ty_args) fv
 
-substituteTypeBinder :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteTypeBinder :: EvalMonad m =>
                         Subst -> Binder
                      -> (Subst -> Binder -> m a)
                      -> m a
@@ -272,21 +271,21 @@ substituteTypeBinder s binder k =
   Substitute.substituteBinder (typeSubst s) binder $ \ts' binder' ->
   k (setTypeSubst ts' s) binder'
 
-substituteTypeBinders :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteTypeBinders :: EvalMonad m =>
                          Subst -> [Binder]
                       -> (Subst -> [Binder] -> m a)
                       -> m a
 substituteTypeBinders = renameMany substituteTypeBinder
 
 -- | Apply a substitution to a type pattern
-substituteTyPat :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteTyPat :: EvalMonad m =>
                    Subst -> TyPat
                 -> (Subst -> TyPat -> m a)
                 -> m a
 substituteTyPat s (TyPat binder) k =
   substituteTypeBinder s binder $ \s' binder' -> k s' (TyPat binder')
 
-substituteTyPats :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteTyPats :: EvalMonad m =>
                     Subst -> [TyPat]
                  -> (Subst -> [TyPat] -> m a)
                  -> m a
@@ -295,7 +294,7 @@ substituteTyPats = renameMany substituteTyPat
 -- | Apply a substitution to a binder that binds a value to a variable.
 --
 -- See 'substituteBinder'.
-substituteValueBinder :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteValueBinder :: EvalMonad m =>
                          Subst -> Binder
                        -> (Subst -> Binder -> m a)
                        -> m a
@@ -318,17 +317,17 @@ substituteValueBinder s (x ::: t) k = do
       assume x' t' $ k s' (x' ::: t')
 
 -- | Apply a substitution to a pattern
-substitutePatM :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substitutePatM :: EvalMonad m =>
                   Subst -> PatM -> (Subst -> PatM -> m a) -> m a
 substitutePatM s (PatM binder uses) k = do
   uses' <- substitute (typeSubst s) uses
   substituteValueBinder s binder $ \s' binder' -> k s' (PatM binder' uses')
 
-substitutePatMs :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substitutePatMs :: EvalMonad m =>
                    Subst -> [PatM] -> (Subst -> [PatM] -> m a) -> m a
 substitutePatMs = renameMany substitutePatM
 
-substituteDefGroup :: forall m a s. (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteDefGroup :: forall m a s. EvalMonad m =>
                       (Subst -> Fun Mem -> m (Fun s))
                       -- ^ How to perform substitution on a function
                    -> Subst     -- ^ Substitution to apply
@@ -381,7 +380,7 @@ substituteDefGroup subst_fun s g k =
            let s' = modifyValueSubst (extendV v (RenamedVar v')) s
            return (s', v')
 
-substituteDeConInst :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteDeConInst :: (EvalMonad m) =>
                        TypeSubst -> DeConInst
                     -> (TypeSubst -> DeConInst -> m a)
                     -> m a 

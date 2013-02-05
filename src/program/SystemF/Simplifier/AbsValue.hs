@@ -406,7 +406,7 @@ renameIfBound s x = do
 -- | Apply a substitution to a binder that binds a value to a variable.
 --
 -- See 'substituteBinder'.
-substituteValueBinder :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteValueBinder :: EvalMonad m =>
                          AbsSubst -> Binder
                        -> (AbsSubst -> Binder -> m a)
                        -> m a
@@ -425,13 +425,13 @@ substituteDeConInst s (TupleDeCon ty_args) k = do
   k s (TupleDeCon ty_args')
 
 -- | Apply a substitution to a pattern
-substitutePatM :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substitutePatM :: EvalMonad m =>
                   AbsSubst -> PatM -> (AbsSubst -> PatM -> m a) -> m a
 substitutePatM s (PatM binder uses) k = do
   uses' <- substitute (typeSubst s) uses
   substituteValueBinder s binder $ \s' binder' -> k s' (PatM binder' uses')
 
-substitutePatMs :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substitutePatMs :: EvalMonad m =>
                    AbsSubst -> [PatM] -> (AbsSubst -> [PatM] -> m a) -> m a
 substitutePatMs = renameMany substitutePatM
 
@@ -441,7 +441,7 @@ substituteTyPatM s (TyPat binder) k =
 
 substituteTyPatMs = renameMany substituteTyPatM
 
-substituteDefGroup :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteDefGroup :: EvalMonad m =>
                       AbsSubst
                    -> DefGroup (FDef Mem)
                    -> (AbsSubst -> DefGroup (FDef Mem) -> MaybeT m a)
@@ -479,15 +479,15 @@ substituteDefGroup s g k =
                         | (def, v) <- zip defs' renamed_definienda]
          k s' (Rec new_defs)
 
-substituteType :: (TypeEnvMonad m, Supplies m (Ident Var),
+substituteType :: (EvalMonad m,
                    Substitutable a, Substitution a ~ TypeSubst) => 
                   AbsSubst -> a -> MaybeT m a
 substituteType s t = lift $ substitute (typeSubst s) t
 
 -- | Apply a substitution to an expression
-substituteExp :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteExp :: EvalMonad m =>
                  AbsSubst -> ExpM -> MaybeT m ExpM
-substituteExp s expression =
+substituteExp s expression = (MaybeT . liftTypeEvalM . runMaybeT) $
   case fromExpM expression
   of VarE inf v ->
        case lookupValue v s
@@ -529,18 +529,18 @@ substituteExp s expression =
         substituteType s t2 <*>
         substituteExp s body)
 
-substituteFun :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteFun :: EvalMonad m =>
                  AbsSubst -> FunM -> MaybeT m FunM
-substituteFun s (FunM f) =
+substituteFun s (FunM f) = (MaybeT . liftTypeEvalM . runMaybeT) $
   substituteTyPatMs s (funTyParams f) $ \s' ty_params ->
   substitutePatMs s' (funParams f) $ \s'' params -> do
     ret <- substituteType s'' (funReturn f)
     body <- substituteExp s'' (funBody f)
     return $ FunM $ Fun (funInfo f) ty_params params ret body
 
-substituteAlt :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteAlt :: EvalMonad m =>
                  AbsSubst -> AltM -> MaybeT m AltM
-substituteAlt s (AltM (Alt decon params body)) =
+substituteAlt s (AltM (Alt decon params body)) = (MaybeT . liftTypeEvalM . runMaybeT) $
   substituteDeConInst s decon $ \s' decon' ->
   substitutePatMs s' params $ \s'' params' -> do
     body' <- substituteExp s body
@@ -639,9 +639,9 @@ substituteAbsProp s prop =
     conjunction Nothing  (Just q) = Just q
     conjunction Nothing  Nothing  = Nothing
 
-substituteAbsHeap :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteAbsHeap :: EvalMonad m =>
                      AbsSubst -> AbsHeap -> m (Maybe AbsHeap)
-substituteAbsHeap s (AbsHeap (HeapMap xs)) = do
+substituteAbsHeap s (AbsHeap (HeapMap xs)) = liftTypeEvalM $ do
     m_xs' <- mapM substitute_entry xs
     case sequence m_xs' of
       Nothing -> return Nothing

@@ -247,7 +247,7 @@ ctxFreeBoundVariables ctx = free_variables Set.empty Set.empty ctx
 renameCtx :: Renaming -> Ctx -> (Renaming -> Ctx -> a) -> a
 renameCtx = renameMany renameCtxItem
 
-substituteCtx :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substituteCtx :: EvalMonad m =>
                  Subst -> Ctx -> (Subst -> Ctx -> m a) -> m a
 substituteCtx = renameMany substituteCtxItem
 

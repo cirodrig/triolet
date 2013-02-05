@@ -13,6 +13,7 @@ import Control.Monad.Reader
 import qualified Data.Set as Set
 import qualified Data.IntMap as IntMap
 import Debug.Trace
+import GHC.Exts(inline)
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
@@ -118,8 +119,7 @@ compareTypes :: EvalMonad m =>
 {-# INLINE compareTypes #-}
 compareTypes t1 t2 = liftTypeEvalM $ compareTypes' t1 t2
 
--- | The main work of 'compareTypes' is in this function.  It's less 
---   polymorphic for greater efficiency.
+-- | The main work of 'compareTypes' is in this function.
 compareTypes' :: BoxingMode m => Type -> Type -> TypeEvalM m Bool
 {-# SPECIALIZE compareTypes' :: Type -> Type -> TypeEvalM UnboxedMode Bool #-}
 {-# SPECIALIZE compareTypes' :: Type -> Type -> TypeEvalM FullyBoxedMode Bool #-}
@@ -134,9 +134,13 @@ compareTypes' t1 t2 = do
 --
 --   Arguments are assumed to be in weak head-normal form and are assumed to
 --   inhabit the same kind.
+
+--   This function is very heavily used.
+--   The call to 'unifyBoundVariables' is explicitly inlined to make 
+--   optimization easier.
 cmpType :: BoxingMode m => Type -> Type -> TypeEvalM m Bool
 cmpType expected given =
-  debug $ cmp =<< Substitute.unifyBoundVariables expected given
+  debug $ cmp =<< inline Substitute.unifyBoundVariables expected given
   where
     -- For debugging, print the types being compared
     debug x = x -- traceShow message x
@@ -144,7 +148,7 @@ cmpType expected given =
         message = text "cmpType" <+>
                   (pprType expected $$ text "----" $$ pprType given)
 
-    cmp (VarT v1, VarT v2) = return $ v1 == v2
+    cmp (VarT v1, VarT v2) = return $! v1 == v2
     cmp (AppT op1 arg1, AppT op2 arg2) =
       compareTypes' op1 op2 >&&> compareTypes' arg1 arg2
     cmp (FunT dom1 rng1, FunT dom2 rng2) =
@@ -154,9 +158,9 @@ cmpType expected given =
     cmp (AllT (a1 ::: dom1) rng1, AllT (a2 ::: dom2) rng2) =
       compareTypes' dom1 dom2 >&&> bindAndCompare a2 dom2 rng1 rng2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
-    cmp (IntT n1, IntT n2) = return $ n1 == n2
+    cmp (IntT n1, IntT n2) = return $! n1 == n2
     cmp (CoT k1, CoT k2) = compareTypes' k1 k2
-    cmp (UTupleT a, UTupleT b) = return $ a == b
+    cmp (UTupleT a, UTupleT b) = return $! a == b
 
     -- Matching (\x. e1) with e2
     -- is the same as matching (\x. e1) with (\x. e2 x)

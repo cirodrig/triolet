@@ -58,12 +58,12 @@ newtype instance Fun SM = FunSM {fromFunSM :: BaseFun SM}
 data instance Exp SM = ExpSM !Subst ExpM
 
 -- | 'PatSM' behaves like 'PatM'
-substitutePatSM :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substitutePatSM :: EvalMonad m =>
                    Subst -> PatSM -> (Subst -> PatSM -> m a) -> m a
 substitutePatSM s pat k =
   substitutePatM s (fromPatSM pat) $ \s' p' -> k s' (PatSM p')
 
-substitutePatSMs :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+substitutePatSMs :: EvalMonad m =>
                     Subst -> [PatSM] -> (Subst -> [PatSM] -> m a) -> m a
 substitutePatSMs = renameMany substitutePatSM
 
@@ -121,7 +121,7 @@ deferAlt (AltM (Alt decon params body)) =
 
 -- | Apply a substitution to an 'ExpSM'.  The actual substitution is
 --   performed later.
-addDeferredSubstitution :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
+addDeferredSubstitution :: EvalMonad m =>
                            Subst -> ExpSM -> m ExpSM
 addDeferredSubstitution subst (ExpSM s e) = do
   s' <- subst `composeSubst` s
