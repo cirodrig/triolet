@@ -11,9 +11,9 @@ module Untyped.Proof
         getPlaceholders_PE,
         placeholderFree_PE,
         generateProof,
-        lookupProof,
+        lookupEvidence,
         prove,
-        proveConstraint,
+        proofExp,
         assumeConstraint,
         mkProofBinding,
         assumeProofBinding,
@@ -148,7 +148,6 @@ mkDictPlaceholder_PE prd = do
 -- | Defer the resolution of a placeholder.
 deferPlaceholder_PE :: Placeholder -> PE ()
 deferPlaceholder_PE ph = PE $ tell [ph]
-
 -- | Extract the placeholders produced by the argument.
 --   The placeholders are cleared.
 getPlaceholders_PE :: PE a -> PE (a, Placeholders)
@@ -168,10 +167,10 @@ getProofs :: PE [(Predicate, SF.Var)]
 getProofs = PE (gets envProofValues)
 
 -- | Create a proof value from a witness variable
-proofExp :: SF.Var              -- ^ A witness
-         -> Predicate           -- ^ The predicate witnessed by the varible
+proofExp :: Predicate           -- ^ The predicate witnessed by the varible
+         -> SF.Var              -- ^ A witness
          -> TIExp               -- ^ A proof value
-proofExp v p = mkVarE noSourcePos (predicateRepr p) v
+proofExp p v = mkVarE noSourcePos (predicateRepr p) v
 
 -- | Get all predicates that have been proven
 getProofContext :: PE Constraint
@@ -212,12 +211,11 @@ insertCode mk_code = PE $ modify ins
       in ProofEnvironment env mk_exp'
 
 -- | Look up a proof of a predicate in the proof environment.
-lookupProof :: Predicate -> PE (Maybe TIExp)
-lookupProof prd = do
+lookupEvidence :: Predicate -> PE (Maybe Var)
+lookupEvidence prd = do
   m_result <- findM match_proof =<< getProofs
   return $! case m_result
-            of Just (_, v) ->
-                 Just $ VarTE (tiInfo noSourcePos (predicateRepr prd)) v
+            of Just (_, v) -> Just v
                Nothing -> Nothing
   where
     match_proof (p, v) = predicatesEqual prd p
@@ -225,11 +223,11 @@ lookupProof prd = do
 -- | Generate or look up a proof of a predicate.
 --   If successful, return the evidence and any unresolvable subgoals.
 --   Otherwise, return 'Nothing'.
-prove :: Predicate -> PE (Maybe (TIExp, Constraint))
+prove :: Predicate -> PE (Maybe (SF.Var, Constraint))
 prove prd = debug $ do
-  m_prf <- lookupProof prd
+  m_prf <- lookupEvidence prd
   case m_prf of
-    Just p  -> return $ Just (p, [])
+    Just v  -> return $ Just (v, [])
     Nothing -> createProof prd
   where
     debug m = do
@@ -241,7 +239,7 @@ prove prd = debug $ do
       liftIO $ print message
       m
 
-proveConstraint :: Constraint -> PE (Maybe ([TIExp], Constraint))
+{-proveConstraint :: Constraint -> PE (Maybe ([TIExp], Constraint))
 proveConstraint cst = dropEffectsOnFailure $ go cst
   where
     go (p:cst) = do
@@ -255,10 +253,10 @@ proveConstraint cst = dropEffectsOnFailure $ go cst
             Just (es, cst2) ->
               return $ Just (e:es, cst1 ++ cst2)
 
-    go [] = return $ Just ([], [])
+    go [] = return $ Just ([], [])-}
 
 -- | Create a new proof of a predicate.
-createProof :: Predicate -> PE (Maybe (TIExp, Constraint))
+createProof :: Predicate -> PE (Maybe (SF.Var, Constraint))
 createProof prd = dropEffectsOnFailure $ do
   -- Rewrite constraint to normalized form
   context <- getProofContext
@@ -297,16 +295,17 @@ createProof prd = dropEffectsOnFailure $ do
             return $ Just (proofExp proof_var prd, cst')
     else return Nothing-}
 
-instance Derivation PE TIExp where
+instance Derivation PE SF.Var where
   liftTE _ m = liftTE_PE m
 
   hypothesis prd = do
     -- Create a placeholder for this hypothesis
     liftIO . print . (text "New hypothesis" <+>) =<< runPpr (pprPredicate prd) -- DEBUG
     ph <- mkDictPlaceholder_PE prd
-    return $ PlaceholderTE ph
+    -- Assign its result to a variable
+    saveTerm prd $ PlaceholderTE ph
 
-  lookupDerivation = lookupProof
+  lookupDerivation = lookupEvidence
 
   instanceDerivation p i c_t c_p i_t i_p =
     instanceTerm p i c_t c_p i_t i_p >>= saveTerm p
@@ -325,20 +324,19 @@ instance Derivation PE TIExp where
     -- Add dictionaries to proof environment
     sequence_ [insertEvidence p v | (v, p) <- superclasses]
 
-    return [(p, proofExp v p) | (v, p) <- superclasses]
+    return [(p, v) | (v, p) <- superclasses]
 
-saveTerm :: Predicate -> TIExp -> PE TIExp
+saveTerm :: Predicate -> TIExp -> PE SF.Var
 saveTerm p d = do
   liftIO . print =<< liftM (text "save" <+>) (runPpr $ pprPredicate p)
-  v <- insertProof p d
-  return $ proofExp v p
+  insertProof p d
 
 instanceTerm :: Predicate              -- ^ Derived predicate
              -> Instance ClassInstance -- ^ Instance satisfying the predicate
              -> [HMType]               -- ^ Class type arguments
-             -> [TIExp]                -- ^ Class premises
+             -> [(Predicate, SF.Var)]  -- ^ Class premises
              -> [HMType]               -- ^ Instance type arguments
-             -> [TIExp]                -- ^ Instance premises
+             -> [(Predicate, SF.Var)]  -- ^ Instance premises
              -> PE TIExp
 instanceTerm prd@(IsInst tycon inst_type) inst c_ty_args c_premises
              i_ty_args i_premises = do
@@ -353,15 +351,16 @@ instanceTerm prd@(IsInst tycon inst_type) inst c_ty_args c_premises
     MethodsInstance methods ->
       -- Create a class dictionary
       let inst_methods = map (instantiate i_ty_args) methods
+          c_premise_exps = map (uncurry proofExp) c_premises
       in return $ mkDictE noSourcePos cls (mkType inst_type)
-                  c_premises inst_methods
+                  c_premise_exps inst_methods
   where
     -- Instantiate a function or class method.
     -- For class methods, the type arguments are given by the instance's
     -- type signature; for abstract instances, they are given explicitly.
     instantiate type_args f_var =
       let fun_ty_args = map mkType type_args
-          fun_args = i_premises
+          fun_args = map (uncurry proofExp) i_premises
           fun_repr = polyThingRepr TIBoxed type_args fun_args
           fun = mkVarE noSourcePos fun_repr f_var
       in mkPolyCallE noSourcePos TIBoxed fun fun_ty_args fun_args
@@ -379,10 +378,10 @@ equalityTerm prd@(IsEqual t1 t2) =
   let f = mkVarE noSourcePos TIUncoercedVal (SF.coreBuiltin SF.The_unsafeMakeCoercion)
   in return $ mkPolyCallE noSourcePos TIUncoercedVal f [mkType t1, mkType t2] []
 
-coerceTerm :: Predicate -> Predicate -> TIExp -> PE TIExp
+coerceTerm :: Predicate -> Predicate -> SF.Var -> PE TIExp
 coerceTerm src_type result_type src =
   return $ mkCoerceE noSourcePos TIBoxed
-           (mkPredicate src_type) (mkPredicate result_type) src
+           (mkPredicate src_type) (mkPredicate result_type) (proofExp src_type src)
 
 magicTerm :: Predicate -> PE TIExp
 magicTerm result_type =
@@ -390,19 +389,21 @@ magicTerm result_type =
   in return $ mkPolyCallE noSourcePos TIBoxed f [mkPredicate result_type] []
 
 -- | Get the superclass dictionaries from a class dictionary
-getSuperclasses :: Class -> HMType -> TIExp -> PE [(Var, Predicate)]
-getSuperclasses cls ty dict
-  -- If there are no superclasses, don't generate any code
-  | clsIsAbstract cls || null (qConstraint $ clsSignature cls) =
-      return []
+getSuperclasses :: TyCon -> HMType -> SF.Var -> PE [(SF.Var, Predicate)]
+getSuperclasses cls_con ty dict = do
+  Just cls <- getTyConClass cls_con
 
-  | otherwise = do
+  -- If there are no superclasses, don't generate any code
+  if clsIsAbstract cls || null (qConstraint $ clsSignature cls)
+    then return []
+    else do
       -- Instantiate the class to get its superclass constraints
       InstanceType _ constraint c_methods <- instantiateClass cls ty
 
       -- Extract the class fields
+      let dict_exp = proofExp (IsInst cls_con ty) dict
       (mk_case, superclasses, _) <-
-        mkCaseOfDict noSourcePos cls ty constraint c_methods dict
+        mkCaseOfDict noSourcePos cls ty constraint c_methods dict_exp
       insertCode mk_case
       return $ zip superclasses constraint
 
@@ -424,7 +425,7 @@ assumePredicate' prd v = do
   insertEvidence prd v
 
   -- Add superclass proofs to environment
-  assumeSuperclasses prd $ proofExp v prd
+  assumeSuperclasses prd v
       
   let pattern = mkVarP v (mkPredicate prd)
   return (prd, pattern)
@@ -443,23 +444,13 @@ assumeProofBinding (prd, pattern@(TIVarP v _)) = do
   insertEvidence prd v
 
   -- Add superclass proofs to environment
-  assumeSuperclasses prd $ proofExp v prd
+  assumeSuperclasses prd v
 
 -- | Add the given class's superclass constraints to the environment
-assumeSuperclasses :: Predicate -> TIExp -> PE ()
+assumeSuperclasses :: Predicate -> SF.Var -> PE ()
 assumeSuperclasses (IsInst tycon ty) dict = do
-  Just cls <- getTyConClass tycon
-  superclasses <- superclassDerivation cls ty dict
+  superclasses <- superclassDerivation tycon ty dict
   mapM_ (uncurry assumeSuperclasses) superclasses
-  -- superclasses <- getSuperclasses cls ty dict
-
-  -- Add each superclass to the proof environment
-  -- Also add its superclasses, transitively
-  --mapM_ assume_superclass superclasses
-  --where
-  --  assume_superclass (sc_var, sc_prd) = do
-  --    assumePredicate' sc_prd sc_var
-  --    return ()
 
 assumeSuperclasses (IsEqual _ _) _ = return ()
 
@@ -490,6 +481,6 @@ satisfyDictPlaceholder ph =
     m_prf <- prove $ dictPPredicate ph
     case m_prf of
       Nothing -> return Nothing
-      Just (proof, residual) -> do
-        liftIO $ setDictP ph proof
+      Just (evidence, residual) -> do
+        liftIO $ setDictP ph evidence
         return $ Just residual

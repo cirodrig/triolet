@@ -91,9 +91,9 @@ class (NormalizeContext HMType m) => Derivation m d where
   instanceDerivation :: Predicate              -- ^ Derived predicate
                      -> Instance ClassInstance -- ^ Instance satisfying the predicate
                      -> [HMType]               -- ^ Class type arguments
-                     -> [d]                    -- ^ Class premises
+                     -> [(Predicate, d)]       -- ^ Class premises
                      -> [HMType]               -- ^ Instance type arguments
-                     -> [d]                    -- ^ Instance premises
+                     -> [(Predicate, d)]       -- ^ Instance premises
                      -> m d
   boxedReprDerivation :: Predicate -> m d
   equalityDerivation :: Predicate -> m d
@@ -102,7 +102,7 @@ class (NormalizeContext HMType m) => Derivation m d where
 
   -- | Derive predicates for all superclasses of the given class and add
   --   them to the environment.
-  superclassDerivation :: Class       -- ^ A class
+  superclassDerivation :: TyCon       -- ^ A class type constructor
                        -> HMType      -- ^ The class's member
                        -> d           -- ^ Derivation of class membership
                        -> m [Proof d] -- ^ Get derivations of all superclasses
@@ -171,9 +171,10 @@ instance Derivation Ctx () where
   coerceDerivation _ _ _ = return ()
   magicDerivation _ = return ()
 
-  superclassDerivation cls ty _ = do
+  superclassDerivation cls_con ty _ = do
     -- Create superclass derivations, consisting of one @()@ value
     -- for each element of the context
+    Just cls <- getTyConClass cls_con
     InstanceType _ cls_constraint _ <- instantiateClass cls ty
 
     -- Add superclasses to environment
@@ -208,8 +209,7 @@ reduceTypeFunction family [arg] = do
 superclassPredicates :: Derivation m d => Proof d -> m ()
 superclassPredicates (IsInst tycon ty, derivation) = do
   -- Derive superclasses
-  Just cls <- getTyConClass tycon
-  superclasses <- superclassDerivation cls ty derivation
+  superclasses <- superclassDerivation tycon ty derivation
 
   -- Recursively expand superclasses
   mapM_ superclassPredicates superclasses
@@ -355,7 +355,8 @@ instanceReduction pos cls_tycon ty ty_op ty_args
 
       -- Create an instance derivation
       d <- instanceDerivation pred inst
-           cls_ty_args cls_superclasses inst_ty_args inst_superclasses
+           cls_ty_args (zip cls_cst cls_superclasses)
+           inst_ty_args (zip inst_cst inst_superclasses)
 
       return $ Just (d, cls_cst' ++ inst_cst')
 

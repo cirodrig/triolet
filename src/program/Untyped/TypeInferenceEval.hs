@@ -25,6 +25,7 @@ import qualified Untyped.TIExp as U
 import Untyped.TIExp(TIType, TIConInst, TIDeConInst, TITyPat, TIPat, TIExp,
                     TIFun, TIDef, TIAlt, TIExport)
 import Untyped.TIMonad
+import Untyped.Proof
 import Globals
 
 evType :: TIType -> TE Type
@@ -71,7 +72,9 @@ evExp expression =
      U.PlaceholderTE ph ->
        evExp =<< evPlaceholder ph
      
-evPlaceholder (U.DictPlaceholder (U.DictP _ ref)) = readPlaceholderValue ref
+evPlaceholder (U.DictPlaceholder (U.DictP prd ref)) = do
+  v <- readPlaceholderValue ref
+  return $ proofExp prd v
 evPlaceholder (U.RecVarPlaceholder (U.RecVarP _ ref)) = readPlaceholderValue ref
 
 readPlaceholderValue ref = do

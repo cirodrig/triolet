@@ -128,7 +128,7 @@ data TIAlt =
 data Placeholder = DictPlaceholder DictP | RecVarPlaceholder RecVarP
 type Placeholders = [Placeholder]
 
-data DictP   = DictP Predicate (IORef (Maybe TIExp))
+data DictP   = DictP Predicate (IORef (Maybe SF.Var))
 data RecVarP = RecVarP Variable (IORef (Maybe TIExp))
 
 dictPPredicate (DictP p _) = p
@@ -136,7 +136,7 @@ dictPPredicate (DictP p _) = p
 isDictPSet :: DictP -> IO Bool
 isDictPSet (DictP _ r) = liftM isJust $ readIORef r
 
-setDictP :: DictP -> TIExp -> IO ()
+setDictP :: DictP -> SF.Var -> IO ()
 setDictP (DictP _ r) e = writeIORef r (Just e)
 
 isRecVarPSet :: RecVarP -> IO Bool
