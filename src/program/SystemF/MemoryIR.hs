@@ -5,6 +5,7 @@ with more detailed information about how data structures fit
 into memory.  Each variable binding gets extra information.
 -}
 
+{-# OPTIONS_GHC -no-auto #-}
 module SystemF.MemoryIR
        (Mem,
         Mentions(..),
