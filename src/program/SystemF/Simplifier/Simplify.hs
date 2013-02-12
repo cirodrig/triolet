@@ -524,7 +524,7 @@ interpretStreamInSimplifier :: ExpInfo -> ExpM -> [Type] -> [ExpM]
                             -> LR (Maybe ExpM)
 interpretStreamInSimplifier inf op ty_args args = LR $ \env ->
   let phase = lrPhase $ lrConstants env
-  in if phase > FinalSimplifierPhase
+  in if True {- Temporarily turned off -} -- phase > FinalSimplifierPhase
      then return $ Just Nothing
      else do
        x <- runTypeEvalM (interpret_stream phase) (lrIdSupply $ lrConstants env) (lrTypeEnv env)

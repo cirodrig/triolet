@@ -4,12 +4,14 @@
 #include "CxxWrapperGeneratorPrint.h"
 #include "Signature.h"
 
-typedef enum TypeKindTag { ValTypeTag , BareTypeTag } TypeKindTag;
+typedef enum TypeKindTag { ValTypeTag , BoxTypeTag, BareTypeTag } TypeKindTag;
 
 void printCxxFunction(FILE* fp, char* wrappedFunctionName, char* wrapperFunctionName, PyonSignature* pyonSignature);
 
 Function* createWrappedFunctionDeclaration(Pool* p, char* wrappedFunctionName, PyonSignature* pyonSignature);
 Function* createWrapperFunctionDefinition(Pool* p, char* wrapperFunctionName, PyonSignature* pyonSignature, Function* wrappedFunction);
+
+Declaration** createWrapperFunctionParameters(Pool *p, PyonSignature *pyonSignature);
 
 Statement* createUnwrappingStatement(Pool* p, const PyonType* pyonType, Declaration* wrappedVariable, Declaration* wrapperVariable);
 

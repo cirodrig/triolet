@@ -268,6 +268,7 @@ defineArray elt_type size_ix size elt_repr writer =
       varApp (coreBuiltin The_arr) [size_ix, elt_type] -}
 
 storedIntType = storedType intT
+boxedIntType = varApp (coreBuiltin The_Boxed) [storedIntType]
 
 shapeOfType :: Type -> Type
 shapeOfType t = varApp (coreBuiltin The_shape) [t]
@@ -373,37 +374,35 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (coreBuiltin The_modI, rwModInt)
             ]
 
-    exprs = [ (coreBuiltin The_count, count_expr)
-            ]
+    exprs = [(coreBuiltin The_count, count_expr)]
     
     -- The following expression represents the "count" stream:
     --
-    -- > viewStream @(Stored int)
+    -- > viewStream @(Boxed (Stored int))
     -- > (view_generate @list_dim ShapeDict_list_dim
-    -- >  @(Stored int) repr_int
+    -- >  @(Boxed (Stored int)) repr_int
     -- >   (mk_list_dim (nothingVal @int))
-    -- >   (copy @(Stored int) repr_int))
+    -- >   (\i. i))
     count_expr =
       mkConE defaultExpInfo view_stream
       [appExp
        (varAppE (coreBuiltin The_view_generate)
         [VarT $ coreBuiltin The_list_dim]
         [mkVarE (coreBuiltin The_ShapeDict_list_dim)])
-       [storedIntType]
+       [boxedIntType]
        [mkVarE (coreBuiltin The_repr_int), 
         return $ conE defaultExpInfo mk_list_dim [conE defaultExpInfo nothing_val []],
-        varAppE (coreBuiltin The_copy) [storedIntType]
-        [mkVarE (coreBuiltin The_repr_int)]]]
+        lamE $ mkFun [] (\ [] -> return ([boxedIntType], boxedIntType)) (\ [] [x] -> mkVarE x)]]
       where
         view_stream =
-          VarCon (coreBuiltin The_viewStream) [storedIntType] []
+          VarCon (coreBuiltin The_viewStream) [boxedIntType] []
         mk_list_dim =
           VarCon (coreBuiltin The_mk_list_dim) [] []
         nothing_val =
           VarCon (coreBuiltin The_nothingVal) [intT] []
         mk_view =
           VarCon (coreBuiltin The_mk_view)
-          [VarT $ coreBuiltin The_list_dim, storedIntType] []
+          [VarT $ coreBuiltin The_list_dim, boxedIntType] []
 
     int0_expr = return $ litE' $ IntL 0 intT
     int1_expr = return $ litE' $ IntL 1 intT

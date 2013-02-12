@@ -118,6 +118,20 @@ tupleReprCon n | n < 0 = internalError "tupleReprCon"
            , coreBuiltin The_repr_Tuple4
            ]
 
+-- | Fully boxed wrappers around representation dictionaries for use by
+--   the frontend
+feTupleReprCon :: Int -> Var
+feTupleReprCon n | n < 0 = internalError "feTupleReprCon"
+                   | n >= 5 = internalError "feTupleReprCon: Unsupported size"
+                   | otherwise = cons !! n
+  where
+    cons = [ coreBuiltin The_repr_Tuple0 -- Does not need a wrapper
+           , coreBuiltin The_frontend_repr_Tuple1
+           , coreBuiltin The_frontend_repr_Tuple2
+           , coreBuiltin The_frontend_repr_Tuple3
+           , coreBuiltin The_frontend_repr_Tuple4
+           ]
+
 -------------------------------------------------------------------------------
 -- Initializing the builtins
 

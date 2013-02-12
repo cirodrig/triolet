@@ -235,11 +235,9 @@ printDerivedDeclaration(FILE* fp, Derivation* derivation) {
         printDeclaration(fp, derivation->call.parameterList[index]);
         if (index < derivation->call.parameterCount-1) {
           fputs(", ", fp);
-        } else {
-          fputs(")", fp);
         }
       }
-      break;
+      fputs(")", fp);
     default: ERR("invalid Derivation kind");
   }
 }

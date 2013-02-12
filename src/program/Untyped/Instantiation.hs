@@ -49,8 +49,9 @@ polyThingRepr repr inst_types placeholders =
      TIBoxed -> TIBoxed
      TIUncoercedVal -> TIUncoercedVal
 
-     -- If it's monomorphic, it has the same representation
-     TIRepr _ | null inst_types && null placeholders -> repr
+     -- If it's monomorphic, it has the same representation.
+     TIInferredRepr _ | null inst_types && null placeholders -> repr
+     TICoreRepr _ _ _ | null inst_types && null placeholders -> repr
 
      _ -> internalError "polyThingRepr: Unhandled case"
 
@@ -198,7 +199,7 @@ instantiateDataCon pos v con = do
   let mk_expr fields =
         let Just sf_con = varSystemFVariable v
             sf_types = map mkType inst_types
-        in return $ mkConE pos repr sf_con sf_types [] dicts fields
+        in return $ mkConE pos repr sf_con sf_types [] (map TIInferredRepr dicts) fields
 
   exp <- mkLambda pos field_tys (data_type tc inst_types) mk_expr
   return (constructor_type tc inst_types field_tys, exp)
@@ -237,7 +238,7 @@ instantiateMethod pos cls_tycon method_index = do
   let inst_ty_args = map mkType m_inst_types
       inst_exp = mkPolyCallE pos repr inst_var inst_ty_args m_inst_dicts
 
-  return (ty, mk_case repr inst_exp)
+  return (ty, mk_case inst_exp)
 
 -- | Instantiate a class's signature to the given type
 instantiateClass :: NormalizeContext HMType m =>
@@ -301,4 +302,4 @@ requireRepr ty = do
   where
     is_boxed = return $ TIBoxed
     not_boxed = let inst = IsInst (builtinTyCon TheTC_Repr) ty
-                in fmap TIRepr $ requirePredicate inst
+                in fmap TIInferredRepr $ requirePredicate inst

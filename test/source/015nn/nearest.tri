@@ -14,7 +14,8 @@ def minIndex(xs):
 def nearestNeighbors(refs, inputs):
     return [minIndex(magnitude2(inp - ref) for ref in refs) for inp in inputs]
 
-export ccall "nearest" nearestNeighbors : list(float) * list(float) -> list(int)
+export cplusplus "nearest" nearestNeighbors : \
+       list(float) * list(float) -> list(int)
 
 
 

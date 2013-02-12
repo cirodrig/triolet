@@ -6,5 +6,5 @@ def fib(n : int) -> int:
 def fibs(count : int) -> list(int):
 	return [fib(n) for n in range(count)]
 
-export ccall fibs : int -> list(int)
+export cplusplus fibs : int -> list(int)
 

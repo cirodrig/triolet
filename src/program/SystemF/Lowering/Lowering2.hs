@@ -499,7 +499,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
 
     define_c_fun tenv fun = do
       -- Create export signature
-      let c_export_sig = getCExportSig tenv fun_type
+      c_export_sig <- liftTypeEvalM $ getCExportSig fun_type
 
       -- Generate marshalling code
       wrapped_fun <- createCMarshalingFunction c_export_sig fun
@@ -511,7 +511,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
 
     define_cxx_fun tenv fun = do
       -- Create export signature
-      let cxx_export_sig = getCxxExportSig exported_name tenv fun_type
+      cxx_export_sig <- liftTypeEvalM $ getCxxExportSig exported_name fun_type
 
       -- Generate marshalling code
       wrapped_fun <- createCxxMarshalingFunction cxx_export_sig fun

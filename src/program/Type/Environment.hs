@@ -66,6 +66,7 @@ module Type.Environment
        
         -- * New conversion routines
         isAdapterCon,
+        forgetTypeFunctions,
         specializeTypeEnv
        )
 where
@@ -117,8 +118,11 @@ instance BoxingMode UnboxedMode where
   builtinTypeFunctionForEval _ = builtinMemTypeFunction
 
 -- | The specification type environment, with initializer types.
---   This is going away eventually.
 data SpecMode
+
+instance BoxingMode SpecMode where
+  -- This should never be called
+  builtinTypeFunctionForEval _ = builtinSpecTypeFunction
 
 -- | A monad that keeps track of the current type environment
 class (Monad m, Applicative m, BoxingMode (EvalBoxingMode m)) =>
@@ -377,6 +381,7 @@ applyTypeFunction f ts = do
 data BuiltinTypeFunction =
   BuiltinTypeFunction
   { builtinPureTypeFunction :: !TypeFunction
+  , builtinSpecTypeFunction :: !TypeFunction
   , builtinMemTypeFunction :: !TypeFunction
   }
 
@@ -683,15 +688,24 @@ initializerType t = typeApp outPtrT [t] `FunT` storeT
 
 -------------------------------------------------------------------------------
 
+forgetTypeFunctions :: TypeEnvBase b -> TypeEnvBase b
+forgetTypeFunctions (TypeEnv m) = TypeEnv $ IntMap.map forget_type_function m
+  where
+    forget_type_function (TyFunTypeAssignment k _) = VarTypeAssignment k False
+    forget_type_function ass = ass
+
 -- | Specialize a specification type environment for a particular use case.
 specializeTypeEnv :: (BaseKind -> Maybe BaseKind)
                      -- ^ Transformation on base kinds
                   -> (Kind -> Maybe Kind)
                      -- ^ Transformation on kinds
                   -> (Type -> Maybe Type)
-                     -- ^ Transformation on types
+                     -- ^ Transformation on types in data constructors
+                  -> (Type -> Maybe Type)
+                     -- ^ Transformation on types in type bindings
                   -> TypeEnvBase b1 -> TypeEnvBase b2
-specializeTypeEnv basekind_f kind_f type_f (TypeEnv m) = new_type_env
+specializeTypeEnv basekind_f kind_f type_f tybind_f (TypeEnv m) =
+  new_type_env
   where
     -- Data type constructors are looked up in the new type environment
     new_type_env = TypeEnv (IntMap.mapMaybe type_assignment m)
@@ -700,7 +714,7 @@ specializeTypeEnv basekind_f kind_f type_f (TypeEnv m) = new_type_env
       let t' = case getLevel t
                of SortLevel -> Just t
                   KindLevel -> kind_f t
-                  TypeLevel -> type_f t
+                  TypeLevel -> tybind_f t
                   ObjectLevel -> internalError "specializeTypeEnv"
       in VarTypeAssignment <$> t' <*> pure conlike
 

@@ -763,10 +763,10 @@ referenceLayout layout =
 polymorphicLayout :: Type -> MemLayout
 polymorphicLayout ty =
   memBytesLayout $ lookupReprDict ty $ \dict -> do
-    size <- selectPassConvSize dict
-    align <- selectPassConvAlignment dict
+    sa <- selectPassConvSizeAlign dict
+    [size, align] <- unpackRecord sizeAlignRecord sa
     is_pointerless <- selectPassConvIsPointerless dict
-    return (size, align, is_pointerless)
+    return (LL.VarV size, LL.VarV align, is_pointerless)
 
 -- | Get an array layout, given the array size and element layout.
 --   The array size generates code to get the number of elements, in the

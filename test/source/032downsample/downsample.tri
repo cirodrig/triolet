@@ -12,4 +12,4 @@ def downsample(mat):
 			          displaceView(mat[0:h:2, 1:w:2], (0, -1)),
                                   displaceView(mat[1:h:2, 1:w:2], (-1, -1)))]
 
-export ccall downsample : array2(int) -> array2(int)
+export cplusplus downsample : array2(int) -> array2(int)

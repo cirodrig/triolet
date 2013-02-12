@@ -50,7 +50,7 @@ mkType ty = DelayedType $ convertHMType ty
 
 -- | Make the type of an uncurried function from @domain@ to @range@.
 --
--- Depending on the calling convention indicated by the range, a stream 
+-- Depending on the calling convention indicated by the range, a stream
 -- function or action function is generated.
 functionType :: [SF.Type]      -- ^ domain
              -> SF.Type        -- ^ range
@@ -145,11 +145,8 @@ mkTupleP fs = TITupleP fs
 mkVarE :: SourcePos -> TIRepr -> SF.Var -> TIExp
 mkVarE pos repr v = VarTE (tiInfo pos repr) v
 
-mkReprE :: TIRepr -> TIExp
-mkReprE = undefined
-
 mkConE :: SourcePos -> TIRepr -> SF.Var -> [TIType] -> [TIType]
-       -> [TIExp] -> [TIExp] -> TIExp
+       -> [TIRepr] -> [TIExp] -> TIExp
 mkConE pos repr c ty_args ex_types size_params fields =
   let con = TIConInst c ty_args ex_types
   in ConTE (tiInfo pos repr) con size_params fields
@@ -158,7 +155,7 @@ mkTupleE :: SourcePos -> TIRepr -> [TIType] -> [TIRepr] -> [TIExp] -> TIExp
 mkTupleE pos repr elt_types size_params fields =
   let n_elts = length fields
       con = TIConInst (SF.tupleCon n_elts) elt_types []
-  in ConTE (tiInfo pos repr) con (map mkReprE size_params) fields
+  in ConTE (tiInfo pos repr) con size_params fields
 
 -- | Create the expression
 --   list @n @t (fiInt @n n) (stuckBox @(arr n t) (array @t e1 e2 ...))
@@ -175,23 +172,21 @@ mkListE pos elt_type elt_repr elts =
         return $ SF.varApp SF.arrV [SF.IntT $ fromIntegral n, sf_elt_type]
 
       -- Indexed integer 
-      fiint_repr = mkBuiltinCallE pos TIBoxed SF.The_repr_FIInt 
-                   [size] []
-      integer = mkConE pos (TIRepr fiint_repr) fiint_con [size] [] []
+      fiint_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_FIInt) [size] []
+      integer = mkConE pos fiint_repr fiint_con [size] [] []
                 [mkIntLitE pos n]
 
       -- Array expression
-      array_repr = mkBuiltinCallE pos TIBoxed SF.The_repr_arr 
-                   [size, elt_type] [integer, mkReprE elt_repr]
+      array_repr = TICoreRepr (SF.coreBuiltin SF.The_frontend_repr_arr) 
+                   [size, elt_type] [Left (mkIntLitE pos n), Right elt_repr]
       array = ArrayTE (tiInfo pos array_repr) elt_type elts
       array_box = mkConE pos TIBoxed
                   (SF.coreBuiltin SF.The_stuckBox)
                   [array_type] [] [array_repr] [array]
 
       -- List object
-      list_repr = mkBuiltinCallE pos TIBoxed SF.The_repr_list
-                  [elt_type] [mkReprE elt_repr]
-  in mkConE pos (TIRepr list_repr)
+      list_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_list) [elt_type] []
+  in mkConE pos list_repr
      (SF.coreBuiltin SF.The_make_list) [elt_type] [size]
      [] [integer, array_box]
   where
@@ -199,14 +194,12 @@ mkListE pos elt_type elt_repr elts =
     fiint_con = SF.coreBuiltin SF.The_fiInt
 
 mkIntLitE pos n =
-  let repr = mkVarE noSourcePos TIBoxed
-             (SF.coreBuiltin SF.The_repr_int)
+  let repr = TICoreRepr (SF.coreBuiltin SF.The_repr_int) [] []
       sf_int_type = SF.intT
   in LitTE (tiInfo pos repr) $ SF.IntL (fromIntegral n) sf_int_type
 
 mkFloatLitE pos n =
-  let repr = mkVarE noSourcePos TIBoxed
-             (SF.coreBuiltin SF.The_repr_float)
+  let repr = TICoreRepr (SF.coreBuiltin SF.The_repr_float) [] []
       sf_float_type = SF.floatT
   in LitTE (tiInfo pos repr) $ SF.FloatL n sf_float_type
 
@@ -222,10 +215,8 @@ mkLitE pos l =
     sf_constructor repr c =
       mkConE pos repr (SF.coreBuiltin c) [] [] [] []
 
-    b_repr = TIRepr $ mkVarE noSourcePos TIBoxed
-             (SF.coreBuiltin SF.The_repr_bool)
-    n_repr = TIRepr $ mkVarE noSourcePos TIBoxed
-             (SF.coreBuiltin SF.The_repr_NoneType)
+    b_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_bool) [] []
+    n_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_NoneType) [] []
 
 mkBuiltinCallE :: SourcePos -> TIRepr -> SF.BuiltinThing
                -> [TIType] -> [TIExp] -> TIExp
@@ -247,46 +238,46 @@ mkCoerceE :: SourcePos -> TIRepr -> TIType -> TIType -> TIExp -> TIExp
 mkCoerceE pos repr from_ty to_ty e =
   CoerceTE (tiInfo pos repr) from_ty to_ty e
 
-mkIfE :: SourcePos -> TIRepr -> TIExp -> TIExp -> TIExp -> TIExp
-mkIfE pos repr cond tr fa =
+mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
+mkIfE pos cond tr fa =
   let true_decon =
         TIDeConInst (SF.coreBuiltin SF.The_True) [] []
       false_decon =
         TIDeConInst (SF.coreBuiltin SF.The_False) [] []
       true_alt = TIAlt true_decon [] tr
       false_alt = TIAlt false_decon [] fa
-  in CaseTE (tiInfo pos repr) cond [] [true_alt, false_alt]
+  in CaseTE pos cond [] [true_alt, false_alt]
 
 -- | Create a call of a polymorphic function with no constraint arguments.
 mkPolyCallE :: SourcePos -> TIRepr -> TIExp -> [TIType] -> [TIExp] -> TIExp
 mkPolyCallE _   _    oper []      []    = oper
 mkPolyCallE pos repr oper ty_args args = mkAppE pos repr oper ty_args args
 
-mkLetE :: SourcePos -> TIRepr -> TIPat -> TIExp -> TIExp -> TIExp
-mkLetE pos repr lhs rhs body = LetTE (tiInfo pos repr) lhs rhs body
+mkLetE :: SourcePos -> TIPat -> TIExp -> TIExp -> TIExp
+mkLetE pos lhs rhs body = LetTE pos lhs rhs body
 
 mkFunE :: SourcePos -> TIFun -> TIExp
 mkFunE pos fun = LamTE (tiInfo pos TIBoxed) fun
 
-mkLetrecE :: SourcePos -> TIRepr -> SF.DefGroup TIDef -> TIExp -> TIExp
-mkLetrecE pos repr defs body =
-  LetfunTE (tiInfo pos repr) defs body
+mkLetrecE :: SourcePos -> SF.DefGroup TIDef -> TIExp -> TIExp
+mkLetrecE pos defs body =
+  LetfunTE pos defs body
 
-mkCaseTE :: SourcePos -> TIRepr -> TIExp -> [TIRepr] -> [TIAlt] -> TIExp
-mkCaseTE pos repr scrutinee size_params alts =
-  CaseTE (tiInfo pos repr) scrutinee size_params alts
+mkCaseTE :: SourcePos -> TIExp -> [TIRepr] -> [TIAlt] -> TIExp
+mkCaseTE pos scrutinee size_params alts =
+  CaseTE pos scrutinee size_params alts
 
 mkTupleCaseE :: SourcePos -> TIExp -> [TIRepr] -> [TIPat] -> TIExp -> TIExp
 mkTupleCaseE pos scrutinee size_params patterns body =
   let pattern_types = [t | ~(TIVarP _ t) <- patterns]
       decon = TIDeConInst (SF.tupleCon $ length patterns) pattern_types []
-  in mkCaseTE pos unknownRepr scrutinee size_params
+  in mkCaseTE pos scrutinee size_params
      [TIAlt decon patterns body]
 
 -- | Create a case expression to deconstruct a class dictionary
 mkCaseOfDict :: (MonadIO m, Supplies m SF.VarID) =>
                 SourcePos -> Class -> HMType -> Constraint -> [ClassMethod]
-             -> TIExp -> m (TIRepr -> TIExp -> TIExp, [SF.Var], [SF.Var])
+             -> TIExp -> m (TIExp -> TIExp, [SF.Var], [SF.Var])
 mkCaseOfDict pos cls ty constraint methods dict 
   | clsIsAbstract cls =
       internalError "mkCaseOfDict: Cannot deconstruct an abstract class"
@@ -305,8 +296,8 @@ mkCaseOfDict pos cls ty constraint methods dict
       let method_patterns = zipWith TIVarP method_vars method_types
       let field_patterns = dict_patterns ++ method_patterns
 
-      let mk_expr repr body =
-            mkCaseTE pos repr dict []
+      let mk_expr body =
+            mkCaseTE pos dict []
             [TIAlt (TIDeConInst dict_con [ty_arg] []) field_patterns body]
 
       return (mk_expr, dict_vars, method_vars)

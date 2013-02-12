@@ -494,7 +494,6 @@ createCoreModule var_supply mod@(Module decls) = do
                  declGlobals decls
 
   -- Construct final expressions and type environments
-  let spec_env    = convertMemToSpec type_env
-      sf_env      = convertSpecToSF name_table spec_env
+  let (spec_env, sf_env) = convertFromMemTypeEnv name_table type_env
 
   return (sf_env, spec_env, mem_env, mem_module, name_table)

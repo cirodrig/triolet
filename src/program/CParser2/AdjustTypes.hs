@@ -1,8 +1,7 @@
 
 module CParser2.AdjustTypes
        (VariableNameTable,
-        convertMemToSpec,
-        convertSpecToSF)
+        convertFromMemTypeEnv)
 where
   
 import Control.Applicative
@@ -42,7 +41,7 @@ isStore v = v == storeV
 -- (This is true even though the type 'Init' does appear.)
 convertMemToSpec :: TypeEnvBase UnboxedMode -> TypeEnvBase SpecMode
 convertMemToSpec env =
-  insert_init_types $ specializeTypeEnv Just Just do_type env
+  insert_init_types $ specializeTypeEnv Just Just do_type do_type env
   where
     insert_init_types env =
       insertType initV kindT $
@@ -69,33 +68,37 @@ convertMemToSpec env =
 
 -------------------------------------------------------------------------------
 
-data SFInfo = SFInfo { sf_Init      :: !Var
-                     , sf_Stored    :: !Var
-                     , sf_Ref       :: !Var
-                     , sf_Boxed     :: !Var
-                     , sf_BoxedType :: !Var
-                     , sf_BareType  :: !Var
+data SFInfo = SFInfo { sf_Init   :: !Var
+                     , sf_Stored :: !Var
+                     , sf_Ref    :: !Var
+                     , sf_Boxed  :: !Var
+                     , sf_AsBox  :: !Var
+                     , sf_AsBare :: !Var
                      }
 
 getSFInfo :: VariableNameTable -> SFInfo
 getSFInfo tbl =
-  let v_Init      = initConV
-      v_Stored    = lookupVariableByName tbl "Stored"
-      v_Ref       = lookupVariableByName tbl "Ref"
-      v_Boxed     = lookupVariableByName tbl "Boxed"
-      v_BoxedType = lookupVariableByName tbl "AsBox"
-      v_BareType  = lookupVariableByName tbl "AsBare"
-  in SFInfo v_Init v_Stored v_Ref v_Boxed v_BoxedType v_BareType
+  let v_Init   = initConV
+      v_Stored = lookupVariableByName tbl "Stored"
+      v_Ref    = lookupVariableByName tbl "Ref"
+      v_Boxed  = lookupVariableByName tbl "Boxed"
+      v_AsBox  = lookupVariableByName tbl "AsBox"
+      v_AsBare = lookupVariableByName tbl "AsBare"
+  in SFInfo v_Init v_Stored v_Ref v_Boxed v_AsBox v_AsBare
+
+isBoxedAdapterCon1 :: SFInfo -> Var -> Bool
+isBoxedAdapterCon1 env v =
+  v == sf_Boxed env || v == sf_AsBox env
 
 isAdapterCon1 :: SFInfo -> Var -> Bool
 isAdapterCon1 env v =
   v == sf_Init env || v == sf_Stored env || v == sf_Ref env || 
-  v == sf_Boxed env || v == sf_BoxedType env || v == sf_BareType env
+  v == sf_Boxed env || v == sf_AsBox env || v == sf_AsBare env
 
 convertSpecToSF :: VariableNameTable
                 -> TypeEnvBase SpecMode -> TypeEnvBase FullyBoxedMode
 convertSpecToSF tbl env =
-  specializeTypeEnv do_base_kind do_kind do_type env
+  specializeTypeEnv do_base_kind do_kind do_type do_bound_type env
   where
     ctx = getSFInfo tbl
 
@@ -105,31 +108,78 @@ convertSpecToSF tbl env =
     do_base_kind IntIndexK = Just IntIndexK
     do_base_kind _         = Nothing
 
-    do_kind (FunT t1 t2) = FunT <$> do_kind t1 <*> do_kind t2
-    do_kind (VarT kind_var)
-      | kind_var == boxV      = Just boxT
-      | kind_var == bareV     = Just boxT
-      | kind_var == valV      = Just boxT
-      | kind_var == intindexV = Just intindexT
-      | otherwise             = Nothing
-    do_kind _ = internalError "convertSpecToSF: Unexpected kind"
+    do_kind = specToSFKind
+    do_type ty = specToSFType ctx False ty
+    do_bound_type ty = specToSFType ctx True ty
 
-    do_type ty =
-      case fromVarApp ty
-      of Just (con, [arg])
-          | isAdapterCon1 ctx con -> do_type arg
-         _ -> case ty
-              of VarT v 
-                   | isAdapterCon1 ctx v -> Nothing
-                   | otherwise -> pure ty
-                 AppT op arg -> AppT <$> do_type op <*> do_type arg
-                 LamT b body -> LamT <$> do_binder b <*> do_type body
-                 FunT arg ret -> FunT <$> do_type arg <*> do_type ret
-                 AllT b body -> AllT <$> do_binder b <*> do_type body
-                 AnyT k -> AnyT <$> do_kind k
-                 IntT n -> pure ty
-                 UTupleT _ -> Nothing
-                 CoT k -> CoT <$> do_kind k
+specToSFKind  (FunT t1 t2) = FunT <$> specToSFKind t1 <*> specToSFKind t2
+specToSFKind (VarT kind_var)
+  | kind_var == boxV      = Just boxT
+  | kind_var == bareV     = Just boxT
+  | kind_var == valV      = Just boxT
+  | kind_var == intindexV = Just intindexT
+  | otherwise             = Nothing
+specToSFKind _ = internalError "specToSFKind: Unexpected kind"
 
-    do_binder (v ::: k) = (v :::) <$> do_kind k
+-- | To be usable by the frontend, a binder appearing inside a type
+--   must bind a boxed type variable
+specToSFBinder (v ::: k)
+  | is_boxed_kind k = (v :::) <$> specToSFKind k
+  | otherwise       = Nothing
+  where
+    is_boxed_kind (VarT v) = v == boxV
+    is_boxed_kind (FunT k1 k2) = is_boxed_kind k1 && is_boxed_kind k2
+    is_boxed_kind _ = False
 
+-- | Convert a spec type to a fully boxed type.  Coercions are removed from
+--   the type.
+--   If 'expect_boxed', then the only permitted coercions at the head of
+--   the type are coercions to boxed type.
+--   Otherwise, any coercion is permitted.
+--
+--   It would really be helpful to check types when 'expect_boxed' is true,
+--   since the frontend relies on assumptions about boxed types to generate
+--   valid code.  Currently types aren't checked.
+specToSFType :: SFInfo -> Bool -> Type -> Maybe Type
+specToSFType ctx expect_boxed ty =
+  case fromVarApp ty
+  of Just (con, [arg])
+       | if expect_boxed
+         then isBoxedAdapterCon1 ctx con
+         else isAdapterCon1 ctx con ->
+           -- Remove any additional coercions appearing under this one
+           do_type arg
+     _ -> case ty
+          of VarT v
+               | isAdapterCon1 ctx v -> Nothing
+               | otherwise -> pure ty
+             AppT op arg -> AppT <$> do_type op <*> do_type arg
+             LamT b body -> not_boxed $ LamT <$> specToSFBinder b <*> do_type body
+             FunT arg ret -> FunT <$> boxed_type arg <*> boxed_type ret
+             AllT b body -> AllT <$> specToSFBinder b <*> boxed_type body
+             AnyT k -> AnyT <$> specToSFKind k
+             IntT n -> not_boxed $ pure ty
+             UTupleT _ -> Nothing
+             CoT k  -> not_boxed $ CoT <$> specToSFKind k
+  where
+    -- Return something that is not a boxed type.
+    -- Return 'Nothing' if a boxed type was expected
+    not_boxed x = if expect_boxed then Nothing else x
+    
+    do_type ty = specToSFType ctx False ty
+    boxed_type ty = specToSFType ctx True ty
+
+-------------------------------------------------------------------------------
+-- Generate Spec and fully boxed types
+
+convertFromMemTypeEnv :: VariableNameTable
+                      -> TypeEnvBase UnboxedMode
+                      -> (TypeEnvBase SpecMode, TypeEnvBase FullyBoxedMode)
+convertFromMemTypeEnv tbl env =
+  let pre_spec_env = convertMemToSpec env
+      sf_env = convertSpecToSF tbl pre_spec_env
+
+      -- Since we can't evaluate type functions in Spec, treat them as type
+      -- constructors
+      spec_env = {-forgetTypeFunctions-} pre_spec_env
+  in (spec_env, sf_env)

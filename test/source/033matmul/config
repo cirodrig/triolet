@@ -1,8 +1,8 @@
 TestConfig {
   synopsis	 = "Matrix multiplication",
-  trioletSources	 = ["matmul.pyon"],
+  trioletSources	 = ["matmul.tri"],
   lltrioletSources  = [],
-  cSources	 = ["main.c"],
-  cxxSources	 = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "OK"
 }

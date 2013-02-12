@@ -32,7 +32,7 @@ import qualified SystemF.TypecheckMem
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.Rename as SystemF
-import qualified SystemF.ReprInference as SystemF
+import qualified SystemF.ReprInference2 as SystemF
 import qualified SystemF.Floating2 as SystemF
 import qualified SystemF.Simplifier.Rewrite as SystemF
 import qualified SystemF.Simplifier.Simplify as SystemF
@@ -199,9 +199,14 @@ compilePyonToPyonMem compile_flags path text = do
 
   _ <- SystemF.TypecheckSF.typeCheckModule sf_mod
 
-  -- Convert to explicit memory representation
-  repr_mod <- SystemF.representationInference sf_mod
+  -- Convert to explicit memory representation  
+  repr_mod <- SystemF.insertCoercions sf_mod
+  --putStrLn ""
+  --putStrLn "New Core IR generation"
+  --print $ pprMemModule repr_mod
   
+  -- repr_mod <- SystemF.representationInference sf_mod
+
   -- Add predefined functions to the module
   repr_mod <- SystemF.insertGlobalSystemFFunctions repr_mod
 

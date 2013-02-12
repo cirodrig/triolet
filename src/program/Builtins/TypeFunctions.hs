@@ -98,20 +98,28 @@ builtinTypeFunctions :: Map.Map String Var
 builtinTypeFunctions name_environment =
   let bi = createBuiltinsArray name_environment
   in Map.fromList
-     [ (name, BuiltinTypeFunction (pure_f bi) (mem_f bi))
-     | (name, pure_f, mem_f) <-
-          [ ("minus_i", minusTF, minusTF)
-          , ("plus_i", plusTF, plusTF)
-          , ("min_i", minTF, minTF)
-          , ("max_i", maxTF, maxTF)
-          , ("shape", shapePureTF, shapeMemTF)
-          , ("cartesianDomain", cartPureTF, cartMemTF)
-          , ("index", indexPureTF, indexMemTF)
-          , ("slice", slicePureTF, sliceMemTF)
-          , ("Stream", streamPureTF, streamMemTF)
-          , ("AsBox", boxedPureTF, boxedMemTF)
-          , ("AsBare", barePureTF, bareMemTF)
+     [ (name, BuiltinTypeFunction (pure_f bi) (spec_f bi) (mem_f bi))
+     | (name, pure_f, spec_f, mem_f) <-
+          [ ("minus_i", minusTF, minusTF, minusTF)
+          , ("plus_i", plusTF, minusTF, plusTF)
+          , ("min_i", minTF, minusTF, minTF)
+          , ("max_i", maxTF, minusTF, maxTF)
+          , ("shape", shapePureTF, idTF The_shape 1, shapeMemTF)
+          , ("cartesianDomain", cartPureTF, idTF The_cartesianDomain 1, cartMemTF)
+          , ("index", indexPureTF, idTF The_index 1, indexMemTF)
+          , ("slice", slicePureTF, idTF The_slice 1, sliceMemTF)
+          , ("Stream", streamPureTF, idTF The_Stream 1, streamMemTF)
+
+            -- Use the same function in mem and spec
+          , ("AsBox", boxedPureTF, boxedMemTF, boxedMemTF)
+          , ("AsBare", barePureTF, bareMemTF, bareMemTF)
           ]]
+
+-- | A type function that doesn't get reduced at all
+idTF :: BuiltinThing -> Int -> Array Int Var -> TypeFunction
+idTF get_con arity bi =
+  let con = getBuiltin bi get_con
+  in con `seq` typeFunction arity $ \args -> return $ varApp con args
 
 -- | The integers extended with @+infinity@ and @-infinity@
 data ExtInt = Fin Integer | NegInf | PosInf deriving(Eq)
@@ -503,6 +511,7 @@ boxedPureTF bi =
   typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'AsBox'")
 
 -- | Compute the boxed representation corresponding to a bare type
+--   This is used for both spec and mem types.
 boxedMemTF bi = typeFunction 1 compute_boxed
   where
     compute_boxed :: forall m. EvalMonad m => [Type] -> m Type
@@ -541,7 +550,8 @@ boxedMemTF bi = typeFunction 1 compute_boxed
 barePureTF bi =
   typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'BareType'")
 
--- | Compute the bare representation corresponding to a boxed type
+-- | Compute the bare representation corresponding to a boxed type.
+--   This is used for both spec and mem types.
 bareMemTF bi = typeFunction 1 compute_bare
   where
     compute_bare :: forall m. EvalMonad m => [Type] -> m Type

@@ -10,8 +10,11 @@ module Type.Eval
         typeOfApp,
 
         -- * Deconstructing types
-        deconForallType,
+        deconVarAppType,
         deconFunType,
+        deconAllType,
+        deconUniversalType,
+        deconFunctionType,
         deconForallFunType,
 
         -- * Other functions
@@ -196,34 +199,62 @@ typeOfApp pos arg_index op_type arg_type = do
         else throwTypeError $ argTypeMismatch pos arg_index dom arg_type
     _ -> throwTypeError $ badApplication pos whnf_op_type arg_type
 
--- | Given a type of the form @forall a b ... z. t@, extract all @forall@
---   bindings and the rest of the type.
-deconForallType :: BoxingMode b => Type -> TypeEvalM b ([Binder], Type)
-deconForallType t = examine id t
-  where 
-    examine hd t = do
-      t' <- reduceToWhnf t
-      case t' of
-        AllT b t'' -> assumeBinder b $ examine (hd . (b:)) t''
-        _ -> return (hd [], t')
+-- | Given a type of the form @c t1 ... tN@, return @c@ and @t1 ... tN@.
+deconVarAppType :: BoxingMode b => Type -> TypeEvalM b (Maybe (Var, [Type]))
+{-# INLINE deconVarAppType #-}
+deconVarAppType t = do
+  t' <- reduceToWhnf t
+  case fromTypeApp t' of
+    (VarT op, args) -> return $ Just (op, args)
+    _ -> return Nothing
+
+-- | Given a type of the form @t1 -> t2@, return @t1@ and @t2@.
+--
+--   Returns a 'Right' value on success, 'Left' on failure.  The 'Left'
+--   value is 't' after being reduced to WHNF.
+deconFunType :: BoxingMode b => Type -> TypeEvalM b (Either Type (Type, Type))
+{-# INLINE deconFunType #-}
+deconFunType t = do
+  t' <- reduceToWhnf t
+  case t' of
+    FunT d r -> return $ Right (d, r)
+    _ -> return $ Left t'
+
+-- | Given a type of the form @forall a. t@, return @a@ and @t@.
+deconAllType :: BoxingMode b => Type -> TypeEvalM b (Either Type (Binder, Type))
+{-# INLINE deconAllType #-}
+deconAllType t = do
+  t' <- reduceToWhnf t
+  case t' of
+    AllT b r -> return $ Right (b, r)
+    _ -> return $ Left t'
 
 -- | Given a type of the form @t1 -> ... -> tN@, get the domain and range
 --   types.
-deconFunType :: BoxingMode b => Type -> TypeEvalM b ([Type], Type)
-deconFunType t = examine id t
+deconFunctionType :: BoxingMode b => Type -> TypeEvalM b ([Type], Type)
+deconFunctionType t = examine id t
   where 
-    examine hd t = do
-      t' <- reduceToWhnf t
-      case t' of
-        d `FunT` r -> examine (hd . (d:)) r
-        _ -> return (hd [], t')
+    examine hd t = deconFunType t >>= continue
+      where
+        continue (Right (d, r)) = examine (hd . (d:)) r
+        continue (Left t') = return (hd [], t')
+
+-- | Given a type of the form @forall a ... z. t@, get the binders and range
+--   type.
+deconUniversalType :: BoxingMode b => Type -> TypeEvalM b ([Binder], Type)
+deconUniversalType t = examine id t
+  where 
+    examine hd t = deconAllType t >>= continue
+      where
+        continue (Right (b, r)) = assumeBinder b $ examine (hd . (b:)) r
+        continue (Left t') = return (hd [], t')
 
 -- | Deconstruct a universally quantified function type.
 deconForallFunType :: BoxingMode b =>
                       Type -> TypeEvalM b ([Binder], [Type], Type)
 deconForallFunType t = do
-  (binders, fntype) <- deconForallType t
-  (domain, range) <- assumeBinders binders $ deconFunType fntype
+  (binders, fntype) <- deconUniversalType t
+  (domain, range) <- assumeBinders binders $ deconFunctionType fntype
   return (binders, domain, range)
 
 -- | Create an unboxed tuple type constructor that can hold 

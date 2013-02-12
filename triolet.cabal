@@ -115,13 +115,7 @@ Executable triolet
     Parser.GenUntyped2
     Untyped.Builtins2
     Untyped.BuiltinsTH2
---    Untyped.Builtins
---    Untyped.BuiltinsTH
---    Untyped.InitializeBuiltins
     Untyped.Classes
---    Untyped.Data
---    Untyped.GenSystemF
---    Untyped.HMType
     Untyped.DepAnalysis
     Untyped.InitializeBuiltins2
     Untyped.Kind
@@ -134,7 +128,6 @@ Executable triolet
     Untyped.Type
     Untyped.TypeInference2
     Untyped.TypeUnif
---    Untyped.TypeAssignment
     Untyped.TypeInferenceEval
     Untyped.Unif
     Untyped.Unification
@@ -168,7 +161,7 @@ Executable triolet
     SystemF.PartialEval
     SystemF.Print
     SystemF.PrintMemoryIR
-    SystemF.ReprInference
+    SystemF.ReprInference2
     SystemF.Rename
     SystemF.ReprDict
     SystemF.Simplifier.AbsValue

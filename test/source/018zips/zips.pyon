@@ -5,6 +5,6 @@ def zips3(xs, ys, zs):
 def zips4(xs, ys, zs, ws) -> list(int):
     return [(x + y) // (z - w) for (x, y, z, w) in zip4(xs, ys, zs, ws)]
 
-export ccall zips3 : list(int) * list(int) * list(int) -> list(int)
-export ccall zips4 : list(int) * list(int) * list(int) * list(int) -> list(int)
+export cplusplus zips3 : list(int) * list(int) * list(int) -> list(int)
+export cplusplus zips4 : list(int) * list(int) * list(int) * list(int) -> list(int)
 

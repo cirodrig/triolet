@@ -8,9 +8,10 @@ module SystemF.Lowering.Marshaling(createCMarshalingFunction,
                                    getCxxExportSig)
 where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
-import Data.Maybe
+import Debug.Trace
 
 import Common.Error
 import Builtins.Builtins
@@ -19,8 +20,6 @@ import qualified LowLevel.Syntax as LL
 import qualified LowLevel.Builtins as LL
 import LowLevel.Build
 import LowLevel.Records
-import SystemF.Syntax
-import SystemF.MemoryIR
 import SystemF.Lowering.LowerMonad
 import Type.Environment
 import Type.Eval
@@ -227,31 +226,10 @@ data ReturnMarshaler =
 marshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 marshalCReturn ty =
   case ty
-  of ListET _ _ -> return_new_reference (LL.RecordType listRecord)
-     ArrayET 2 False _ -> return_new_reference (LL.RecordType matrixRecord)
-     TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
+  of TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passReturnWithType (LL.PrimType LL.trioletBoolType)
-  where
-    complex_float_type = complexRecord (LL.PrimField LL.trioletFloatType)
-
-    -- Allocate and return a new object.  The allocated object is passed
-    -- as a parameter to the function.
-    return_new_reference t = do
-      v <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
-      
-      let setup mk_real_call = do
-            -- Allocate the return value
-            allocateHeapMemAs (nativeWordV $ LL.sizeOf t) (boolV $ LL.pointerlessness t) v
-            
-            -- Call the function, which returns nothing
-            emitAtom0 =<< mk_real_call
-
-      return $ ReturnMarshaler { rmInputs = []
-                               , rmCode = setup
-                               , rmOutput = [LL.VarV v] 
-                               , rmReturns = [v]}
 
 -- | Marshal a return value to C++ code.
 --
@@ -266,49 +244,17 @@ marshalCxxReturn ty =
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passReturnWithType (LL.PrimType LL.trioletBoolType)
-     ListET _ _ -> passReturnParameter
-     ArrayET _ _ _ -> passReturnParameter
-     TupleET _ -> passReturnParameter
+     ListET _ _ -> passReturnBoxed
+     ArrayET _ _ _ -> passReturnBoxed
+     TupleET _ -> passReturnBoxed
 
 demarshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 demarshalCReturn ty =
   case ty
-  of ListET False element_type ->
-       let list_type = varApp (coreBuiltin The_list) [pyonType element_type]
-       in demarshal_reference list_type
-     ArrayET 2 False element_type ->
-       let mat_type = varApp (coreBuiltin The_array2) [pyonType element_type]
-       in demarshal_reference mat_type
-     TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
+  of TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passReturnWithType (LL.PrimType LL.trioletBoolType)
-  where
-    complex_float_type = complexRecord (LL.PrimField LL.trioletFloatType)
-    demarshal_reference ref_type = do
-      -- An uninitialized pyon object pointer is passed as a parameter to 
-      -- the marshaling function.  The C function returns a reference to an
-      -- object.  Copy the returned data into the destination function and
-      -- free the data.
-      pyon_ref <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
-
-      let setup mk_call = do
-            ret_val <- emitAtom1 (LL.PrimType LL.PointerType) =<< mk_call
-            dict <- computeReprDict ref_type
-
-            -- Copy to output
-            copy_fun <- selectPassConvCopy dict
-            emitAtom0 $ LL.closureCallA copy_fun [ret_val, LL.VarV pyon_ref]
-              
-            -- Deallocate
-            free_fun <- selectPassConvFinalize dict
-            emitAtom0 $ LL.closureCallA free_fun [ret_val]
-
-      -- Copy the C reference into the pyon reference
-      return $ ReturnMarshaler { rmInputs = [pyon_ref]
-                               , rmCode = setup
-                               , rmOutput = []
-                               , rmReturns = []}
 
 -- Just return a primitive value
 passReturnWithType pt = do
@@ -326,6 +272,14 @@ passReturnParameter = do
                            , rmCode = \g -> g >>= emitAtom0
                            , rmOutput = [LL.VarV v]
                            , rmReturns = []}
+
+-- | Return a boxed object
+passReturnBoxed = do
+  v <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
+  return $ ReturnMarshaler { rmInputs = []
+                           , rmCode = \g -> g >>= bindAtom1 v
+                           , rmOutput = []
+                           , rmReturns = [v]}
 
 -- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
 -- primitive function.
@@ -375,11 +329,10 @@ createMarshalingFunction marshal_params marshal_return f = do
 --   All elements of the type are assumed to be in their natural 
 --   representation.  Code that looks at 'ExportSig's assumes this and
 --   may break otherwise.
-getCExportSig :: TypeEnv -> Type -> CSignature
-getCExportSig tenv ty =
-  case getExportedFunctionSignature (getCExportType tenv) tenv ty
-  of (param_types, return_type) ->
-       CSignature param_types return_type
+getCExportSig :: Type -> UnboxedTypeEvalM CSignature
+getCExportSig ty = do
+  (param_types, return_type) <- getExportedFunctionSignature getCExportType ty
+  return $ CSignature param_types return_type
 
 -- | Given a memory function type signature, determine the type of the
 --   function that's exported to C++.
@@ -387,144 +340,92 @@ getCExportSig tenv ty =
 --   All elements of the type are assumed to be in their natural 
 --   representation.  Code that looks at 'ExportSig's assumes this and
 --   may break otherwise.
-getCxxExportSig :: String -> TypeEnv -> Type -> CXXSignature
-getCxxExportSig exported_name tenv ty =
-  case getExportedFunctionSignature (getCxxExportType tenv) tenv ty
-  of (param_types, return_type) ->
-       CXXSignature exported_name param_types return_type
+getCxxExportSig :: String -> Type -> UnboxedTypeEvalM CXXSignature
+getCxxExportSig exported_name ty = do
+  (param_types, return_type) <- getExportedFunctionSignature getCxxExportType ty
+  return $ CXXSignature exported_name param_types return_type
 
 -- | Determine the exported parameter and return types of some
 --   function type, using the given type conversion function to
 --   convert each parameter and return type.
-getExportedFunctionSignature :: (Type -> ExportDataType)
-                             -> TypeEnv
+getExportedFunctionSignature :: (Type -> UnboxedTypeEvalM ExportDataType)
                              -> Type
-                             -> ([ExportDataType], ExportDataType)
-getExportedFunctionSignature convert_type tenv ty =
-  case getFunctionInputsAndOutputs tenv ty
-  of (param_types, return_type) ->
-       (map convert_type param_types, convert_type return_type)
+                             -> UnboxedTypeEvalM ([ExportDataType], ExportDataType)
+getExportedFunctionSignature convert_type ty = do
+  (param_types, return_type) <- deconFunctionType ty
+  export_param_types <- mapM convert_type param_types
+  export_return_type <- convert_type return_type
+  return (export_param_types, export_return_type)
 
--- | Determine the input and output types of a function. 
---
---   In most cases, the input types are the parameter types and
---   the output is the return type.  The primary exception is output
---   parameters.  These are converted to a bare return type.
---   The original function must not have a bare return type.
-getFunctionInputsAndOutputs tenv ty =
-  case fromFunType ty
-  of (params, return) ->
-       let param_types = mapMaybe get_param_input_type params
-           return_type = get_output_type params return
-       in (param_types, return_type)
-  where
-    kind t = toBaseKind $ typeKind tenv t
-
-    -- Decide whether the parameter type describes an input
-    input_param t =
-      case kind t
-      of ValK  -> True
-         BoxK  -> True
-         BareK -> True
-         OutK  -> False
-         _     -> internalError "getCExportSig: Unexpected type"
-
-    -- Decide whether the return type describes an output.
-    -- Store objects represent a return by side effect.
-    output_return t =
-      case kind t
-      of ValK -> case t
-                 of VarT v | v == storeV -> False
-                    _ -> True
-         BoxK -> True
-         _  -> internalError "getCExportSig: Unexpected type"
-
-    get_param_input_type ty =
-      if input_param ty then Just ty else Nothing
-
-    get_output_type params rtype =
-      -- If the function returns a value, then return that value
-      -- If it returns by writing a pointer, then return the output object
-      case (param_type, return_type)
-      of (Just t, Nothing) -> t
-         (Nothing, Just t) -> t
-         _ -> internalError "getCExportSig: Unexpected type"
-      where
-        return_type = if output_return rtype then Just rtype else Nothing
-        param_type =
-          if null params
-          then Nothing
-          else case fromVarApp $ last params
-               of Just (con, [arg])
-                    | con == outPtrV -> Just arg
-                  _ -> Nothing
-
-getCExportType :: TypeEnv -> Type -> ExportDataType
-getCExportType tenv ty =
-  case fromVarApp ty
-  of Just (con, args)
-       | con `isCoreBuiltin` The_NoneType -> TrioletNoneET
-       | con == intV -> TrioletIntET
-       | con == floatV -> TrioletFloatET
-       | con `isCoreBuiltin` The_bool -> TrioletBoolET
-       | con `isCoreBuiltin` The_list ->
-           case args
-           of [arg] -> ListET False (getCExportType tenv arg)
-       | con `isCoreBuiltin` The_array2 ->
-           case args
-           of [arg] -> ArrayET 2 False (getCExportType tenv arg)
-     _ | FunT {} <- ty ->
-       case getExportedFunctionSignature (getCExportType tenv) tenv ty
-       of (param_types, return_type) -> FunctionET param_types return_type
-     _ -> unsupported
+getCExportType :: Type -> UnboxedTypeEvalM ExportDataType
+getCExportType ty = do
+  decon_ty <- deconVarAppType ty
+  case decon_ty of
+    Just (con, [])
+      | con `isCoreBuiltin` The_NoneType -> return TrioletNoneET
+      | con == intV -> return TrioletIntET
+      | con == floatV -> return TrioletFloatET
+      | con `isCoreBuiltin` The_bool -> return TrioletBoolET
+    Just (con, [arg])
+      -- Look through 'Stored' and 'Boxed' constructors
+      | con `isCoreBuiltin` The_Stored -> getCExportType arg
+      | con `isCoreBuiltin` The_Boxed -> getCExportType arg
+      | con `isCoreBuiltin` The_list ->
+          ListET False <$> getCExportType arg
+      | con `isCoreBuiltin` The_array2 ->
+          ArrayET 2 False <$> getCExportType arg
+    _ -> unsupported
   where
     unsupported = internalError "getCExportType: Unsupported exported type"
                                         
-getCxxExportType :: TypeEnv -> Type -> ExportDataType
-getCxxExportType tenv ty =
-  case fromVarApp ty
-  of Just (con, args)
-       | con `isCoreBuiltin` The_Stored ->
-           -- Look through 'Stored' constructors.  Exported types are always 
-           -- in their natural reprsentation, so we can ignore them.
-           case args of [arg] -> getCxxExportType tenv arg
-       | con `isCoreBuiltin` The_NoneType -> TrioletNoneET
-       | con == intV -> TrioletIntET
-       | con == floatV -> TrioletFloatET
-       | con `isCoreBuiltin` The_bool -> TrioletBoolET
-       | con `isCoreBuiltin` The_Tuple2 ->
-           if length args /= 2
-           then type_error
-           else TupleET $ map (getCxxExportType tenv) args
-       | con `isCoreBuiltin` The_Tuple3 ->
-           if length args /= 3
-           then type_error
-           else TupleET $ map (getCxxExportType tenv) args
-       | con `isCoreBuiltin` The_Tuple4 ->
-           if length args /= 4
-           then type_error
-           else TupleET $ map (getCxxExportType tenv) args
-       | con `isCoreBuiltin` The_list ->
-           unary (ListET False) args
-       | con `isCoreBuiltin` The_array0 ->
-           unary (ArrayET 0 False) args
-       | con `isCoreBuiltin` The_array1 ->
-           unary (ArrayET 1 False) args
-       | con `isCoreBuiltin` The_array2 ->
-           unary (ArrayET 2 False) args
-       | con `isCoreBuiltin` The_array3 ->
-           unary (ArrayET 3 False) args
-       | con `isCoreBuiltin` The_blist ->
-           unary (ListET True) args
-       | con `isCoreBuiltin` The_barray1 ->
-           unary (ArrayET 1 True) args
-       | con `isCoreBuiltin` The_barray2 ->
-           unary (ArrayET 2 True) args
-       | con `isCoreBuiltin` The_barray3 ->
-           unary (ArrayET 3 True) args
-     _ -> unsupported
+getCxxExportType :: Type -> UnboxedTypeEvalM ExportDataType
+getCxxExportType ty = do
+  decon_ty <- deconVarAppType ty
+  case decon_ty of
+    Just (con, [])
+      | con `isCoreBuiltin` The_NoneType -> return TrioletNoneET
+      | con == intV -> return TrioletIntET
+      | con == floatV -> return TrioletFloatET
+      | con `isCoreBuiltin` The_bool -> return TrioletBoolET
+    Just (con, [arg])
+      -- Look through 'Stored' and 'Boxed' constructors
+      | con `isCoreBuiltin` The_Stored -> getCxxExportType arg
+      | con `isCoreBuiltin` The_Boxed -> getCxxExportType arg
+       
+      | con `isCoreBuiltin` The_list ->
+           unary (ListET False) arg
+      | con `isCoreBuiltin` The_array0 ->
+          unary (ArrayET 0 False) arg
+      | con `isCoreBuiltin` The_array1 ->
+          unary (ArrayET 1 False) arg
+      | con `isCoreBuiltin` The_array2 ->
+          unary (ArrayET 2 False) arg
+      | con `isCoreBuiltin` The_array3 ->
+          unary (ArrayET 3 False) arg
+      | con `isCoreBuiltin` The_blist ->
+          unary (ListET True) arg
+      | con `isCoreBuiltin` The_barray1 ->
+          unary (ArrayET 1 True) arg
+      | con `isCoreBuiltin` The_barray2 ->
+          unary (ArrayET 2 True) arg
+      | con `isCoreBuiltin` The_barray3 ->
+          unary (ArrayET 3 True) arg
+    Just (con, args)
+      | con `isCoreBuiltin` The_Tuple2 ->
+          if length args /= 2
+          then type_error
+          else TupleET <$> mapM getCxxExportType args
+      | con `isCoreBuiltin` The_Tuple3 ->
+          if length args /= 3
+          then type_error
+          else TupleET <$> mapM getCxxExportType args
+      | con `isCoreBuiltin` The_Tuple4 ->
+          if length args /= 4
+          then type_error
+          else TupleET <$> mapM getCxxExportType args
+    _ -> unsupported
   where
-    unary con [arg] = con (getCxxExportType tenv arg)
+    unary con arg = con <$> getCxxExportType arg
     unsupported = internalError "getCxxExportType: Unsupported exported type"
 
     type_error = internalError "getCxxExportType: Type error detected"

@@ -22,18 +22,6 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   };
 };
 
-#if 0
-// A dynamic shape value with no further information
-data owned DynShapeUnit_value = Obj(unit) {
-  ObjectHeader {DynShapeUnit_info},
-  nil
-};
-
-data pointer DynShapeUnit_info = InfoTableHeader {
-  TAG_CON
-};
-#endif
-
 // The info table of a stream
 data pointer Stream_info = InfoTableHeader {
   TAG_CON
@@ -47,29 +35,3 @@ procedure inline Stream_alloc () -> owned {
 };
 
 
-/*****************************************************************************/
-/* Counting stream */
-
-data owned Stream_count = Obj(StreamData) {
-  ObjectHeader { Stream_info },
-  StreamData {
-    Stream_count_init_state,
-    Stream_count_next
-  }
-};
-
-data owned Stream_count_init_state = Boxed(int) {
-  ObjectHeader { int_info },
-  int 0
-};
-
-// Get the next value from a counting stream.
-// Return the state, and also increment the state.
-function Stream_count_next (owned state) -> StreamNext {
-  counter = state @! Boxed(int).member;
-
-  new_state = pointer primcall triolet_alloc (sizeof Boxed(int));
-  new_state @! Boxed(int).member = counter + int 1;
-
-  StreamNext {STREAM_VALUE, StreamNextData {new_state as owned, state}};
-};

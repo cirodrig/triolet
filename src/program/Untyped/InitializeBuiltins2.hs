@@ -236,10 +236,10 @@ data ClassSigField =
   | CSX                         -- ^ Unrecognized field type
 
 -- | Create a class signature from a class dictionary's type constructor 
---   and data constructor
-frontendClassSignature :: TyConMap -> Bool -> SF.DataConType
+--   and data constructor.  The class must not be abstract.
+frontendClassSignature :: TyConMap -> SF.DataConType
                        -> InitM (Qualified [ClassMethod])
-frontendClassSignature tc_map abstract dcon_type =
+frontendClassSignature tc_map dcon_type =
   SF.assumeBinders sf_params $ do
     (params', tc_map') <- translateTyVars tc_map $ map SF.binderVar sf_params
 
@@ -265,14 +265,24 @@ frontendClassSignature tc_map abstract dcon_type =
       where
         get_predicates ps (CSP p : fs) = get_predicates (ps . (p:)) fs
         get_predicates ps fs = do
-          -- If this is an abstract class, ignore the class methods
-          methods <- if abstract then Just [] else get_fields id fs
+          methods <- get_fields id fs
           return (ps [], methods)
 
         get_fields ts (CSM t : fs) = get_fields (ts . (t:)) fs
         get_fields ts (_ : _)      = Nothing
         get_fields ts []           = Just (ts [])
 
+-- | Create a signature for an abstract class.  The signature has no
+--   constraints or methods.
+abstractClassSignature :: TyConMap -> SF.DataType
+                       -> InitM (Qualified [ClassMethod])
+abstractClassSignature tc_map data_type = do
+  SF.assumeBinders sf_params $ do
+    (params', tc_map') <- translateTyVars tc_map $ map SF.binderVar sf_params
+    return $ Qualified params' [] []
+  where
+    sf_params = SF.dataTypeParams data_type
+  
 -- | Decide whether the range of a core kind is boxed.
 --
 --   Use the given type environment as the type environment for
@@ -454,20 +464,20 @@ reprClass tc_map = do
   maybe_instance <-
     polymorphic [Star] $ \ [a] ->
     let head = ConTy (builtinTyCon TheTC_Maybe) @@ ConTy a
-        inst = AbstractClassInstance (coreBuiltin The_repr_Maybe) [ConTy a]
+        inst = AbstractClassInstance (coreBuiltin The_frontend_repr_Maybe) [ConTy a]
         cst = [instancePredicate TheTC_Repr (ConTy a)]
     in return (cst, Instance head inst)
   tuple2_instance <-
     polymorphic [Star, Star] $ \ [a, b] ->
     let head = TupleTy 2 @@ ConTy a @@ ConTy b
-        inst = AbstractClassInstance (tupleReprCon 2) [ConTy a, ConTy b]
+        inst = AbstractClassInstance (feTupleReprCon 2) [ConTy a, ConTy b]
         cst = [instancePredicate TheTC_Repr (ConTy a),
                instancePredicate TheTC_Repr (ConTy b)]
     in return (cst, Instance head inst)
   tuple3_instance <-
     polymorphic [Star, Star, Star] $ \ [a, b, c] ->
     let head = TupleTy 3 @@ ConTy a @@ ConTy b @@ ConTy c
-        inst = AbstractClassInstance (tupleReprCon 3) [ConTy a, ConTy b, ConTy c]
+        inst = AbstractClassInstance (feTupleReprCon 3) [ConTy a, ConTy b, ConTy c]
         cst = [instancePredicate TheTC_Repr (ConTy a),
                instancePredicate TheTC_Repr (ConTy b),
                instancePredicate TheTC_Repr (ConTy c)]
@@ -475,7 +485,7 @@ reprClass tc_map = do
   tuple4_instance <-
     polymorphic [Star, Star, Star, Star] $ \ [a, b, c, d] ->
     let head = TupleTy 4 @@ ConTy a @@ ConTy b @@ ConTy c @@ ConTy d
-        inst = AbstractClassInstance (tupleReprCon 4) [ConTy a, ConTy b, ConTy c, ConTy d]
+        inst = AbstractClassInstance (feTupleReprCon 4) [ConTy a, ConTy b, ConTy c, ConTy d]
         cst = [instancePredicate TheTC_Repr (ConTy a),
                instancePredicate TheTC_Repr (ConTy b),
                instancePredicate TheTC_Repr (ConTy c),
@@ -497,13 +507,14 @@ reprClass tc_map = do
     -- independent of their contents
     container_instances =
       [(TheTC_StuckRef, The_repr_StuckRef),
-       (TheTC_list, The_repr_list),
-       (TheTC_array1, The_repr_array1),
-       (TheTC_array2, The_repr_array2),
-       (TheTC_array3, The_repr_array3),
-       (TheTC_barray1, The_repr_barray1),
-       (TheTC_barray2, The_repr_barray2),
-       (TheTC_barray3, The_repr_barray3)]
+       (TheTC_list, The_frontend_repr_list),
+       (TheTC_array1, The_frontend_repr_array1),
+       (TheTC_array2, The_frontend_repr_array2),
+       (TheTC_array3, The_frontend_repr_array3),
+       (TheTC_blist, The_frontend_repr_blist),
+       (TheTC_barray1, The_frontend_repr_barray1),
+       (TheTC_barray2, The_frontend_repr_barray2),
+       (TheTC_barray3, The_frontend_repr_barray3)]
 
     -- Instances for boxed types.
     boxed_instances =
@@ -885,7 +896,8 @@ translateVar :: SF.Var -> TyConClass -> InitM TyCon
 translateVar v cls = do
   -- Compute kind
   tenv <- SF.getTypeEnv
-  let Just sf_kind = SF.lookupType v tenv
+  let sf_kind = fromMaybe (internalError $ "translateVar: " ++ show v) $
+                SF.lookupType v tenv
   k <- frontendKind sf_kind
 
   -- If it is a type function, get its arity
@@ -969,7 +981,10 @@ mkTypeClassBinding tc_map tycon abstract mk_instances = do
       [dict_var] = SF.dataTypeDataConstructors data_type
       Just dcon_type = SF.lookupDataCon dict_var tenv
 
-  signature <- frontendClassSignature tc_map abstract dcon_type
+  signature <-
+    if abstract
+    then abstractClassSignature tc_map data_type
+    else frontendClassSignature tc_map dcon_type
   instances <- mk_instances
   return $ TyClsAss $ Class sf_var dict_var abstract signature instances
 
@@ -1198,6 +1213,8 @@ translateVariable tc_map frontend_thing core_thing = do
                       translateDataCon tc_map v dcon_type
                   | Just ty <- SF.lookupType v tenv ->
                       translateGlobalVar tc_map v ty
+                  | otherwise ->
+                      internalError $ "translateVariable: " ++ show v
   return (frontend_thing, frontend_var, binding)
 
 translateDataCon tc_map v dcon_type = SF.assumeBinders ty_params $ do

@@ -824,34 +824,6 @@ demoteVal original_type v
 -------------------------------------------------------------------------------
 -- Other operations
 
--- | Allocate temporary local memory over the scope of some computation.
---   The allocated memory is not initialized, and must be initialized by 
---   the given code generator.
-allocateLocalMem :: (Monad m, Supplies m (Ident Var)) =>
-                    Var      -- ^ Pointer that will reference the object
-                 -> Val      -- ^ Passing convention of object
-                 -> [ValueType] -- ^ Return type(s) of the generated code
-                 -> Gen m Atom -- ^ Code generator
-                 -> Gen m Atom
-allocateLocalMem ptr_var pass_conv rtypes mk_block = do
-  -- Allocate the object
-  size <- selectPassConvSize pass_conv
-  pointerless <- selectPassConvIsPointerless pass_conv
-  allocateHeapMemAs size pointerless ptr_var
-  
-  -- Generate code and bind its results to temporary variables
-  rvars <- lift $ mapM newAnonymousVar rtypes
-  ret_atom <- mk_block
-  emit (LetE rvars ret_atom)
-  
-  -- Finalize and free the object
-  fini <- selectPassConvFinalize pass_conv
-  bindAtom0 $ closureCallA fini [VarV ptr_var]
-  bindAtom0 $ primCallA (builtinVar the_prim_triolet_dealloc) [VarV ptr_var]
-  
-  -- Return the temporary values
-  return $ ValA $ map VarV rvars
-
 -- | Helper function for 'allocateHeapMem' and friends.
 allocate_with_dst f = do
   dst_var <- lift $ newAnonymousVar (PrimType PointerType)
@@ -922,21 +894,18 @@ initializeObject :: (Monad m, Supplies m (Ident Var)) =>
 initializeObject ptr info_ptr = do
   storeField (objectHeaderRecord' !!: 0) ptr info_ptr
 
-selectPassConvSize, selectPassConvAlignment,
+selectPassConvSizeAlign,
   selectPassConvCopy,
   selectPassConvConvertToBoxed,
   selectPassConvConvertToBare,
-  selectPassConvFinalize,
   selectPassConvIsPointerless :: (Monad m, Supplies m (Ident Var)) =>
                                  Val -> Gen m Val
 -- (Field 0 is the object header)
-selectPassConvSize           = loadField (passConvRecord' !!: 1)
-selectPassConvAlignment      = loadField (passConvRecord' !!: 2)
-selectPassConvCopy           = loadField (passConvRecord' !!: 3)
-selectPassConvConvertToBoxed = loadField (passConvRecord' !!: 4)
-selectPassConvConvertToBare  = loadField (passConvRecord' !!: 5)
-selectPassConvFinalize       = loadField (passConvRecord' !!: 6)
-selectPassConvIsPointerless  = loadField (passConvRecord' !!: 7)
+selectPassConvSizeAlign      = loadField (passConvRecord' !!: 1)
+selectPassConvCopy           = loadField (passConvRecord' !!: 2)
+selectPassConvConvertToBoxed = loadField (passConvRecord' !!: 3)
+selectPassConvConvertToBare  = loadField (passConvRecord' !!: 4)
+selectPassConvIsPointerless  = loadField (passConvRecord' !!: 5)
 
 -------------------------------------------------------------------------------
 -- Dictionaries

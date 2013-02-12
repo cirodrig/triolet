@@ -1,0 +1,5 @@
+
+def test(m):
+  return [x + 1 for x in m]
+
+export cplusplus test : array2(float) -> array2(float)

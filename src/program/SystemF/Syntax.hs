@@ -27,8 +27,11 @@ module SystemF.Syntax
 
      -- ** Annotations on expressions
      ExpInfo,
+     Representation(..),
      defaultExpInfo,
      mkExpInfo,
+     mkExpInfoWithRepresentation,
+     getExpRepresentation,
      
      -- ** Literals
      Lit(..),
@@ -206,18 +209,40 @@ literalType (FloatL _ t) = t
 data ExpInfo =
   ExpInfo
     SourcePos            -- ^ Location where the expression originated
-    !(Maybe ExpSF)       -- ^ Representation dictionary for this expression.
+    !Representation      -- ^ Representation dictionary for this expression.
                          --   This is only used during elaboration; afterward,
                          --   it is always 'Nothing'.
 
+data Representation =
+    NoRepresentation   -- ^ No representation information is available
+  | BoxedRepresentation         -- ^ Data type is naturally boxed
+  | ValueRepresentation         -- ^ Data type has kind 'val' and will not
+                                --   be coerced
+  | Representation ExpSF        -- ^ Explicitly given representation
+
 defaultExpInfo :: ExpInfo
-defaultExpInfo = ExpInfo noSourcePos Nothing
+defaultExpInfo = ExpInfo noSourcePos NoRepresentation
 
 mkExpInfo :: SourcePos -> ExpInfo
-mkExpInfo pos = ExpInfo pos Nothing
+mkExpInfo pos = ExpInfo pos NoRepresentation
+
+mkExpInfoWithRepresentation :: SourcePos -> Representation -> ExpInfo
+mkExpInfoWithRepresentation pos r = ExpInfo pos r
+
+-- | Look up the representation of an expression.  Representations
+--   are annotated onto expressions during type inference, and are only 
+--   available immediately after generating System F code.
+getExpRepresentation :: ExpSF -> Representation
+getExpRepresentation (ExpSF e) =
+  case expInfo e
+  of ExpInfo _ NoRepresentation -> internalError "getRepresentation"
+     ExpInfo _ r -> r
 
 instance HasSourcePos ExpInfo where
   getSourcePos (ExpInfo p _) = p
+
+instance HasSourcePos ExpSF where
+  getSourcePos (ExpSF e) = getSourcePos $ expInfo e
 
 -- Data types used in representing code.  Data types are indexed by a
 -- data format; different indices are used in different stages of the

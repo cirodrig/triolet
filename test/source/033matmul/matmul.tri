@@ -7,4 +7,4 @@ def mm(M, N):
 
   return [dotprod(r,c) for (r, c) in outerproduct(rows(M), cols(N))]
 
-export ccall mm : array2(float) * array2(float) -> array2(float)
+export cplusplus mm : array2(float) * array2(float) -> array2(float)

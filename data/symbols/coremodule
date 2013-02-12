@@ -1612,10 +1612,10 @@ data intset : bare
                                              (arr N (Stored uint))));
 };
 
-build_intset (ls : list (Stored int)) (ret : OutPtr intset)
-  -> Store attribute(inline) =
-  case ls of
-    make_list @(N : intindex) (list_size : FIInt N) barr.
+build_intset (ls : Boxed (list (Stored int)))
+  -> Boxed intset attribute(inline) =
+  case ls of boxed u_ls.
+  case u_ls of make_list @(N : intindex) (list_size : FIInt N) barr.
   case barr of stuckBox (a : arr N (Stored int)).
 
   -- Compute size of hash table
@@ -1626,10 +1626,10 @@ build_intset (ls : list (Stored int)) (ret : OutPtr intset)
 
   -- Create hash table
   let type HT = Tuple2 (arr M (Stored int)) (arr M (Stored uint)) in
-  let hash_table : StuckBox HT =
+  let hash_table =
    stuckBox @HT (build_hash_table @N @M list_size table_size a) in
 
-  mk_intset @M table_size hash_table ret;
+  boxed @intset (mk_intset @M table_size hash_table);
 
 
 compute_hash_table_size : (N : intindex) -> FIInt N -> int;
@@ -1638,20 +1638,19 @@ build_hash_table : (N M : intindex)
                 -> arr N (Stored int)
                 -> Init (Tuple2 (arr M (Stored int)) (arr M (Stored uint)));
 
-intsetLookup (set : intset) (key : int) (ret : OutPtr (Maybe (Stored int)))
-  -> Store attribute(inline) =
+intsetLookup (set : Boxed intset) (key : Boxed (Stored int))
+  -> Boxed (Maybe (Stored int)) attribute(inline) =
 
-  case set of mk_intset @(N : intindex) (size : FIInt N) contents.
+  case set of boxed u_set.
+  case u_set of mk_intset @(N : intindex) (size : FIInt N) contents.
   case contents of stuckBox tuple.
-  case tuple of
-    tuple2
-    (keys_array : arr N (Stored int))
-    (inds_array : arr N (Stored uint)).
+  case tuple of tuple2 keys_array inds_array.
 
-  let index : int = lookup_hash_table @N size keys_array inds_array key in
+  let index =
+        lookup_hash_table @N size keys_array inds_array (unboxIntValue key) in
   if index ==# -1
-  then nothing @(Stored int) ret
-  else just @(Stored int) (stored @int index) ret;
+  then boxed @(Maybe (Stored int)) (nothing @(Stored int))
+  else boxed @(Maybe (Stored int)) (just @(Stored int) (stored @int index));
 
 
 lookup_hash_table : (N : intindex)
@@ -1661,14 +1660,13 @@ lookup_hash_table : (N : intindex)
                  -> int
                  -> int;
 
-intsetElements (set : intset) -> Stream1 (Boxed (Stored int)) attribute(inline) =
-  case set of mk_intset @(N : intindex) (size : FIInt N) contents.
+intsetElements (set : Boxed intset)
+  -> Stream1 (Boxed (Stored int)) attribute(inline) =
+  case set of boxed u_set.
+  case u_set of mk_intset @(N : intindex) (size : FIInt N) contents.
   case size of fiInt (count : int).
   case contents of stuckBox tuple.
-  case tuple of
-    tuple2
-    (keys_array : arr N (Stored int))
-    (inds_array : arr N (Stored uint)).
+  case tuple of tuple2 keys_array inds_array.
 
   -- For each array element
   let dom : list_dim = mk_list_dim (justVal @int count) in
@@ -2394,8 +2392,8 @@ repr_blist @(a : bare) -> Repr (blist a)
      case x of boxed ux. copy_list ux ret)
   False;
 
-
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
+
 repr_Maybe : (a : bare) -> Repr a -> Repr (Maybe a);
 -- repr_MaybeVal_int : Repr (MaybeVal int);
 -- repr_MaybeVal_MaybeVal_int : Repr (MaybeVal (MaybeVal int));
@@ -2553,6 +2551,61 @@ repr_arr @(n : intindex) @(e : bare)
   (\ (x : Boxed (arr n e)) (ret : OutPtr (arr n e)) -> Store.
      case x of boxed ux. copy_arr ux ret)
   pointerless_e;
+
+-- Wrapper functions to create Repr objects for the frontend
+
+frontend_repr_Maybe @(a : box) -> Repr (AsBare a) -> Repr (Maybe (AsBare a)) =
+  repr_Maybe @(AsBare a);
+
+frontend_repr_list @(a : box) -> Repr (list (AsBare a)) =
+  repr_list @(AsBare a);
+
+frontend_repr_array1 @(a : box) -> Repr (array1 (AsBare a)) =
+  repr_array1 @(AsBare a);
+
+frontend_repr_array2 @(a : box) -> Repr (array2 (AsBare a)) =
+  repr_array2 @(AsBare a);
+
+frontend_repr_array3 @(a : box) -> Repr (array3 (AsBare a)) =
+  repr_array3 @(AsBare a);
+
+frontend_repr_blist @(a : box) -> Repr (blist (AsBare a)) =
+  repr_blist @(AsBare a);
+
+frontend_repr_barray1 @(a : box) -> Repr (barray1 (AsBare a)) =
+  repr_barray1 @(AsBare a);
+
+frontend_repr_barray2 @(a : box) -> Repr (barray2 (AsBare a)) =
+  repr_barray2 @(AsBare a);
+
+frontend_repr_barray3 @(a : box) -> Repr (barray3 (AsBare a)) =
+  repr_barray3 @(AsBare a);
+
+frontend_repr_Tuple1 @(a : box)
+  (rep_a : Repr (AsBare a))
+  -> Repr (Tuple1 (AsBare a)) =
+  repr_Tuple1 @(AsBare a) rep_a;
+
+frontend_repr_Tuple2 @(a b : box)
+  (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b))
+  -> Repr (Tuple2 (AsBare a) (AsBare b)) =
+  repr_Tuple2 @(AsBare a) @(AsBare b) rep_a rep_b;
+
+frontend_repr_Tuple3 @(a b c : box)
+  (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b)) (rep_c : Repr (AsBare c))
+  -> Repr (Tuple3 (AsBare a) (AsBare b) (AsBare c)) =
+  repr_Tuple3 @(AsBare a) @(AsBare b) @(AsBare c) rep_a rep_b rep_c;
+
+frontend_repr_Tuple4 @(a b c d : box)
+  (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b)) (rep_c : Repr (AsBare c)) (rep_d : Repr (AsBare d))
+  -> Repr (Tuple4 (AsBare a) (AsBare b) (AsBare c) (AsBare d)) =
+  repr_Tuple4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) rep_a rep_b rep_c rep_d;
+
+frontend_repr_arr @(n : intindex) @(e : box)
+  (size : Boxed (Stored int)) (repr_e : Repr (AsBare e))
+  -> Repr (arr n (AsBare e))
+  attribute(inline) =
+  repr_arr @n @(AsBare e) (fiInt @n (unboxIntValue size)) repr_e;
 
 
 copy_EffTok (x : Stored EffTok) (ret : OutPtr (Stored EffTok)) -> Store
@@ -2762,9 +2815,10 @@ TraversableDict_array1_build
 
 
 TraversableDict_array1_traverse
-  @(a : box) (rep : Repr (AsBare a)) (ar : array1 (AsBare a))
+  @(a : box) (rep : Repr (AsBare a)) (ar : Boxed (array1 (AsBare a)))
   -> view dim1 a attribute(inline) =
-  case ar of mk_array1 @(N : intindex) lo stride size ayref.
+  case ar of boxed u_ar.
+  case u_ar of mk_array1 @(N : intindex) lo stride size ayref.
   case ayref of stuckBox ay.
   
   let linear_map = linearMap stride lo in
@@ -2813,9 +2867,10 @@ TraversableDict_array2_build
 
 
 TraversableDict_array2_traverse
-  @(a : box) (rep : Repr (AsBare a)) (ar : array2 (AsBare a))
+  @(a : box) (rep : Repr (AsBare a)) (ar : Boxed (array2 (AsBare a)))
   -> view dim2 a attribute(inline) =
-  case ar of
+  case ar of boxed u_ar.
+  case u_ar of
     mk_array2 @(M N : intindex)
     lo_y stride_y size_y lo_x stride_x size_x ayref.
   case ayref of stuckBox (ay : arr M (arr N (AsBare a))).
@@ -2880,9 +2935,10 @@ TraversableDict_array3_build
 
 
 TraversableDict_array3_traverse
-  @(a : box) (repr : Repr (AsBare a)) (ar : array3 (AsBare a))
+  @(a : box) (repr : Repr (AsBare a)) (ar : Boxed (array3 (AsBare a)))
   -> view dim3 a attribute(inline) =
-  case ar of
+  case ar of boxed u_ar.
+  case u_ar of
     mk_array3 @(L M N : intindex)
     lo_z stride_z size_z
     lo_y stride_y size_y
@@ -2987,10 +3043,11 @@ TraversableDict_barray1_build
 
 
 TraversableDict_barray1_traverse
-  @(a : box) (repr : Repr (AsBare a)) (ar : barray1 (AsBare a))
+  @(a : box) (repr : Repr (AsBare a)) (ar : Boxed (barray1 (AsBare a)))
   -> view dim1 a attribute(inline) =
   let type boxed_a = StuckRef a in
-  case ar of mk_barray1 (ar2 : array1 boxed_a).
+  case ar of boxed u_ar.
+  case u_ar of mk_barray1 (ar2 : array1 boxed_a).
   case ar2 of mk_array1 @(N : intindex) lo stride size ayref.
   case ayref of stuckBox (ay : arr N boxed_a).
 
@@ -3043,10 +3100,11 @@ TraversableDict_barray2_build
 
 
 TraversableDict_barray2_traverse
-  @(a : box) (repr : Repr (AsBare a)) (ar : barray2 (AsBare a))
+  @(a : box) (repr : Repr (AsBare a)) (ar : Boxed (barray2 (AsBare a)))
   -> view dim2 a attribute(inline) =
   let type boxed_a = StuckRef a in
-  case ar of mk_barray2 (ar2 : array2 boxed_a).
+  case ar of boxed u_ar.
+  case u_ar of mk_barray2 (ar2 : array2 boxed_a).
   case ar2 of
     mk_array2 @(M N : intindex)
     lo_y stride_y size_y lo_x stride_x size_x ayref.
@@ -3117,10 +3175,11 @@ TraversableDict_barray3_build
 
 
 TraversableDict_barray3_traverse
-  @(a : box) (repr : Repr (AsBare a)) (ar : barray3 (AsBare a))
+  @(a : box) (repr : Repr (AsBare a)) (ar : Boxed (barray3 (AsBare a)))
   -> view dim3 a attribute(inline) =
   let type boxed_a = StuckRef a in
-  case ar of mk_barray3 (ar2 : array3 boxed_a).
+  case ar of boxed u_ar.
+  case u_ar of mk_barray3 (ar2 : array3 boxed_a).
   case ar2 of
     mk_array3 @(L M N : intindex)
     lo_z stride_z size_z
@@ -4235,25 +4294,27 @@ IndexableDict_view_get_shape @(sh : box) (dict : ShapeDict sh) ->
 
 
 IndexableDict_array0_at_point @(a : box)
-  (repr : Repr (AsBare a)) (ay : array0 (AsBare a))
+  (repr : Repr (AsBare a)) (ay : Boxed (array0 (AsBare a)))
   (ix : Boxed (Stored NoneType)) -> a
   attribute(inline) =
-  case ay of mk_array0 (x : StuckBox (AsBare a)).
+  case ay of boxed u_ay.
+  case u_ay of mk_array0 (x : StuckBox (AsBare a)).
   case x of stuckBox ux.
   bareToBox @(AsBare a) repr ux;
 
 
 IndexableDict_array0_get_shape @(a : box)
-  (ay : array0 (AsBare a)) -> dim0
+  (ay : Boxed (array0 (AsBare a))) -> dim0
   attribute(inline) =
   mk_dim0;
 
 
 IndexableDict_array1_at_point @(a : box)
-  (repr : Repr (AsBare a)) (ay : array1 (AsBare a))
+  (repr : Repr (AsBare a)) (ay : Boxed (array1 (AsBare a)))
   (ix : Boxed (Stored int)) -> a
   attribute(inline) =
-  case ay of mk_array1 @(N : intindex) lb stride size ayref.
+  case ay of boxed u_ay.
+  case u_ay of mk_array1 @(N : intindex) lb stride size ayref.
   case ayref of stuckBox (ay : arr N (AsBare a)).
 
   -- Compute real array index
@@ -4264,19 +4325,21 @@ IndexableDict_array1_at_point @(a : box)
 
 
 IndexableDict_array1_get_shape @(a : box)
-  (ay : array1 (AsBare a)) -> dim1
+  (ay : Boxed (array1 (AsBare a))) -> dim1
   attribute(inline) =
-  case ay of mk_array1 @(N : intindex) lb stride size ayref.
+  case ay of boxed u_ay.
+  case u_ay of mk_array1 @(N : intindex) lb stride size ayref.
   arrayDescToDim1 @N lb stride size;
 
 
 IndexableDict_array2_at_point @(a : box)
   (repr : Repr (AsBare a))
-  (ay : array2 (AsBare a))
+  (ay : Boxed (array2 (AsBare a)))
   (ix : AsBox (index dim2))
   -> a attribute(inline) =
-  case ay of mk_array2 @(M N : intindex)
-             lb_y stride_y size_y lb_x stride_x size_x ayref.
+  case ay of boxed u_ay.
+  case u_ay of mk_array2 @(M N : intindex)
+               lb_y stride_y size_y lb_x stride_x size_x ayref.
   case ayref of stuckBox (ay : arr M (arr N (AsBare a))).
   let row_repr = repr_arr @N @(AsBare a) size_x repr in
 
@@ -4296,10 +4359,11 @@ IndexableDict_array2_at_point @(a : box)
 
 
 IndexableDict_array2_get_shape @(a : box)
-  (ay : array2 (AsBare a)) -> dim2
+  (ay : Boxed (array2 (AsBare a))) -> dim2
   attribute(inline) =
-  case ay of mk_array2 @(M N : intindex)
-             lb_y stride_y size_y lb_x stride_x size_x ayref.
+  case ay of boxed u_ay.
+  case u_ay of mk_array2 @(M N : intindex)
+               lb_y stride_y size_y lb_x stride_x size_x ayref.
   mk_dim2 (arrayDescToDim1 @M lb_y stride_y size_y)
           (arrayDescToDim1 @N lb_x stride_x size_x);
 
@@ -4337,11 +4401,12 @@ IndexableDict_array3_at_point @(a : box)
 
 
 IndexableDict_array3_get_shape @(a : box)
-  (ay : array3 (AsBare a)) -> dim3
+  (ay : Boxed (array3 (AsBare a))) -> dim3
   attribute(inline) =
-  case ay of mk_array3 @(L M N : intindex)
-             lb_z stride_z size_z lb_y stride_y size_y lb_x stride_x size_x
-             ayref.
+  case ay of boxed u_ay.
+  case u_ay of mk_array3 @(L M N : intindex)
+               lb_z stride_z size_z lb_y stride_y size_y lb_x stride_x size_x
+               ayref.
   mk_dim3 (arrayDescToDim1 @L lb_z stride_z size_z)
           (arrayDescToDim1 @M lb_y stride_y size_y)
           (arrayDescToDim1 @N lb_x stride_x size_x);
@@ -4378,12 +4443,13 @@ IndexableDict_blist_get_shape @(a : box)
 
 IndexableDict_barray1_at_point @(a : box)
   (repr : Repr (AsBare a))
-  (ay : barray1 (AsBare a))
+  (ay : Boxed (barray1 (AsBare a)))
   (ix : Boxed (Stored int))
   -> a
   attribute(inline) =
   let type boxed_a = StuckRef a in
-  case ay of mk_barray1 (ay2 : array1 boxed_a).
+  case ay of boxed u_ay.
+  case u_ay of mk_barray1 (ay2 : array1 boxed_a).
   case ay2 of mk_array1 @(N : intindex) lb stride size ayref.
   case ayref of stuckBox (ay : arr N boxed_a).
   let boxed_repr = repr_StuckRef @a in
@@ -4999,8 +5065,8 @@ FloatingDict_float_tan (x : Boxed (Stored float))
   boxFloatValue (tanF (unboxFloatValue x));
 
 
-FloatingDict_float_pi : float;
-
+FloatingDict_float_pi : Boxed (Stored float) =
+  boxed @(Stored float) (stored @float 3.141592653589793);
 
 
 VectorDict_float_scale : float -> float -> float;
@@ -5061,57 +5127,56 @@ CartesianDict_dim0_divideDomain
 
 
 CartesianDict_dim0_multiplyIndex :
-    index dim0 -> index dim0 -> Init (index dim0);
+    AsBox (index dim0) -> AsBox (index dim0) -> AsBox (index dim0);
 
 CartesianDict_dim0_divideIndex :
-    index dim0 -> index dim0 -> Init (index dim0);
+    AsBox (index dim0) -> AsBox (index dim0) -> AsBox (index dim0);
 
 CartesianDict_dim0_unbounded :
     dim0;
 
 
 CartesianDict_dim1_loBound
-  (dom : dim1)
-  (ret : OutPtr (Maybe (index dim1)))
-  -> Store
+  (dom : dim1) -> Boxed (Maybe (index dim1))
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case lb of {
-    justVal x.  just @(Stored int) (stored @int x) ret
-  ; nothingVal. nothing @(Stored int) ret
+    justVal x.  boxed @(Maybe (index dim1))
+                (just @(Stored int) (stored @int x))
+  ; nothingVal. boxed @(Maybe (index dim1))
+                (nothing @(Stored int))
   };
 
 
 CartesianDict_dim1_hiBound
-  (dom : dim1)
-  (ret : OutPtr (Maybe (index dim1)))
-  -> Store
+  (dom : dim1) -> Boxed (Maybe (index dim1))
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case ub of {
-    justVal x.  just @(Stored int) (stored @int x) ret
-  ; nothingVal. nothing @(Stored int) ret
+    justVal x.  boxed @(Maybe (index dim1))
+                (just @(Stored int) (stored @int x))
+  ; nothingVal. boxed @(Maybe (index dim1))
+                (nothing @(Stored int))
   };
 
 
 CartesianDict_dim1_stride
-  (dom : dim1)
-  -> Init (index dim1)
+  (dom : dim1) -> Boxed (index dim1)
   attribute(inline) =
   case dom of mk_dim1 (iv : Interval) (lm : LinearMap).
   case lm of linearMap (stride : int) (alignment : int).
-  stored @int stride;
+  boxIntValue stride;
   
 
 CartesianDict_dim1_arrayDomain
-  (lo : index dim1)
-  (hi : index dim1)
+  (lo : AsBox (index dim1))
+  (hi : AsBox (index dim1))
   -> dim1
   attribute(inline, inline_final) =
-  case lo of stored lo_i.
-  case hi of stored hi_i.
+  let lo_i = unboxIntValue lo in
+  let hi_i = unboxIntValue hi in
 
   -- Check for empty range
   if lo_i ># hi_i
@@ -5122,13 +5187,13 @@ CartesianDict_dim1_arrayDomain
 
 CartesianDict_dim1_displaceDomain
   (dom : dim1)
-  (ix : index dim1)
+  (ix : AsBox (index dim1))
   -> dim1
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
-  case ix of stored offset_i.
+  let offset_i = unboxIntValue ix in
 
   let lb2 : MaybeVal int =
         case lb of {
@@ -5146,13 +5211,13 @@ CartesianDict_dim1_displaceDomain
 
 CartesianDict_dim1_multiplyDomain
   (dom : dim1)
-  (n : Stored int)
+  (n : Boxed (Stored int))
   -> dim1
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
-  case n of stored n_u.
+  let n_u = unboxIntValue n in
 
   -- Stride must remain positive
   if n_u <=# 0 then except @dim1 else
@@ -5174,13 +5239,13 @@ CartesianDict_dim1_multiplyDomain
 
 CartesianDict_dim1_divideDomain
   (dom : dim1)
-  (n : Stored int)
+  (n : Boxed (Stored int))
   -> dim1
   attribute(inline, inline_sequential) =
   case dom of mk_dim1 (iv : Interval) (m : LinearMap).
   case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
   case m of linearMap (stride : int) (alignment : int).
-  case n of stored n_u.
+  let n_u = unboxIntValue n in
 
   -- Stride must remain positive
   if n_u <=# 0 then except @dim1 else
@@ -5205,19 +5270,16 @@ CartesianDict_dim1_divideDomain
 
 
 CartesianDict_dim1_multiplyIndex :
-    index dim1 -> index dim1 -> Init (index dim1);
+    AsBox (index dim1) -> AsBox (index dim1) -> AsBox (index dim1);
 
 CartesianDict_dim1_divideIndex :
-    index dim1 -> index dim1 -> Init (index dim1);
+    AsBox (index dim1) -> AsBox (index dim1) -> AsBox (index dim1);
 
 CartesianDict_dim1_unbounded :
     dim1;
 
 
-CartesianDict_dim2_loBound
-  (dom : dim2)
-  (ret : OutPtr (Maybe (index dim2)))
-  -> Store
+CartesianDict_dim2_loBound (dom : dim2) -> Boxed (Maybe (index dim2))
   attribute(inline, inline_final) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
   case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
@@ -5228,21 +5290,21 @@ CartesianDict_dim2_loBound
       case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
       case lb_x of {
         justVal (x : int).
-          just @(Tuple2 (Stored int) (Stored int))
-               (tuple2 @(Stored int) @(Stored int)
-                (stored @int y) (stored @int x)) ret
+          boxed @(Maybe (index dim2))
+          (just @(Tuple2 (Stored int) (Stored int))
+                (tuple2 @(Stored int) @(Stored int)
+                 (stored @int y) (stored @int x)))
       ; nothingVal.
-          nothing @(Tuple2 (Stored int) (Stored int)) ret
+          boxed @(Maybe (index dim2))
+          (nothing @(Tuple2 (Stored int) (Stored int)))
       }
   ; nothingVal.
-      nothing @(Tuple2 (Stored int) (Stored int)) ret
+      boxed @(Maybe (index dim2))
+      (nothing @(Tuple2 (Stored int) (Stored int)))
   };
   
 
-CartesianDict_dim2_hiBound
-  (dom : dim2)
-  (ret : OutPtr (Maybe (index dim2)))
-  -> Store
+CartesianDict_dim2_hiBound (dom : dim2) -> Boxed (Maybe (index dim2))
   attribute(inline, inline_final) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
   case dom_y of mk_dim1 (iv_y : Interval) (lm : LinearMap).
@@ -5253,36 +5315,41 @@ CartesianDict_dim2_hiBound
       case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
       case ub_x of {
         justVal (x : int).
-          just @(Tuple2 (Stored int) (Stored int))
-               (tuple2 @(Stored int) @(Stored int)
-               (stored @int y) (stored @int x)) ret
+          boxed @(Maybe (index dim2))
+          (just @(Tuple2 (Stored int) (Stored int))
+                (tuple2 @(Stored int) @(Stored int)
+                (stored @int y) (stored @int x)))
       ; nothingVal.
-          nothing @(Tuple2 (Stored int) (Stored int)) ret
+          boxed @(Maybe (index dim2))
+          (nothing @(Tuple2 (Stored int) (Stored int)))
       }
   ; nothingVal.
-      nothing @(Tuple2 (Stored int) (Stored int)) ret
+      boxed @(Maybe (index dim2))
+      (nothing @(Tuple2 (Stored int) (Stored int)))
   };
 
 
 CartesianDict_dim2_stride
-  (dom : dim2)
-  -> Init (index dim2)
+  (dom : dim2) -> Boxed (index dim2)
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  tuple2 @(Stored int) @(Stored int)
-  (CartesianDict_dim1_stride dom_y)
-  (CartesianDict_dim1_stride dom_x);
+  boxed @(index dim2)
+  (tuple2 @(Stored int) @(Stored int)
+   (stored @int (unboxIntValue (CartesianDict_dim1_stride dom_y)))
+   (stored @int (unboxIntValue (CartesianDict_dim1_stride dom_x))));
 
 
 CartesianDict_dim2_arrayDomain
-  (lo : index dim2)
-  (hi : index dim2)
+  (lo : Boxed (index dim2))
+  (hi : Boxed (index dim2))
   -> dim2
   attribute(inline) =
-  case lo of tuple2 lo_y lo_x.
+  case lo of boxed u_lo.
+  case u_lo of tuple2 lo_y lo_x.
   case lo_y of stored lo_y_i.
   case lo_x of stored lo_x_i.
-  case hi of tuple2 hi_y hi_x.
+  case hi of boxed u_hi.
+  case u_hi of tuple2 hi_y hi_x.
   case hi_y of stored hi_y_i.
   case hi_x of stored hi_x_i.
   mk_dim2 (mk_dim1 (interval (justVal @int lo_y_i) (justVal @int hi_y_i))
@@ -5293,51 +5360,58 @@ CartesianDict_dim2_arrayDomain
 
 CartesianDict_dim2_displaceDomain
   (dom : dim2)
-  (ix : index dim2)
+  (ix : Boxed (index dim2))
   -> dim2
   attribute(inline) =
-  case ix of tuple2 (ix_y : Stored int) (ix_x : Stored int).
+  case ix of boxed u_ix.
+  case u_ix of tuple2 (ix_y : Stored int) (ix_x : Stored int).
+  let b_y = boxIntValue (case ix_y of stored n. n) in
+  let b_x = boxIntValue (case ix_x of stored n. n) in
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  mk_dim2 (CartesianDict_dim1_displaceDomain dom_y ix_y)
-          (CartesianDict_dim1_displaceDomain dom_x ix_x);
+  mk_dim2 (CartesianDict_dim1_displaceDomain dom_y b_y)
+          (CartesianDict_dim1_displaceDomain dom_x b_x);
 
 
 CartesianDict_dim2_multiplyDomain
   (dom : dim2)
-  (v : Tuple2 (Stored int) (Stored int))
+  (v : Boxed (Tuple2 (Stored int) (Stored int)))
   -> dim2
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  case v of tuple2 (v_y : Stored int) (v_x : Stored int).
-  mk_dim2 (CartesianDict_dim1_multiplyDomain dom_y v_y)
-          (CartesianDict_dim1_multiplyDomain dom_x v_x);
+  case v of boxed u_v.
+  case u_v of tuple2 (v_y : Stored int) (v_x : Stored int).
+  let b_y = boxIntValue (case v_y of stored n. n) in
+  let b_x = boxIntValue (case v_x of stored n. n) in
+  mk_dim2 (CartesianDict_dim1_multiplyDomain dom_y b_y)
+          (CartesianDict_dim1_multiplyDomain dom_x b_x);
   
   
 CartesianDict_dim2_divideDomain
   (dom : dim2)
-  (v : Tuple2 (Stored int) (Stored int))
+  (v : Boxed (Tuple2 (Stored int) (Stored int)))
   -> dim2
   attribute(inline) =
   case dom of mk_dim2 (dom_y : dim1) (dom_x : dim1).
-  case v of tuple2 (v_y : Stored int) (v_x : Stored int).
-  mk_dim2 (CartesianDict_dim1_divideDomain dom_y v_y)
-          (CartesianDict_dim1_divideDomain dom_x v_x);
+  case v of boxed u_v.
+  case u_v of tuple2 (v_y : Stored int) (v_x : Stored int).
+  let b_y = boxIntValue (case v_y of stored n. n) in
+  let b_x = boxIntValue (case v_x of stored n. n) in
+  mk_dim2 (CartesianDict_dim1_divideDomain dom_y b_y)
+          (CartesianDict_dim1_divideDomain dom_x b_x);
 
 
 CartesianDict_dim2_multiplyIndex :
-    index dim2 -> index dim2 -> Init (index dim2);
+    AsBox (index dim2) -> AsBox (index dim2) -> AsBox (index dim2);
 
 CartesianDict_dim2_divideIndex :
-    index dim2 -> index dim2 -> Init (index dim2);
+    AsBox (index dim2) -> AsBox (index dim2) -> AsBox (index dim2);
 
 CartesianDict_dim2_unbounded :
     dim2;
 
 
 CartesianDict_dim3_loBound
-  (dom : dim3)
-  (ret : OutPtr (Maybe (index dim3)))
-  -> Store
+  (dom : dim3) -> Boxed (Maybe (index dim3))
   attribute(inline, inline_final) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
   case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
@@ -5352,24 +5426,26 @@ CartesianDict_dim3_loBound
           case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
           case lb_x of {
             justVal (x : int).
-              just @(Tuple3 (Stored int) (Stored int) (Stored int))
-                   (tuple3 @(Stored int) @(Stored int) @(Stored int)
-                    (stored @int z) (stored @int y) (stored @int x)) ret
+              boxed @(Maybe (index dim3))
+              (just @(Tuple3 (Stored int) (Stored int) (Stored int))
+                    (tuple3 @(Stored int) @(Stored int) @(Stored int)
+                     (stored @int z) (stored @int y) (stored @int x)))
           ; nothingVal.
-              nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
+              boxed @(Maybe (index dim3))
+              (nothing @(Tuple3 (Stored int) (Stored int) (Stored int)))
           }
       ; nothingVal.
-          nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
+          boxed @(Maybe (index dim3))
+          (nothing @(Tuple3 (Stored int) (Stored int) (Stored int)))
       }
   ; nothingVal.
-      nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
+      boxed @(Maybe (index dim3))
+      (nothing @(Tuple3 (Stored int) (Stored int) (Stored int)))
   };
   
 
 CartesianDict_dim3_hiBound
-  (dom : dim3)
-  (ret : OutPtr (Maybe (index dim3)))
-  -> Store
+  (dom : dim3) -> Boxed (Maybe (index dim3))
   attribute(inline, inline_final) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
   case dom_z of mk_dim1 (iv_z : Interval) (lm : LinearMap).
@@ -5384,41 +5460,47 @@ CartesianDict_dim3_hiBound
           case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
           case ub_x of {
             justVal (x : int).
-              just @(Tuple3 (Stored int) (Stored int) (Stored int))
-                   (tuple3 @(Stored int) @(Stored int) @(Stored int)
-                   (stored @int z) (stored @int y) (stored @int x)) ret
+              boxed @(Maybe (index dim3))
+              (just @(Tuple3 (Stored int) (Stored int) (Stored int))
+                    (tuple3 @(Stored int) @(Stored int) @(Stored int)
+                    (stored @int z) (stored @int y) (stored @int x)))
           ; nothingVal.
-              nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
+              boxed @(Maybe (index dim3))
+              (nothing @(Tuple3 (Stored int) (Stored int) (Stored int)))
           }
       ; nothingVal.
-          nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
+          boxed @(Maybe (index dim3))
+          (nothing @(Tuple3 (Stored int) (Stored int) (Stored int)))
       }
   ; nothingVal.
-      nothing @(Tuple3 (Stored int) (Stored int) (Stored int)) ret
+      boxed @(Maybe (index dim3))
+      (nothing @(Tuple3 (Stored int) (Stored int) (Stored int)))
   };
 
 
 CartesianDict_dim3_stride
-  (dom : dim3)
-  -> Init (index dim3)
+  (dom : dim3) -> AsBox (index dim3)
   attribute(inline) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  tuple3 @(Stored int) @(Stored int) @(Stored int)
-  (CartesianDict_dim1_stride dom_z)
-  (CartesianDict_dim1_stride dom_y)
-  (CartesianDict_dim1_stride dom_x);
+  boxed @(index dim3)
+  (tuple3 @(Stored int) @(Stored int) @(Stored int)
+   (stored @int (unboxIntValue (CartesianDict_dim1_stride dom_z)))
+   (stored @int (unboxIntValue (CartesianDict_dim1_stride dom_y)))
+   (stored @int (unboxIntValue (CartesianDict_dim1_stride dom_x))));
 
 
 CartesianDict_dim3_arrayDomain
-  (lo : index dim3)
-  (hi : index dim3)
+  (lo : Boxed (index dim3))
+  (hi : Boxed (index dim3))
   -> dim3
   attribute(inline) =
-  case lo of tuple3 lo_z lo_y lo_x.
+  case lo of boxed u_lo.
+  case u_lo of tuple3 lo_z lo_y lo_x.
   case lo_z of stored lo_z_i.
   case lo_y of stored lo_y_i.
   case lo_x of stored lo_x_i.
-  case hi of tuple3 hi_z hi_y hi_x.
+  case hi of boxed u_hi.
+  case u_hi of tuple3 hi_z hi_y hi_x.
   case hi_z of stored hi_z_i.
   case hi_y of stored hi_y_i.
   case hi_x of stored hi_x_i.
@@ -5432,44 +5514,56 @@ CartesianDict_dim3_arrayDomain
 
 CartesianDict_dim3_displaceDomain
   (dom : dim3)
-  (ix : index dim3)
+  (ix : Boxed (index dim3))
   -> dim3
   attribute(inline) =
-  case ix of tuple3 ix_z ix_y ix_x.
+  case ix of boxed u_ix.
+  case u_ix of tuple3 ix_z ix_y ix_x.
+  let b_z = boxIntValue (case ix_z of stored n. n) in
+  let b_y = boxIntValue (case ix_y of stored n. n) in
+  let b_x = boxIntValue (case ix_x of stored n. n) in
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  mk_dim3 (CartesianDict_dim1_displaceDomain dom_z ix_z)
-          (CartesianDict_dim1_displaceDomain dom_y ix_y)
-          (CartesianDict_dim1_displaceDomain dom_x ix_x);
+  mk_dim3 (CartesianDict_dim1_displaceDomain dom_z b_z)
+          (CartesianDict_dim1_displaceDomain dom_y b_y)
+          (CartesianDict_dim1_displaceDomain dom_x b_x);
 
 
 CartesianDict_dim3_multiplyDomain
   (dom : dim3)
-  (v : Tuple3 (Stored int) (Stored int) (Stored int))
+  (v : Boxed (index dim3))
   -> dim3
   attribute(inline) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  case v of tuple3 v_z v_y v_x.
-  mk_dim3 (CartesianDict_dim1_multiplyDomain dom_z v_z)
-          (CartesianDict_dim1_multiplyDomain dom_y v_y)
-          (CartesianDict_dim1_multiplyDomain dom_x v_x);
+  case v of boxed u_v.
+  case u_v of tuple3 v_z v_y v_x.
+  let b_z = boxIntValue (case v_z of stored n. n) in
+  let b_y = boxIntValue (case v_y of stored n. n) in
+  let b_x = boxIntValue (case v_x of stored n. n) in
+  mk_dim3 (CartesianDict_dim1_multiplyDomain dom_z b_z)
+          (CartesianDict_dim1_multiplyDomain dom_y b_y)
+          (CartesianDict_dim1_multiplyDomain dom_x b_x);
   
   
 CartesianDict_dim3_divideDomain
   (dom : dim3)
-  (v : Tuple3 (Stored int) (Stored int) (Stored int))
+  (v : Boxed (index dim3))
   -> dim3
   attribute(inline) =
   case dom of mk_dim3 (dom_z : dim1) (dom_y : dim1) (dom_x : dim1).
-  case v of tuple3 v_z v_y v_x.
-  mk_dim3 (CartesianDict_dim1_divideDomain dom_z v_z)
-          (CartesianDict_dim1_divideDomain dom_y v_y)
-          (CartesianDict_dim1_divideDomain dom_x v_x);
+  case v of boxed u_v.
+  case u_v of tuple3 v_z v_y v_x.
+  let b_z = boxIntValue (case v_z of stored n. n) in
+  let b_y = boxIntValue (case v_y of stored n. n) in
+  let b_x = boxIntValue (case v_x of stored n. n) in
+  mk_dim3 (CartesianDict_dim1_divideDomain dom_z b_z)
+          (CartesianDict_dim1_divideDomain dom_y b_y)
+          (CartesianDict_dim1_divideDomain dom_x b_x);
 
 CartesianDict_dim3_multiplyIndex :
-    index dim3 -> index dim3 -> Init (index dim3);
+    AsBox (index dim3) -> AsBox (index dim3) -> AsBox (index dim3);
 
 CartesianDict_dim3_divideIndex :
-    index dim3 -> index dim3 -> Init (index dim3);
+    AsBox (index dim3) -> AsBox (index dim3) -> AsBox (index dim3);
 
 CartesianDict_dim3_unbounded :
     dim3;
@@ -8279,7 +8373,12 @@ view_transform @(sh : box) @(a : bare)
   mk_view @sh @(AsBox a) (transform_domain dom)
   (\ (i : AsBox (index sh)) -> AsBox a. f (transform_index i));
 
-count : Stream list_dim (Boxed (Stored int));
+
+count : Stream list_dim (Boxed (Stored int)) attribute(inline) =
+  viewStream @(Boxed (Stored int))
+  (view_generate @list_dim ShapeDict_list_dim @(Boxed (Stored int)) repr_int
+   (mk_list_dim (nothingVal @int))
+   (\ (i : Boxed (Stored int)) -> Boxed (Stored int). i));
 
 
 range (length : Boxed (Stored int)) -> Stream list_dim (Boxed (Stored int))

@@ -464,8 +464,8 @@ setRecVarPlaceholder qvars bindings ph@(RecVarP rec_var _) = do
   let Just v = varSystemFVariable rec_var
       v_exp = mkVarE noSourcePos TIBoxed v
       ty_args = map ConTy qvars
-      dict_args = [mkVarE noSourcePos unknownRepr v
-                  | (_, TIVarP v _) <- bindings]
+      dict_args = [mkVarE noSourcePos (predicateRepr prd) v
+                  | (prd, TIVarP v _) <- bindings]
       inst_exp =
         mkPolyCallE noSourcePos TIBoxed v_exp (map mkType ty_args) dict_args
 
@@ -570,7 +570,7 @@ completePolyFunction pos typarams params set_up_constraint rtype
       (_, residual_placeholders) <-
         getPlaceholders_PE $ satisfyPlaceholders placeholders
 
-      return (unknownRepr, body, (cst_bindings, residual_cst, residual_placeholders))
+      return (body, (cst_bindings, residual_cst, residual_placeholders))
 
   -- Build the typed function
   let ti_typarams = [ TITyPat (tyConSFVar tc) (mkKind $ tyConKind tc)
@@ -625,18 +625,20 @@ tiUnifyTypes reason expected given = do
 --   of 'e'.  If coercion is necessary, 'e' will be coerced from given to
 --   expected type.
 --   An exception is raised if unification fails.
-tiUnify :: Reason -> HMType -> HMType -> TIExp -> TI TIExp
-tiUnify reason expected given e = do
+tiUnify :: Reason -> SourcePos -> HMType -> HMType -> TIExp -> TI TIExp
+tiUnify reason pos expected given e = do
   m_cst <- unify expected given
   case m_cst of
     Just deferred_cst -> do
       require deferred_cst
 
       -- If unification produced equality constraints, a coercion may
-      -- be required
+      -- be required.  Compute the representation of the coerced value.
       if any isEqualityPredicate deferred_cst
-        then return $
-             mkCoerceE noSourcePos unknownRepr (mkType given) (mkType expected) e
+        then do repr <- requireRepr expected
+                let co = mkCoerceE pos repr (mkType given) (mkType expected) e
+                return co
+             
         else return e
 
     Nothing -> do
@@ -656,13 +658,13 @@ tiUnifyVariable reason pos ty v =
 instantiateVarAtType :: Reason -> SourcePos -> Variable -> HMType -> TI TIExp
 instantiateVarAtType reason pos v expected_ty = do
   (inferred_ty, e) <- instantiateVar pos v
-  tiUnify reason expected_ty inferred_ty e
+  tiUnify reason pos expected_ty inferred_ty e
 
 tiExpAtType :: (SourcePos -> Reason) -> HMType -> Expression -> TI TIExp
 tiExpAtType reason expected e =
   do (e', _, inferred) <- tiExp e
      let pos = getSourcePos e
-     tiUnify (reason pos) expected inferred e'
+     tiUnify (reason pos) pos expected inferred e'
 
 -------------------------------------------------------------------------------
 -- Type inference on terms
@@ -715,7 +717,7 @@ tiList pos elements = do
   ti_elements <- mapM (tiExpAtType listItemReason elt_type) elements
 
   list_repr <- requireRepr list_type
-  let list = mkListE pos (mkType elt_type) list_repr []
+  let list = mkListE pos (mkType elt_type) list_repr ti_elements
   return (list, list_repr, list_type)
 
 tiUndefined pos = do
@@ -755,7 +757,7 @@ tiIf pos c t f = do
   t_exp <- tiExpAtType ifBranchReason branch_type t
   f_exp <- tiExpAtType ifBranchReason branch_type f
   repr <- requireRepr branch_type
-  let exp = mkIfE pos repr c_exp t_exp f_exp
+  let exp = mkIfE pos c_exp t_exp f_exp
   return (exp, repr, branch_type)
 
 tiLet pos pat rhs body = do
@@ -764,12 +766,12 @@ tiLet pos pat rhs body = do
   assumePattern ds_pat $ do
     unpack <- dsUnpackBoundVar ds_pat
     (ti_body, repr, ty) <- tiExp body
-    let exp = mkLetE pos repr (dsTIPat ds_pat) ti_rhs $ unpack ti_body
+    let exp = mkLetE pos (dsTIPat ds_pat) ti_rhs $ unpack ti_body
     return (exp, repr, ty)
 
 tiLetrec pos defs body = tiDefGroup False defs $ \defs' -> do
   (ti_body, repr, ty) <- tiExp body
-  let exp = mkLetrecE pos repr defs' ti_body
+  let exp = mkLetrecE pos defs' ti_body
   return (exp, repr, ty)
 
 tiTypeAssert pos v ty body = do
@@ -929,7 +931,7 @@ instantiateExportedVariable pos ds_params params return_type v =
     -- Create call
     let call = mkPolyCallE pos repr inst_exp [] args
         reason = exportReturnTypeReason pos v
-    call' <- tiUnify reason return_type inst_return_ty call
+    call' <- tiUnify reason pos return_type inst_return_ty call
 
     return call'
 

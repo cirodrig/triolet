@@ -1,8 +1,8 @@
 TestConfig {
   synopsis	 = "Find nearest neighbors",
-  trioletSources	 = ["nearest.pyon"],
+  trioletSources	 = ["nearest.tri"],
   lltrioletSources  = [],
-  cSources	 = ["main.c"],
-  cxxSources	 = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cpp"],
   expectedResult = ShouldPrint "1,2,0,1,4,3,"
 }

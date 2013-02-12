@@ -77,11 +77,11 @@ data ProofEnvironment =
     --   expression that bind all proof values to variables.
     --   The two arguments are an expression
     --   that uses the proof values, and its representation.
-  , envProofExp :: TIRepr -> TIExp -> TIExp
+  , envProofExp :: TIExp -> TIExp
   }
 
 emptyProofEnvironment :: ProofEnvironment
-emptyProofEnvironment = ProofEnvironment [] (const id)
+emptyProofEnvironment = ProofEnvironment [] id
 
 -- | A monad for creating proofs.
 --
@@ -130,11 +130,11 @@ dropEffectsOnFailure (PE m) = PE $ RWST $ \r s -> do
 
 -- | Generate proof terms in the context of an expression.  Add the
 --   proof-generating code to the expression.
-generateProof :: PE (TIRepr, TIExp, a) -> TI (TIExp, a)
+generateProof :: PE (TIExp, a) -> TI (TIExp, a)
 generateProof (PE m) = TI $ RWST $ \r s -> do
-  ((user_repr, user_exp, x), proof_env, placeholders) <-
+  ((user_exp, x), proof_env, placeholders) <-
     runRWST m r emptyProofEnvironment
-  let exp = envProofExp proof_env user_repr user_exp
+  let exp = envProofExp proof_env user_exp
   return ((exp, x), (), ([], placeholders, []))
 
 -- | Create a dictionary placeholder
@@ -189,9 +189,9 @@ insertProof prd proof_exp = do
       let env' = (prd, proof_var) : env
           proof_type = mkPredicate prd
           var_binder = TIVarP proof_var proof_type
-          mk_exp' repr body =
-            mk_exp repr $
-            mkLetE noSourcePos repr var_binder proof_exp body
+          mk_exp' body =
+            mk_exp $
+            mkLetE noSourcePos var_binder proof_exp body
       in ProofEnvironment env' mk_exp'
 
 -- | Add an evidence variable to the proof environment.
@@ -203,12 +203,11 @@ insertEvidence prd proof_var = PE $ modify (insert_proof proof_var)
       in ProofEnvironment env' mk_exp
 
 -- | Add some code to the proof environment
-insertCode :: (TIRepr -> TIExp -> TIExp) -> PE ()
+insertCode :: (TIExp -> TIExp) -> PE ()
 insertCode mk_code = PE $ modify ins
   where
     ins (ProofEnvironment env mk_exp) =
-      let mk_exp' repr e = mk_exp repr $ mk_code repr e
-      in ProofEnvironment env mk_exp'
+      ProofEnvironment env (mk_exp . mk_code)
 
 -- | Look up a proof of a predicate in the proof environment.
 lookupEvidence :: Predicate -> PE (Maybe Var)
@@ -290,10 +289,6 @@ createProof prd = dropEffectsOnFailure $ do
   if change1 || change2
     then return $ Just (proof', cst')
     else return Nothing
-  {-if change1 || change2
-    then do proof_var <- insertProof prd proof' -- Add to proof environment
-            return $ Just (proofExp proof_var prd, cst')
-    else return Nothing-}
 
 instance Derivation PE SF.Var where
   liftTE _ m = liftTE_PE m
