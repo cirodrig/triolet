@@ -107,8 +107,9 @@ compileCTrioletFile verb lbi econfig src_file dst_file =
       args = ["-c", src_file, "-o", dst_file] ++ configured_args
       Just cc = lookupProgram gccProgram $ withPrograms lbi 
   in dst_file ?= do
-       -- The auto-generated preprocessor macros file must exit       
-       Shake.need [cabalMacrosFile lbi]
+       -- In addition to the source file,
+       -- the auto-generated preprocessor macros file must exist
+       Shake.need [src_file, cabalMacrosFile lbi]
        runCommand (invokeProgram verb cc args)
 
 -- | Create a rule to invoke GHC for the main Triolet executable.
@@ -129,7 +130,7 @@ compileTriolet verb lbi econfig hs_sources c_objects main = target ?= do
       source_args = main : c_objects
       args = ["--make", "-o", target] ++ source_args ++ configured_args
   runCommand $ invokeProgram verb ghc args
-
+  
   -- If profiling, invoke GHC again to build the profiled program
   let prof_args = args ++ trioletGhcProfArgs econfig exe lbi
   when is_prof $ runCommand $ invokeProgram verb ghc prof_args
@@ -375,7 +376,7 @@ compileRtsLltFiles verb lbi econfig =
     Shake.need [trioletFile lbi] -- Need compiler
     needRtsHeaders lbi           -- Need headers
     Shake.need [src_path]        -- Depend on source file
-    traceShow file_name $ compileLltRtsFile verb lbi econfig src_path obj_path
+    compileLltRtsFile verb lbi econfig src_path obj_path
   where
     build_dir = rtsBuildDir lbi
     target_patterns =
@@ -440,10 +441,10 @@ generateShakeRules verb lbi econfig = do
     -- Define all rules here
     SetupSrc.Rules.generateMachineInfo verb lbi
     SetupSrc.Rules.generateCabalMacros verb lbi
-    SetupSrc.Rules.compileTriolet verb lbi econfig triolet_hs_files
-      triolet_obj_files main_file
     pp_rules
     c_rules
+    SetupSrc.Rules.compileTriolet verb lbi econfig triolet_hs_files
+      triolet_obj_files main_file
     SetupSrc.Rules.moveDataFiles lbi
     SetupSrc.Rules.moveRtsDataFiles lbi
     SetupSrc.Rules.compileRtsCFiles verb lbi econfig
