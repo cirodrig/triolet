@@ -18,7 +18,8 @@ import Common.SourcePos(SourcePos)
 import Export
 import Untyped.Builtins2
 
-data AST                        -- | ^ The AST stage of parsing
+-- | The AST stage of parsing
+data AST
 
 type PVar = Var AST
 type PExpr = LExpr AST

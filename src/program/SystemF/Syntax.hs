@@ -208,10 +208,10 @@ literalType (FloatL _ t) = t
 -- | Information common to all expressions.
 data ExpInfo =
   ExpInfo
-    SourcePos            -- ^ Location where the expression originated
-    !Representation      -- ^ Representation dictionary for this expression.
-                         --   This is only used during elaboration; afterward,
-                         --   it is always 'Nothing'.
+    SourcePos            -- Location where the expression originated
+    !Representation      -- Representation dictionary for this expression.
+                         -- This is only used during elaboration; afterward,
+                         -- it is always 'Nothing'.
 
 data Representation =
     NoRepresentation   -- ^ No representation information is available

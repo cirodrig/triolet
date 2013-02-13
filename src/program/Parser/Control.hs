@@ -34,33 +34,33 @@ noSSAFlow l = Flow l Nothing
 
 -- | A control flow node.  Performs an action, has inputs and outputs.
 data Stmt id e x where
-    -- | Assign LHS the value of RHS
+    --   Assign LHS the value of RHS
     Assign :: Parameter id -> LExpr id -> Stmt id O O
 
-    -- | A group of function definitions.
+    --   A group of function definitions.
     --   Definition groups are annotated with their live-in variables
     --   during live variable analysis.  The live-in variables is the
     --   union of the functions' live-ins, minus the functions themselves.
     DefGroup :: [LCFunc id] -> !MLiveness -> Stmt id O O
 
-    -- | Assert that some propositions hold
+    --   Assert that some propositions hold
     Assert :: [LExpr id] -> Stmt id O O
 
-    -- | Type annotation
+    --   Type annotation
     Require :: Var id -> LExpr id -> Stmt id O O
 
-    -- | A control flow target, for incoming control flow.
+    --   A control flow target, for incoming control flow.
     --
     --   Targets are annotated with parameters during SSA analysis.
     Target :: Label -> !(Maybe [Var id]) -> Stmt id C O
     
-    -- | Conditional branch
+    --   Conditional branch
     If :: LExpr id -> Flow id -> Flow id -> Stmt id O C
     
-    -- | Direct jump
+    --   Direct jump
     Jump :: Flow id -> Stmt id O C
     
-    -- | Return from function
+    --   Return from function
     Return :: LExpr id -> Stmt id O C
 
 instance NonLocal (Stmt id) where

@@ -184,10 +184,10 @@ lookupContSet hashtable v = do
 --   Scanning is an imperative algorithm that generates a map assigning
 --   a set of continuations to each local function.
 newtype Scan =
-  Scan {runScan :: RContHT      -- ^ Map from local function to continuation
-                -> Relevant     -- ^ In-scope local functions
-                -> [ValueType]  -- ^ Current function's return types
-                -> RCont        -- ^ Current function's return continuation
+  Scan {runScan :: RContHT      -- Map from local function to continuation
+                -> Relevant     -- In-scope local functions
+                -> [ValueType]  -- Current function's return types
+                -> RCont        -- Current function's return continuation
                 -> IO ()}
 
 instance Monoid Scan where

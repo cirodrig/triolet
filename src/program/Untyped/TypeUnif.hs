@@ -439,10 +439,10 @@ instance MonadTrans Ppr where
   lift m = Ppr $ \_ -> m
 
 outer_prec = 0
-rel_prec = 1                    -- ^ Relations on types
-arrow_prec = 2                  -- ^ Function arrows
-prod_prec = 3                   -- ^ Products in function domains
-app_prec = 4                    -- ^ Application
+rel_prec = 1                    -- Relations on types
+arrow_prec = 2                  -- Function arrows
+prod_prec = 3                   -- Products in function domains
+app_prec = 4                    -- Application
 
 -- | Pretty-print a type constructor
 pprTyCon :: MonadIO m => TyCon -> Ppr m Doc

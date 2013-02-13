@@ -326,10 +326,10 @@ type Rep = Representation
 
 infix 4 |>>
 -- | Convert an expression from one spec type to another.
-(|>>) :: Rep :* Type            -- ^ Convert from type
-      -> Type                   -- ^ Convert to type
-      -> ExpM                   -- ^ Convert this expression
-      -> RI ExpM                -- ^ Compute the coerced expression
+(|>>) :: Rep :* Type            -- Convert from type
+      -> Type                   -- Convert to type
+      -> ExpM                   -- Convert this expression
+      -> RI ExpM                -- Compute the coerced expression
 (rep :* t1 |>> t2) expression = do
   tenv <- getSpecTypeEnv
   kindCoerceExp tenv rep t1 t2 expression

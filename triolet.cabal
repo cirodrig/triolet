@@ -136,9 +136,9 @@ Executable triolet
     SystemF.Build
     SystemF.Context
     SystemF.ConSpecialization
-    SystemF.Datatypes.TypeLayout
-    SystemF.Datatypes.ComputeLayout
-    SystemF.Datatypes.RuntimeLayout
+    --SystemF.Datatypes.TypeLayout
+    --SystemF.Datatypes.ComputeLayout
+    --SystemF.Datatypes.RuntimeLayout
     SystemF.Datatypes.DynamicTypeInfo
     SystemF.Datatypes.Layout
     SystemF.Datatypes.Size

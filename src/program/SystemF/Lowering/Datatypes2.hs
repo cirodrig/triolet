@@ -1391,7 +1391,7 @@ getValLayout ty
          (CoT {}, [_, _]) ->
            -- Coercions are erased
            -- TODO: Convert coercions to unit values, instead
-           error "Coercion" -- $ return VErased
+           error "Coercion"
 
          _ -> internalError "getLayout: Head is not a type application"
   where
