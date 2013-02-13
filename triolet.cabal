@@ -130,7 +130,6 @@ Executable triolet
     Untyped.TypeUnif
     Untyped.TypeInferenceEval
     Untyped.Unif
-    Untyped.Unification
     Untyped.Variable
     SystemF.ArgumentFlattening
     SystemF.Build
