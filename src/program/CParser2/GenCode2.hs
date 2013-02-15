@@ -168,13 +168,19 @@ optDomainsInExp pos tys domains k
   | otherwise = withMany (uncurry (optDomainInExp pos)) (zip tys domains) k
 
 -- | Generate code of a type appearing in an expression.
---   'Init' terms are expanded so that type checking can proceed.
+--   Reduce the type as much as possible, to save work later on.
 typeInExp :: RLType -> TransE Type.Type
-typeInExp t = fst `liftM` genType t
+typeInExp t = do
+  (t', _) <- genType t
+  Type.Eval.normalize t'
 
 -- | Translate an AST type to a specification type and compute its kind.
+--   Reduce the type as much as possible, to save work later on.
 typeKindInExp :: RLType -> TransE (Type.Type, Type.Kind)
-typeKindInExp = genType
+typeKindInExp t = do
+  (t', k') <- genType t
+  t'' <- Type.Eval.normalize t'
+  return (t'', k')
 
 exprs :: [RLExp] -> TransE ([SystemF.ExpM], [Type.Type])
 exprs = mapAndUnzipM expr
