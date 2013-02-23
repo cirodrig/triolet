@@ -157,7 +157,7 @@ varEnt :: Var -> LType Resolved -> [Attribute] -> TransT UpdateTypeEnv
 varEnt ident ty attrs = do
   let conlike = fromVarAttrs attrs
   (ty', _) <- genType ty
-  let update = UpdateTypeEnv (insertTypeWithProperties ident ty' conlike)
+  let update = UpdateTypeEnv (\env -> insertGlobalTypeWithProperties env ident ty' conlike)
   return $! conlike `seq` update
 
 typeEnt ident kind = do
@@ -168,7 +168,9 @@ typeEnt ident kind = do
              of Just l -> labelLocalNameAsString l
   type_function <- lookupBuiltinTypeFunction name
   return $ UpdateTypeEnv
-    (maybe (insertType ident kind') (insertTypeFunction ident kind') type_function)
+    (\env -> case  type_function
+             of Nothing -> insertGlobalType env ident kind'
+                Just f -> insertTypeFunction env ident kind' f)
 
 dataEnt pos core_name dom kind data_cons attrs = do
   kind' <- genKind kind
@@ -180,7 +182,7 @@ dataEnt pos core_name dom kind data_cons attrs = do
       mapM (translateDataConDecl core_name) data_cons
     base_kind <- toBaseKind pos kind'
     let descr = DataTypeDescr core_name params base_kind data_con_descrs abstract algebraic
-    return $ UpdateTypeEnv (insertDataType descr)
+    return $ UpdateTypeEnv (\env -> insertDataType env descr)
 
 -- | Translate a global type-related declaration.
 typeLevelDecl :: LDecl Resolved -> TransT UpdateTypeEnv
@@ -215,4 +217,7 @@ typeTranslation var_ids type_synonyms kind_env type_functions mod = do
     runTypeTranslation var_ids kind_env type_synonyms type_functions $
     declTypeEnvironment mod
 
-  return $ applyUpdates type_env_updates wiredInTypeEnv
+  -- Create a new type environment to hold all definitions
+  tenv <- mkWiredInTypeEnv
+  applyUpdates type_env_updates tenv
+  return tenv

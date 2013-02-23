@@ -33,6 +33,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
 import Common.SourcePos
 import Common.Supply
 import Common.PrecDoc
@@ -58,17 +59,19 @@ import GlobalVar
 
 -- | If the parameter is a type constructor that has a single data constructor,
 --   return its type and data constructors
-fromProductTyCon :: TypeEnv -> Var -> Maybe DataConType
-fromProductTyCon tenv ty_op =
-  case lookupDataType ty_op tenv
-  of Nothing -> Nothing
-     Just data_type ->
-       case dataTypeDataConstructors data_type
-       of [con] ->
-            case lookupDataCon con tenv
-            of Just dcon_type -> Just dcon_type
-               Nothing -> internalError "fromProductTyCon"
-          _ -> Nothing
+fromProductTyCon :: EvalMonad m => Var -> m (Maybe DataConType)
+fromProductTyCon ty_op = do
+  m_dtype <- lookupDataType ty_op
+  case m_dtype of
+    Nothing -> return Nothing
+    Just data_type ->
+      case dataTypeDataConstructors data_type
+      of [con] -> do
+           m_dcon <- lookupDataCon con
+           case m_dcon of
+             Just dcon_type -> return $ Just dcon_type
+             Nothing -> internalError "fromProductTyCon"
+         _ -> return Nothing
 
 fromOutPtrType :: Type -> Type
 fromOutPtrType t =
@@ -82,12 +85,13 @@ storeType = storeT
 --
 --   Creates either a let expression or a case-of-boxed expression, depending
 --   on the data type that will be bound.
-bindVariable :: TypeEnv -> Binder -> ExpM -> ExpM -> ExpM
-bindVariable tenv binder rhs body =
-  case toBaseKind $ typeKind tenv (binderType binder)
-  of BareK -> letViaBoxed binder rhs body
-     ValK  -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
-     BoxK  -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
+bindVariable :: EvalMonad m => Binder -> ExpM -> m (ExpM -> ExpM)
+bindVariable binder rhs = do
+  k <- typeBaseKind $ binderType binder
+  return $! case k of
+    BareK -> \body -> letViaBoxed binder rhs body
+    ValK  -> \body -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
+    BoxK  -> \body -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
 
 noneValue :: ExpM
 noneValue = conE defaultExpInfo (VarCon (coreBuiltin The_None) [] []) []
@@ -122,10 +126,10 @@ liftFreshVarAF m = AF $ ReaderT $ \env -> runFreshVarM (afVarSupply env) m
 instance TypeEnvMonad (AFMonad e) where
   type EvalBoxingMode (AFMonad e) = UnboxedMode
   getTypeEnv = AF $ asks afTypeEnv
-  assumeWithProperties v t b m = AF $ local insert_type $ unAF m
+  {-assumeWithProperties v t b m = AF $ local insert_type $ unAF m
     where
       insert_type env =
-        env {afTypeEnv = insertTypeWithProperties v t b $ afTypeEnv env}
+        env {afTypeEnv = insertTypeWithProperties v t b $ afTypeEnv env}-}
 
 instance ReprDictMonad (AFMonad e) where
   getVarIDs = AF $ asks afVarSupply
@@ -219,38 +223,40 @@ isDeadDecomp _ = False
 --   The significance of this test is that small data are probably cheap
 --   to copy, so it's probably cheap to decompose or rebuild a value if
 --   its results are small.
-isSmallDecomp :: TypeEnv -> (Type, Decomp) -> Bool
-isSmallDecomp tenv (ty, decomp) =
+isSmallDecomp :: EvalMonad m => (Type, Decomp) -> m Bool
+isSmallDecomp (ty, decomp) =
   case decomp
   of IdDecomp -> is_small_type ty
-     DeadDecomp {} -> True
+     DeadDecomp {} -> return True
      DeconDecomp decon fields ->
-       let local_tenv = foldr assume_binder tenv $ deConExTypes decon
-       in all (isSmallDecomp local_tenv)
-          [(patMType p, d) | FlatArg p d <- fields]
+       -- True if all fields are small
+       assumeBinders (deConExTypes decon) $
+       allM isSmallDecomp [(patMType p, d) | FlatArg p d <- fields]          
   where
-    assume_binder (v ::: t) tenv = insertType v t tenv
-
-    is_small_type t =
-      case toBaseKind $ typeKind tenv ty
-      of ValK -> True
-         BoxK -> True
-         _    -> False
+    is_small_type t = do
+      k <- typeBaseKind t
+      return $! case k
+                of ValK -> True
+                   BoxK -> True
+                   _    -> False
 
 -- | Determine whether all decomposed items are values or boxed objects.
 --   If so, then it's possible to unpack a return value with this type.
-unpacksToAValue :: TypeEnv -> FlatRet -> Bool
-unpacksToAValue tenv (FlatRet ty IdDecomp) =
-  case toBaseKind $ typeKind tenv ty
-  of ValK -> True
-     BoxK -> True
-     _    -> False
+unpacksToAValue :: EvalMonad m => FlatRet -> m Bool
+unpacksToAValue (FlatRet ty IdDecomp) = do
+  k <- typeBaseKind ty
+  return $! case k
+            of ValK -> True
+               BoxK -> True
+               _    -> False
 
-unpacksToAValue tenv (FlatRet _ (DeconDecomp decon fs)) =
-  null (deConExTypes decon) &&
-  and [unpacksToAValue tenv (flatArgReturn f) | f <- fs]
+unpacksToAValue (FlatRet _ (DeconDecomp decon fs))
+  | null (deConExTypes decon) =
+      allM unpacksToAValue [(flatArgReturn f) | f <- fs]
+  | otherwise =
+      return False
 
-unpacksToAValue _ (FlatRet _ (DeadDecomp _)) = True
+unpacksToAValue (FlatRet _ (DeadDecomp _)) = return True
 
 -- | Flatten a decomposition.  Decomposed type parameters and fields are
 --   transformed and collected by a monoid.
@@ -450,14 +456,14 @@ flattenReturnDecomp f decomp =
 
 -- | Get the flattened return type.  Only valid if
 --   @flattenedReturnsBySideEffect flat_ret == False@.
-flattenedReturnType :: TypeEnv -> FlatRet -> Type
-flattenedReturnType tenv flat_ret =
+flattenedReturnType :: EvalMonad m => FlatRet -> m Type
+flattenedReturnType flat_ret =
   let flat_type = frType flat_ret
       flat_decomp = frDecomp flat_ret
   in case flattenReturnDecomp patMType flat_decomp
-     of Just [t] -> t
-        Just ts  -> unboxedTupleType tenv ts
-        Nothing  -> flat_type
+     of Just [t] -> return t
+        Just ts  -> liftTypeEvalM $ unboxedTupleType ts
+        Nothing  -> return flat_type
 
 -- | Get the parameter list to use to bind the flattened return values
 flattenedReturnParameters :: FlatRet -> Maybe [PatM]
@@ -554,14 +560,14 @@ packParameterWrite' pat flat_arg =
     var_exp v = ExpM $ VarE defaultExpInfo v
     
     copy_expr ty src = do
-       tenv <- getTypeEnv
-       case toBaseKind $ typeKind tenv ty of
-         BareK -> do
-           -- Insert a copy operation
-           dict <- getReprDict ty
-           return $ appE defaultExpInfo copy_op [ty] [dict, src]
-         _ ->
-           return src
+      k <- typeBaseKind ty
+      case k of
+        BareK -> do
+          -- Insert a copy operation
+          dict <- getReprDict ty
+          return $ appE defaultExpInfo copy_op [ty] [dict, src]
+        _ ->
+          return src
     
     copy_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_copy)
 
@@ -595,13 +601,11 @@ packParameterRead (FlatArg pat flat_arg) =
          
          -- If this is a bare type, define a local variable with the
          -- packed parameter.  Otherwise, just assign a local variable.
-         tenv <- getTypeEnv
-         return (bindVariable tenv (patMBinder pat) packed)
+         bindVariable (patMBinder pat) packed
 
      DeadDecomp e -> do
        -- Assign the expression to a temporary variable
-       tenv <- getTypeEnv
-       return (bindVariable tenv (patMBinder pat) e)
+       bindVariable (patMBinder pat) e
   where
     var_exp v = ExpM $ VarE defaultExpInfo v
 
@@ -714,8 +718,8 @@ deconReturn decon dc_fields decon_initializers decon_patterns expression =
                       VarCon v ty_args [VarT v | v ::: _ <- ex_types]
                     TupleDeCon ty_args ->
                       TupleCon ty_args)
-      tenv <- getTypeEnv
-      case toBaseKind $ typeKind tenv data_type of
+      k <- typeBaseKind data_type
+      case k of
         BareK -> deconstruct_writer data_type tail_exp case_of
         ValK  -> deconstruct_value tail_exp case_of
         BoxK  -> deconstruct_value tail_exp case_of
@@ -780,8 +784,8 @@ flattenLocalWrite (FlatLocal (FlatArg old_binder decomp)) expr consumer =
 flattenLocalRead :: (EvalMonad m, ReprDictMonad m) =>
                     FlatLocal -> ExpM -> ExpM -> m ExpM
 flattenLocalRead flat_local@(FlatLocal flat_arg) expr consumer = do
-  tenv <- getTypeEnv
-  case toBaseKind $ typeKind tenv arg_type of
+  k <- typeBaseKind arg_type
+  case k of
     BareK -> return decon_value
     ValK  -> flattenLocalWrite flat_local expr consumer
     BoxK  -> flattenLocalWrite flat_local expr consumer
@@ -910,7 +914,6 @@ planFlattening :: (ReprDictMonad m, EvalMonad m,
                    EvalBoxingMode m ~ UnboxedMode) =>
                   PlanMode -> Type -> Specificity -> m (Type, Decomp)
 planFlattening mode ty spc = do
-  tenv <- getTypeEnv
   whnf_type <- reduceToWhnf ty
   let
     -- The return value will have of these decompositions 
@@ -933,37 +936,42 @@ planFlattening mode ty spc = do
     -- However, deconstructing may be disallowed when the constructor has
     -- existential types.
     singleton_decomp =
-      case fromVarApp whnf_type
-      of Just (op, _) | Just data_con <- fromProductTyCon tenv op ->
+      cond (fromVarApp whnf_type) $
+      [ do Just (op, _) <- it
+           Just data_con <- lift $ fromProductTyCon op
+
            -- Check for existential types
            if (case existentialHandling mode
                of UnpackExistentials -> True
                   Don'tUnpackExistentials ->
                     null $ dataConExTypes data_con)
-           then decon_decomp (dataConCon data_con) Nothing
-           else id_decomp
-         _ -> id_decomp
+             then lift $ decon_decomp (dataConCon data_con) Nothing
+             else lift $ id_decomp
+
+      , lift id_decomp
+      ]
 
     -- Similar to singleton_decomp, except that decomposition only occurs if
     -- the result of decomposition is small.
     liberal_decomp =
-      case fromVarApp whnf_type
-      of Just (op, _) | Just data_con <- fromProductTyCon tenv op ->
+      cond (fromVarApp whnf_type) $
+      [ do Just (op, _) <- it
+           Just data_con <- lift $ fromProductTyCon op
+
            -- Check for existential types
            if (case existentialHandling mode
                of UnpackExistentials -> True
                   Don'tUnpackExistentials ->
                     null $ dataConExTypes data_con)
-           then do
-             -- Create a decomposition
-             ret <- decon_decomp (dataConCon data_con) Nothing
+             then lift $ do
+               -- Create a decomposition
+               ret <- decon_decomp (dataConCon data_con) Nothing
 
-             -- Ensure that the decomposed value is samll
-             if isSmallDecomp tenv ret
-               then return ret
-               else id_decomp
-           else id_decomp
-         _ -> id_decomp
+               -- Ensure that the decomposed value is samll
+               ifM (isSmallDecomp ret) (return ret) id_decomp
+             else lift id_decomp
+       , lift id_decomp
+       ]
 
     -- If data type is a Stored type, then deconstruct it.
     stored_decomp =
@@ -972,54 +980,49 @@ planFlattening mode ty spc = do
            decon_decomp (coreBuiltin The_stored) Nothing
          _ -> id_decomp
 
-  case spc of
-    -- Don't flatten or remove Repr or FIInt parameters, because later
-    -- stages of the compiler might want to access them.
-    _ | is_repr_pattern whnf_type || is_fiint_pattern whnf_type -> id_decomp
+  cond spc $
+    [ -- Don't flatten or remove Repr or FIInt parameters, because later
+      -- stages of the compiler might want to access them.
+      do Just (op, _) <- return $ fromVarApp whnf_type
+         aguard (op == coreBuiltin The_Repr || op == coreBuiltin The_FIInt)
+         lift id_decomp
 
-    -- Remove dead fields
-    Unused -> dead_decomp
+    , -- Remove dead fields
+      do Unused <- return spc
+         lift dead_decomp
 
-    -- Don't flatten dictionary parameters or abstract data types.
-    -- They can be removed if dead.
-    _ | is_dictionary_pattern whnf_type || is_abstract tenv whnf_type ->
-      id_decomp
+    , -- Don't flatten dictionary parameters.
+      -- They can be removed if dead.
+      do Just (op, _) <- return $ fromVarApp whnf_type
+         aguard $ isDictionaryTypeCon op
+         lift id_decomp
 
-    Decond (VarDeCon spc_con _ _) spcs -> decon_decomp spc_con (Just spcs)
+    , -- Don't flatten abstract data types.
+      -- They can be removed if dead.
+      do Just (op, _) <- return $ fromVarApp whnf_type
+         Just dtype <- lift $ lookupDataType op
+         aguard $ dataTypeIsAbstract dtype
+         lift id_decomp
 
-    -- Unpacking is not implemented for unboxed tuples
-    Decond (TupleDeCon _) spcs -> id_decomp
+    , do Decond (VarDeCon spc_con _ _) spcs <- it
+         lift $ decon_decomp spc_con (Just spcs)
 
-    Inspected -> singleton_decomp
-    Copied    -> singleton_decomp
+    , -- Unpacking is not implemented for unboxed tuples
+      do Decond (TupleDeCon _) spcs <- it
+         lift id_decomp
 
-    Used -> 
-      case eagerness mode
-      of Parsimonious -> id_decomp
-         LiberalStored -> stored_decomp
-         LiberalSmall -> liberal_decomp
-           
-  where
-    is_repr_pattern t =
-      case fromVarApp t
-      of Just (op, _) -> op == coreBuiltin The_Repr
-         _ -> False
+    , do Inspected <- it
+         lift singleton_decomp
 
-    is_fiint_pattern t =
-      case fromVarApp t
-      of Just (op, _) -> op == coreBuiltin The_FIInt
-         _ -> False
+    , do Copied <- it
+         lift singleton_decomp
 
-    is_dictionary_pattern t =
-      case fromVarApp t
-      of Just (op, _) -> isDictionaryTypeCon op
-         _ -> False
-    
-    is_abstract tenv t =
-      case fromVarApp t
-      of Just (op, _) | Just dtype <- lookupDataType op tenv ->
-           dataTypeIsAbstract dtype
-         _ -> False
+    , do Used <- it
+         lift $ case eagerness mode
+                of Parsimonious -> id_decomp
+                   LiberalStored -> stored_decomp
+                   LiberalSmall -> liberal_decomp
+    ]
 
 -- | Deconstruct a parameter into its component fields.
 --
@@ -1031,8 +1034,8 @@ planDeconstructedValue :: (ReprDictMonad m, EvalMonad m,
                           PlanMode -> Var -> [Type] -> Maybe [Specificity]
                        -> m Decomp
 planDeconstructedValue mode con ty_args maybe_fields = do
-  tenv <- getTypeEnv
-  case lookupDataCon con tenv of
+  m_dcon <- lookupDataCon con
+  case m_dcon of
     Just datacon_type -> do
       -- Instantiate the data constructor type
       (ex_params, field_types, _) <-
@@ -1065,8 +1068,8 @@ planDeconstructedValue mode con ty_args maybe_fields = do
 -- | Construct an arbitrary value of the given type to replace an expression 
 --   whose value is dead.  The argument should be in WHNF.
 deadValue t = do
-  tenv <- getTypeEnv
-  case toBaseKind $ typeKind tenv t of
+  k <- typeBaseKind t
+  case k of
     ValK ->
       case fromTypeApp t
       of (VarT con, [])
@@ -1080,8 +1083,7 @@ deadValue t = do
            | con `isCoreBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor
                -- Get types of data constructor parameters
-               let Just datacon_type =
-                     lookupType (coreBuiltin The_fiInt) tenv
+               Just datacon_type <- lookupType $ coreBuiltin The_fiInt
                monotype <- liftTypeEvalM $
                            typeOfTypeApp noSourcePos 1 datacon_type intindexT p
                let (dom, _) = fromFunType monotype
@@ -1092,8 +1094,7 @@ deadValue t = do
                return expr
            | con `isCoreBuiltin` The_IInt -> do
                -- Use 'iInt' as the data constructor
-               let Just datacon_type =
-                     lookupType (coreBuiltin The_iInt) tenv
+               Just datacon_type <- lookupType (coreBuiltin The_iInt)
                monotype <- liftTypeEvalM $
                            typeOfTypeApp noSourcePos 1 datacon_type intindexT p
                let (dom, _) = fromFunType monotype
@@ -1150,15 +1151,15 @@ planOutputReturn :: (ReprDictMonad m, EvalMonad m,
                      EvalBoxingMode m ~ UnboxedMode) =>
                     PatM -> m PlanRet
 planOutputReturn pat = do
-  tenv <- getTypeEnv
   let return_type = fromOutPtrType $ patMType pat
   flat_ret <- planReturn mode Used return_type
 
   -- Only perform decomposition if everything was converted to a value
-  let real_ret =
-        if unpacksToAValue tenv flat_ret
-        then flat_ret
-        else FlatRet (frType flat_ret) IdDecomp
+  real_ret <- do
+    value <- unpacksToAValue flat_ret
+    return $! if value
+              then flat_ret
+              else FlatRet (frType flat_ret) IdDecomp
   return $ PlanRetWriter pat real_ret
   where
     mode = PlanMode LiberalSmall Don'tUnpackExistentials
@@ -1205,18 +1206,18 @@ packLocal (FlatLocal flat_arg) consumer = do
 planLocal :: (ReprDictMonad m, EvalMonad m,
               EvalBoxingMode m ~ UnboxedMode) => PatM -> m FlatLocal
 planLocal pat = do
-  flat_arg <- planParameter mode pat
-  tenv <- getTypeEnv
-  choose_flattening tenv flat_arg
+  flat_arg@(FlatArg pat' decomp) <- planParameter mode pat
+  
+  cond decomp
+    [ -- Don't decompose if some fields are bare references
+      do DeconDecomp {} <- it
+         False <- lift $ unpacksToAValue $ flatArgReturn flat_arg
+         return $ FlatLocal (FlatArg pat' IdDecomp)
+
+    , return $ FlatLocal flat_arg
+    ]
   where
     mode = PlanMode Parsimonious UnpackExistentials
-    choose_flattening tenv flat_arg@(FlatArg pat decomp) = 
-      case decomp
-      of DeconDecomp {}
-           -- Don't decompose if some fields are bare references
-           | not $ unpacksToAValue tenv $ flatArgReturn flat_arg ->
-               return $ FlatLocal (FlatArg pat IdDecomp)
-         _ -> return $ FlatLocal flat_arg
 
 -------------------------------------------------------------------------------
 -- * The argument flattening transformation on a function
@@ -1250,19 +1251,21 @@ planRetOriginalInterface (PlanRetWriter p fr) =
 -- | Get the flattened return parameter and return type
 --   of a return flattening plan.
 --   They are used in the worker function.
-planRetFlattenedInterface :: TypeEnv -> PlanRet -> ([PatM], Type)
-planRetFlattenedInterface tenv (PlanRetValue fr) =
-  ([], flattenedReturnType tenv fr)
+planRetFlattenedInterface :: EvalMonad m => PlanRet -> m ([PatM], Type)
+planRetFlattenedInterface (PlanRetValue fr) = do
+  rt <- flattenedReturnType fr
+  return ([], rt)
 
-planRetFlattenedInterface tenv (PlanRetWriter p fr) =
+planRetFlattenedInterface (PlanRetWriter p fr) =
   case frDecomp fr
   of IdDecomp ->
-       ([p], storeType)
+       return ([p], storeType)
      DeadDecomp {} ->
        -- Dead return values aren't handled currently
        internalError "planRetFlattenedInterface"
-     DeconDecomp {} ->
-       ([], flattenedReturnType tenv fr)
+     DeconDecomp {} -> do
+       rt <- flattenedReturnType fr
+       return ([], rt)
 
 type PlanArg = FlatArg
 type PlanArgs = FlatArgs
@@ -1306,27 +1309,26 @@ originalFunctionInterface p =
 
   in (originalTyParams p, params, return_type)
 
-flattenedFunctionInterface :: TypeEnv -> FunctionPlan
-                           -> ([TyPat], [PatM], Type)
-flattenedFunctionInterface tenv p =
-  let (output_params, return_type) =
-        planRetFlattenedInterface tenv $ flatReturn p
+flattenedFunctionInterface :: EvalMonad m => FunctionPlan
+                           -> m ([TyPat], [PatM], Type)
+flattenedFunctionInterface p = do
+  (output_params, return_type) <-
+    planRetFlattenedInterface $ flatReturn p
 
-      -- Get flattened parameters
-      (new_ty_params, input_params) = flattenedParameters $ flatParams p
+  -- Get flattened parameters
+  let (new_ty_params, input_params) = flattenedParameters $ flatParams p
       
       params = input_params ++ output_params
       ty_params = originalTyParams p ++ new_ty_params
-  in if null params && null ty_params
+  if null params && null ty_params
      then -- If this happens, the 'FunctionPlan' value is wrong.
           internalError "flattenedFunctionInterface: No parameters"
-     else (ty_params, params, return_type)
+     else return (ty_params, params, return_type)
 
 planFunction :: FunM -> AF FunctionPlan
 planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
   -- Partition parameters into input and output parameters
-  tenv <- getTypeEnv
-  let (input_params, output_params) = partitionParameters tenv $ funParams f
+  (input_params, output_params) <- liftTypeEvalM $ partitionParameters $ funParams f
 
   params <- planParameters (PlanMode LiberalStored UnpackExistentials) input_params
 
@@ -1337,8 +1339,9 @@ planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
 
   -- If all parameters are dead and there's no output parameter, then add a
   -- dummy parameter
+  flattened_interface <- planRetFlattenedInterface ret
   let no_flattened_output_params =
-        case planRetFlattenedInterface tenv ret
+        case flattened_interface
         of ([], _) -> True
            _ -> False
   x_params <-
@@ -1371,8 +1374,7 @@ mkWrapperFunction plan annotation wrapper_name worker_name = do
   where
     make_wrapper_body = assumeTyPats (originalTyParams plan) $ do
       -- Call the worker function and re-pack its arguments
-      tenv <- getTypeEnv
-      worker_call_exp <- worker_call tenv
+      worker_call_exp <- worker_call
       body <- packReturn (planRetFlatRet $ flatReturn plan) worker_call_exp
       
       -- Apply the return argument, if the original function had one
@@ -1387,25 +1389,26 @@ mkWrapperFunction plan annotation wrapper_name worker_name = do
 
     -- A call to the worker function.  The worker function takes flattened 
     -- function arguments.
-    worker_call tenv =
+    worker_call = do
       let orig_ty_args =
             [VarT a | TyPat (a ::: _) <- originalTyParams plan]
           (new_ty_args, input_args) =
             flattenedParameterValues (flatParams plan)
-          (output_params, return_type) =
-            planRetFlattenedInterface tenv $ flatReturn plan
-          output_args = [ExpM $ VarE defaultExpInfo (patMVar p)
+      (output_params, return_type) <-
+        planRetFlattenedInterface $ flatReturn plan
+      let output_args = [ExpM $ VarE defaultExpInfo (patMVar p)
                         | p <- output_params]
 
           ty_args = orig_ty_args ++ new_ty_args
           args = input_args ++ output_args
           worker_e = ExpM $ VarE defaultExpInfo worker_name
           worker_call_exp = appE defaultExpInfo worker_e ty_args args
-      in -- If the worker function returns by reference, then lambda-abstract
-         -- over its output parameter
-         case output_params
-         of [] -> return worker_call_exp
-            [p] -> lambdaAbstract defaultExpInfo return_type p worker_call_exp
+
+      -- If the worker function returns by reference, then lambda-abstract
+      -- over its output parameter
+      case output_params of
+        [] -> return worker_call_exp
+        [p] -> lambdaAbstract defaultExpInfo return_type p worker_call_exp
 
 -- | Create a worker function.  The worker function takes unpacked arguments
 --   and returns an unpacked return value.  The worker function body repacks
@@ -1418,10 +1421,9 @@ mkWorkerFunction :: FunctionPlan
                  -> AF (FDef Mem)
 mkWorkerFunction plan annotation worker_name original_body = do
   worker_body <- create_worker_body
-  tenv <- getTypeEnv
-  let (worker_ty_params, worker_params, worker_ret) = 
-        flattenedFunctionInterface tenv plan
-      worker = FunM $ Fun { funInfo = defaultExpInfo
+  (worker_ty_params, worker_params, worker_ret) <-
+    flattenedFunctionInterface plan
+  let worker = FunM $ Fun { funInfo = defaultExpInfo
                           , funTyParams = worker_ty_params
                           , funParams = worker_params
                           , funReturn = worker_ret
@@ -1443,9 +1445,9 @@ mkWorkerFunction plan annotation worker_name original_body = do
       
       -- If the new function returns by reference, then apply to the new
       -- return parameter
-      tenv <- getTypeEnv
+      flattened_interface <- planRetFlattenedInterface (flatReturn plan)
       let worker_body =
-            case planRetFlattenedInterface tenv (flatReturn plan)
+            case flattened_interface
             of ([], _) -> flat_body
                ([p], _) -> let out_exp = ExpM $ VarE defaultExpInfo (patMVar p)
                            in appE defaultExpInfo flat_body [] [out_exp]
@@ -1594,6 +1596,7 @@ flattenArguments :: Module Mem -> IO (Module Mem)
 flattenArguments mod =
   withTheNewVarIdentSupply $ \id_supply -> do
     dict_env <- runFreshVarM id_supply createDictEnv
-    type_env <- readInitGlobalVarIO the_memTypes
+    i_type_env <- readInitGlobalVarIO the_memTypes
+    type_env <- thawTypeEnv i_type_env
     let env = AFLVEnv id_supply type_env dict_env ()
     runReaderT (unAF $ flattenModuleContents mod) env

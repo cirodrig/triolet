@@ -30,14 +30,14 @@ import Globals
 import GlobalVar
 
 data Env =
-  Env { boxedTypeEnv :: TypeEnvBase FullyBoxedMode
-      , specTypeEnv :: TypeEnvBase SpecMode
-      , memTypeEnv :: TypeEnvBase UnboxedMode
-      , varIDs :: IdentSupply Var
+  Env { boxedTypeEnv :: !(MTypeEnvBase FullyBoxedMode)
+      , specTypeEnv :: !(MTypeEnvBase SpecMode)
+      , memTypeEnv :: !(MTypeEnvBase UnboxedMode)
+      , varIDs :: !(IdentSupply Var)
       }
 
 newtype RI a = RI (ReaderT Env IO a)
-             deriving(Functor, Applicative, Monad)
+             deriving(Functor, Applicative, Monad, MonadIO)
 
 instance Supplies RI (Ident Var) where
   fresh = RI $ ReaderT $ \env -> supplyValue $ varIDs env
@@ -45,8 +45,11 @@ instance Supplies RI (Ident Var) where
 runRI :: Env -> RI a -> IO a
 runRI env (RI m) = runReaderT m env
 
-getSpecTypeEnv :: RI (TypeEnvBase SpecMode)
+getSpecTypeEnv :: RI (MTypeEnvBase SpecMode)
 getSpecTypeEnv = RI $ asks specTypeEnv
+
+getBoxedTypeEnv :: RI (MTypeEnvBase FullyBoxedMode)
+getBoxedTypeEnv = RI $ asks boxedTypeEnv
 
 withBoxedTyping :: BoxedTypeEvalM a -> RI a
 withBoxedTyping m = RI $ ReaderT $ \env ->
@@ -69,19 +72,23 @@ liftFreshVarMToBoxed m = TypeEvalM $ \id_supply _ -> runFreshVarM id_supply m
 
 -- | Add a binding to the boxed and spec type environments.
 assumeType :: Var -> Type -> Type -> RI a -> RI a
-assumeType v boxed_t spec_t (RI m) = RI $ local insert m
-  where
-    insert env = env { boxedTypeEnv = insertType v boxed_t $ boxedTypeEnv env
-                     , specTypeEnv = insertType v spec_t $ specTypeEnv env}
+assumeType v boxed_t spec_t m = do 
+  boxed_type_env <- getBoxedTypeEnv
+  spec_type_env <- getSpecTypeEnv
+  locallyInsertType boxed_type_env v boxed_t $
+    locallyInsertType spec_type_env v spec_t $
+    m
 
--- | Add a binding to the spec type environment
+-- | Add bindings to the spec type environment
 assumeBindersSpec :: [Binder] -> RI a -> RI a
 assumeBindersSpec bs m = foldr assumeBinderSpec m bs
 
+-- | Add a binding to the spec type environment
 assumeBinderSpec :: Binder -> RI a -> RI a
-assumeBinderSpec (v ::: t) (RI m) = RI $ local insert m
-  where
-    insert env = env {specTypeEnv = insertType v t $ specTypeEnv env}
+assumeBinderSpec (v ::: t) m = do
+  spec_type_env <- getSpecTypeEnv
+  locallyInsertType spec_type_env v t m
+
 {-
 unpackFunT :: Type -> RI (Type, Type)
 unpackFunT ty = do
@@ -241,8 +248,8 @@ elaborateType ty = do
 
        _ -> internalError $ "elaborateType: " ++ show (pprType ty)
 
-  spec_tenv <- getSpecTypeEnv
-  return (elaborated, typeKind spec_tenv elaborated)
+  kind <- withSpecTyping $ typeKind elaborated
+  return (elaborated, kind)
 
 -- | Elaborate a type to a specific kind
 elaborateTypeTo :: Kind -> Type -> RI Type
@@ -284,24 +291,29 @@ elaborateBaseTypeToForm form ty = do
 --   The type must be of the form @C ts@, @t1 ~ t2@, or @forall as. t1 -> t2@.
 naturalType :: Type -> RI Type
 naturalType ty = do
-  tenv <- getSpecTypeEnv
-  let k = typeKind tenv ty
-  case strip_foralls_and_coercions ty of
-    -- Function type
-    FunT {} -> (k |> boxT) ty
+  k <- withSpecTyping $ typeKind ty
 
-    -- Data type
-    ty' | Just (con, _) <- fromVarApp ty',
-          Just dtype <- lookupDataType con tenv -> do
-      -- Convert to the natural kind for this data type
-      (k |> fromBaseKind (dataTypeKind dtype)) ty
+  cond (strip_foralls_and_coercions ty) $
+    [ -- Function type
+      do FunT {} <- it
+         lift $ (k |> boxT) ty
 
-    -- Coercion types are values
-    ty' | (CoT {}, [_, _]) <- fromTypeApp ty' -> do
-      (k |> valT) ty
+    , -- Data type
+      do ty' <- it
+         Just (con, _) <- return $ fromVarApp ty'
+         Just dtype <- lift $ withSpecTyping $ lookupDataType con
 
-    _ -> internalError $
-         "naturalType: Not a function or data type: " ++ show (pprType ty)
+         -- Convert to the natural kind for this data type
+         lift $ (k |> fromBaseKind (dataTypeKind dtype)) ty
+
+    , -- Coercion types are values
+      do ty' <- it
+         (CoT {}, [_, _]) <- return $ fromTypeApp ty'
+         lift $ (k |> valT) ty
+
+    , lift $ internalError $
+      "naturalType: Not a function or data type: " ++ show (pprType ty)
+    ]
   where
     -- Remove all forall and adapter terms from the head of this type
     strip_foralls_and_coercions ty =
@@ -331,12 +343,14 @@ infix 4 |>>
       -> ExpM                   -- Convert this expression
       -> RI ExpM                -- Compute the coerced expression
 (rep :* t1 |>> t2) expression = do
-  tenv <- getSpecTypeEnv
-  kindCoerceExp tenv rep t1 t2 expression
+  kindCoerceExp rep t1 t2 expression
 
-kindCoerceExp :: TypeEnvBase SpecMode -> Rep -> Type -> Type -> ExpM
-              -> RI ExpM
-kindCoerceExp tenv rep t1 t2 expression =
+kindCoerceExp :: Rep -> Type -> Type -> ExpM -> RI ExpM
+kindCoerceExp rep t1 t2 expression = do
+  -- Determine which storage strategies are being used
+  k1 <- withSpecTyping $ typeBaseKind t1
+  k2 <- withSpecTyping $ typeBaseKind t2
+
   case (k1, k2) of
     -- No coercion required    
     _ | k1 == k2 -> return expression
@@ -385,10 +399,6 @@ kindCoerceExp tenv rep t1 t2 expression =
                        convert_to_bare t2 expression
   where
     exp_info = case expression of ExpM e -> mkExpInfo (getSourcePos e)
-
-    -- Determine which storage strategies are being used
-    k1 = toBaseKind $ typeKind tenv t1
-    k2 = toBaseKind $ typeKind tenv t2
 
     stored_con val_type e =
       return $ conE exp_info (VarCon (coreBuiltin The_stored) [val_type] []) [e]
@@ -529,8 +539,8 @@ coerceExpressionResult form rep e =
      GivenType t -> coerce_to_type t
   where
     coerce_to_kind want_k = do
-      tenv <- getSpecTypeEnv
-      want_t <- (typeKind tenv (eeType e) |> want_k) (eeType e)
+      given_k <- withSpecTyping $ typeKind $ eeType e
+      want_t <- (given_k |> want_k) (eeType e)
       coerce_to_type want_t
 
     coerce_to_type want_t = do
@@ -538,8 +548,7 @@ coerceExpressionResult form rep e =
       return $ EExp want_t e'
 
 elaborateVar info rep v = do
-  tenv <- getSpecTypeEnv
-  let Just ty = lookupType v tenv
+  Just ty <- withSpecTyping $ lookupType v
   return $ EExp ty (ExpM $ VarE info v)
 
 elaborateLit info rep l = do
@@ -555,8 +564,7 @@ elaborateCon info rep con args = do
 -- parameter and return types.
 elaborateConInst :: ConInst -> RI (ConInst, [Type], Type)
 elaborateConInst (VarCon con ty_args ex_types) = do
-  tenv <- getSpecTypeEnv
-  let Just dcon_type = lookupDataCon con tenv
+  Just dcon_type <- withSpecTyping $ lookupDataCon con
   let typaram_kinds = map binderType $ dataConTyParams dcon_type
       ex_type_kinds = map binderType $ dataConExTypes dcon_type
 
@@ -571,8 +579,8 @@ elaborateConInst (VarCon con ty_args ex_types) = do
   (data_field_types, data_return_type) <-
     withSpecTyping $
     instantiateDataConTypeWithExistentials dcon_type (ty_args' ++ ex_types')
-  let field_types = map (toInitializerType tenv) data_field_types
-      return_type = toInitializerType tenv data_return_type
+  field_types <- withSpecTyping $ mapM toInitializerType data_field_types
+  return_type <- withSpecTyping $ toInitializerType data_return_type
 
   return (VarCon con ty_args' ex_types', field_types, return_type)
 
@@ -580,8 +588,7 @@ elaborateConInst (VarCon con ty_args ex_types) = do
 -- parameter and return types.
 elaborateDeConInst :: DeConInst -> RI (DeConInst, [Type])
 elaborateDeConInst (VarDeCon con ty_args []) = do
-  tenv <- getSpecTypeEnv
-  let Just dcon_type = lookupDataCon con tenv
+  Just dcon_type <- withSpecTyping $ lookupDataCon con
   let typaram_kinds = map binderType $ dataConTyParams dcon_type
 
   -- Coerce type arguments
@@ -594,12 +601,13 @@ elaborateDeConInst (VarDeCon con ty_args []) = do
   return (VarDeCon con ty_args' [], field_types)
 
 -- | If the type is a bare type, convert to a spec initializer type.
-toInitializerType :: TypeEnvBase SpecMode -> Type -> Type
-toInitializerType tenv ty =
-  case toBaseKind $ typeKind tenv ty
-  of BareK -> initConV `varApp` [ty]
-     BoxK  -> ty
-     ValK  -> ty
+toInitializerType :: Type -> TypeEvalM SpecMode Type
+toInitializerType ty = do
+  k <- typeBaseKind ty
+  return $! case k
+            of BareK -> initConV `varApp` [ty]
+               BoxK  -> ty
+               ValK  -> ty
 
 elaborateApp info rep op ty_args args = do
   (op_type, op') <- elaborateExpressionNatural op
@@ -807,8 +815,8 @@ elaborateModule (Module mod_name [] groups exports) = do
 insertCoercions :: Module SF -> IO (Module Mem)
 insertCoercions mod = do
   withTheNewVarIdentSupply $ \supply -> do
-    boxed_type_env <- readInitGlobalVarIO the_systemFTypes
-    spec_type_env <- readInitGlobalVarIO the_specTypes
-    unboxed_type_env <- readInitGlobalVarIO the_memTypes
+    boxed_type_env <- thawTypeEnv =<< readInitGlobalVarIO the_systemFTypes
+    spec_type_env <- thawTypeEnv =<< readInitGlobalVarIO the_specTypes
+    unboxed_type_env <- thawTypeEnv =<< readInitGlobalVarIO the_memTypes
     let env = Env boxed_type_env spec_type_env unboxed_type_env supply
     runRI env (elaborateModule mod)

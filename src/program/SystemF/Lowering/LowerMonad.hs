@@ -184,11 +184,8 @@ instance TypeEnvMonad Lower where
   type EvalBoxingMode Lower = UnboxedMode
   getTypeEnv = Lower $ asks typeEnvironment
   
-  assumeWithProperties v t b (Lower m) = Lower $ local update m
-    where
-      update env =
-        env {typeEnvironment =
-                insertTypeWithProperties v t b $ typeEnvironment env}
+  liftTypeEnvM m = Lower $ ReaderT $ \env ->
+    runTypeEnvM (typeEnvironment env) m
 
 instance EvalMonad Lower where
   liftTypeEvalM m = Lower $ ReaderT $ \env ->

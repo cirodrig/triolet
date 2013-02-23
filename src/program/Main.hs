@@ -21,7 +21,7 @@ import qualified Untyped.Print as Untyped
 import qualified Untyped.Syntax as Untyped
 import qualified Untyped.TypeInference2 as Untyped
 import qualified SystemF.ArgumentFlattening as SystemF
-import qualified SystemF.ConSpecialization as SystemF
+-- import qualified SystemF.ConSpecialization as SystemF
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
@@ -159,7 +159,7 @@ highLevelOptimizations global_demand_analysis simplifier_phase mod = do
   mod <- SystemF.rewriteAtPhase simplifier_phase mod
 
   -- Specialize on constructors
-  mod <- SystemF.specializeOnConstructors mod
+  --mod <- SystemF.specializeOnConstructors mod
 
   -- Demand information was destroyed by the previous passes.
   -- Re-run demand analysis.

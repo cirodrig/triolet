@@ -302,7 +302,7 @@ substituteValueBinder s (x ::: t) k = do
   t' <- substitute (typeSubst s) t
   
   -- Is the bound variable in scope?
-  type_assignment <- askTypeEnv (lookupType x)
+  type_assignment <- lookupType x
   case type_assignment of
     Nothing -> do
       -- Not in scope: remove from the substitution.
@@ -370,7 +370,7 @@ substituteDefGroup subst_fun s g k =
   where
     rename_if_bound :: Subst -> Var -> m (Subst, Var)
     rename_if_bound s v = do
-       type_assignment <- askTypeEnv (lookupType v)
+       type_assignment <- lookupType v
        case type_assignment of
          Nothing ->
            let s' = modifyValueSubst (excludeV v) s
@@ -642,9 +642,10 @@ instance Substitutable (Fun Mem) where
 
 -- | Search for instances of name shadowing in the expression.
 --   If found, raise an exception.
-checkForShadowingExp :: TypeEnvBase a -> ExpM -> ()
+checkForShadowingExp :: ITypeEnvBase a -> ExpM -> ()
 checkForShadowingExp tenv e =
-  checkForShadowingExpSet (IntMap.keysSet $ getAllKinds tenv) e
+  let all_kinds = getAllKinds tenv
+  in checkForShadowingExpSet (IntMap.keysSet all_kinds) e
 
 checkForShadowingExpSet :: CheckForShadowing ExpM
 checkForShadowingExpSet in_scope e =
@@ -767,8 +768,9 @@ checkForShadowingAltSet in_scope (AltM (Alt decon params body)) =
 -- | Check whether any variables from the current type environment
 --   are shadowed in the expression
 checkForShadowingExpHere :: TypeEnvMonad m => ExpM -> m ()
-checkForShadowingExpHere e =
-  askTypeEnv (\tenv -> checkForShadowingExp tenv e)
+checkForShadowingExpHere e = do
+  tenv <- freezeTypeEnv
+  return $! checkForShadowingExp tenv e
 
 checkForShadowingModule :: Module Mem -> ()
 checkForShadowingModule (Module _ imports defss exports) =

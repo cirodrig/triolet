@@ -59,10 +59,12 @@ import Type.Compare
 
 type TC a = TCM UnboxedMode a
 
+initType t = AppT outPtrT t `FunT` storeT
+
 arrayInitializerType len element_type =
   let length_type = IntT $ fromIntegral len
       arr_type = arrT `typeApp` [length_type, element_type]
-  in typeApp outPtrT [arr_type] `FunT` storeT
+  in initType arr_type
 
 assumeAndAnnotatePat :: PatM -> TC b -> TC b
 assumeAndAnnotatePat (PatM (v ::: ty) _) k = do
@@ -114,8 +116,8 @@ tcExp (ExpM expression) =
 tcVar :: SourcePos -> Var -> TC Type
 tcVar pos var = do
   -- It's an internal error if a data constructor appears here
-  tenv <- getTypeEnv
-  when (isJust $ lookupDataCon var tenv) $
+  m_dcon <- lookupDataCon var
+  when (isJust m_dcon) $
     internalError $ "typeInferVarE: Data constructor used as variable: " ++ show var
 
   lookupVar var
@@ -153,9 +155,7 @@ tcCon pos con arg_tys = do
 --   and return type.
 typeInferCon :: EvalMonad m => SourcePos -> ConInst -> m ([Type], Type)
 typeInferCon pos con@(VarCon op ty_args ex_types) = do
-  env <- getTypeEnv
-  let Just data_con = lookupDataCon op env
-  let Just type_con = lookupDataType (dataConTyCon data_con) env
+  Just (type_con, data_con) <- lookupDataConWithType op
   (field_types, result_type) <-
     instantiateDataConTypeWithExistentials data_con (ty_args ++ ex_types)
 
@@ -168,7 +168,7 @@ typeInferCon pos con@(VarCon op ty_args ex_types) = do
   let con_result_type = make_initializer (dataTypeKind type_con) result_type
   return (con_field_types, con_result_type)
   where
-    make_initializer BareK ty = typeApp outPtrT [ty] `FunT` storeT
+    make_initializer BareK ty = initType ty
     make_initializer _ ty = ty
 
 typeInferCon pos con@(TupleCon types) = do
@@ -381,7 +381,7 @@ typeInferArray inf ty es = do
   e_tys <- mapM tcExp es
   
   -- Expressions must have an initializer type
-  let init_type = typeApp outPtrT [ty] `FunT` storeT
+  let init_type = initType ty
 
   forM_ (zip [0..] e_tys) $ \(i, g_ty) ->
     checkType (arrayConTypeMismatch (getSourcePos inf) i) init_type g_ty
@@ -427,8 +427,9 @@ typeCheckExport (Export pos spec f) = do
 typeCheckModule (Module module_name imports defs exports) = do
   global_type_env <- readInitGlobalVarIO the_memTypes
   withTheNewVarIdentSupply $ \varIDs -> do
+    i_type_env <- thawTypeEnv global_type_env
     let do_typecheck = typeCheckTopLevel imports defs exports
-    runTypeEvalM do_typecheck varIDs global_type_env
+    runTypeEvalM do_typecheck varIDs i_type_env
 
 typeCheckTopLevel imports defss exports =
   typeCheckGlobalDefGroup (Rec imports) $ typecheck_contents defss
@@ -484,16 +485,15 @@ inferExpType expression =
 inferAppTypeQuickly :: ExpM -> [Type] -> [ExpM] -> UnboxedTypeEvalM Type
 inferAppTypeQuickly op ty_args args = do
   op_type <- inferExpType op
-  tenv <- getTypeEnv
-  inst_op_type <- apply_types tenv op_type ty_args
+  inst_op_type <- apply_types op_type ty_args
   apply_arguments inst_op_type args
   where
-    apply_types tenv op_type (arg:args) = do
-      let kind = typeKind tenv arg
+    apply_types op_type (arg:args) = do
+      kind <- typeKind arg
       t <- typeOfTypeApp noSourcePos 1 op_type kind arg
-      apply_types tenv t args
+      apply_types t args
     
-    apply_types _ t [] = return t
+    apply_types t [] = return t
   
     -- Compute the result of applying a type to some arguments.
     -- For each argument, eliminate the function type constructor.
@@ -512,21 +512,19 @@ inferAppTypeQuickly op ty_args args = do
 --   For bare object constructors, it's the type of a writer function.
 inferConAppType (VarCon op ty_args _) = do
   -- Get the data type's type
-  tenv <- getTypeEnv
-  case lookupDataConWithType op tenv of
-    Just (data_type, con_type) -> let
-      -- Apply the data type constructor to the type arguments 
-      app_type = varApp (dataConTyCon con_type) ty_args
+  Just (data_type, con_type) <- lookupDataConWithType op
 
-      -- Create a writer function type, if it's a bare type
-      in return $!
-         case dataTypeKind data_type
-         of BareK -> typeApp outPtrT [app_type] `FunT` storeT
-            _ -> app_type
+  -- Apply the data type constructor to the type arguments 
+  let app_type = varApp (dataConTyCon con_type) ty_args
+
+  -- Create a writer function type, if it's a bare type
+  return $!
+    case dataTypeKind data_type
+    of BareK -> initType app_type
+       _ -> app_type
 
 inferConAppType (TupleCon ty_args) = do
-  tenv <- getTypeEnv
-  let kinds = map (toBaseKind . typeKind tenv) ty_args
+  kinds <- mapM typeBaseKind ty_args
   return $ typeApp (UTupleT kinds) ty_args
 
 -- | Infer the type of an application, given the operator type and argument
@@ -565,6 +563,5 @@ deConInstType mono_con =
          instantiateDataConTypeWithExistentials op_type (ty_args ++ ex_args)
        return ret_type
      TupleDeCon field_types -> do
-       tenv <- getTypeEnv
-       let field_kinds = map (toBaseKind . typeKind tenv) field_types
+       field_kinds <- mapM typeBaseKind field_types
        return $ typeApp (UTupleT field_kinds) field_types

@@ -87,42 +87,51 @@ lowerBuiltinFunType :: LowerEnv
                     -> Type.Environment.TypeEnv
                     -> Type.Var.Var
                     -> IO FunctionType
-lowerBuiltinFunType lowering_env type_env con =
-  case Type.Environment.lookupType con type_env
-  of Just ty ->
-       lowerFunctionType lowering_env ty `catch`
-       \(exc :: SomeException) -> do
-         putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
-         throwIO exc
+lowerBuiltinFunType lowering_env type_env con = do
+  m_type <-  Type.Environment.runTypeEnvM type_env $
+             Type.Environment.lookupType con
+  case m_type of
+    Just ty ->
+      lowerFunctionType lowering_env ty `catch`
+      \(exc :: SomeException) -> do
+        putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
+        throwIO exc
 
-     Just _ -> internalError $
-               "lowerBuiltinFunType: Incompatible representation for " ++ show con
-     Nothing -> internalError $
-                "lowerBuiltinFunType: Missing type for " ++ show con
+    Just _ -> internalError $
+              "lowerBuiltinFunType: Incompatible representation for " ++ show con
+    Nothing -> internalError $
+               "lowerBuiltinFunType: Missing type for " ++ show con
 
-lowerBuiltinObjType :: Type.Environment.TypeEnv
+lowerBuiltinObjType :: IdentSupply Type.Var.Var
+                    -> Type.Environment.TypeEnv
                     -> Type.Var.Var
                     -> IO ValueType
-lowerBuiltinObjType type_env var =
-  case Type.Environment.lookupType var type_env
-  of Just t ->
-       case Type.Eval.typeKind type_env t
-       of Type.Type.VarT kind
-            | kind == Type.Type.boxV -> return $ PrimType OwnedType
-            | kind == Type.Type.bareV -> return $ PrimType PointerType
-          _ -> internalError $
-               "lowerBuiltinObjType: Incompatible representation for " ++ show var
-     Nothing -> internalError $
-               "lowerBuiltinObjType: Missing type for " ++ show var
+lowerBuiltinObjType id_supply type_env var =
+  Type.Environment.runTypeEvalM lower id_supply type_env
+  where
+    lower = do
+      m_type <- Type.Environment.lookupType var
+      case m_type of
+        Just t -> do
+          kind <- Type.Eval.typeKind t
+          case kind of
+            Type.Type.VarT kind
+              | kind == Type.Type.boxV -> return $ PrimType OwnedType
+              | kind == Type.Type.bareV -> return $ PrimType PointerType
+            _ -> internalError $
+                 "lowerBuiltinObjType: Incompatible representation for " ++ show var
+        Nothing -> internalError $
+                   "lowerBuiltinObjType: Missing type for " ++ show var
   
 -- | Given an identifier supply, and the memory-annotated type environment,
 --   initialize the builtin variables.
 initializeLowLevelBuiltins :: IdentSupply Type.Var.Var
                            -> IdentSupply Var
-                           -> Type.Environment.TypeEnv 
+                           -> Type.Environment.ITypeEnvBase Type.Environment.UnboxedMode
                            -> IO ()
-initializeLowLevelBuiltins type_var_ids v_ids mem_type_env = do
+initializeLowLevelBuiltins type_var_ids v_ids i_mem_type_env = do
   -- Create the environment needed for lowering
+  mem_type_env <- Type.Environment.thawTypeEnv i_mem_type_env
   lowering_env <- initializeLowerEnv type_var_ids v_ids mem_type_env Map.empty
 
   -- Create the record
@@ -150,7 +159,7 @@ initializeLowLevelBuiltins type_var_ids v_ids mem_type_env = do
                     case src
                     of Left t -> [| return t |]
                        Right conQ -> 
-                         [| lowerBuiltinObjType mem_type_env $conQ |]
+                         [| lowerBuiltinObjType type_var_ids mem_type_env $conQ |]
               in [| do ty <- $mk_ty
                        initializeVarField v_ids nm ty |]) 
             | (nm, src) <- builtinGlobals]

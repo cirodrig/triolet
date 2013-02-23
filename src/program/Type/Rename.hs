@@ -30,6 +30,7 @@ where
 
 import Prelude hiding(lookup, null, mapM)
 import Control.Monad hiding(mapM)
+import Control.Monad.Trans
 import qualified Data.IntSet as IntSet
 import Data.List(tails)
 import Data.Maybe
@@ -92,7 +93,7 @@ lookup v (R m) = IntMap.lookup (fromIdent $ varID v) m
 --   Remove the bound variable from the renaming because it is shadowed.
 renameBinder :: Renaming -> Binder -> (Renaming -> Binder -> a) -> a
 renameBinder rn (x ::: t) k =
-  -- Remove the bound variable from the environment; it is shadowed  
+  -- Remove the bound variable from the environment; it is shadowed
   let rn' = R $ IntMap.delete (fromIdent $ varID x) (unR rn)
   in k rn' (x ::: rename rn t)
 
@@ -178,9 +179,10 @@ instance Renameable KindedType where
 
 -- | Check for name shadowing in the type.  If any in-scope variables
 --   are redefined, raise an error.
-checkForShadowing :: TypeEnvBase a -> Type -> ()
-checkForShadowing tenv ty =
-  checkForShadowingSet (IntMap.keysSet $ getAllKinds tenv) ty
+checkForShadowing :: ITypeEnvBase a -> Type -> IO ()
+checkForShadowing tenv ty = do
+  let all_kinds = getAllKinds tenv
+  return $! checkForShadowingSet (IntMap.keysSet all_kinds) ty
 
 type CheckForShadowing a = IntSet.IntSet -> a -> ()
 
@@ -230,4 +232,6 @@ checkForShadowingSet in_scope ty =
 -- | Check for name shadowing using the current type environment.
 --   The caller must force evaluation of the return value.
 checkForShadowingHere :: TypeEnvMonad m => Type -> m ()
-checkForShadowingHere ty = askTypeEnv (\tenv -> checkForShadowing tenv ty)
+checkForShadowingHere ty = do
+  tenv <- freezeTypeEnv
+  liftIO $ checkForShadowing tenv ty

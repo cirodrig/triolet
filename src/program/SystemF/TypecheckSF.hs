@@ -119,8 +119,8 @@ typeInferExp (ExpSF expression) =
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCSF Type
 typeInferVarE inf var = do
-  tenv <- getTypeEnv
-  when (isJust $ lookupDataCon var tenv) $
+  m_dcon <- lookupDataCon var
+  when (isJust m_dcon) $
     internalError $ "typeInferVarE: Data constructor used as variable: " ++ show var
 
   lookupVar var
@@ -380,8 +380,9 @@ typeCheckExport (Export pos spec f) = do
 typeCheckModule (Module module_name [] defs exports) = do
   global_type_env <- readInitGlobalVarIO the_systemFTypes
   withTheNewVarIdentSupply $ \varIDs -> do
+    i_type_env <- thawTypeEnv global_type_env
     let typecheck = typeCheckDefGroups defs exports
-    runTypeEvalM typecheck varIDs global_type_env
+    runTypeEvalM typecheck varIDs i_type_env
   where
     typeCheckDefGroups (defs:defss) exports = 
       typeCheckGlobalDefGroup defs $ typeCheckDefGroups defss exports

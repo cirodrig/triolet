@@ -92,8 +92,8 @@ reduceToWhnf' ty =
   where
     -- If the operator is a type function, then evaluate it
     reduce_function_con op_var args = do
-      env <- getTypeEnv
-      case lookupTypeFunction op_var env of
+      tyfun <- lookupTypeFunction op_var
+      case tyfun of
         Nothing    -> return ty
         Just tyfun -> do b <- getBoxingMode
                          let tf = builtinTypeFunctionForEval b tyfun

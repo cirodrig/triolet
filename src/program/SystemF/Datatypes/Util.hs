@@ -32,9 +32,9 @@ runSC supply (SizeComputing m) = runReaderT m supply
 instance TypeEnvMonad SizeComputing where
   type EvalBoxingMode SizeComputing = UnboxedMode
   getTypeEnv = SizeComputing (lift getTypeEnv)
-  assumeWithProperties v t b (SizeComputing m) =
+  {-assumeWithProperties v t b (SizeComputing m) =
     SizeComputing $ ReaderT $ \env ->
-    assumeWithProperties v t b $ runReaderT m env
+    assumeWithProperties v t b $ runReaderT m env-}
 
 instance EvalMonad SizeComputing where
   liftTypeEvalM m = SizeComputing $ lift m

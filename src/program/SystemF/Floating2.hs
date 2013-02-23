@@ -96,14 +96,12 @@ isFloatableData cinst args =
 --   bare, or an approved value type.
 isFloatableDecon :: DeConInst -> Flt Bool
 isFloatableDecon (VarDeCon con ty_args ex_types) = do
-  tenv <- getTypeEnv
-  case lookupDataConWithType con tenv of
-    Just (data_type, con_type) ->
-      let instantiate_field_types = do
-            (_, field_types, _) <-
-              instantiateDataConType con_type ty_args $ map binderVar ex_types
-            return field_types
-      in isFloatableDataType tenv data_type con_type instantiate_field_types
+  Just (data_type, con_type) <- lookupDataConWithType con
+  let instantiate_field_types = do
+        (_, field_types, _) <-
+          instantiateDataConType con_type ty_args $ map binderVar ex_types
+        return field_types
+  isFloatableDataType data_type con_type instantiate_field_types
 
 -- Don't attempt to float tuples.
 -- We could change this to be more permissive if there's a good reason to.
@@ -114,36 +112,34 @@ isFloatableDecon (TupleDeCon _) = return False
 --   The critera are the same as for deconstructors.
 isFloatableCon :: ConInst -> Flt Bool
 isFloatableCon (VarCon con ty_args ex_types) = do
-  tenv <- getTypeEnv
-  case lookupDataConWithType con tenv of
-    Just (data_type, con_type) ->
-      let instantiate_field_types = do
-            (field_types, _) <-
-              instantiateDataConTypeWithExistentials con_type
-              (ty_args ++ ex_types)
-            return field_types
-      in isFloatableDataType tenv data_type con_type instantiate_field_types
+  Just (data_type, con_type) <- lookupDataConWithType con
+  let instantiate_field_types = do
+        (field_types, _) <-
+          instantiateDataConTypeWithExistentials con_type
+          (ty_args ++ ex_types)
+        return field_types
+  isFloatableDataType data_type con_type instantiate_field_types
 
 isFloatableCon (TupleCon _) = return False
 
-isFloatableDataType tenv data_type con_type compute_field_types
+isFloatableDataType data_type con_type compute_field_types
   | dataTypeIsAbstract data_type = return False
   | not_length_1 (dataTypeDataConstructors data_type) = return False
   | not_length_1 (dataConFields con_type) = return False
   | otherwise = do
       -- Get the type of the data constructor's single field
       [field_type] <- compute_field_types
-      return $!
-        case toBaseKind $ typeKind tenv field_type
-        of BoxK -> True
-           BareK -> True
-           ValK ->
-             -- Only allow types that are known to fit in a register
-             case field_type
-             of VarT a -> a == intV ||
-                          a == floatV ||
-                          a `isCoreBuiltin` The_bool
-                _ -> False
+      k <- typeBaseKind field_type
+      return $! case k
+                of BoxK -> True
+                   BareK -> True
+                   ValK ->
+                     -- Only allow types that are known to fit in a register
+                     case field_type
+                     of VarT a -> a == intV ||
+                                  a == floatV ||
+                                  a `isCoreBuiltin` The_bool
+                        _ -> False
   where
     not_length_1 :: [a] -> Bool
     not_length_1 [_] = False
@@ -167,10 +163,6 @@ runFlt m id_supply tenv = runReaderT (unFlt m) (FloatCtx id_supply tenv)
 instance TypeEnvMonad Flt where
   type EvalBoxingMode Flt = UnboxedMode
   getTypeEnv = Flt (asks fcTypeEnv)
-  assumeWithProperties v ty b (Flt m) = Flt $ local insert_type m
-    where
-      insert_type ctx =
-        ctx {fcTypeEnv = insertTypeWithProperties v ty b $ fcTypeEnv ctx}
 
 instance Supplies Flt (Ident Var) where
   fresh = Flt $ ReaderT $ \ctx -> supplyValue (fcVarSupply ctx)
@@ -440,5 +432,6 @@ floatModule (Module module_name imports defs exports) = do
 longRangeFloating :: Module Mem -> IO (Module Mem)
 longRangeFloating mod =
   withTheNewVarIdentSupply $ \var_supply -> do
-    tenv <- readInitGlobalVarIO the_memTypes
+    i_tenv <- readInitGlobalVarIO the_memTypes
+    tenv <- thawTypeEnv i_tenv
     runFlt (floatModule mod) var_supply tenv

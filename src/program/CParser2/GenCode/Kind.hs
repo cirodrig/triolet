@@ -37,7 +37,7 @@ genKind (L pos rtype) =
 declKind :: LDecl Resolved -> TransT UpdateTypeEnv
 declKind (L loc (Decl ident ent)) = do
   let make_update kind =
-        return $ UpdateTypeEnv $ insertType (toVar ident) kind
+        return $ UpdateTypeEnv $ \env -> insertGlobalType env (toVar ident) kind
   case ent of
     TypeEnt k             -> genKind k >>= make_update
     DataEnt binders k _ _ -> genKind (fun_kind binders k) >>= make_update
@@ -61,8 +61,13 @@ kindTranslation :: IdentSupply Var
                 -> RModule
                 -> IO TypeEnv
 kindTranslation var_ids type_synonyms type_functions mod = do
+  -- Create a type environment with built-in types to use
+  -- while examining kinds
+  tenv <- mkWiredInTypeEnv
   kind_env_updates <-
-    runTypeTranslation var_ids wiredInTypeEnv type_synonyms type_functions $
+    runTypeTranslation var_ids tenv type_synonyms type_functions $
     moduleKindEnvironment mod
 
-  return $ applyUpdates kind_env_updates wiredInTypeEnv
+  -- Add bindings to the type environment
+  applyUpdates kind_env_updates tenv
+  return tenv

@@ -80,11 +80,6 @@ instance TypeEnvMonad RW where
   type EvalBoxingMode RW = UnboxedMode
   getTypeEnv = RW (ReaderT (\env -> return $ rwTypeEnv env))
 
-  assumeWithProperties v t b (RW m) = RW (local assume_type m)
-    where
-      assume_type env =
-        env {rwTypeEnv = insertTypeWithProperties v t b $ rwTypeEnv env}
-
 instance EvalMonad RW where
   liftTypeEvalM m = RW $ ReaderT $ \env ->
     runTypeEvalM m (rwIdentSupply env) (rwTypeEnv env)
@@ -98,13 +93,12 @@ liftFreshVarM m = RW $ ReaderT $ \env -> runFreshVarM (rwIdentSupply env) m
 -- | Load a value.
 --
 -- > case x of stored t (y : t). y
-load :: TypeEnv
-     -> Type                    -- ^ Value type to load
+load :: Type                    -- ^ Value type to load
      -> RW ExpM                 -- ^ Expression to load
      -> RW ExpM
-load tenv ty val =
+load ty val =
   caseE val
-  [mkAlt tenv (coreBuiltin The_stored) [ty] $
+  [mkAlt (coreBuiltin The_stored) [ty] $
    \ [] [val] -> mkVarE val]
 
 -- | Create a case expression to inspect a list.
@@ -156,68 +150,63 @@ caseOfMatrix tenv scrutinee elt_type mk_body =
       varApp (coreBuiltin The_arr) [VarT size_y_index,
                                     varApp (coreBuiltin The_arr) [VarT size_x_index, elt_type]]-}
 
-caseOfTraversableDict :: TypeEnv
-                      -> RW ExpM
+caseOfTraversableDict :: RW ExpM
                       -> Type
                       -> (Var -> Var -> RW ExpM)
                       -> RW ExpM
-caseOfTraversableDict tenv scrutinee container_type mk_body =
+caseOfTraversableDict scrutinee container_type mk_body =
   caseE scrutinee
-  [mkAlt tenv (coreBuiltin The_traversableDict) [container_type] $
+  [mkAlt (coreBuiltin The_traversableDict) [container_type] $
    \ [] [trv, bld] -> mk_body trv bld]
 
-caseOfSomeIndInt :: TypeEnv
-                 -> RW ExpM
+caseOfSomeIndInt :: RW ExpM
                  -> (Var -> Var -> RW ExpM)
                  -> RW ExpM
-caseOfSomeIndInt tenv scrutinee mk_body =
+caseOfSomeIndInt scrutinee mk_body =
   caseE scrutinee
-  [mkAlt tenv (coreBuiltin The_someIInt) [] $
+  [mkAlt (coreBuiltin The_someIInt) [] $
    \ [intindex] [intvalue] -> mk_body intindex intvalue]
 
-defineAndInspectIndInt tenv int_value mk_body =
+defineAndInspectIndInt int_value mk_body =
   let define_indexed_int =
         varAppE (coreBuiltin The_defineIntIndex) [] [int_value]
-  in caseOfSomeIndInt tenv define_indexed_int mk_body
+  in caseOfSomeIndInt define_indexed_int mk_body
 
-caseOfFinIndInt :: TypeEnv
-                -> RW ExpM
+caseOfFinIndInt :: RW ExpM
                 -> Type
                 -> (Var -> RW ExpM)
                 -> RW ExpM
-caseOfFinIndInt tenv scrutinee int_index mk_body =
+caseOfFinIndInt scrutinee int_index mk_body =
   caseE scrutinee
-  [mkAlt tenv (coreBuiltin The_fiInt) [int_index] $
+  [mkAlt (coreBuiltin The_fiInt) [int_index] $
    \ [] [intvalue] -> mk_body intvalue]
 
-caseOfIndInt :: TypeEnv
-             -> RW ExpM
+caseOfIndInt :: RW ExpM
              -> Type
              -> (Var -> RW ExpM)
              -> (Var -> RW ExpM)
              -> RW ExpM
-caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
+caseOfIndInt scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt tenv (coreBuiltin The_iInt) [int_index] $
+  [mkAlt (coreBuiltin The_iInt) [int_index] $
    \ [] [fin] -> mk_finite fin,
-   mkAlt tenv (coreBuiltin The_iPosInfty) [int_index] $
+   mkAlt (coreBuiltin The_iPosInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf,
-   mkAlt tenv (coreBuiltin The_iNegInfty) [int_index] $
+   mkAlt (coreBuiltin The_iNegInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf]
 
-caseOfIndInt' :: TypeEnv
-              -> RW ExpM
+caseOfIndInt' :: RW ExpM
               -> Type
               -> (Var -> RW ExpM)
               -> (Var -> RW ExpM)
               -> RW ExpM
-caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
+caseOfIndInt' scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt tenv (coreBuiltin The_iInt) [int_index] $
-   \ [] [fin] -> caseOfFinIndInt tenv (mkVarE fin) int_index mk_finite,
-   mkAlt tenv (coreBuiltin The_iPosInfty) [int_index] $
+  [mkAlt (coreBuiltin The_iInt) [int_index] $
+   \ [] [fin] -> caseOfFinIndInt (mkVarE fin) int_index mk_finite,
+   mkAlt (coreBuiltin The_iPosInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf,
-   mkAlt tenv (coreBuiltin The_iNegInfty) [int_index] $
+   mkAlt (coreBuiltin The_iNegInfty) [int_index] $
    \ [] [pf] -> mk_infinite pf]
 
 -- | Create a list where each array element is a function of its index only
@@ -501,9 +490,8 @@ rwAsBare inf [bare_type] [repr, arg]
     --
     -- > case arg of boxed bare_type (x : bare_type) -> copy bare_type repr x
     deconstruct_boxed whnf_type = do
-      tenv <- getTypeEnv
       caseE (return arg)
-        [mkAlt tenv (coreBuiltin The_boxed)
+        [mkAlt (coreBuiltin The_boxed)
          [whnf_type]
          (\ [] [unboxed_ref] ->
            varAppE (coreBuiltin The_copy) [whnf_type]
@@ -549,11 +537,10 @@ rwAsBox inf [bare_type] [repr, arg]
     -- Argument is an initializer expression whose output has 'Ref' type.
     -- Bind it to a temporary value, then deconstruct it.
     deconstruct_stored_box boxed_type = do
-      tenv <- getTypeEnv
       localE bare_type (return arg)
         (\arg_val ->
           caseE (mkVarE arg_val) 
-          [mkAlt tenv (coreBuiltin The_ref)
+          [mkAlt (coreBuiltin The_ref)
            [boxed_type]
            (\ [] [boxed_ref] -> mkVarE boxed_ref)])
     

@@ -70,7 +70,7 @@ assumeVarG is_exported v ty k = liftT1 (assumeVar is_exported v ty) k
 assumeVar :: Bool -> Var -> Type -> (LL.Var -> Lower a) -> Lower a
 assumeVar is_exported v rt k = do
   tenv <- getTypeEnv
-  rtype <- lowerType tenv rt 
+  rtype <- lowerType rt 
   case rtype of
     Just t -> assumeVariableWithType is_exported v rt t $ \ll_var ->
       assumeSingletonValue rt ll_var (k ll_var)
@@ -120,8 +120,7 @@ retValToList (RetVal val) = [val]
 --   is returned.  All type arguments must be provided.
 compileConstructor :: LayoutCon -> Type -> [LL.Val] -> GenLower RetVal
 compileConstructor con data_type args = do
-  tenv <- lift getTypeEnv
-  layout <- lift $ getAlgLayout tenv data_type
+  layout <- lift $ getAlgLayout data_type
   fmap RetVal $ algebraicIntro layout con args
 
 compileCase :: Type             -- ^ Case statement result type
@@ -131,8 +130,8 @@ compileCase :: Type             -- ^ Case statement result type
             -> GenLower RetVal
 compileCase result_type scrutinee_type scrutinee_val branches = do
   tenv <- lift getTypeEnv
-  layout <- lift $ getAlgLayout tenv scrutinee_type
-  rtypes <- lift $ lowerType tenv result_type
+  layout <- lift $ getAlgLayout scrutinee_type
+  rtypes <- lift $ lowerType result_type
   rparams <- lift $ mapM LL.newAnonymousVar (maybeToList rtypes)
   getContinuation True rparams $ \cont ->
     algebraicElim layout scrutinee_val $
@@ -179,8 +178,7 @@ lowerConstantExp m_name expression =
      ConE _ con args -> do
        -- Compute the constructed value's type
        result_type <- getConType con
-       tenv <- getTypeEnv
-       layout <- getAlgLayout tenv result_type
+       layout <- getAlgLayout result_type
 
        -- Create a static value
        let layout_con = layoutCon $ summarizeConstructor con
@@ -250,13 +248,11 @@ lowerCon con args = do
   compileConstructor layout_con result_type arg_values
 
 getConType (TupleCon ty_args) = do
-  tenv <- getTypeEnv
-  let arg_kinds = map (toBaseKind . typeKind tenv) ty_args
+  arg_kinds <- mapM typeBaseKind ty_args
   return $ typeApp (UTupleT arg_kinds) ty_args
 
 getConType (VarCon op ty_args ex_types) = do
-  tenv <- getTypeEnv
-  let Just op_data_con = lookupDataCon op tenv
+  Just op_data_con <- lookupDataCon op
   (_, result_type) <-
     instantiateDataConTypeWithExistentials
     op_data_con (ty_args ++ ex_types)
@@ -289,8 +285,7 @@ lowerApp rt op ty_args args = do
   -- If function arguments were given, then generate a function call
   if null args then return op' else do
     args'   <- mapM lowerExpToVal args
-    tenv    <- lift getTypeEnv
-    returns <- lift $ lowerType tenv rt
+    returns <- lift $ lowerType rt
     retvals <- emitAtom (maybeToList returns) $
                LL.closureCallA (fromRetVal op') args'
     return $ listToRetVal retvals
@@ -330,8 +325,7 @@ lowerExcept return_type = do
 
   -- Return a value.  The return value is dead code, but is expected by the
   -- lowering process.
-  tenv <- lift getTypeEnv
-  lowered_type <- lift $ lowerType tenv return_type
+  lowered_type <- lift $ lowerType return_type
   case lowered_type of
     Nothing -> return NoVal
     Just vt -> fmap RetVal $ return_ll_value vt
@@ -389,8 +383,7 @@ lowerFun :: FunM -> Lower LL.Fun
 lowerFun (FunM fun) =
   assumeTyParams (funTyParams fun) $
   withMany lower_param (funParams fun) $ \params -> do
-    tenv <- getTypeEnv
-    returns <- lowerType tenv $ funReturn fun
+    returns <- lowerType $ funReturn fun
     genClosureFun params (maybeToList returns) $ lower_body (funBody fun)
   where
     lower_param pat k = assumeVar False (patMVar pat) (patMType pat) k
@@ -486,18 +479,17 @@ lowerExport :: ModuleName
             -> Lower (LL.FunDef, (LL.Var, ExportSig))
 lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
   fun' <- lowerFun fun
-  tenv <- getTypeEnv
   
   -- Create exported function
   (fun_def, export_sig) <-
     case lang
-    of CCall     -> define_c_fun tenv fun'
-       CPlusPlus -> define_cxx_fun tenv fun'
+    of CCall     -> define_c_fun fun'
+       CPlusPlus -> define_cxx_fun fun'
   return (fun_def, (LL.definiendum fun_def, export_sig))
   where
     fun_type = functionType fun
 
-    define_c_fun tenv fun = do
+    define_c_fun fun = do
       -- Create export signature
       c_export_sig <- liftTypeEvalM $ getCExportSig fun_type
 
@@ -509,7 +501,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
       return (LL.Def v wrapped_fun, CExportSig c_export_sig)
 
-    define_cxx_fun tenv fun = do
+    define_cxx_fun fun = do
       -- Create export signature
       cxx_export_sig <- liftTypeEvalM $ getCxxExportSig exported_name fun_type
 
@@ -547,7 +539,8 @@ lowerModule (Module { modName = mod_name
   (ll_functions, ll_export_sigs) <-
     withTheNewVarIdentSupply $ \var_supply ->
     withTheLLVarIdentSupply $ \ll_var_supply -> do
-      global_types <- readInitGlobalVarIO the_memTypes
+      i_global_types <- readInitGlobalVarIO the_memTypes
+      global_types <- thawTypeEnv i_global_types
       global_map <- readInitGlobalVarIO the_loweringMap
       env <- initializeLowerEnv var_supply ll_var_supply global_types global_map
       

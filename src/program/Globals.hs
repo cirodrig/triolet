@@ -40,23 +40,18 @@ the_TITypes :: InitGlobalVar Untyped.Environment
 the_TITypes = defineInitGlobalVar () 
 
 -- | The types of System F terms.
-the_systemFTypes :: InitGlobalVar Type.Environment.BoxedTypeEnv
+the_systemFTypes :: InitGlobalVar (Type.Environment.ITypeEnvBase Type.Environment.FullyBoxedMode)
 {-# NOINLINE the_systemFTypes #-}
 the_systemFTypes = defineInitGlobalVar ()
 
--- | The types of Core terms.  This variable is going to go away.
-the_newCoreTypes :: InitGlobalVar Type.Environment.TypeEnv
-{-# NOINLINE the_newCoreTypes #-}
-the_newCoreTypes = defineInitGlobalVar ()
-
 -- | The types of explicit-memory terms.
-the_memTypes :: InitGlobalVar Type.Environment.TypeEnv
+the_memTypes :: InitGlobalVar (Type.Environment.ITypeEnvBase Type.Environment.UnboxedMode)
 {-# NOINLINE the_memTypes #-}
 the_memTypes = defineInitGlobalVar ()
 
 -- | The specification types of global variables.
 --   Replaces functionality formerly provided by 'the_newCoreTypes'.
-the_specTypes :: InitGlobalVar (Type.Environment.TypeEnvBase Type.Environment.SpecMode)
+the_specTypes :: InitGlobalVar (Type.Environment.ITypeEnvBase Type.Environment.SpecMode)
 {-# NOINLINE the_specTypes #-}
 the_specTypes = defineInitGlobalVar ()
 

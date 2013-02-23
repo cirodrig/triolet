@@ -12,7 +12,7 @@ body is an expression ('Exp').  Values are bound by patterns ('TyPat', 'Pat')
 and case statements branch to alternatives ('Alt').
 -}
 
-{-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
+{-# LANGUAGE DeriveDataTypeable, FlexibleInstances, FlexibleContexts #-}
 {-# OPTIONS_GHC -no-auto #-}
 module SystemF.Syntax
     (-- * Demand information
@@ -399,23 +399,21 @@ conExTypes (TupleCon _)    = []
 conTypes :: ConInst -> [Type]
 conTypes t = conTyArgs t ++ conExTypes t
 
-conFieldKinds :: TypeEnv -> ConInst -> [BaseKind]
-conFieldKinds tenv (VarCon op _ _) =
-  let Just data_con = lookupDataCon op tenv
-  in dataConFieldKinds data_con
+conFieldKinds :: EvalMonad m => ConInst -> m [BaseKind]
+conFieldKinds (VarCon op _ _) = do
+  Just data_con <- lookupDataCon op
+  return $ dataConFieldKinds data_con
 
-conFieldKinds tenv (TupleCon types) =
-  map (toBaseKind . typeKind tenv) types
+conFieldKinds (TupleCon types) =
+  liftTypeEvalM $ mapM typeBaseKind types
 
 conType :: EvalMonad m => ConInst -> m ([Type], Type)
 conType (VarCon v ty_args ex_types) = do
-  tenv <- getTypeEnv
-  let Just data_con = lookupDataCon v tenv
+  Just data_con <- lookupDataCon v
   instantiateDataConTypeWithExistentials data_con (ty_args ++ ex_types)
 
 conType (TupleCon ty_args) = do
-  tenv <- getTypeEnv
-  let kinds = map (toBaseKind . typeKind tenv) ty_args
+  kinds <- liftTypeEvalM $ mapM typeBaseKind ty_args
   return (ty_args, UTupleT kinds `typeApp` ty_args)
 
 isVarCon (VarCon {}) = True
@@ -439,13 +437,13 @@ deConExTypes :: DeConInst -> [Binder]
 deConExTypes (VarDeCon _ _ ts) = ts
 deConExTypes (TupleDeCon _)    = []
 
-deConFieldKinds :: TypeEnv -> DeConInst -> [BaseKind]
-deConFieldKinds tenv (VarDeCon op _ _) =
-  let Just data_con = lookupDataCon op tenv
-  in dataConFieldKinds data_con
+deConFieldKinds :: EvalMonad m => DeConInst -> m [BaseKind]
+deConFieldKinds (VarDeCon op _ _) = do
+  Just data_con <- lookupDataCon op
+  return $ dataConFieldKinds data_con
 
-deConFieldKinds tenv (TupleDeCon types) =
-  map (toBaseKind . typeKind tenv) types
+deConFieldKinds (TupleDeCon types) =
+  liftTypeEvalM $ mapM typeBaseKind types
 
 isVarDeCon (VarDeCon {}) = True
 isVarDeCon _             = False

@@ -93,7 +93,7 @@ substituteBinder rn (x ::: t) k = do
   t' <- substitute rn t
   
   -- Is the bound variable in scope?
-  type_assignment <- askTypeEnv (lookupType x)
+  type_assignment <- lookupType x
   case type_assignment of
     Nothing -> do
       -- Not in scope: remove from the substitution.

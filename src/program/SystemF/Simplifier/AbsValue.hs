@@ -389,7 +389,7 @@ renameIfBound :: (TypeEnvMonad m, Supplies m (Ident Var)) =>
                  AbsSubst -> Var -> m (AbsSubst, Var)
 renameIfBound s x = do
   -- Is the bound variable in scope?
-  type_assignment <- askTypeEnv (lookupType x)
+  type_assignment <- lookupType x
   case type_assignment of
     Nothing -> do
       let s' = s { valueSubst = excludeV x $ valueSubst s
@@ -809,8 +809,7 @@ interpretCon con fields =
   case con
   of VarCon op _ _ -> do
        -- Look up field kinds
-       tenv <- getTypeEnv
-       let Just (data_type, dcon_type) = lookupDataConWithType op tenv
+       Just (data_type, dcon_type) <- lookupDataConWithType op
        let field_kinds = dataConFieldKinds dcon_type
        when (length field_kinds /= length fields) type_error
        
@@ -936,25 +935,23 @@ concretizeData :: AbsData -> MaybeT UnboxedTypeEvalM ExpM
 concretizeData data_value@(AbsData con fs) = do
   -- Ensure that the data value is not a bare data value.
   -- It's an error to attempt to concretize a bare value.
-  tenv <- getTypeEnv
-  when (bad_data_kind tenv con) $
+  whenM (bad_data_kind con) $
     internalError "concretize: Cannot concretize values of kind 'bare'"
 
   concretizeDataConApp data_value
   where
-    bad_data_kind tenv (VarCon op _ _) =
-      let Just (data_type, dcon_type) = lookupDataConWithType op tenv
-      in dataTypeKind data_type == BareK
+    bad_data_kind (VarCon op _ _) = do
+      Just (data_type, dcon_type) <- lookupDataConWithType op
+      return $ dataTypeKind data_type == BareK
     
-    bad_data_kind tenv (TupleCon _) = False
+    bad_data_kind (TupleCon _) = return False
 
 -- | Concretize a data constructor application.
 --   The result is either a data value or an initializer function.
 concretizeDataConApp (AbsData con fs) = do
   -- Determine field kinds and types
-  tenv <- getTypeEnv
   (field_types, _) <- conType con
-  let field_kinds = conFieldKinds tenv con
+  field_kinds <- conFieldKinds con
 
   -- Concretize each field and create a constructor application
   field_exps <- sequence $ zipWith3 concretize_field field_kinds field_types fs

@@ -238,28 +238,28 @@ sameSpecificity _ _ = False
 -- | Given the specificity of a data constructor application, get the
 --   specificity of its individual fields as they appear in a constructor
 --   application
-deconstructSpecificity :: TypeEnv -> Int -> Specificity -> [Specificity]
-deconstructSpecificity tenv n_fields spc =
+deconstructSpecificity :: EvalMonad m => Int -> Specificity -> m [Specificity]
+deconstructSpecificity n_fields spc =
   case spc
   of Decond mono_con spcs
        | length spcs /= n_fields ->
          internalError "deconstructSpecficity: Wrong number of fields"
        | otherwise ->
            case mono_con
-           of VarDeCon con _ _ ->
-                let field_kinds = deConFieldKinds tenv mono_con
-                    from_field BareK spc = Written spc
+           of VarDeCon con _ _ -> do
+                field_kinds <- deConFieldKinds mono_con
+                let from_field BareK spc = Written spc
                     from_field _     spc = spc
-                in zipWith from_field field_kinds spcs
+                return $ zipWith from_field field_kinds spcs
               TupleDeCon _ ->
                 -- Unboxed tuples have no bare fields
-                spcs
+                return spcs
 
      -- If the aggregate value is unused, all fields are unused
-     Unused -> replicate n_fields Unused
+     Unused -> return $ replicate n_fields Unused
 
      -- All other usages produce an unknown effect on fields 
-     _ -> replicate n_fields Used
+     _ -> return $ replicate n_fields Used
 
 fromWrittenSpecificity spc =
   case spc

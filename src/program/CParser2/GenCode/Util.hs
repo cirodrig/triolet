@@ -42,14 +42,14 @@ showResolvedVar = show . toVar
 -- Type environment updates
 
 -- | A set of updates to make to a type environment
-newtype UpdateTypeEnv = UpdateTypeEnv (TypeEnv -> TypeEnv)
+newtype UpdateTypeEnv = UpdateTypeEnv (TypeEnv -> IO ())
 
 instance Monoid UpdateTypeEnv where
-  mempty = UpdateTypeEnv id
-  UpdateTypeEnv f `mappend` UpdateTypeEnv g = UpdateTypeEnv (f . g)
+  mempty = UpdateTypeEnv (\_ -> return ())
+  UpdateTypeEnv f `mappend` UpdateTypeEnv g = UpdateTypeEnv (\e -> f e >> g e)
 
-applyUpdates :: UpdateTypeEnv -> TypeEnv -> TypeEnv
-applyUpdates (UpdateTypeEnv f) e = f e
+applyUpdates :: UpdateTypeEnv -> TypeEnv -> IO ()
+applyUpdates (UpdateTypeEnv m) e = m e
 
 -------------------------------------------------------------------------------
 -- Type translation
@@ -71,12 +71,6 @@ newtype TransT a = TransT (ReaderT TransTEnv IO a)
 instance TypeEnvMonad TransT where
   type EvalBoxingMode TransT = UnboxedMode
   getTypeEnv = TransT (asks envTypes)
-  askTypeEnv f = TransT (asks (f . envTypes))
-
-  assumeWithProperties v t b (TransT m) = TransT (local insert m)
-    where
-      insert e = e {envTypes = insertTypeWithProperties v t b $
-                                   envTypes e}
 
 instance Supplies TransT (Ident Var) where
   fresh = TransT $ ReaderT $ \env -> supplyValue $ envIDSupply env

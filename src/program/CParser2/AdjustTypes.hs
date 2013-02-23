@@ -39,14 +39,16 @@ isStore v = v == storeV
 -- type variable bindings and data type definitions, and Init is not
 -- a first-class type, the kind 'init' does not appear in any types.
 -- (This is true even though the type 'Init' does appear.)
-convertMemToSpec :: TypeEnvBase UnboxedMode -> TypeEnvBase SpecMode
-convertMemToSpec env =
-  insert_init_types $ specializeTypeEnv Just Just do_type do_type env
-  where
-    insert_init_types env =
-      insertType initV kindT $
-      insertType initConV (bareT `FunT` initT) env
+convertMemToSpec :: ITypeEnvBase UnboxedMode -> IO (ITypeEnvBase SpecMode)
+convertMemToSpec unboxed_env = do
+  mutable_env <- thawTypeEnv unboxed_env
+  env' <- specializeTypeEnv Just Just do_type do_type mutable_env
 
+  -- Insert initializer types
+  insertGlobalType env' initV kindT
+  insertGlobalType env' initConV (bareT `FunT` initT)
+  runTypeEnvM env' freezeTypeEnv
+  where
     do_type ty =
       case ty
       of VarT v 
@@ -96,9 +98,11 @@ isAdapterCon1 env v =
   v == sf_Boxed env || v == sf_AsBox env || v == sf_AsBare env
 
 convertSpecToSF :: VariableNameTable
-                -> TypeEnvBase SpecMode -> TypeEnvBase FullyBoxedMode
-convertSpecToSF tbl env =
-  specializeTypeEnv do_base_kind do_kind do_type do_bound_type env
+                -> ITypeEnvBase SpecMode -> IO (ITypeEnvBase FullyBoxedMode)
+convertSpecToSF tbl env = do
+  env' <- thawTypeEnv env
+  env'' <- specializeTypeEnv do_base_kind do_kind do_type do_bound_type env'
+  runTypeEnvM env'' freezeTypeEnv
   where
     ctx = getSFInfo tbl
 
@@ -173,13 +177,9 @@ specToSFType ctx expect_boxed ty =
 -- Generate Spec and fully boxed types
 
 convertFromMemTypeEnv :: VariableNameTable
-                      -> TypeEnvBase UnboxedMode
-                      -> (TypeEnvBase SpecMode, TypeEnvBase FullyBoxedMode)
-convertFromMemTypeEnv tbl env =
-  let pre_spec_env = convertMemToSpec env
-      sf_env = convertSpecToSF tbl pre_spec_env
-
-      -- Since we can't evaluate type functions in Spec, treat them as type
-      -- constructors
-      spec_env = {-forgetTypeFunctions-} pre_spec_env
-  in (spec_env, sf_env)
+                      -> ITypeEnvBase UnboxedMode
+                      -> IO (ITypeEnvBase SpecMode, ITypeEnvBase FullyBoxedMode)
+convertFromMemTypeEnv tbl env = do
+  spec_env <- convertMemToSpec env
+  sf_env <- convertSpecToSF tbl spec_env
+  return (spec_env, sf_env)

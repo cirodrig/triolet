@@ -60,15 +60,15 @@ type TCM b a = TypeEvalM b a
 
 lookupVar :: BoxingMode b => Var -> TCM b Type
 lookupVar v = do
-  env <- getTypeEnv
-  case lookupType v env of
+  m_ty <- lookupType v
+  case m_ty of
     Just rt -> return rt
     Nothing -> internalError $ "lookupVar: No type for variable: " ++ show v
 
 tcLookupDataCon :: BoxingMode b => Var -> TCM b DataConType
 tcLookupDataCon v = do
-  env <- getTypeEnv
-  case lookupDataCon v env of
+  m_dct <- lookupDataCon v
+  case m_dct of
     Just dct -> return dct
     Nothing -> internalError $ "lookupVar: No type for data constructor: " ++ show v
 

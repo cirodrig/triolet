@@ -194,8 +194,8 @@ expr (L pos expression) =
   case expression
   of VarE v -> do
        -- Translate to either a data constructor or a variable
-       tenv <- getTypeEnv
-       case lookupDataConWithType (toVar v) tenv of
+       m_data_con <- lookupDataConWithType (toVar v)
+       case m_data_con of
          Just (type_con, data_con) ->
            translateCon inf type_con data_con (toVar v) [] []
          Nothing -> do
@@ -210,8 +210,7 @@ expr (L pos expression) =
        in return (e, float_type)
      TupleE es -> do
        (es', types) <- exprs es
-       tenv <- getTypeEnv
-       kinds <- mapM (toBaseKind pos . Type.Eval.typeKind tenv) types
+       kinds <- mapM (toBaseKind pos <=< Type.Eval.typeKind) types
        let con = SystemF.TupleCon types
            tuple_type = Type.UTupleT kinds `Type.typeApp` types
        return (SystemF.ExpM $ SystemF.ConE inf con es', tuple_type)
@@ -275,14 +274,16 @@ expr (L pos expression) =
 translateApp inf op ty_args args = do
   -- Is the operator a data constructor?
   tenv <- getTypeEnv
-  case unLoc op of
-    VarE v
-      | Just (type_con, data_con) <- lookupDataConWithType (toVar v) tenv ->
-          translateCon inf type_con data_con (toVar v) ty_args args
-    _ -> do
-      -- Create an application term
-      (op_exp, op_type) <- expr op
-      translateAppWithOperator inf op_exp op_type ty_args args
+  cond (unLoc op)
+    [ do VarE v <- it
+         Just (type_con, data_con) <- lift $ lookupDataConWithType (toVar v)
+         lift $ translateCon inf type_con data_con (toVar v) ty_args args
+
+    , lift $ do
+         -- Create an application term
+         (op_exp, op_type) <- expr op
+         translateAppWithOperator inf op_exp op_type ty_args args
+    ]
 
 translateAppWithOperator inf op_exp op_type ty_args args = do
   -- Examine arguments
@@ -374,9 +375,11 @@ translateLAlt s_ty_op s_ty_args (L pos (Alt pattern body)) =
     with_pattern (ConPattern con ex_types fields) k = do
       tenv <- getTypeEnv
       -- 'con' must be a data constructor
-      dcon_type <- case lookupDataCon (toVar con) tenv
-                   of Nothing -> error $ show pos ++ ": Expecting a data constructor"
-                      Just c  -> return c
+      dcon_type <- do
+        x <- lookupDataCon (toVar con)
+        case x of
+          Nothing -> error $ show pos ++ ": Expecting a data constructor"
+          Just c  -> return c
 
       -- Check that the operator is this data constructor's type constructor
       case s_ty_op of
@@ -470,8 +473,11 @@ variableNameTable decls = Map.fromList keyvals
                          , Left name <- return $ labelLocalName lab]
 
 createCoreModule :: IdentSupply Var -> RModule
-                 -> IO (BoxedTypeEnv, TypeEnvBase SpecMode, TypeEnv,
-                        SystemF.Module SystemF.Mem, Map.Map String Var)
+                 -> IO (ITypeEnvBase FullyBoxedMode,
+                        ITypeEnvBase SpecMode,
+                        ITypeEnvBase UnboxedMode,
+                        SystemF.Module SystemF.Mem,
+                        Map.Map String Var)
 createCoreModule var_supply mod@(Module decls) = do
   -- Create a table of variable names
   let name_table = variableNameTable decls
@@ -495,11 +501,11 @@ createCoreModule var_supply mod@(Module decls) = do
   type_env <- typeTranslation var_supply type_subst kind_env builtin_type_functions mod
 
   -- Translate functions using this type environment
-  let mem_env = type_env
-  mem_module <- runExprTranslation var_supply type_subst builtin_type_functions mem_env $
+  mem_env <- runTypeEnvM type_env freezeTypeEnv :: IO (ITypeEnvBase UnboxedMode)
+  mem_module <- runExprTranslation var_supply type_subst builtin_type_functions type_env $
                  declGlobals decls
 
   -- Construct final expressions and type environments
-  let (spec_env, sf_env) = convertFromMemTypeEnv name_table type_env
+  (spec_env, sf_env) <- convertFromMemTypeEnv name_table mem_env
 
   return (sf_env, spec_env, mem_env, mem_module, name_table)

@@ -25,6 +25,7 @@ import Debug.Trace
 import Common.Error
 import Common.Identifier
 import Common.Label
+import Common.MonadLogic
 import Common.Supply
 import Builtins.Builtins
 import qualified Type.Environment as SF
@@ -79,6 +80,10 @@ monomorphicClassInstance head methods =
   return $ Instance head (MethodsInstance methods)
 
 global_mzero = mzero
+
+withCoreTypeEnv :: SF.TypeEnv -> SF.UnboxedTypeEvalM a -> InitM a
+withCoreTypeEnv tenv m = lift $ SF.TypeEvalM $ \supply _ ->
+  SF.runTypeEvalM m supply tenv
 
 -------------------------------------------------------------------------------
 -- Type translation from System F to frontend
@@ -290,8 +295,7 @@ abstractClassSignature tc_map data_type = do
 isBoxedKind :: SF.TypeEnv
             -> SF.Kind
             -> InitM Bool
-isBoxedKind tenv sf_kind = lift $ SF.TypeEvalM $ \supply _ ->
-  SF.runTypeEvalM (examine sf_kind) supply tenv
+isBoxedKind tenv sf_kind = withCoreTypeEnv tenv (examine sf_kind)
   where
     examine k = do
       k' <- SF.reduceToWhnf k
@@ -896,17 +900,18 @@ translateVar :: SF.Var -> TyConClass -> InitM TyCon
 translateVar v cls = do
   -- Compute kind
   tenv <- SF.getTypeEnv
-  let sf_kind = fromMaybe (internalError $ "translateVar: " ++ show v) $
-                SF.lookupType v tenv
+  m_sf_kind <- SF.lookupType v
+  let sf_kind = fromMaybe (internalError $ "translateVar: " ++ show v) m_sf_kind
+                
   k <- frontendKind sf_kind
 
   -- If it is a type function, get its arity
-  let arity =
-        case cls
-        of TCCFun ->
-             let Just tf = SF.lookupTypeFunction v tenv
-             in SF.typeFunctionArity $ SF.builtinPureTypeFunction tf
-           _ -> 0
+  arity <-
+    case cls
+    of TCCFun -> do
+         Just tf <- SF.lookupTypeFunction v
+         return $ SF.typeFunctionArity $ SF.builtinPureTypeFunction tf
+       _ -> return 0
 
   -- Create type constructor
   liftIO $ newTyCon v k cls arity
@@ -951,7 +956,7 @@ mkTypeBindings tc_map core_type_env = do
 mkDataTypeBinding :: TyCon -> SF.TypeEnv -> InitM TypeBinding
 mkDataTypeBinding tycon core_type_env = do
   let sf_var = tyConSFVar tycon
-  let Just core_kind = SF.lookupType sf_var core_type_env
+  Just core_kind <- withCoreTypeEnv core_type_env $ SF.lookupType sf_var
   is_boxed <- isBoxedKind core_type_env core_kind
   return $ TyConAss (DataType is_boxed)
 
@@ -959,11 +964,10 @@ mkTypeFamilyBinding :: TyCon             -- ^ Type family constructor
                     -> InitM (Instances TyFamilyInstance)
                     -> InitM TypeBinding
 mkTypeFamilyBinding tycon mk_instances = do
-  tenv <- SF.getTypeEnv
   let sf_var = tyConSFVar tycon
-      Just kind = SF.lookupType sf_var tenv
-      Just type_function = SF.lookupTypeFunction sf_var tenv
-      arity = SF.typeFunctionArity $ SF.builtinPureTypeFunction type_function
+  Just kind <- SF.lookupType sf_var
+  Just type_function <- SF.lookupTypeFunction sf_var
+  let arity = SF.typeFunctionArity $ SF.builtinPureTypeFunction type_function
 
   kind' <- frontendKind kind
   instances <- mk_instances
@@ -975,16 +979,15 @@ mkTypeClassBinding :: TyConMap
                    -> InitM (Instances ClassInstance)
                    -> InitM TypeBinding
 mkTypeClassBinding tc_map tycon abstract mk_instances = do
-  tenv <- SF.getTypeEnv
   let sf_var = tyConSFVar tycon
-      Just data_type = SF.lookupDataType sf_var tenv
-      [dict_var] = SF.dataTypeDataConstructors data_type
-      Just dcon_type = SF.lookupDataCon dict_var tenv
-
+  Just data_type <- SF.lookupDataType sf_var
+  let [dict_var] = SF.dataTypeDataConstructors data_type
+            
   signature <-
     if abstract
     then abstractClassSignature tc_map data_type
-    else frontendClassSignature tc_map dcon_type
+    else do Just dcon_type <- SF.lookupDataCon dict_var
+            frontendClassSignature tc_map dcon_type
   instances <- mk_instances
   return $ TyClsAss $ Class sf_var dict_var abstract signature instances
 
@@ -1207,14 +1210,15 @@ translateVariable tc_map frontend_thing core_thing = do
   frontend_var <- liftIO $ newVariable (SF.varName v) (Just v)
 
   -- Create a binding
-  tenv <- SF.getTypeEnv
-  binding <- case ()
-             of _ | Just dcon_type <- SF.lookupDataCon v tenv ->
-                      translateDataCon tc_map v dcon_type
-                  | Just ty <- SF.lookupType v tenv ->
-                      translateGlobalVar tc_map v ty
-                  | otherwise ->
-                      internalError $ "translateVariable: " ++ show v
+  binding <- cond ()
+             [ do Just dcon_type <- lift $ SF.lookupDataCon v
+                  lift $ translateDataCon tc_map v dcon_type
+
+             , do Just ty <- lift $ SF.lookupType v
+                  lift $ translateGlobalVar tc_map v ty
+
+             , internalError $ "translateVariable: " ++ show v
+             ]
   return (frontend_thing, frontend_var, binding)
 
 translateDataCon tc_map v dcon_type = SF.assumeBinders ty_params $ do
@@ -1243,25 +1247,28 @@ translateGlobalVar tc_map v ty = do
 -- Exported top-level routines
 
 setupTypeEnvironment :: IdentSupply SF.Var
-                     -> SF.BoxedTypeEnv -- ^ System F type environment
-                     -> SF.TypeEnv     -- ^ Core type nvironment
+                     -> SF.ITypeEnvBase SF.FullyBoxedMode -- ^ System F type environment
+                     -> SF.ITypeEnvBase SF.UnboxedMode -- ^ Core type nvironment
                      -> IO Environment
 setupTypeEnvironment id_supply sf_type_env core_type_env = do
+  env_sf <- SF.thawTypeEnv sf_type_env
+  env_core <- SF.thawTypeEnv core_type_env
+
+  let run_type_action :: SF.BoxedTypeEvalM a -> IO a
+      run_type_action m = SF.runTypeEvalM m id_supply env_sf
+
   -- Create type constructors
   (tc_list, tc_map) <- run_type_action createTyCons
   initializeFrontendBuiltinTypes tc_list
             
   -- Create type bindings
-  tc_bindings <- run_type_action $ mkTypeBindings tc_map core_type_env
+  tc_bindings <- run_type_action $ mkTypeBindings tc_map env_core
 
   -- Create variables
   (v_list, v_bindings) <- run_type_action $ createVars tc_map tc_bindings
   initializeFrontendBuiltinVars v_list
   
   return $ Environment tc_bindings v_bindings id_supply
-  where
-    run_type_action :: SF.BoxedTypeEvalM a -> IO a
-    run_type_action m = SF.runTypeEvalM m id_supply sf_type_env
 
 -- | Dump the type environment in human-readable form.
 dumpTypeEnvironment :: Environment -> IO ()

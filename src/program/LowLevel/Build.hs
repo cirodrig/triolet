@@ -78,8 +78,8 @@ instance (Supplies m (Ident Var)) => Supplies (Gen m) (Ident Var) where
 instance Type.TypeEnvMonad m => Type.TypeEnvMonad (Gen m) where
   type EvalBoxingMode (Gen m) = Type.EvalBoxingMode m
   getTypeEnv = lift Type.getTypeEnv
-  assumeWithProperties v t b m =
-    Gen $ \env -> Type.assumeWithProperties v t b (runGen m env)
+  --assumeWithProperties v t b m =
+  --  Gen $ \env -> Type.assumeWithProperties v t b (runGen m env)
 
 
 execBuild :: Monad m => [ValueType] -> Gen m Stm -> m Stm

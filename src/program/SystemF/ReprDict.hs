@@ -67,7 +67,7 @@ class EvalMonad m => ReprDictMonad m where
   withVarIDs :: (Supply VarID -> m a) -> m a
   withVarIDs f = getVarIDs >>= f
 
-  withTypeEnv :: (TypeEnvBase (EvalBoxingMode m) -> m a) -> m a
+  withTypeEnv :: (MTypeEnvBase (EvalBoxingMode m) -> m a) -> m a
   withTypeEnv f = getTypeEnv >>= f
 
   getDictEnv :: m SingletonValueEnv

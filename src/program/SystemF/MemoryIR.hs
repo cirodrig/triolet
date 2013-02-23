@@ -41,6 +41,9 @@ module SystemF.MemoryIR
        )
 where
 
+import Control.Monad
+import Data.Maybe
+  
 import Common.Error
 import SystemF.Syntax
 import SystemF.Demand
@@ -163,27 +166,25 @@ unpackVarAppM _ = Nothing
 -- | If the expression is a data constructor (other than a tuple),
 --   return the data constructor, type arguments, existential types,
 --   and field arguments
-unpackDataConAppM :: TypeEnv -> ExpM
-                  -> Maybe (DataConType, [Type], [Type], [ExpM])
-unpackDataConAppM tenv (ExpM (ConE inf con args)) =
+unpackDataConAppM :: EvalMonad m => ExpM
+                  -> m (Maybe (DataConType, [Type], [Type], [ExpM]))
+unpackDataConAppM (ExpM (ConE inf con args)) =
   case con of
-    VarCon op ty_args ex_types -> 
-      let Just dcon = lookupDataCon op tenv
-      in Just (dcon, ty_args, ex_types, args)
+    VarCon op ty_args ex_types -> do
+      Just dcon <- lookupDataCon op
+      return $ Just (dcon, ty_args, ex_types, args)
     TupleCon types ->
-      Nothing
+      return Nothing
 
-unpackDataConAppM _ _ = Nothing
+unpackDataConAppM _ = return Nothing
 
 -- | Return True if the expression is a data constructor or data constructor
 --   application.
 --
 --   The type environment is only used for looking up potential data
 --   constructors.
-isDataConAppM :: TypeEnv -> ExpM -> Bool
-isDataConAppM tenv e = case unpackDataConAppM tenv e
-                       of Just _ -> True
-                          _ -> False
+isDataConAppM :: EvalMonad m => ExpM -> m Bool
+isDataConAppM e = liftM isJust $ unpackDataConAppM e
 
 assumePatM :: TypeEnvMonad m => PatM -> m a -> m a
 assumePatM pat m = assumeBinder (patMBinder pat) m
@@ -255,21 +256,23 @@ entityType (DataEnt d) = constType d
 
 -- | Partition a list of parameters into input and output parameters.
 --   Output parameters must follow input parameters.
-partitionParameters :: TypeEnv -> [PatM] -> ([PatM], [PatM])
-partitionParameters tenv params = go id params 
+partitionParameters :: [PatM] -> UnboxedTypeEvalM ([PatM], [PatM])
+partitionParameters params = go id params
   where
     -- Take parameters until the first output parameter is found
-    go hd (p:ps) =
-      case toBaseKind $ typeKind tenv (patMType p)
-      of OutK -> (hd [], check_out_kinds (p:ps))
-         _    -> go (hd . (p:)) ps
+    go hd (p:ps) = do
+      base_kind <- typeBaseKind $ patMType p
+      case base_kind of
+        OutK -> do check_out_kinds (p:ps) 
+                   return (hd [], p:ps)
+        _    -> go (hd . (p:)) ps
 
-    go hd [] = (hd [], [])
+    go hd [] = return (hd [], [])
         
     -- Verify that all parameters in the list are output parameters
-    check_out_kinds ps
-      | and [OutK == toBaseKind (typeKind tenv (patMType p)) | p <- ps] = ps
-      | otherwise =
+    check_out_kinds ps = do
+      kinds <- mapM (typeBaseKind . patMType) ps
+      unless (all (OutK ==) kinds) $
         internalError "partitionParameters: Invalid parameter order"
     
 -------------------------------------------------------------------------------

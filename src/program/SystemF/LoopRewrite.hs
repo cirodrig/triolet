@@ -53,7 +53,8 @@ data LREnv =
 modifyLoopNesting f env = env {loopNesting = f $ loopNesting env}
 
 -- | During loop rewriting, keep track of the current loop nesting
-newtype LRW a = LRW (ReaderT LREnv IO a) deriving(Functor, Applicative, Monad)
+newtype LRW a = LRW (ReaderT LREnv IO a)
+              deriving(Functor, Applicative, Monad, MonadIO)
 
 instance Supplies LRW (Ident Var) where
   fresh = LRW $ ReaderT $ \env -> supplyValue (varSupply env)
@@ -61,10 +62,6 @@ instance Supplies LRW (Ident Var) where
 instance TypeEnvMonad LRW where
   type EvalBoxingMode LRW = UnboxedMode  
   getTypeEnv = LRW $ asks typeEnv
-  assumeWithProperties v t conlike (LRW m) = LRW (local insert_type m)
-    where
-      insert_type env = env {typeEnv = insertTypeWithProperties v t conlike $
-                                       typeEnv env}
 
 incParLoopCount (LRW m) = LRW $ local (modifyLoopNesting inc_count) m 
   where
@@ -139,8 +136,7 @@ replaceWithParallelApp inf op_var ty_args args =
   case lookup op_var parallel_function_table
   of Just parallel_op -> do
        -- Ensure that the operator is fully applied
-       tenv <- getTypeEnv
-       let Just t = lookupType op_var tenv
+       Just t <- lookupType op_var
        if fully_applied t
          then case parallel_op
               of ReplaceWith v -> return $ Just $ new_expr v
@@ -344,7 +340,8 @@ parallelLoopRewrite (Module modname imports defss exports) =
   withTheNewVarIdentSupply $ \var_supply -> do
 
     -- Set up globals
-    tenv <- readInitGlobalVarIO the_memTypes
+    i_tenv <- readInitGlobalVarIO the_memTypes
+    tenv <- thawTypeEnv i_tenv
     dict_env <- runFreshVarM var_supply createDictEnv
     let global_context = LREnv (LoopNesting 0 0) tenv dict_env var_supply
         LRW rewrite = rwTopLevel defss exports

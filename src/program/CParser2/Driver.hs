@@ -47,8 +47,11 @@ predefinedVarDetails =
 --   types and memory types.  Also, create a module containing
 --   definitions of built-in functions and constants.
 parseCoreModule2 :: IdentSupply Var
-                 -> IO (BoxedTypeEnv, TypeEnvBase SpecMode, TypeEnv,
-                        SystemF.Module SystemF.Mem, Map.Map String Var)
+                 -> IO (ITypeEnvBase FullyBoxedMode,
+                        ITypeEnvBase SpecMode,
+                        ITypeEnvBase UnboxedMode,
+                        SystemF.Module SystemF.Mem,
+                        Map.Map String Var)
 parseCoreModule2 ident_supply = do
   pathname <- getDataFileName ("symbols" </> "coremodule")
   input_file <- readFile pathname

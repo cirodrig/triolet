@@ -185,12 +185,9 @@ instance Supplies LR VarID where
 
 instance TypeEnvMonad LR where
   type EvalBoxingMode LR = UnboxedMode 
-  getTypeEnv = withTypeEnv return
+  getTypeEnv = LR $ \env -> return $ Just (lrTypeEnv env)
 
-  assumeWithProperties v rt b m = LR $ \env ->
-    let env' = env {lrTypeEnv =
-                       insertTypeWithProperties v rt b $ lrTypeEnv env}
-    in runLR m env'
+  liftTypeEnvM m = LR $ \env -> liftM Just $ runTypeEnvM (lrTypeEnv env) m
 
 instance EvalMonad LR where
   liftTypeEvalM m = LR $ \env -> do
@@ -624,8 +621,8 @@ funIsSmallerThan f n = compareCodeSize (funSize f) n
 --   with the inlined value; to ensure this, reference values are never
 --   pre-inlined.  Pre-inlining is performed only if it does not duplicate
 --   code or work.
-worthPreInlining :: TypeEnv -> Dmd -> Type -> ExpM -> Bool
-worthPreInlining tenv dmd ty expr =
+worthPreInlining :: Dmd -> Type -> ExpM -> TypeEnvM UnboxedMode Bool
+worthPreInlining dmd ty expr =
   let should_inline =
         case multiplicity dmd
         of OnceSafe -> inlckTrue
@@ -633,69 +630,71 @@ worthPreInlining tenv dmd ty expr =
                          inlckFunction `inlckOr`
                          inlckConlike
            _ -> inlckTrivial
-  in should_inline tenv dmd expr
+  in should_inline dmd expr
   where
     is_function_type = case ty of {FunT {} -> True; _ -> False}
 
 -- | Decide whether to inline the bare expression /before/ simplifying it.
 --   TODO: We actually want to use different heuristics for copied versus
 --   case-inspected expressions.
-worthPreInliningBare :: TypeEnv -> Dmd -> ExpM -> Bool
-worthPreInliningBare tenv dmd expr =
+worthPreInliningBare :: Dmd -> ExpM -> TypeEnvM UnboxedMode Bool
+worthPreInliningBare dmd expr =
   case multiplicity dmd
-  of OnceSafe -> True
-     ManySafe -> inlckBareDataCon tenv dmd expr
+  of OnceSafe -> return True
+     ManySafe -> inlckBareDataCon dmd expr
 
 -- | A test performed to decide whether to inline an expression
-type InlineCheck = TypeEnv -> Dmd -> ExpM -> Bool
+type InlineCheck = Dmd -> ExpM -> TypeEnvM UnboxedMode Bool
 
 inlckTrue, inlckFalse :: InlineCheck
-inlckTrue _ _ _  = True
-inlckFalse _ _ _ = False
+inlckTrue _ _  = return True
+inlckFalse _ _ = return False
 
 inlckBool :: Bool -> InlineCheck
-inlckBool b _ _ _ = b
+inlckBool b _ _ = return b
 
 inlckOr :: InlineCheck -> InlineCheck -> InlineCheck
 infixr 2 `inlckOr`
-inlckOr a b tenv dmd e = a tenv dmd e || b tenv dmd e
+inlckOr a b dmd e = a dmd e >||> b dmd e
 
 inlckAnd :: InlineCheck -> InlineCheck -> InlineCheck
 infixr 3 `inlckAnd`
-inlckAnd a b tenv dmd e = a tenv dmd e && b tenv dmd e
+inlckAnd a b dmd e = a dmd e >&&> b dmd e
 
 -- | Is the expression trivial?
 inlckTrivial :: InlineCheck
-inlckTrivial _ _ e = isTrivialExp e
+inlckTrivial _ e = return $ isTrivialExp e
 
 -- | Is the expression a lambda function?
 inlckFunction :: InlineCheck
-inlckFunction _ _ (ExpM (LamE {})) = True
-inlckFunction _ _ _ = False
+inlckFunction _ (ExpM (LamE {})) = return True
+inlckFunction _ _ = return False
 
 -- | Is the expression a duplicatable term?
 inlckConlike :: InlineCheck
-inlckConlike tenv dmd (ExpM (AppE _ (ExpM (VarE _ op)) _ args)) =
-  case lookupTypeWithProperties op tenv
-  of Just (_, conlike) | conlike == True ->
-       all ((inlckTrivial `inlckOr` inlckFunction) tenv dmd) args
-     _ -> False
+inlckConlike dmd (ExpM (AppE _ (ExpM (VarE _ op)) _ args)) = do
+  m_type_info <- lookupTypeWithProperties op
+  case m_type_info of
+    Just (_, conlike) | conlike == True ->
+      allM ((inlckTrivial `inlckOr` inlckFunction) dmd) args
+    _ -> return False
 
-inlckConlike tenv dmd _ = False
+inlckConlike dmd _ = return False
 
 -- | Is the given expression (of kind 'bare') a data constructor application?
 --   The arguments must be trivial values (val or box fields) 
 --   or bare data constructor applications (bare fields).
 inlckBareDataCon :: InlineCheck
-inlckBareDataCon tenv dmd (ExpM (ConE _ (VarCon con _ _) args)) =
-  case lookupDataCon con tenv
-  of Just dcon ->
-       let field_kinds = dataConFieldKinds dcon
-           check_field BareK arg = inlckBareDataCon tenv unknownDmd arg
-           check_field ValK  arg = inlckTrivial tenv unknownDmd arg
-           check_field BoxK  arg = inlckTrivial tenv unknownDmd arg
-       in and $ zipWith check_field field_kinds args
-     _ -> False
+inlckBareDataCon dmd (ExpM (ConE _ (VarCon con _ _) args)) = do
+  m_dcon <- lookupDataCon con
+  case m_dcon of
+    Just dcon ->
+      let field_kinds = dataConFieldKinds dcon
+          check_field BareK arg = inlckBareDataCon unknownDmd arg
+          check_field ValK  arg = inlckTrivial unknownDmd arg
+          check_field BoxK  arg = inlckTrivial unknownDmd arg
+      in andM $ zipWith check_field field_kinds args
+    _ -> return False
 
 -- | Create a substitution that pre-inlines the given list of variables
 preinlineSubst :: [(Var, ExpM)] -> Subst
@@ -920,9 +919,8 @@ flattenInsideLambda expression = do
 --   If the kind is \"bare\", leave it where it is, but flatten inside the
 --   expression if it's a lambda expression.
 flattenConExp inf con args = do
-  tenv <- getTypeEnv
   (field_types, _) <- conType con
-  let field_kinds = conFieldKinds tenv con
+  field_kinds <- conFieldKinds con
   args' <- flattenConFieldExps $ zip3 args field_types field_kinds
   return $ mapContext (\xs -> ExpM $ ConE inf con xs) args'
 
@@ -1014,16 +1012,15 @@ flattenAppExp inf op ty_args args = do
     if conlike_op
     then do s_args <- mapM applySubstitution args
             let args' = map deferEmptySubstitution s_args
-            tenv <- getTypeEnv
             arg_types <- mapM inferExpType s_args
-            let kinds = map (toBaseKind . typeKind tenv) arg_types
+            kinds <- mapM typeBaseKind arg_types
             flattenConlikeArgs $ zip3 args' arg_types kinds
     else flattenExps args
   mergeWith (\op' args' -> ExpM $ AppE inf op' ty_args args') ctx_op ctx_args
   where
     check_conlike (ExpM (VarE _ v)) = do
-      tenv <- getTypeEnv
-      let is_conlike = case lookupTypeWithProperties v tenv
+      type_info <- lookupTypeWithProperties v
+      let is_conlike = case type_info
                        of Just (_, conlike) -> conlike
                           Nothing -> False
       return $! Substitute.Nameless $! is_conlike
@@ -1098,8 +1095,6 @@ eliminateUselessCopying expression = do
         _ -> can't_eliminate
 
     CaseE inf scrutinee alts -> do
-      tenv <- getTypeEnv
-
       -- Eliminate reconstruction of bare or val data in each alternative.
       -- If scrutinee is a complex expression, don't eliminate, as it may
       -- produce code duplication.
@@ -1118,10 +1113,11 @@ eliminateUselessCopying expression = do
       -- First, try to detect the case where a value is deconstructed and
       -- reconstructed.
       -- Skip this step for bare types, since we can't avoid copying.
-      uses <-
-        if BareK == alt_kind tenv (head alts1)
-        then return Nothing
-        else liftM sequence $ mapM (useless_alt tenv) alts1
+      uses <- do
+        scrutinee_kind <- alt_kind (head alts1)
+        if scrutinee_kind == BareK
+          then return Nothing
+          else liftM sequence $ mapM useless_alt alts1
 
       -- Useless if all alternatives are useless.
       -- In well-typed code, all return parameters must be the same.
@@ -1141,7 +1137,7 @@ eliminateUselessCopying expression = do
         _ -> do
           -- Next, try to detect the case where a value is constructed and
           -- then copied
-          elim_case <- eliminate_unbox_and_copy tenv scrutinee alts1
+          elim_case <- eliminate_unbox_and_copy scrutinee alts1
           case elim_case of 
             Nothing -> do -- can't_eliminate
               -- Reconstruct the case expression
@@ -1155,15 +1151,15 @@ eliminateUselessCopying expression = do
     can't_eliminate = return expression
 
     -- Get the kind of the data type being matched
-    alt_kind tenv (AltSM (Alt {altCon = VarDeCon var _ _})) =
-      case lookupDataConWithType var tenv
-      of Just (type_con, _) -> dataTypeKind type_con
+    alt_kind (AltSM (Alt {altCon = VarDeCon var _ _})) = do
+      Just (type_con, _) <- lookupDataConWithType var
+      return $ dataTypeKind type_con
     
-    alt_kind _ (AltSM (Alt {altCon = TupleDeCon {}})) = ValK
+    alt_kind (AltSM (Alt {altCon = TupleDeCon {}})) = return ValK
 
     -- Try to detect and simplify the pattern
     -- @case boxed E of boxed x. copy x@
-    eliminate_unbox_and_copy tenv scrutinee alts = do
+    eliminate_unbox_and_copy scrutinee alts = do
       scrutinee' <- freshenHead scrutinee
       case scrutinee' of
         ConE _ (VarCon op [ty_arg] []) [initializer]
@@ -1199,7 +1195,7 @@ eliminateUselessCopying expression = do
     -- Return @Nothing@ if not useless.
     -- Return @Just Nothing@ if useless and there's no return parameter.
     -- Return @Just (Just p)@ if useless and the return parameter is @p@.
-    useless_alt tenv (AltSM (Alt decon alt_fields body)) = do
+    useless_alt (AltSM (Alt decon alt_fields body)) = do
       body' <- freshenHead body
       case body' of
         ConE inf con fields ->
@@ -1301,19 +1297,18 @@ data ReconstructorTemplate =
 --
 --   FIXME: Do this in a separate pass to avoid redundant traversals!
 eliminateReconstructor debug_expr scrutinee alt@(AltSM (Alt decon params body)) = do
-  tenv <- getTypeEnv
 
   -- Determine the kind of the scrutinee and the object fields
   -- and the type parameters
-  let (data_kind, field_kinds) =
-        case decon
-        of VarDeCon data_con _ _ ->
-             let Just (data_type, con_type) =
-                   lookupDataConWithType data_con tenv
-             in (dataTypeKind data_type, dataConFieldKinds con_type)
-           TupleDeCon fs ->
-             (ValK, map (toBaseKind . typeKind tenv) fs)
-      ty_args = deConTyArgs decon
+  (data_kind, field_kinds) <-
+    case decon
+    of VarDeCon data_con _ _ -> do
+         Just (data_type, con_type) <- lookupDataConWithType data_con
+         return (dataTypeKind data_type, dataConFieldKinds con_type)
+       TupleDeCon fs -> do
+         field_kinds <- mapM typeBaseKind fs
+         return (ValK, field_kinds)
+  let ty_args = deConTyArgs decon
       ex_types = deConExTypes decon
       param_vars = map (patMVar . fromPatSM) params
 
@@ -1653,7 +1648,6 @@ rwAppWithOperator' is_stream_arg inf op op_val ty_args args =
 
             | otherwise -> do
                 -- Try to apply a rewrite rule
-                tenv <- getTypeEnv
                 rewritten <- rewriteAppInSimplifier inf op_var ty_args args
                 case rewritten of
                   Just new_expr -> do
@@ -1932,10 +1926,11 @@ rwLet inf (PatSM bind@(PatM (bind_var ::: _) _)) val simplify_body =
   where
     -- Check if we should inline the RHS _before_ rewriting it
     try_pre_inline = do
-      tenv <- getTypeEnv
       rhs_type <- reduceToWhnf (patMType bind)
       subst_val <- applySubstitution val
-      if worthPreInlining tenv (patMDmd bind) rhs_type subst_val
+      should_pre_inline <-
+        liftTypeEnvM $ worthPreInlining (patMDmd bind) rhs_type subst_val
+      if should_pre_inline
         then do
           -- The variable is used exactly once or is trivial; inline it.
           -- Since substitution will eliminate the variable before the
@@ -2024,8 +2019,7 @@ rwLetrec is_stream_arg inf defs body = do
 
 rwCase :: Bool -> ExpInfo -> ExpSM -> [AltSM] -> LR (ExpM, AbsCode)
 rwCase is_stream_arg inf scrut alts = do
-  tenv <- getTypeEnv
-  rwCase1 is_stream_arg tenv inf scrut alts
+  rwCase1 is_stream_arg inf scrut alts
   where
     -- For debugging, print the case expression that will be rewritten
     debug_print_case :: LR (ExpM, AbsCode) -> LR (ExpM, AbsCode)
@@ -2045,11 +2039,11 @@ rwCase is_stream_arg inf scrut alts = do
 -- statement becomes dead code.
 --
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
-rwCase1 is_stream_arg tenv inf scrut alts
+rwCase1 is_stream_arg inf scrut alts
   | [alt@(AltSM (Alt {altCon = VarDeCon op _ _}))] <- alts,
     op `isCoreBuiltin` The_boxed = do
       let AltSM (Alt _ [binder] body) = alt
-      rwLetViaBoxed tenv inf scrut binder (substAndRwExp is_stream_arg body)
+      rwLetViaBoxed inf scrut binder (substAndRwExp is_stream_arg body)
 
 -- If this is a case of data constructor, we can unpack the case expression
 -- before processing the scrutinee.
@@ -2058,7 +2052,7 @@ rwCase1 is_stream_arg tenv inf scrut alts
 -- a constructor application.
 --
 -- Unpacking consumes fuel
-rwCase1 is_stream_arg tenv inf scrut alts
+rwCase1 is_stream_arg inf scrut alts
   | ExpM (ConE {}) <- discardSubstitution scrut = eliminate_case scrut
   | otherwise = do
       -- Check for an application of "reify _ _ E".
@@ -2078,7 +2072,7 @@ rwCase1 is_stream_arg tenv inf scrut alts
             _ -> not_case_of_constructor
         _ -> not_case_of_constructor
   where
-    not_case_of_constructor = rwCaseScrutinee is_stream_arg tenv inf scrut alts
+    not_case_of_constructor = rwCaseScrutinee is_stream_arg inf scrut alts
 
     -- This is a case of data constructor expression.  The case
     -- expression and data constructor cancel out.
@@ -2089,42 +2083,43 @@ rwCase1 is_stream_arg tenv inf scrut alts
       ConE _ scrut_con scrut_args <- freshenHead data_con_expr
 
       let alt = findAlternative alts scrut_con
-          field_kinds = conFieldKinds tenv scrut_con
           ex_types = conExTypes scrut_con
+      field_kinds <- conFieldKinds scrut_con
 
       -- Eliminate this case statement
-      eliminateCaseWithExp is_stream_arg tenv field_kinds ex_types scrut_args alt
+      eliminateCaseWithExp is_stream_arg field_kinds ex_types scrut_args alt
 
 -- Simplify the scrutinee, then try to simplify the case statement.
-rwCaseScrutinee is_stream_arg tenv inf scrut alts = do
+rwCaseScrutinee is_stream_arg inf scrut alts = do
   -- Simplify scrutinee
   (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp False scrut
 
   -- Try to deconstruct the new scrutinee expression
-  ifElseFuel (can't_deconstruct scrut' scrut_val) $
-    case makeDataExpWithAbsValue tenv scrut' scrut_val
-    of Just app_with_value -> do
-         -- Scrutinee is a constructor application that can be eliminated
-         consumeFuel
-         eliminateCaseWithAppAndValue is_stream_arg False tenv app_with_value alts
-       _ ->
-         -- Can't deconstruct.  Propagate values and rebuild the case
-         -- statement.
-         can't_deconstruct scrut' scrut_val
+  ifElseFuel (can't_deconstruct scrut' scrut_val) $ do
+    let maybe_exp = makeDataExpWithAbsValue scrut' scrut_val
+    case maybe_exp of
+      Just app_with_value -> do
+        -- Scrutinee is a constructor application that can be eliminated
+        consumeFuel
+        eliminateCaseWithAppAndValue is_stream_arg False app_with_value alts
+      _ ->
+        -- Can't deconstruct.  Propagate values and rebuild the case
+        -- statement.
+        can't_deconstruct scrut' scrut_val
   where
     can't_deconstruct scrut' scrut_val =
       rwCase2 is_stream_arg inf alts scrut' scrut_val
 
 -- | Rewrite a case statement that stands for a let-expression.
 --   This code is similar to 'rwLet'.
-rwLetViaBoxed :: TypeEnv -> ExpInfo -> ExpSM -> PatSM 
+rwLetViaBoxed :: ExpInfo -> ExpSM -> PatSM 
               -> (Subst -> LR (ExpM, AbsCode))
                  -- ^ Computation that rewrites the body after
                  --   applying a substitution.  The substitution holds
                  --   inlining decisions that were made while
                  --   processing the binder part of the let expression.
               -> LR (ExpM, AbsCode)
-rwLetViaBoxed tenv inf scrut (PatSM pat) compute_body =
+rwLetViaBoxed inf scrut (PatSM pat) compute_body =
   ifElseFuel rw_recursive_let try_pre_inline
   where
     -- Check if we should inline the constructed value _before_ rewriting it.
@@ -2291,9 +2286,9 @@ data DataExpAndValue =
 --
 --   Return the components of the expression and the abstract values of
 --   its fields.
-makeDataExpWithAbsValue :: TypeEnv -> ExpM -> AbsCode
+makeDataExpWithAbsValue :: ExpM -> AbsCode
                         -> Maybe DataExpAndValue
-makeDataExpWithAbsValue tenv expression expression_value =
+makeDataExpWithAbsValue expression expression_value =
   case expression
   of ExpM (ConE inf con args) ->
        case codeValue expression_value
@@ -2309,12 +2304,12 @@ makeDataExpWithAbsValue tenv expression expression_value =
 -- | Eliminate a case statement whose scrutinee was determined to be a
 --   data constructor application.
 eliminateCaseWithAppAndValue
-  is_stream_arg is_inspector tenv (ConAppAndValue con args_and_values) alts =
-  let field_kinds = conFieldKinds tenv con
-      ex_args = conExTypes con
+  is_stream_arg is_inspector (ConAppAndValue con args_and_values) alts = do
+  field_kinds <- conFieldKinds con
+  let ex_args = conExTypes con
       alt = findAlternative alts con
-  in eliminateCaseWithSimplifiedExp
-     is_stream_arg is_inspector tenv field_kinds ex_args args_and_values alt
+  eliminateCaseWithSimplifiedExp
+     is_stream_arg is_inspector field_kinds ex_args args_and_values alt
 
 -- | Rewrite a case statement after rewriting the scrutinee.
 --   The case statement cannot be eliminated by deconstructing the scrutinee
@@ -2324,7 +2319,6 @@ eliminateCaseWithAppAndValue
 --   the case statement.
 rwCase2 :: Bool -> ExpInfo -> [AltSM] -> ExpM -> AbsCode -> LR (ExpM, AbsCode)
 rwCase2 is_stream_arg inf alts scrut' scrut_val = do
-  tenv <- getTypeEnv
   have_fuel <- checkFuel
   case codeValue scrut_val of
     DataAV (AbsData dcon field_values) ->
@@ -2333,9 +2327,8 @@ rwCase2 is_stream_arg inf alts scrut' scrut_val = do
           -- All fields can be represented as expressions. 
           -- The case statement can be eliminated.
           consumeFuel
-          tenv <- getTypeEnv
           let data_value = ConAppAndValue dcon (zip field_exps field_values)
-          eliminateCaseWithAppAndValue is_stream_arg True tenv data_value alts
+          eliminateCaseWithAppAndValue is_stream_arg True data_value alts
         _ -> do
           -- Cannot eliminate the case statement. 
           -- However, we may have eliminated some case alternatives. 
@@ -2364,6 +2357,7 @@ rwCase2 is_stream_arg inf alts scrut' scrut_val = do
       -- Cannot eliminate; simplify the case alternatives
       rwCaseAlternatives inf scrut' is_stream_arg scrut_var Nothing alts
   where
+    {-
     is_product_case tenv =
       case alts
       of (AltSM (Alt {altCon = con}) : _) ->
@@ -2373,7 +2367,7 @@ rwCase2 is_stream_arg inf alts scrut' scrut_val = do
                 case lookupDataConWithType v tenv
                 of Just (ty, _) -> length (dataTypeDataConstructors ty) == 1
                    Nothing -> internalError "rwCase: Invalid constructor"
-         [] -> internalError "rwCase: Empty case statement"
+         [] -> internalError "rwCase: Empty case statement"-}
 
     -- Apply a function to the true and false branches of the case statement
     substitute_in_case_branches :: Subst -> Subst -> [AltSM] -> LR [AltSM]
@@ -2406,30 +2400,34 @@ rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values alts = do
   have_fuel <- checkFuel
   tenv <- getTypeEnv
   phase <- getPhase
-  case scrut of
-    ExpM (CaseE _ inner_scrut inner_alts)
-      | have_fuel &&
-        -- Before 'PostFinal', only transform when the outer case inspects
-        -- a sum type
-        (phase >= PostFinalSimplifierPhase || sum_case tenv alts) &&
-        isUnfloatableCase scrut -> do
-          -- Apply the case-of-case transformation
-          rwCaseOfCase inf Nothing inner_scrut inner_alts alts
-    _ -> do
-      -- Continue rewriting in the body of each case alternative
-      let one_alt = length alts == 1
-      alts' <- mapM (rwAlt is_stream_arg one_alt scrut_var known_values) alts
-      rwExpReturn (ExpM $ CaseE inf scrut alts', topCode)
+  cond scrut
+    [ do ExpM (CaseE _ inner_scrut inner_alts) <- it
+         aguard have_fuel
+         -- Before 'PostFinal', only transform when the outer case inspects
+         -- a sum type
+         aguard (phase >= PostFinalSimplifierPhase) <|> (lift (sum_case alts) >>= aguard)
+         aguard (isUnfloatableCase scrut)
+         
+         lift $ do
+           -- Apply the case-of-case transformation
+           rwCaseOfCase inf Nothing inner_scrut inner_alts alts
+
+    , -- Continue rewriting in the body of each case alternative
+      lift $ do
+        let one_alt = length alts == 1
+        alts' <- mapM (rwAlt is_stream_arg one_alt scrut_var known_values) alts
+        rwExpReturn (ExpM $ CaseE inf scrut alts', topCode)
+    ]
   where
     -- Check whether the outer case statement is inspecting a type with
     -- more than one constructor
-    sum_case tenv (AltSM alt : _) =
+    sum_case (AltSM alt : _) =
       -- Get the data type from the case alternative
       case altCon alt
-      of TupleDeCon {} -> False
-         VarDeCon con _ _ ->
-           let Just (data_type, _) = lookupDataConWithType con tenv
-           in length (dataTypeDataConstructors data_type) /= 1
+      of TupleDeCon {} -> return False
+         VarDeCon con _ _ -> do
+           Just (data_type, _) <- lookupDataConWithType con
+           return $ length (dataTypeDataConstructors data_type) /= 1
 
 -- | Find the alternative matching constructor @con@
 findAlternative :: [AltSM] -> ConInst -> AltSM
@@ -2472,13 +2470,12 @@ eliminateCaseExTypes ex_args (AltSM alt) k
 --
 --   Fuel should be consumed prior to calling this function.
 eliminateCaseWithExp :: Bool
-                     -> TypeEnv
                      -> [BaseKind]
                      -> [Type]
                      -> [ExpSM]
                      -> AltSM
                      -> LR (ExpM, AbsCode)
-eliminateCaseWithExp is_stream_arg tenv field_kinds ex_args initializers alt =
+eliminateCaseWithExp is_stream_arg field_kinds ex_args initializers alt =
   eliminateCaseExTypes ex_args alt $ \params body ->
   if length params /= length initializers
   then internalError "rwCase: Wrong number of fields"
@@ -2499,14 +2496,13 @@ eliminateCaseWithExp is_stream_arg tenv field_kinds ex_args initializers alt =
 --   whether the arguments are initializer expressions or not.
 eliminateCaseWithSimplifiedExp :: Bool
                                -> Bool -- ^ Whether fields are given as field values or initializers
-                               -> TypeEnv
                                -> [BaseKind] -- ^ Field kinds
                                -> [Type]     -- ^ Existential type parameters
                                -> [(ExpM, AbsCode)] -- ^ Initializers or field values, together with their abstract value
                                -> AltSM                -- ^ Case alternative to eliminate
                                -> LR (ExpM, AbsCode) -- ^ Simplified case alternative and its abstract value
 eliminateCaseWithSimplifiedExp
-  is_stream_arg is_inspector tenv field_kinds ex_args initializers alt =
+  is_stream_arg is_inspector field_kinds ex_args initializers alt =
   eliminateCaseExTypes ex_args alt $ \params body ->
   if length params /= length initializers
   then internalError "rwCase: Wrong number of fields"
@@ -2553,8 +2549,7 @@ caseInitializerBinding kind param initializer compute_body =
       let boxed_initializer =
             deferEmptySubstitution $
             conE defaultExpInfo constructor [initializer_exp]
-      tenv <- getTypeEnv
-      rwLetViaBoxed tenv defaultExpInfo boxed_initializer param' compute_body
+      rwLetViaBoxed defaultExpInfo boxed_initializer param' compute_body
     _ ->
       rwLet defaultExpInfo param' initializer compute_body
   where
@@ -2616,7 +2611,6 @@ rwAlt :: Bool                   -- ^ Whether the case statement is an argument
       -> AltSM                        -- ^ Alternative to rewrite
       -> LR AltM
 rwAlt is_stream_arg propagate_exceptions scr m_values (AltSM alt) = do
-  tenv <- getTypeEnv
   let decon = altCon alt
       -- Clear demand information because number of uses
       -- may increase or decrease after simplifying
@@ -2665,7 +2659,6 @@ rwAlt is_stream_arg propagate_exceptions scr m_values (AltSM alt) = do
 
     -- Add existential types, paramters, and known values to the environment
     assume_params ex_types params_and_values m = do
-      tenv <- getTypeEnv
       let with_params = assume_parameters params_and_values m
           with_ty_params = foldr assumeBinder with_params ex_types
       with_ty_params
@@ -2892,10 +2885,9 @@ rwFun' (FunSM f) = do
           -- No parameters
           setCurrentReturnParameter Nothing k
       | otherwise = do
-        tenv <- getTypeEnv
         let last_param = last params
-            last_param_kind = toBaseKind $ typeKind tenv $ patMType last_param
-            returns_store =
+        last_param_kind <- typeBaseKind $ patMType last_param
+        let returns_store =
               case rtype
               of VarT v -> v == storeV
                  _ -> False
@@ -2981,7 +2973,8 @@ rewriteLocalExpr :: SimplifierPhase
 rewriteLocalExpr phase ruleset mod =
   withTheNewVarIdentSupply $ \var_supply -> do
     fuel <- readInitGlobalVarIO the_fuel
-    tenv <- readInitGlobalVarIO the_memTypes
+    i_tenv <- readInitGlobalVarIO the_memTypes
+    tenv <- thawTypeEnv i_tenv
     denv <- runFreshVarM var_supply createDictEnv
 
     -- Initialize the global substitution with the variable rewrite rules.

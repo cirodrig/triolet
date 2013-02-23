@@ -363,7 +363,6 @@ shapeMemTF bi = shapeLike bi $ \op args ->
            | isBuiltin bi The_barray2 op -> return_dim2
            | isBuiltin bi The_barray3 op -> return_dim3
          _ -> return Nothing
-    examine_bare_type _ = return Nothing
 
     return_list_dim, return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m (Maybe Type)
     return_list_dim = return $ Just $ VarT (getBuiltin bi The_list_dim)
@@ -537,8 +536,8 @@ boxedMemTF bi = typeFunction 1 compute_boxed
            | otherwise -> do
                -- If the argument is a data constructor application, then
                -- use 'Boxed' as the adapter type
-               tenv <- getTypeEnv
-               case lookupDataType op tenv of
+               m_dtype <- lookupDataType op
+               case m_dtype of
                  Just _ -> return $ varApp (getBuiltin bi The_Boxed) [arg]
                  _ -> cannot_reduce
          _ -> cannot_reduce
@@ -585,8 +584,8 @@ bareMemTF bi = typeFunction 1 compute_bare
                        -- If the argument is a data constructor
                        -- application, then use 'StoredBox' as the
                        -- adapter type
-                       tenv <- getTypeEnv
-                       case lookupDataType op tenv of
+                       m_dtype <- lookupDataType op
+                       case m_dtype of
                          Just _ -> stored_type
                          _ -> cannot_reduce
                  _ -> cannot_reduce

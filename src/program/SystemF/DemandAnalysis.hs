@@ -20,6 +20,7 @@ module SystemF.DemandAnalysis
 where
 
 import Control.Monad
+import Control.Monad.Trans
 import Control.Applicative
 import Control.Monad.Reader.Class
 import Control.Monad.Writer.Class
@@ -32,6 +33,8 @@ import Debug.Trace
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
+import Common.Supply
 import Builtins.Builtins
 import SystemF.Demand
 import SystemF.Syntax
@@ -54,10 +57,13 @@ import Globals
 --   type variables, not value variables.
 --   
 --   The analysis generates demand information on variables.
-newtype Df a = Df {runDf :: TypeEnv -> (a, Dmds)}
+newtype Df a = Df {runDf :: TypeEvalM UnboxedMode (a, Dmds)}
 
-evalDf :: Df a -> TypeEnv -> a
-evalDf m env = fst (runDf m env)
+evalDf :: Df a -> IdentSupply Var -> ITypeEnvBase UnboxedMode -> IO a
+evalDf m supply env = do
+  env' <- thawTypeEnv env
+  (x, _) <- runTypeEvalM (runDf m) supply env'
+  return x
 
 instance Functor Df where
   fmap = liftM
@@ -67,33 +73,44 @@ instance Applicative Df where
   (<*>) = ap
 
 instance Monad Df where
-  return x = Df (\_ -> (x, IntMap.empty))
-  m >>= k = Df (\env -> case runDf m env
-                        of (x, dmd1) -> case runDf (k x) env
-                                        of (y, dmd2) -> (y, joinSeq dmd1 dmd2))
-
-instance MonadReader Df where
-  type EnvType Df = TypeEnv
-  ask = Df (\tenv -> (tenv, IntMap.empty))
-  local f m = Df (\tenv -> runDf m (f tenv))
+  return x = Df (return (x, IntMap.empty))
+  m >>= k = Df (do (x, dmd1) <- runDf m
+                   (y, dmd2) <- runDf (k x)
+                   return (y, joinSeq dmd1 dmd2))
 
 instance MonadWriter Df where
   type WriterType Df = Dmds
-  tell w = Df (\_ -> ((), w))
-  listen m = Df (\tenv -> let (x, w) = runDf m tenv in ((x, w), w))
-  pass m = Df (\tenv -> let ((x, f), w) = runDf m tenv in (x, f w))
+  tell w = Df (return ((), w))
+  listen m = Df (do (x, w) <- runDf m
+                    return ((x, w), w))
+  pass m = Df (do ((x, f), w) <- runDf m 
+                  return (x, f w))
+
+instance MonadIO Df where
+  liftIO m = Df (do x <- liftIO m 
+                    return (x, IntMap.empty))
 
 instance TypeEnvMonad Df where
   type EvalBoxingMode Df = UnboxedMode
-  getTypeEnv = ask
-  assumeWithProperties v t b = local (insertTypeWithProperties v t b)
+  getTypeEnv = Df (do x <- getTypeEnv
+                      return (x, IntMap.empty))
+  liftTypeEnvM m = Df (do x <- liftTypeEnvM m
+                          return (x, IntMap.empty))
+
+instance Supplies Df (Ident Var) where
+  fresh = Df (do x <- fresh
+                 return (x, IntMap.empty))
+
+instance EvalMonad Df where
+  liftTypeEvalM m = Df (do x <- m
+                           return (x, IntMap.empty))
 
 -- | Run multiple dataflow analyses on mutually exclusive execution paths.
 --   This kind of execution occurs in case alternatives.
 parallel :: [Df a] -> Df [a]
-parallel dfs = Df $ \tenv ->
-  case unzip [runDf df tenv | df <- dfs]
-  of (xs, dmds) -> (xs, joinPars dmds)
+parallel dfs = Df $ do
+  (xs, dmds) <- liftM unzip $ sequence $ map runDf dfs
+  return (xs, joinPars dmds)
 
 underLambda :: Bool -> Df a -> Df a
 underLambda is_initializer m = censor change_multiplicities m
@@ -109,23 +126,23 @@ underLambda is_initializer m = censor change_multiplicities m
 --   data constructor definitions cannot be removed, so they are ignored.
 --   To decide whether a variable is ignored, look it up in the type
 --   environment.
-isDeletable :: TypeEnv -> Var -> Bool
-isDeletable tenv v =
-  isNothing (lookupDataType v tenv) &&
-  isNothing (lookupDataCon v tenv) &&
-  isNothing (lookupTypeFunction v tenv)
+isDeletable :: Var -> Df Bool
+isDeletable v = Df $ do
+  deletable <-
+    liftM isNothing (lookupDataType v) >&&>
+    liftM isNothing (lookupDataCon v) >&&>
+    liftM isNothing (lookupTypeFunction v)
+  return (deletable, IntMap.empty)
 
 -- | A helper function for 'mention'.  If the variable is a global type or 
 --   data constructor, then ignore it.
-mentionHelper v dmd = do
-  tenv <- ask
-  if isDeletable tenv v
-    then tell $ useVariable v dmd
-    else return ()
+mentionHelper v dmd =
+  ifM (isDeletable v)
+  (tell $ useVariable v dmd)
+  (return ())
 
 mentionHelperList vs dmd = do
-  tenv <- ask
-  let used_variables = [v | v <- vs, isDeletable tenv v]
+  used_variables <- filterM isDeletable vs
   tell $ useVariables used_variables dmd
 
 -- | A variable was used somehow.  This is the most general case.
@@ -159,20 +176,20 @@ mentionExtern v = mentionHelper v unknownDmd
 -- | Get the demand on variable @v@ produced by the given code; also, remove
 --   @v@ from the demanded set
 getDemand :: Var -> Df a -> Df (a, Dmd)
-getDemand v m = Df $ \tenv ->
-  let (x, dmds) = runDf m tenv
-      dmd = lookupDmd v dmds
-      dmds' = IntMap.delete (fromIdent $ varID v) dmds
-  in ((x, dmd), dmds')
+getDemand v m = Df $ do
+  (x, dmds) <- runDf m
+  let dmd = lookupDmd v dmds
+  let dmds' = IntMap.delete (fromIdent $ varID v) dmds
+  dmd `seq` dmds' `seq` return ((x, dmd), dmds')
 
 maskDemand :: Var -> Df a -> Df a
 maskDemand v m = fmap fst $ getDemand v m
 
 maskDemands :: [Var] -> Df a -> Df a
-maskDemands vs m = Df $ \tenv ->
-  let (x, dmds) = runDf m tenv
-      dmds' = foldr (\v m -> IntMap.delete (fromIdent $ varID v) m) dmds vs
-  in (x, dmds')
+maskDemands vs m = Df $ do
+  (x, dmds) <- runDf m
+  let dmds' = foldr (\v m -> IntMap.delete (fromIdent $ varID v) m) dmds vs
+  dmds' `seq` return (x, dmds')
 
 -------------------------------------------------------------------------------
 -- Demand analysis on Mem IR
@@ -267,8 +284,7 @@ dmdExpWorker is_initializer spc expressionM@(ExpM expression) =
     -}
 
 dmdConE inf con args = do
-  tenv <- ask
-  let field_kinds = conFieldKinds tenv con
+  field_kinds <- conFieldKinds con
   args' <- zipWithM compute_uses field_kinds args
 
   return $ ExpM $ ConE inf con args'
@@ -475,13 +491,13 @@ dmdGroup do_def defgroup do_body =
       useExportedDefs $ defGroupMembers defgroup
       do_body
 
-    rec_dmd defs = Df $ \tenv ->
-      let -- Scan each definition and the body code
-          defs_and_uses = [runDf (do_def def) tenv | def <- defs]
-          (body, body_uses) = runDf do_body_and_exports tenv
+    rec_dmd defs = Df $ do
+      -- Scan each definition and the body code
+      defs_and_uses <- mapM (runDf . do_def) defs
+      (body, body_uses) <- runDf do_body_and_exports
 
-          -- Partition into strongly connected components
-          members = [((new_def, uses),
+      -- Partition into strongly connected components
+      let members = [((new_def, uses),
                       varID $ definiendum new_def,
                       uses)
                     | (new_def, uses) <- defs_and_uses]
@@ -500,7 +516,7 @@ dmdGroup do_def defgroup do_body =
               set_uses def =
                 let dmd = lookupDmd (definiendum def) new_uses
                 in set_def_uses dmd def
-      in ((new_defs, body), new_uses)
+      return ((new_defs, body), new_uses)
     
     set_def_uses dmd def =
       modifyDefAnnotation (\a -> a {defAnnUses = multiplicity dmd}) def
@@ -573,15 +589,21 @@ dmdTopLevelGroup [] exports = do
 -- | Perform local demand analysis and dead code elimination.
 --   Top-level definitions are not removed or regrouped.
 localDemandAnalysis :: Module Mem -> IO (Module Mem)
-localDemandAnalysis (Module modname imports defss exports) = do
-  tenv <- readInitGlobalVarIO the_memTypes
+localDemandAnalysis mod =
+  -- Same as full demand analysis
+  demandAnalysis mod
+{-  withTheNewVarIdentSupply $ \supply -> do
+    tenv <- readInitGlobalVarIO the_memTypes
+    defss' <- mapM (traverse evalDf 
   let defss' = map (fmap (\d -> evalDf (dmdGlobalDef d) tenv)) defss
       exports' = map (\e -> evalDf (dmdExport e) tenv) exports
   return $ Module modname imports defss' exports'
+-}
 
 -- | Perform demand analysis and dead code elimination.
 demandAnalysis :: Module Mem -> IO (Module Mem)
-demandAnalysis mod@(Module modname imports defss exports) = do
-  tenv <- readInitGlobalVarIO the_memTypes
-  let (defss', exports') = evalDf (dmdTopLevelGroup defss exports) tenv
-  return $ Module modname imports defss' exports'
+demandAnalysis mod@(Module modname imports defss exports) =
+  withTheNewVarIdentSupply $ \supply -> do
+    tenv <- readInitGlobalVarIO the_memTypes
+    (defss', exports') <- evalDf (dmdTopLevelGroup defss exports) supply tenv
+    return $ Module modname imports defss' exports'

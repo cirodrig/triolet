@@ -33,12 +33,14 @@ import qualified LowLevel.Print as L
 
 
 -- | Run the memory layout algorithm on data types and print results
-testMemoryLayout :: IdentSupply Var -> IdentSupply L.Var -> TypeEnv
+testMemoryLayout :: IdentSupply Var -> IdentSupply L.Var -> ITypeEnvBase UnboxedMode
                  -> IO ()
-testMemoryLayout var_supply ll_var_supply type_env =
-  mapM_ test_one (IntMap.elems $ getAllDataTypeConstructors type_env)
+testMemoryLayout var_supply ll_var_supply i_type_env = do
+  type_env <- thawTypeEnv i_type_env
+  type_constructors <- liftM getAllDataTypeConstructors $ runTypeEnvM type_env freezeTypeEnv
+  mapM_ (test_one type_env) (IntMap.elems type_constructors)
   where
-    test_one dcon
+    test_one type_env dcon
       | dataTypeIsAlgebraic dcon && not (null $ dataTypeDataConstructors dcon) =
           runTypeEvalM (do_test dcon) var_supply type_env `catch` \exc ->
           print (exc :: ErrorCall)

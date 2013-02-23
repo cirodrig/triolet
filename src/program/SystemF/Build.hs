@@ -157,12 +157,13 @@ mkFun typaram_kinds mk_params mk_body = do
     mk_typaram_var _ = newAnonymousVar TypeLevel
 
 mkAlt :: EvalMonad m =>
-         TypeEnv -> Var -> [Type]
+         Var -> [Type]
       -> ([Var] -> [Var] -> m ExpM)
       -> m AltM
-mkAlt tenv con ty_args mk_body =
-  case lookupDataCon con tenv
-  of Just dcon_type -> do
+mkAlt con ty_args mk_body = do
+  m_dcon <- lookupDataCon con
+  case m_dcon of
+    Just dcon_type -> do
        -- Get the types of the alternative patterns
        (ex_param_types, param_types, _) <-
          instantiateDataConTypeWithFreshVariables dcon_type ty_args
@@ -178,7 +179,7 @@ mkAlt tenv con ty_args mk_body =
                       | (v, ty) <- zip pat_vars param_types]
            decon = VarDeCon con ty_args ex_params
        return $ AltM $ Alt decon patterns body
-     _ -> internalError "mkAlt"
+    _ -> internalError "mkAlt"
 
 outType t = outPtrT `typeApp` [t]
 initEffectType t = storeT

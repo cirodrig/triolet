@@ -151,11 +151,6 @@ withIndependent context_name check transform m = transform $ do
     else internalError $
          context_name ++ ": Layout depends on bound type variable"
 
-computeBaseKind :: TypeEnvMonad m => Type -> m BaseKind
-computeBaseKind t = do
-  tenv <- getTypeEnv
-  return $! toBaseKind $ typeKind tenv t
-
 -------------------------------------------------------------------------------
 -- Getting the structure of a type
 
@@ -177,8 +172,8 @@ computeStructure t = liftTypeEvalM $ do
 
     -- Others are either variables or data type constructors
     Just (con, args) -> do
-      tenv <- getTypeEnv
-      case lookupDataType con tenv of
+      m_data_type <- lookupDataType con
+      case m_data_type of
         -- Compute layout of a data type
         Just dtype -> computeDataStructure dtype args
 
@@ -196,7 +191,7 @@ computeStructure t = liftTypeEvalM $ do
 --   If it's boxed, return a pointer type; otherwise, get the type's structure.
 computeFieldStructure :: EvalMonad m => Type -> m Structure
 computeFieldStructure t = do
-  k <- computeBaseKind t
+  k <- typeBaseKind t
   case k of
     BoxK -> return $ PrimStruct OwnedType
     BareK -> computeStructure t
@@ -218,8 +213,7 @@ computeDataStructure dtype args
 
     -- Compute the layout of one data constructor
     alternative_layout con = do
-      tenv <- getTypeEnv
-      let Just dcon_type = lookupDataCon con tenv
+      Just dcon_type <- lookupDataCon con
       (binders, fields, _) <-
         instantiateDataConTypeWithFreshVariables dcon_type args
       let field_kinds = dataConFieldKinds dcon_type
@@ -264,9 +258,8 @@ variableStructuralSubterms ty = do
     ForallStruct (Forall b t) ->
       withIndependentType b $ variableStructuralSubterms t
     VarStruct t -> do
-      tenv <- getTypeEnv
-      let base_kind = toBaseKind $ typeKind tenv t
-      base_kind `seq` return [KindedType base_kind t]
+      base_kind <- typeBaseKind t
+      return [KindedType base_kind t]
   where
     -- If the given type of kind @intindex@ is variable, return it
     -- otherwise return nothing
@@ -368,26 +361,27 @@ computeAltSizes (Alternative decon fields) =
 
 -- | Compute size information for each data type in the environment.
 --   Update the type environment with computed new size information.
-computeAllDataSizes :: IdentSupply Var -> TypeEnv -> IO TypeEnv
+computeAllDataSizes :: IdentSupply Var -> ITypeEnvBase UnboxedMode -> IO ()
 computeAllDataSizes var_supply env = do
-  xs <- runTypeEvalM compute var_supply env
-  
-  -- DEBUG: print results
-  print $ pprDataSizes xs
-  let set_size e (con, variance) =
-        setSizeParameters con (dtsSizeParamTypes variance) e
-  return $! foldl' set_size env xs
+  let data_constructors = getAllDataTypeConstructors env
+  env' <- thawTypeEnv env
+  runTypeEvalM (compute data_constructors) var_supply env'
   where
-    data_constructors = IntMap.elems $ getAllDataTypeConstructors env
-    
+    compute data_constructors = do
+      xs <- mapM compute_size_info $ IntMap.elems data_constructors
+      liftIO $ print $ pprDataSizes xs      -- DEBUG: print results
+      return ()
+
     -- Compute size information for each data type constructor
-    compute = forM data_constructors $ \dtype -> do
+    compute_size_info dtype = do
       info <- if dataTypeIsAlgebraic dtype
               then computeDataSizes dtype
               else return $ StructuralTypeVariance (dataTypeParams dtype) [] []
+
+      -- Insert into type environment
+      setSizeParameters (dataTypeCon dtype) (dtsSizeParamTypes info)
+
       return (dataTypeCon dtype, info)
-
-
 
 -- | Remove duplicate types from the list
 nubTypeList :: [Type] -> UnboxedTypeEvalM [Type]

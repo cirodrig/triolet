@@ -969,34 +969,36 @@ objectLayout mem_layout =
 -- Using layouts
 
 -- | Get the type of a variable corresponding to the given high-level type
-lowerType :: TypeEnv -> Type -> Lower (Maybe LL.ValueType)
-lowerType tenv ty = 
-  case toBaseKind $ typeKind tenv ty
-  of ValK        -> do whnf_ty <- reduceToWhnf ty
-                       vl <- getValLayout whnf_ty
-                       return $ Just $ valLayoutValueType vl
-     BoxK        -> return $ Just $ LL.PrimType LL.OwnedType
-     BareK       -> return $ Just $ LL.PrimType LL.PointerType
-     OutK        -> return $ Just $ LL.PrimType LL.PointerType
-     _           -> internalError "lowerReturnType: Invalid representation"
+lowerType :: Type -> Lower (Maybe LL.ValueType)
+lowerType ty = do
+  k <- typeBaseKind ty
+  case k of
+    ValK        -> do whnf_ty <- reduceToWhnf ty
+                      vl <- getValLayout whnf_ty
+                      return $ Just $ valLayoutValueType vl
+    BoxK        -> return $ Just $ LL.PrimType LL.OwnedType
+    BareK       -> return $ Just $ LL.PrimType LL.PointerType
+    OutK        -> return $ Just $ LL.PrimType LL.PointerType
+    _           -> internalError "lowerReturnType: Invalid representation"
 
-lowerTypeList :: TypeEnv -> [Type] -> Lower [LL.ValueType]
-lowerTypeList tenv tys = liftM catMaybes $ mapM (lowerType tenv) tys
+lowerTypeList :: [Type] -> Lower [LL.ValueType]
+lowerTypeList tys = liftM catMaybes $ mapM lowerType tys
 
 -- | Compute the low-level function type corresponding to a Mem function.
 --   Uses the Mem type environment.
 lowerFunctionType :: LowerEnv -> Type -> IO LL.FunctionType
 lowerFunctionType env ty = runLowering env $ do
   (ty_params, params, ret) <- liftTypeEvalM $ deconForallFunType ty
-  let local_tenv = foldr insert_type (typeEnvironment env) ty_params
-        where insert_type (a ::: k) e = insertType a k e
   when (null params) $ internalError "lowerFunctionType: Not a function type"
 
-  -- Create a function type
-  param_types <- lowerTypeList local_tenv params
-  ret_type <- fmap maybeToList $ lowerType local_tenv ret
-  let ll_type = LL.closureFunctionType param_types ret_type
-  return ll_type
+  -- Add type parameters to type environment.  Type parameters must not
+  -- affect memory layout.
+  assumeBinders ty_params $ do
+    -- Create a function type
+    param_types <- lowerTypeList params
+    ret_type <- fmap maybeToList $ lowerType ret
+    let ll_type = LL.closureFunctionType param_types ret_type
+    return ll_type
 
 -- | Generate a static data definition from a data constructor application.
 --   Return the lowered value, auxiliary global definitions, and a flag
@@ -1141,10 +1143,11 @@ algMemElim layout scr branch = memReader layout scr >>= branch
 
 -- | Compute the low-level representation of an algebraic data type.
 --   It's an error to call this on a non-algebraic data type.
-getAlgLayout :: TypeEnv -> Type -> Lower AlgLayout
-getAlgLayout tenv ty = do
+getAlgLayout :: Type -> Lower AlgLayout
+getAlgLayout ty = do
   whnf_ty <- reduceToWhnf ty
-  case toBaseKind $ typeKind tenv whnf_ty of
+  kind <- typeBaseKind whnf_ty
+  case kind of
     ValK  -> fmap AlgValLayout $ getValAlgLayout whnf_ty
     BoxK  -> fmap AlgValLayout $ getValAlgLayout whnf_ty
     BareK -> ref_layout whnf_ty
@@ -1159,21 +1162,32 @@ getAlgLayout tenv ty = do
 type InstantiatedDataType = (DataType, [Type], [DataConType])
 
 -- | Look up the constructors of a data type.
-lookupDataTypeForLayout :: TypeEnv -> Type -> Maybe InstantiatedDataType
-lookupDataTypeForLayout tenv ty 
-  | Just (tycon, ty_args) <- fromVarApp ty,
-    Just data_type <- lookupDataType tycon tenv =
-      case sequence [lookupDataCon c tenv
-                    | c <- dataTypeDataConstructors data_type]
-      of Just cons -> Just (data_type, ty_args, cons)
-         Nothing -> internalError "lookupDataTypeForLayout"
-  | otherwise = Nothing
+lookupDataTypeForLayout :: Type -> UnboxedTypeEvalM (Maybe InstantiatedDataType)
+lookupDataTypeForLayout ty =
+  case fromVarApp ty
+  of Just (tycon, ty_args) -> do
+       m_data_type <- lookupDataType tycon
+       case m_data_type of
+         Just data_type -> do cons <- lookup_data_constructors data_type
+                              return $ Just (data_type, ty_args, cons)
+         Nothing        -> return Nothing
+     Nothing -> return Nothing
+  where
+    -- Get all the data constructors
+    lookup_data_constructors data_type = do
+      data_constructors <-
+        sequence [lookupDataCon c
+                 | c <- dataTypeDataConstructors data_type]
+      case sequence data_constructors of
+        Just cons -> return cons
+        Nothing -> internalError "lookupDataTypeForLayout"
 
-lookupDataTypeForLayout' :: TypeEnv -> Type -> InstantiatedDataType
-lookupDataTypeForLayout' tenv ty =
-  case lookupDataTypeForLayout tenv ty
-  of Just x -> x
-     Nothing -> internalError $
+lookupDataTypeForLayout' :: Type -> UnboxedTypeEvalM InstantiatedDataType
+lookupDataTypeForLayout' ty = do
+  m_type <- lookupDataTypeForLayout ty
+  case m_type of
+    Just x -> return x
+    Nothing -> internalError $
                 "getLayout: Unknown data type: " ++ show (pprType ty)
 
 -- | Get the algebraic data type layout of a boxed or value type.
@@ -1189,8 +1203,8 @@ getValAlgLayout ty =
             | op == uintV                 -> not_algebraic
             | op == floatV                -> not_algebraic
             | otherwise -> do
-                tenv <- getTypeEnv
-                case lookupDataTypeForLayout tenv ty of
+                m_inst_type <- liftTypeEvalM $ lookupDataTypeForLayout ty
+                case m_inst_type of
                   Just inst_type -> getValDataTypeLayout inst_type
                   Nothing -> not_algebraic
           (UTupleT kinds, args) -> do
@@ -1298,8 +1312,8 @@ getRefAlgLayout ty =
            arg_layout <- getRefLayout =<< reduceToWhnf arg
            return $ nonSumMemLayout $ referenceLayout arg_layout-}
      _ -> do
-       tenv <- getTypeEnv
-       case lookupDataTypeForLayout tenv ty of
+       m_inst_type <- liftTypeEvalM $ lookupDataTypeForLayout ty
+       case m_inst_type of
          Nothing ->
            case ty
            of AnyT {} -> internalError "getAlgLayout: Not implemented for Any"
@@ -1336,7 +1350,7 @@ getRefDataTypeLayout (data_type, ty_args, datacons)
 getLayout :: Type -> Lower Layout
 getLayout ty = do
   whnf_ty <- reduceToWhnf ty
-  kind <- askTypeEnv (\tenv -> toBaseKind $ typeKind tenv whnf_ty)
+  kind <- typeBaseKind whnf_ty
   case kind of
     ValK  -> fmap ValLayout $ getValLayout whnf_ty
     BoxK  -> fmap ValLayout $ getValLayout whnf_ty
@@ -1360,20 +1374,21 @@ getValLayout ty
            | op == floatV                -> prim_layout LL.trioletFloatType
            | op == storeV                -> prim_layout LL.UnitType
            | otherwise -> do
-               tenv <- getTypeEnv
-               case toBaseKind $ typeKind tenv ty' of
+               kind <- typeBaseKind ty'
+               case kind of
                  BoxK ->
                    -- All boxed types have the same layout
                    prim_layout LL.OwnedType
-                 ValK ->
+                 ValK -> do
                    -- Layout of a value type depends on the data constructor, 
                    -- which must be known (i.e. not a variable or function)
-                   case lookupDataTypeForLayout tenv ty'
-                   of Just inst_type@(tycon, _, _) -> do
+                   m_layout <- liftTypeEvalM $ lookupDataTypeForLayout ty'
+                   case m_layout of
+                     Just inst_type@(tycon, _, _) -> do
                         -- Use the algebraic data type layout
                         alg_layout <- getValDataTypeLayout inst_type
                         return $ discardValStructure alg_layout
-                      _ -> internalError "getValLayout"
+                     _ -> internalError "getValLayout"
                  _ ->
                    internalError "getValLayout: Unexpected kind"
          (UTupleT kinds, args) -> do
@@ -1413,8 +1428,8 @@ getRefLayout ty = do
        -- Look through the 'forall' type
        assume v k $ getRefLayout rng
      _ -> do
-       tenv <- getTypeEnv
-       case lookupDataTypeForLayout tenv ty' of
+       m_inst_type <- liftTypeEvalM $ lookupDataTypeForLayout ty'
+       case m_inst_type of
          Nothing ->
            case ty'
            of AnyT {} -> internalError "getLayout: Not implemented for Any"

@@ -5,6 +5,7 @@ module Type.Eval
 
         -- * Computing and checking types
         typeKind,
+        typeBaseKind,
         typeCheckType,
         typeOfTypeApp,
         typeOfApp,
@@ -64,37 +65,46 @@ normalize t =
          CoT {} -> return t
          UTupleT {} -> return t
 
+-- | Get the type of a type, as a base kind.
+--   Minimal error checking is performed.
+typeBaseKind :: EvalMonad m => Type -> m BaseKind
+typeBaseKind ty = toBaseKind `liftM` typeKind ty
+
 -- | Get the type of a type.
 --   Minimal error checking is performed.
-typeKind :: TypeEnvBase type_function -> Type -> Type
-typeKind tenv ty =
+typeKind :: EvalMonad m => Type -> m Type
+typeKind ty = liftTypeEvalM $ typeKind' ty
+
+typeKind' :: BoxingMode b => Type -> TypeEvalM b Type
+typeKind' ty =
   case ty
-  of VarT v ->
-       case lookupType v tenv
-       of Just k -> k
-          _ -> internalError $ "typeKind: No type for variable: " ++ show v
-     IntT _ -> intindexT
-     AppT op _ ->
+  of VarT v -> do
+       m_k <- lookupType v
+       return $! case m_k
+                 of Just k -> k
+                    _ -> internalError $ "typeKind: No type for variable: " ++ show v
+     IntT _ -> return intindexT
+     AppT op _ -> do
        -- Assume the application is properly typed.  Get the kind of the
        -- operator's range.
-       case typeKind tenv op
-       of _ `FunT` k -> k
-          _ -> internalError "typeKind: Malformed application"
-     LamT (x ::: param_k) ret_t ->
+       FunT _ k <- typeKind' op
+       return k
+     LamT (x ::: param_k) ret_t -> do
+       ret_k <- assume x param_k $ typeKind' ret_t
+
        -- A lambda function has an arrow kind
-       let ret_k = typeKind (insertType x param_k tenv) ret_t
-       in param_k `FunT` ret_k
+       return $ param_k `FunT` ret_k
      FunT _ rng ->
-       case getLevel rng
-       of TypeLevel -> boxT     -- Functions are always boxed
-          KindLevel -> kindT
+       return $! case getLevel rng
+                 of TypeLevel -> boxT     -- Functions are always boxed
+                    KindLevel -> kindT
      AllT (x ::: param_k) rng ->
        -- Kind of 'forall' is the kind of its range
-       typeKind (insertType x param_k tenv) rng
+       assume x param_k $ typeKind' rng
      CoT k ->
        -- Kind of a coercion is k -> k -> val
-       k `FunT` k `FunT` valT
-     UTupleT ks -> funType (map fromBaseKind ks) valT
+       return $ k `FunT` k `FunT` valT
+     UTupleT ks -> return $ funType (map fromBaseKind ks) valT
      _ -> internalError "typeKind: Unrecognized type"
 
 -- | Typecheck a type or kind.  If the term is valid, return its type,
@@ -104,8 +114,8 @@ typeCheckType :: BoxingMode b => Type -> TypeEvalM b Type
 typeCheckType ty =
   case ty
   of VarT v -> do
-       tenv <- getTypeEnv
-       case lookupType v tenv of 
+       m_t <- lookupType v
+       case m_t of 
          Just t -> return t
          Nothing ->
            internalError $ "typeCheckType: No type for variable: " ++ show v
@@ -259,25 +269,21 @@ deconForallFunType t = do
 
 -- | Create an unboxed tuple type constructor that can hold 
 --   the given sequence of types.
-unboxedTupleTyCon :: TypeEnv -> [Type] -> Type
-unboxedTupleTyCon tenv ts =
-  -- Force kinds to be evaluated eagerly, so errors are detected sooner
-  UTupleT $! convert_types ts
+unboxedTupleTyCon :: BoxingMode b => [Type] -> TypeEvalM b Type
+unboxedTupleTyCon ts = UTupleT `liftM` mapM convert_type ts
   where
-    convert_types (t:ts) = (convert_type t :) $! convert_types ts
-    convert_types []     = []
-    
-    convert_type t =
-      case toBaseKind $ typeKind tenv t
-      of ValK -> ValK
-         BoxK -> BoxK
-         _ -> internalError "unboxedTupleTyCon: Invalid kind for tuple"
+    convert_type t = do
+      k <- typeKind t
+      return $! case toBaseKind k
+                of ValK -> ValK
+                   BoxK -> BoxK
+                   _ -> internalError "unboxedTupleTyCon: Invalid kind for tuple"
 
 -- | Create the type of an unboxed tuple whose fields are the given types
-unboxedTupleType :: TypeEnv -> [Type] -> Type
-unboxedTupleType tenv ts =
-  let con = unboxedTupleTyCon tenv ts
-  in con `seq` typeApp con ts
+unboxedTupleType :: BoxingMode b => [Type] -> TypeEvalM b Type
+unboxedTupleType ts = do
+  con <- unboxedTupleTyCon ts
+  return $ typeApp con ts
 
 -- | Given a data constructor type and the type arguments at which it's used,
 --   get the instantiated type.
