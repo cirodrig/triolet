@@ -29,7 +29,7 @@ import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
-import Common.MonadLogic
+import Common.MonadLogic hiding(Cond)
 import Common.SourcePos
 import Common.Supply
 import Common.Worklist

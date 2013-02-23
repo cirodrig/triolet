@@ -1,13 +1,22 @@
 {-| Useful monad versions of logical operations.
 -} 
 
+{-# LANGUAGE Rank2Types #-}
 {-# OPTIONS_GHC -no-auto-all #-}
 module Common.MonadLogic where
 
+import Common.Error
+import Control.Applicative
 import Control.Monad
+import Control.Monad.Trans
 
 infixr 3 >&&>
 infixr 2 >||>
+
+-- | Applicative version of 'guard'
+aguard :: Alternative a => Bool -> a ()
+aguard False = empty
+aguard True  = pure ()
 
 -- | Monadic version of 'when'
 whenM :: Monad m => m Bool -> m () -> m ()
@@ -98,3 +107,48 @@ withMany f xs k = go xs k
     go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
     go []     k = k []
 
+-------------------------------------------------------------------------------
+-- Monadic pattern matching support
+
+-- | A conditional test.
+newtype Cond scrutinee m a =
+  -- | Perform a conditional test. 
+  --   Given a scrutinee, either produce a result and pass it to the success
+  --   continuation, or proceed to the fallthrough continuation.
+  Cond {runCond :: forall r. scrutinee -> (a -> m r) -> m r -> m r}
+
+it :: Cond scrutinee m scrutinee
+it = Cond (\s k _ -> k s)
+
+instance Functor (Cond scrutinee m) where
+  fmap f m = Cond $ \s k fallthrough -> runCond m s (k . f) fallthrough
+
+instance Monad (Cond scrutinee m) where
+  return x = Cond $ \_ k _ -> k x
+  fail _   = Cond $ \_ _ fallthrough -> fallthrough
+  m >>= t  = Cond $ \s k fallthrough ->
+    -- Run 'm'.
+    -- Pass its result to 't', which passes its result to 'k'.
+    runCond m s (\x -> runCond (t x) s k fallthrough) fallthrough
+
+instance Applicative (Cond scrutinee m) where
+  pure = return
+  (<*>) = ap
+
+instance Alternative (Cond scrutinee m) where
+  empty = Cond $ \_ _ fallthrough -> fallthrough
+  m <|> n = Cond $ \s k fallthrough -> runCond m s k (runCond n s k fallthrough)
+
+instance MonadTrans (Cond scrutinee) where
+  lift m = Cond $ \_ k _ -> m >>= k
+
+noMatch :: m a
+noMatch = internalError "Pattern match failed"
+
+cond :: Monad m => scrutinee -> [Cond scrutinee m a] -> m a
+cond s alts = runCond (foldr (<|>) empty alts) s return noMatch
+
+condM :: Monad m => m scrutinee -> [Cond scrutinee m a] -> m a
+condM make_s alts = do
+  s <- make_s
+  runCond (foldr (<|>) empty alts) s return noMatch
