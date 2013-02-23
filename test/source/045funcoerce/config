@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Coercions on functions inside data structures",
+  trioletSources	 = ["tuples.pyon"],
+  lltrioletSources  = [],
+  cSources	 = ["main.c"],
+  cxxSources	 = [],
+  expectedResult = ShouldPrint "(198)(44)"
+}
