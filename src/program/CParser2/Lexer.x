@@ -71,6 +71,7 @@ rules :- ----------------------------------------------------------------------
 <0>     "data" / @eow		{ posnTok DataTok }
 <0>	"else" / @eow		{ posnTok ElseTok }
 <0>	"except" / @eow		{ posnTok ExceptTok }
+<0>	"forall" / @eow		{ posnTok ForallTok }
 <0>	"if" / @eow		{ posnTok IfTok }
 <0>	"in" / @eow		{ posnTok InTok }
 <0>	"let" / @eow		{ posnTok LetTok }

@@ -39,6 +39,7 @@ data Tok =
   | DataTok
   | ElseTok
   | ExceptTok
+  | ForallTok
   | IfTok
   | InTok
   | LetTok
@@ -77,6 +78,7 @@ showTok t =
        DataTok      -> "'data'"
        ElseTok      -> "'else'"
        ExceptTok    -> "'except'"
+       ForallTok    -> "'forall'"
        IfTok        -> "'if'"
        InTok        -> "'in'"
        LetTok       -> "'let'"

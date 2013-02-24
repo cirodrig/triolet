@@ -167,21 +167,39 @@ attr = do
 -------------------------------------------------------------------------------
 -- * Type parsing
 
+-- Precedence chart, from high to low:
+--
+-- T9 ::= v | N | ( T0 ) | ( T0 [, T0]+ )
+-- T2 ::= T2 T9 | coerce T9 T9          -- Application
+-- T1 ::= forall B. T0 | T2 -> T0       -- Function types
+-- T0 ::= \ B -> T0                     -- Abstraction
+
 -- | Parse a type
 pType :: P PLType
-pType = dependent_function <|> function
+pType = abstraction <|> pFunType
   where
-    dependent_function = do
+    abstraction = located $ do
+      match BackslashTok
+      dom <- parameters
+      match DotTok
+      body <- pType
+      return $ LamT dom body
+
+pFunType :: P PLType
+pFunType = forall_function <|> function
+  where
+    forall_function = do
       pos <- locatePosition
-      dom <- PS.try (parens pDomains)
-      match ArrowTok
+      match ForallTok
+      dom <- pDomainsCommaList
+      match DotTok
       rng <- pType
       return $ foldr (\x y -> L pos (AllT x y)) rng dom
 
     -- Parse a function type, coercion type, or type application
     function = do
       loc <- locatePosition
-      ty <- pCoType
+      ty <- pLhsType
       function_rest loc ty <|> return ty
     
     function_rest pos domain = do
@@ -189,8 +207,9 @@ pType = dependent_function <|> function
       rng <- pType
       return $ L pos (FunT domain rng)
 
-pCoType :: P PLType
-pCoType = coercion <|> function <|> pAppType
+-- | Parse a type that can go on the LHS of a function arrow
+pLhsType :: P PLType
+pLhsType = coercion <|> pAppType
   where
     coercion = located $ do
       match CoerceTok
@@ -199,13 +218,6 @@ pCoType = coercion <|> function <|> pAppType
       dom <- pTypeAtom
       rng <- pTypeAtom
       return $ CoT kind dom rng
-
-    function = located $ do
-      match BackslashTok
-      dom <- parameters
-      match DotTok
-      body <- pType
-      return $ LamT dom body
 
 -- | Parse a type application
 pAppType :: P PLType
@@ -243,9 +255,9 @@ pOptDomain = do
   ty <- optionMaybe (match ColonTok *> pType)
   return (Domain v ty)
 
--- | Parse one or more variable bindings that may appear on the LHS of a 
---   function arrow.  The multiple variable binding case @(a b : T) -> c@
---   is shorthand for @(a : T) -> (b : T) -> c@.
+-- | Parse one or more variable bindings with an explicit type.
+--
+-- > a b c d : T
 pDomains :: P [PDomain]
 pDomains = do
   vs <- many1 identifier
@@ -253,17 +265,28 @@ pDomains = do
   ty <- pType
   return [Domain v (Just ty) | v <- vs]
 
+-- | Parse a sequence of variable bindings separated by commas
+pDomainsCommaList :: P [PDomain]
+pDomainsCommaList = liftM concat $ pDomains `sepBy1` match CommaTok
+
+-- | Parse one or more variable bindings with an optional type.
+--
+-- > a b c
+-- > a b c : T
 pOptDomains :: P [PDomain]
 pOptDomains = do
   vs <- many1 identifier
   ty <- optionMaybe (match ColonTok *> pType)
   return [Domain v ty | v <- vs]
 
--- | A variable binding without a type and without parentheses.
-pUnlabeledDomain :: P [PDomain]
-pUnlabeledDomain = do
-  v <- identifier
-  return [Domain v Nothing]
+-- | Parse one or more variable bindings with an optional type.
+--   If it's more than just a variable name, it must be in parentheses.
+pOptParenDomains :: P [PDomain]
+pOptParenDomains = simple_domain <|> parens pOptDomains
+  where
+    simple_domain = do
+      v <- identifier
+      return [Domain v Nothing]
 
 -------------------------------------------------------------------------------
 -- * Expressions
@@ -472,13 +495,11 @@ parameters = fmap concat $ many (parens pDomains)
 
 -- | Type parameter bindings with optional types
 optTypeParameters :: P [PDomain]
-optTypeParameters =
-  fmap concat $ many (match AtTok *> parens pOptDomains)
-  -- fmap concat $ many (match AtTok *> (pUnlabeledDomain <|> parens pOptDomains))
+optTypeParameters = fmap concat $ many (match AtTok *> parens pDomains)
 
 -- | Variable bindings with optional types
 optParameters :: P [PDomain]
-optParameters = fmap concat $ many (pUnlabeledDomain <|> parens pOptDomains)
+optParameters = fmap concat $ many pOptParenDomains
 
 -- | Parse a function signature.
 --
