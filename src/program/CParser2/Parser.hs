@@ -472,30 +472,47 @@ pAlt = located $ do
   return $ Alt pat body
 
 pattern :: P (Pattern Parsed)
-pattern = con_pattern <|> tuple_pattern
+pattern = con_pattern <|> var_pattern <|> atomicPattern
   where
-    -- A constructor pattern starts with an identifier
-    con_pattern =
-      ConPattern <$> identifier <*> optTypeParameters <*> optParameters
+    -- A constructor pattern starts with an identifier. 
+    -- It must have at least one parameter; otherwise it's parsed as an
+    -- ambiguous pattern.
+    con_pattern = PS.try $ do
+      ident <- identifier
+      ty_params <- optTypeParameters
+      params <- many atomicPattern
 
-    type_arg = PS.try (match AtTok >> pTypeAtom)
+      -- Do not accept this parse if there are no parameters
+      if null ty_params && null params
+        then mzero
+        else return $ ConPattern ident ty_params params
 
-    -- A tuple pattern starts with a parenthesis
-    tuple_pattern = parens $ do
-      x <- pOptDomain
-      match CommaTok
-      xs <- pOptDomain `sepBy` match CommaTok
-      return $ TuplePattern (x : xs)
+    -- Only accept this pattern if it has a type annotation.
+    -- Otherwise, it's ambiguous and should be handled by con_var_pattern
+    var_pattern = VarPattern <$> PS.try pDomain
+
+-- | Patterns that do not use syntactic juxtaposition.
+--   This includes plain variables and parenthesized terms.
+atomicPattern = paren_pattern <|> con_var_pattern
+  where
+    con_var_pattern = ConOrVarPattern <$> identifier
+
+    -- A pattern starting with a parenthesis may be a tuple pattern
+    paren_pattern = either id TuplePattern <$> parenOrTuple pattern
+
+-- | A space-separated list of patterns appearing in a constructor argument
+patternList :: P [Pattern Parsed]
+patternList = many pattern
 
 typeParameters :: P [PDomain]
-typeParameters = fmap concat $ many (match AtTok >> parens pDomains)
+typeParameters = fmap concat $ many (match AtTok *> parens pDomains)
 
 parameters :: P [PDomain]
 parameters = fmap concat $ many (parens pDomains)
 
 -- | Type parameter bindings with optional types
 optTypeParameters :: P [PDomain]
-optTypeParameters = fmap concat $ many (match AtTok *> parens pDomains)
+optTypeParameters = fmap concat $ many (match AtTok *> pOptParenDomains)
 
 -- | Variable bindings with optional types
 optParameters :: P [PDomain]

@@ -9,6 +9,7 @@ import Prelude hiding(sequence, mapM)
 import Control.Applicative
 import Control.Monad hiding(sequence, mapM)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Maybe
 import Data.Traversable
 import Debug.Trace
@@ -32,20 +33,33 @@ type Dict = Map.Map (Identifier Parsed) (Identifier Resolved)
 -- | The environment consisting of all variable names that are in scope.
 --   It's organized as a sequence of nested scopes,
 --   starting with the innermost.
-type Env = [Dict]
+--
+--   The set of data and type constructor names is also tracked.
+--   Redefining these is an error.
+data Env = Env { envScopes             :: [Dict]
+               , envConstructors       :: !(Set.Set (Identifier Parsed))
+               }
 
--- | Add a name to the environment
+modifyScopes :: ([Dict] -> [Dict]) -> Env -> Env
+modifyScopes f env = env {envScopes = f $ envScopes env}
+
+modifyHeadScope :: (Dict -> Dict) -> Env -> Env
+modifyHeadScope f = modifyScopes on_head
+  where
+    on_head [] = internalError "modifyHeadScope: Empty environment"
+    on_head (d:ds) = f d : ds
+
+-- | Add a name to the environment.
 addToEnv :: Identifier Parsed -> Identifier Resolved -> Env -> Env
-addToEnv parsed_name resolved_var (d:ds) =
-  Map.insert parsed_name resolved_var d : ds
-
-addToEnv _ _ [] = error "addToEnv: Empty environment"
-
+addToEnv parsed_name resolved_var env =
+  modifyHeadScope (Map.insert parsed_name resolved_var) env
 
 -- | Search for a name in the environment
 lookupInEnv :: Identifier Parsed -> Env -> Maybe (Identifier Resolved)
-lookupInEnv name (d:ds) = Map.lookup name d `mplus` lookupInEnv name ds
-lookupInEnv name []     = mzero
+lookupInEnv name env = search (envScopes env) 
+  where
+    search (d:ds) = Map.lookup name d `mplus` search ds
+    search []     = mzero
 
 -------------------------------------------------------------------------------
 -- Error messages
@@ -72,8 +86,8 @@ getErrors errs = errs []
 -- | Data that are global to name resolution.  These are never modified.
 data Environment =
   Environment
-  { varIDSupply :: !(IdentSupply Var)
-  , currentModule :: !ModuleName
+  { varIDSupply      :: !(IdentSupply Var)
+  , currentModule    :: !ModuleName
   }
 
 -- | A monad used for name resolution.
@@ -113,6 +127,9 @@ instance Supplies NR (Ident Var) where
 getModuleName :: NR ModuleName
 getModuleName = NR (\env e -> returnNR (currentModule env) e)
 
+getNames :: NR Env
+getNames = NR (\_ names -> returnNR names names)
+
 -- | Log an error if 'True' is given, otherwise do nothing.
 --   Execution continues normally after the error is logged.
 logErrorIf :: Bool -> Error -> NR ()
@@ -133,16 +150,39 @@ failError err = NR (\_ e -> return (Nothing, e, (err:)))
 --   only visible within the scope.
 enter :: NR a -> NR a
 enter m = NR $ \env names -> do
-    (x, _, errs) <- runNR m env (Map.empty : names)
+    (x, _, errs) <- runNR m env (modifyScopes (Map.empty :) names)
     return (x, names, errs)
 
--- | Define a variable.  The variable is added to the current scope,
---   and can be looked up with 'use'.
-def :: Identifier Parsed -> Identifier Resolved -> NR ()
-def parsed_name resolved_var =
+-- | Define a variable or constructor.  The variable is added to the
+--   current scope, and can be looked up with 'use'.
+--   This function is called through either 'def' or 'defCon'.
+defineIdentifier :: Identifier Parsed -> Identifier Resolved -> NR ()
+defineIdentifier parsed_name resolved_var =
   NR $ \env names ->
     let s = addToEnv parsed_name resolved_var names
     in returnNR () s
+
+-- | Determine whether the given name is a constructor name
+isConstructor :: Identifier Parsed -> NR Bool
+isConstructor name =
+  NR $ \env names ->
+    let is_con = name `Set.member` envConstructors names
+    in returnNR is_con names
+
+-- | Define a variable.  Error if there's a constructor with this name.  
+--   The variable is added to the current scope,
+--   and can be looked up with 'use'.
+def :: SourcePos -> Identifier Parsed -> Identifier Resolved -> NR ()
+def pos parsed_name resolved_var = do
+  is_con <- isConstructor parsed_name
+  if is_con
+    then failError $ show pos ++ ": Redefined constructor name " ++ parsed_name
+    else defineIdentifier parsed_name resolved_var
+
+-- | Define a constructor.  The variable is added to the current scope,
+--   and can be looked up with 'use'.
+defCon :: SourcePos -> Identifier Parsed -> Identifier Resolved -> NR ()
+defCon _ = defineIdentifier
 
 use :: Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
 use = fetch "Could not find:"
@@ -185,14 +225,19 @@ resolveMaybe f (Just x) = liftM Just $ f x
 resolveMaybe _ Nothing  = return Nothing
 
 -- | Create and define a new variable inhabiting the current module.
-newRVar :: Level -> Identifier Parsed -> NR ResolvedVar
-newRVar lv parsed_name = do
+newRVarOrCon :: Bool -> SourcePos -> Level -> Identifier Parsed -> NR ResolvedVar
+newRVarOrCon is_con pos lv parsed_name = do
   modname <- getModuleName
   id <- fresh
   let label = plainLabel modname parsed_name
       v = ResolvedVar (mkVar id (Just label) lv)
-  def parsed_name v
+  if is_con
+    then defCon pos parsed_name v
+    else def pos parsed_name v
   return v
+
+newRVar = newRVarOrCon False
+newRCon = newRVarOrCon True
 
 -- | Resolve a type expression.  The expression must have the specified level.
 resolveLType :: Level -> PLType -> NR RLType
@@ -224,10 +269,10 @@ resolveType pos level ty =
        d' <- resolveLType level d
        r' <- resolveLType level r
        return $ FunT d' r'
-     AllT d r -> resolveDomain level d $ \d' -> do
+     AllT d r -> resolveDomain pos level d $ \d' -> do
        r' <- resolveLType level r
        return $ AllT d' r'
-     LamT d r -> withMany (resolveDomain level) d $ \d' -> do
+     LamT d r -> withMany (resolveDomain pos level) d $ \d' -> do
        r' <- resolveLType level r
        return $ LamT d' r'
      CoT k d r -> do
@@ -245,10 +290,11 @@ resolveType pos level ty =
 
 -- | Resolve a variable binding.
 --   The variable must have the specified level.
-resolveDomain :: Level -> Domain Parsed -> (Domain Resolved -> NR a) -> NR a
-resolveDomain level (Domain binder t) k = do
+resolveDomain :: SourcePos -> Level -> Domain Parsed
+              -> (Domain Resolved -> NR a) -> NR a
+resolveDomain pos level (Domain binder t) k = do
   t' <- resolveMaybe (resolveLType (succ level)) t
-  enter $ do binder' <- newRVar level binder
+  enter $ do binder' <- newRVar pos level binder
              k (Domain binder' t')
 
 {-
@@ -266,9 +312,9 @@ resolveDomain' expected_level error_message pos d k = do
   return x
 -}
 
-resolveDomainT = resolveDomain TypeLevel
+resolveDomainT pos = resolveDomain pos TypeLevel
 
-resolveDomainV = resolveDomain ObjectLevel
+resolveDomainV pos = resolveDomain pos ObjectLevel
 
 resolveExp :: SourcePos -> Exp Parsed -> NR (Exp Resolved)
 resolveExp pos expression = 
@@ -285,12 +331,12 @@ resolveExp pos expression =
      LamE f -> LamE <$> resolveFun pos f
      LetE binder rhs body -> do
        rhs' <- resolveL resolveExp rhs
-       resolveDomainV binder $ \binder' -> do
+       resolveDomainV pos binder $ \binder' -> do
          body' <- resolveL resolveExp body
          return $ LetE binder' rhs' body'
      LetTypeE lhs rhs body -> do
        rhs' <- resolveLType TypeLevel rhs 
-       enter $ do lhs' <- newRVar TypeLevel lhs
+       enter $ do lhs' <- newRVar pos TypeLevel lhs
                   body' <- resolveL resolveExp body
                   return $ LetTypeE lhs' rhs' body'
      LetfunE defs e ->
@@ -310,8 +356,7 @@ resolveExp pos expression =
 resolveDefGroup :: [LDef Parsed] -> ([LDef Resolved] -> NR a) -> NR a
 resolveDefGroup defs k = enter $ do
   -- Create a new variable for each local variable
-  let variables = map (dName . unLoc) defs
-  resolved <- mapM (newRVar ObjectLevel) variables
+  resolved <- sequence [newRVar pos ObjectLevel (dName d) | L pos d <- defs]
   
   -- Process local functions and pass them to the continuation
   k =<< zipWithM resolve_def resolved defs
@@ -328,18 +373,26 @@ resolveAlt pos (Alt pattern body) = do
 
 resolvePattern pos (ConPattern con ex_types fields) k = do
   con' <- use con pos
-  withMany resolveDomainT ex_types $ \ex_types' ->
-    withMany resolveDomainV fields $ \fields' ->
+  withMany (resolveDomainT pos) ex_types $ \ex_types' ->
+    withMany (resolvePattern pos) fields $ \fields' ->
     k (ConPattern con' ex_types' fields')
 
 resolvePattern pos (TuplePattern fields) k =
-    withMany resolveDomainV fields $ \fields' ->
+    withMany (resolvePattern pos) fields $ \fields' ->
     k (TuplePattern fields')
+
+resolvePattern pos (VarPattern dom) k =
+  resolveDomainV pos dom $ \dom' -> k (VarPattern dom')
+
+resolvePattern pos (ConOrVarPattern ident) k =
+  ifM (isConstructor ident)
+  (resolvePattern pos (ConPattern ident [] []) k)
+  (resolvePattern pos (VarPattern (Domain ident Nothing)) k)
 
 resolveFun :: SourcePos -> PFun -> NR RFun
 resolveFun pos f =
-  withMany resolveDomainT (fTyParams f) $ \tparams ->
-  withMany resolveDomainV (fParams f) $ \params -> do
+  withMany (resolveDomainT pos) (fTyParams f) $ \tparams ->
+  withMany (resolveDomainV pos) (fParams f) $ \params -> do
     range <- resolveLType TypeLevel $ fRange f
     body <- resolveL resolveExp $ fBody f
     return $ Fun tparams params range body  
@@ -350,7 +403,7 @@ resolveDataConDecl :: SourcePos
                    -> NR (DataConDecl Resolved)
 resolveDataConDecl pos v' (DataConDecl _ ex_types args) = do
   enter $
-    withMany resolveDomainT ex_types $ \ex_types' -> do
+    withMany (resolveDomainT pos) ex_types $ \ex_types' -> do
       args' <- mapM (resolveLType TypeLevel) args
       return $ DataConDecl v' ex_types' args'
 
@@ -366,7 +419,7 @@ resolveEntity _ (GlobalName r_name) (TypeEnt ty) = do
 
 resolveEntity pos (DataConNames _ data_con_names) (DataEnt params ty cons attrs) = do
   ty' <- resolveLType KindLevel ty
-  withMany resolveDomainT params $ \params' -> do
+  withMany (resolveDomainT pos) params $ \params' -> do
     cons' <- sequence [L pos <$> resolveDataConDecl pos v con
                       | (v, L pos con) <- zip data_con_names cons]
     return $ DataEnt params' ty' cons' attrs
@@ -392,19 +445,19 @@ data ResolvedDeclName =
   | DataConNames {resolvedGlobal :: ResolvedVar,
                   resolvedDataConstructors :: [ResolvedVar]}
 
-resolveDeclName (L _ (Decl name ent)) =
+resolveDeclName (L pos (Decl name ent)) =
   case ent
-  of VarEnt {}                  -> object_level
-     TypeEnt {}                 -> type_level
+  of VarEnt {}                  -> object_level_var
+     TypeEnt {}                 -> type_level_con
      DataEnt _ _ constructors _ -> data_definition constructors
-     ConstEnt {}                -> object_level
-     FunEnt {}                  -> object_level
+     ConstEnt {}                -> object_level_var
+     FunEnt {}                  -> object_level_var
   where
-    object_level = liftM GlobalName $ newRVar ObjectLevel name
-    type_level = liftM GlobalName $ newRVar TypeLevel name
+    object_level_var = liftM GlobalName $ newRVar pos ObjectLevel name
+    type_level_con = liftM GlobalName $ newRCon pos TypeLevel name
     data_definition constructors = do
-      tycon <- newRVar TypeLevel name
-      datacons <- sequence [newRVar ObjectLevel $ dconVar d
+      tycon <- newRCon pos TypeLevel name
+      datacons <- sequence [newRCon pos ObjectLevel $ dconVar d
                            | L _ d <- constructors]
       return $ DataConNames tycon datacons
 
@@ -428,6 +481,27 @@ globalEnvironment xs = Map.fromList $ map mk_var xs
   where
     mk_var (name, sf_var) = (name, ResolvedVar sf_var)
 
+-- | Get data constructor, type constructor, and type function names.
+--   These names may not be redefined as variables, and they are checked
+--   against definitions during name resolution.
+constructorNames :: PModule -> [Identifier Parsed]
+constructorNames (Module decls) =
+  concatMap decl_constructor_names decls
+  where
+    decl_constructor_names ldecl =
+      case unLoc ldecl
+      of Decl name ent ->
+           case ent
+           of DataEnt _ _ con_decls _ ->
+                let con_names = map data_con_name con_decls
+                in name : con_names
+              TypeEnt _ ->
+                [name]
+              _ ->
+                []
+
+    data_con_name ldecl = dconVar $ unLoc ldecl
+
 resolveModule :: IdentSupply Var -- ^ Supply of unique variable IDs
               -> Map.Map (Identifier Parsed) ResolvedVar
               -> ModuleName     -- ^ Name of module being processed
@@ -435,7 +509,8 @@ resolveModule :: IdentSupply Var -- ^ Supply of unique variable IDs
               -> IO RModule
 resolveModule id_supply predef modname mod = do
   let init_environment = Environment id_supply modname
-      init_env = [predef]
+      constructor_names = Set.fromList $ constructorNames mod
+      init_env = Env [predef] constructor_names
   (mod', env, errors) <- runNR (resolveModule' mod) init_environment init_env
   case getErrors errors of
     [] -> case mod' of Just m -> return m

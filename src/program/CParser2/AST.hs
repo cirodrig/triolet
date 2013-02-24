@@ -168,10 +168,20 @@ data Pattern a =
     ConPattern
     { altCon :: Identifier a
     , _altExTypes :: [Domain a]
-    , altFields :: [Domain a]
+    , altFields :: [Pattern a]
     }
   | TuplePattern
-    { altFields :: [Domain a]
+    { altFields :: [Pattern a]
+    }
+  | VarPattern
+    { altDomain :: Domain a
+    }
+    -- | An ambiguous pattern consisting of just an identifier.
+    --   It is resolved to a 'ConPattern' or a 'VarPattern' during name
+    --   resolution, depending on whether the identifier is a data
+    --   constructor.
+  | ConOrVarPattern 
+    { altIdentifier :: Identifier a
     }
 
 altExTypes (ConPattern {_altExTypes = ts}) = ts

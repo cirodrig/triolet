@@ -226,13 +226,8 @@ expr (L pos expression) =
      CaseE s alts -> do
        (s', scrutinee_type) <- expr s
 
-       -- Compute the type being scrutinized for local type inference
-       whnf_scrutinee_type <- Type.Eval.reduceToWhnf scrutinee_type
-       let (s_ty_op, s_ty_args) = Type.fromTypeApp whnf_scrutinee_type
-
        -- Infer alternatives
-       (alts', alt_types) <-
-         mapAndUnzipM (translateLAlt s_ty_op s_ty_args) alts
+       (alts', alt_types) <- mapAndUnzipM (translateLAlt scrutinee_type) alts
        let ty = case alt_types of t:_ -> t
        return (SystemF.ExpM $ SystemF.CaseE inf s' alts', ty)
      LetE binder rhs body -> do
@@ -273,7 +268,6 @@ expr (L pos expression) =
 --   It's either a function application or data constructor application.
 translateApp inf op ty_args args = do
   -- Is the operator a data constructor?
-  tenv <- getTypeEnv
   cond (unLoc op)
     [ do VarE v <- it
          Just (type_con, data_con) <- lift $ lookupDataConWithType (toVar v)
@@ -361,51 +355,111 @@ uncurryApp e args =
 
 -- | Translate a case alternative.  The scrutinee has type
 --   @typeApp s_ty_op s_ty_args@.
-translateLAlt :: Type.Type -> [Type.Type] -> Located (Alt Resolved)
+translateLAlt :: Type.Type -> Located (Alt Resolved)
              -> TransE (SystemF.AltM, Type.Type)
-translateLAlt s_ty_op s_ty_args (L pos (Alt pattern body)) =
-  with_pattern pattern $ \new_con val_binders -> do
-    (body', body_type) <- expr body
-    let alt = SystemF.AltM $
-              SystemF.Alt { SystemF.altCon = new_con
-                          , SystemF.altParams = map SystemF.patM val_binders
-                          , SystemF.altBody = body'}
-    return (alt, body_type)
+translateLAlt s_ty (L pos (Alt pattern body)) =
+  withPattern pos s_ty pattern $ expr body
+
+buildAlt new_con val_binders body =
+  SystemF.AltM $
+  SystemF.Alt { SystemF.altCon = new_con
+              , SystemF.altParams = val_binders
+              , SystemF.altBody = body}
+
+withPattern :: SourcePos -> Type.Type -> Pattern Resolved
+            -> TransE (SystemF.ExpM, a)
+            -> TransE (SystemF.AltM, a)
+withPattern pos scrutinee_type (ConPattern con ex_types fields) do_body = do
+  -- Type must be a data constructor application
+  Just (tycon, ty_args) <-
+    liftTypeEvalM $ Type.Eval.deconVarAppType scrutinee_type
+  
+  -- 'con' must be a data constructor
+  dcon_type <- do
+    x <- lookupDataCon (toVar con)
+    case x of
+      Nothing -> error $ show pos ++ ": Expecting a data constructor"
+      Just c  -> return c
+
+  -- Check that the operator is this data constructor's type constructor
+  unless (tycon == dataConTyCon dcon_type) $
+    error $ show pos ++ ": Case alternative's data constructor does not match scrutinee type"
+
+  -- Infer types of other fields
+  when (length (dataConExTypes dcon_type) /= length ex_types) $
+    error $ show pos ++ ": Wrong number of existential variables in pattern"
+  (ty_binders, field_types, _) <-
+    Type.Eval.instantiateDataConType
+    dcon_type ty_args [toVar $ boundVar d | d <- ex_types]
+
+  -- Compare with the annotated kinds
+  let inferred_ex_kinds = map binderType ty_binders
+  optDomainsInExp pos inferred_ex_kinds ex_types $ \ty_binders -> do
+
+    when (length field_types /= length fields) $
+      error $ show pos ++ ": Wrong number of fields in pattern"
+
+    (body', (patterns, x)) <-
+      bindPatternList pos (zip field_types fields) do_body
+
+    -- Construct case alternative
+    let new_con = SystemF.VarDeCon (toVar con) ty_args ty_binders
+    return (buildAlt new_con patterns body', x)
+
+withPattern pos scrutinee_type (TuplePattern fields) do_body = do
+  -- Compute the type being scrutinized for local type inference
+  whnf_scrutinee_type <- Type.Eval.reduceToWhnf scrutinee_type
+  let (s_ty_op, field_types) = Type.fromTypeApp whnf_scrutinee_type
+
+  (body', (patterns, x)) <-
+    bindPatternList pos (zip field_types fields) do_body
+
+  let new_con = SystemF.TupleDeCon $ map SystemF.patMType patterns
+  return (buildAlt new_con patterns body', x)
+
+-- | Bind multiple patterns over the scope of an expression.
+--   Return the translated expression and the patterns' variable bindings.
+bindPatternList :: SourcePos
+                -> [(Type.Type, Pattern Resolved)]
+                -> TransE (SystemF.ExpM, a)
+                -> TransE (SystemF.ExpM, ([SystemF.PatM], a))
+bindPatternList pos ps m = go ps 
   where
-    with_pattern (ConPattern con ex_types fields) k = do
-      tenv <- getTypeEnv
-      -- 'con' must be a data constructor
-      dcon_type <- do
-        x <- lookupDataCon (toVar con)
-        case x of
-          Nothing -> error $ show pos ++ ": Expecting a data constructor"
-          Just c  -> return c
+    go ((ty, pat):ps) = do
+      (p', (e, (ps', t))) <- bindPattern pos ty pat $ go ps
+      return (e, (p' : ps', t))
 
-      -- Check that the operator is this data constructor's type constructor
-      case s_ty_op of
-        Type.VarT op_var | op_var == dataConTyCon dcon_type ->
-          return ()
-        _ -> error $ show pos ++ ": Case alternative's data constructor does not match scrutinee type"
-      ty_args' <- return s_ty_args
+    go [] = do
+      (e, t) <- m
+      return (e, ([], t))
 
-      -- Infer types of other fields
-      when (length (dataConExTypes dcon_type) /= length ex_types) $
-        error $ show pos ++ ": Wrong number of existential variables in pattern"
-      (ty_binders, field_types, _) <-
-        Type.Eval.instantiateDataConType
-        dcon_type ty_args' [toVar $ boundVar d | d <- ex_types]
+bindPattern :: SourcePos -> Type.Type -> Pattern Resolved
+            -> TransE (SystemF.ExpM, a)
+            -> TransE (SystemF.PatM, (SystemF.ExpM, a))
+bindPattern pos ty pat m =
+  case pat
+  of VarPattern dom ->
+       -- Bind this simple pattern
+       optDomainInExp pos ty dom $ \b -> do
+         x <- m
+         return (SystemF.patM b, x)
 
-      -- Compare with the annotated types
-      let inferred_ex_kinds = map binderType ty_binders
-      optDomainsInExp pos inferred_ex_kinds ex_types $ \ty_binders ->
-        optDomainsInExp pos field_types fields $ \val_binders ->
-          let new_con = SystemF.VarDeCon (toVar con) ty_args' ty_binders
-          in k new_con val_binders
+     ConOrVarPattern {} ->
+       internalError "bindPattern"
 
-    with_pattern (TuplePattern fields) k =
-      optDomainsInExp pos s_ty_args fields $ \val_binders ->
-        let new_con = SystemF.TupleDeCon [t | _ ::: t <- val_binders]
-        in k new_con val_binders
+     _ -> do
+       -- Create a case alternative to deconstruct this complex pattern
+       (alt, x) <- withPattern pos ty pat m
+
+       -- Create a temporary variable to hold the scrutinee
+       pattern_var <- newAnonymousVar ObjectLevel
+
+       let pattern = SystemF.patM (pattern_var ::: ty)
+           scrutinee = SystemF.ExpM $
+                       SystemF.VarE (SystemF.mkExpInfo pos) pattern_var
+           expr = SystemF.ExpM $
+                  SystemF.CaseE (SystemF.mkExpInfo pos) scrutinee [alt]
+       return (pattern, (expr, x))
 
 translateFun pos f =
   domainsInExp pos (fTyParams f) $ \ty_binders ->
