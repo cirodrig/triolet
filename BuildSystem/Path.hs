@@ -1,5 +1,5 @@
 
-module SetupSrc.Path where
+module BuildSystem.Path where
 
 import Data.List
 import System.FilePath

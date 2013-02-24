@@ -1,5 +1,5 @@
 
-module SetupSrc.Args where
+module BuildSystem.Args where
 
 import Control.Monad
 import Data.Maybe
@@ -14,9 +14,9 @@ import Distribution.Simple.Utils
 import System.Directory
 import System.FilePath
 
-import SetupSrc.Path
-import SetupSrc.Config
-import SetupSrc.Command
+import BuildSystem.Path
+import BuildSystem.Config
+import BuildSystem.Command
 
 -- | Arguments to the Haskell compiler when compiling Triolet
 trioletGhcArgs econfig exe lbi =

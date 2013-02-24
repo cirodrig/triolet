@@ -9,7 +9,7 @@ and the following data types, which interact with commands.
 * Plain strings, which hold command-line options
 -}
 
-module SetupSrc.Command where
+module BuildSystem.Command where
 
 import Control.Monad.Trans
 import qualified Development.Shake as Shake

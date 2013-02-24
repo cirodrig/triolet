@@ -1,5 +1,5 @@
 
-module SetupSrc.Rules
+module BuildSystem.Rules
        (generateTrioletCRules,
         generateTrioletPreprocessorRules,
         moveDataFiles,
@@ -31,10 +31,10 @@ import System.Directory
 import System.FilePath
 import qualified System.Info
 
-import SetupSrc.Args
-import SetupSrc.Command
-import SetupSrc.Config
-import SetupSrc.Path
+import BuildSystem.Args
+import BuildSystem.Command
+import BuildSystem.Config
+import BuildSystem.Path
 
 -- | Create a shake rule that exactly matches a string
 (?=) :: String -> Shake.Action () -> Shake.Rules ()
@@ -403,8 +403,8 @@ linkRts verb lbi econfig = rtsFile lbi ?= do
 
 compileTestDriver verb lbi = test_file ?= do
   -- Triolet must be built first
-  Shake.need [SetupSrc.Path.trioletFile lbi]
-  Shake.need $ SetupSrc.Path.dataFiles lbi
+  Shake.need [BuildSystem.Path.trioletFile lbi]
+  Shake.need $ BuildSystem.Path.dataFiles lbi
 
   -- Find source files
   test_main_file <-
@@ -439,19 +439,19 @@ generateShakeRules verb lbi econfig = do
 
   return $ do
     -- Define all rules here
-    SetupSrc.Rules.generateMachineInfo verb lbi
-    SetupSrc.Rules.generateCabalMacros verb lbi
+    BuildSystem.Rules.generateMachineInfo verb lbi
+    BuildSystem.Rules.generateCabalMacros verb lbi
     pp_rules
     c_rules
-    SetupSrc.Rules.compileTriolet verb lbi econfig triolet_hs_files
+    BuildSystem.Rules.compileTriolet verb lbi econfig triolet_hs_files
       triolet_obj_files main_file
-    SetupSrc.Rules.moveDataFiles lbi
-    SetupSrc.Rules.moveRtsDataFiles lbi
-    SetupSrc.Rules.compileRtsCFiles verb lbi econfig
-    SetupSrc.Rules.compileRtsCxxFiles verb lbi econfig
-    SetupSrc.Rules.compileRtsLltFiles verb lbi econfig
-    SetupSrc.Rules.linkRts verb lbi econfig
-    SetupSrc.Rules.compileTestDriver verb lbi
+    BuildSystem.Rules.moveDataFiles lbi
+    BuildSystem.Rules.moveRtsDataFiles lbi
+    BuildSystem.Rules.compileRtsCFiles verb lbi econfig
+    BuildSystem.Rules.compileRtsCxxFiles verb lbi econfig
+    BuildSystem.Rules.compileRtsLltFiles verb lbi econfig
+    BuildSystem.Rules.linkRts verb lbi econfig
+    BuildSystem.Rules.compileTestDriver verb lbi
     return ()
 
 shake :: Verbosity -> Shake.Rules () -> IO ()

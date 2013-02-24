@@ -5,7 +5,7 @@ beyond what Cabal supports.  This file also contains code for probing the
 environment and saving configuration information.
 -}
 
-module SetupSrc.Config where
+module BuildSystem.Config where
 
 import Control.Exception
 import Control.Monad
@@ -19,18 +19,6 @@ import System.IO
 
 -- Path where we put extra configuration data
 extraConfigPath = "dist" </> "extra-config"
-
--- | Parameters determined during configuration.  Cabal uses 'ConfigFlags';
---   the extra flags specific to this package are 'ExtraConfigFlags'.
-data CustomConfigFlags =
-  CustomConfigFlags
-  { configExtraFlags :: !ExtraConfigFlags
-  , configStdFlags :: !ConfigFlags
-  }
-
-setConfigStdFlags f c = c {configStdFlags = f}
-setConfigExtraFlags f c = c {configExtraFlags = f}
-modifyConfigExtraFlags c f = c {configExtraFlags = f (configExtraFlags c)}
 
 data ExtraConfigFlags =
   ExtraConfigFlags
@@ -52,7 +40,7 @@ data ExtraConfigFlags =
   deriving (Read, Show)
 
 defaultExtraConfigFlags :: ExtraConfigFlags
-defaultExtraConfigFlags = ExtraConfigFlags [] [] [] [] True
+defaultExtraConfigFlags = ExtraConfigFlags [] [] [] [] False
 
 -- Write custom configure information to a file
 writeExtraConfigFile :: ExtraConfigFlags -> IO ()
@@ -63,6 +51,60 @@ writeExtraConfigFile config_data =
 readExtraConfigFile :: IO ExtraConfigFlags
 readExtraConfigFile =
   evaluate . read =<< readFile extraConfigPath
+
+-------------------------------------------------------------------------------
+
+type ReadArg a = Either String a
+
+-- | Read extra configuration flags from the command line.
+--   Flags are given as a list of strings that must be parsed.
+--   Returns an error message or the interpreted flags
+readExtraConfigFlags :: [String] -> ReadArg ExtraConfigFlags
+readExtraConfigFlags options =
+  foldM readArgument defaultExtraConfigFlags (arguments options)
+
+readArgument :: ExtraConfigFlags -> Argument -> ReadArg ExtraConfigFlags
+readArgument flags (Argument key mval) =
+  case lookup key dispatch_table
+  of Nothing -> fail $ "Unrecognized configure option: " ++ show key
+     Just m  -> m key mval flags
+  where
+    dispatch_table =
+      [ ("target-include-dir", reqArg readTargetIncludeDir)
+      , ("target-lib-dir", reqArg readTargetLibDir)
+      , ("enable-tbb", noArg readEnableTBB)
+      ]
+
+reqArg f _ (Just arg) flags = f arg flags
+reqArg _ k (Nothing)  _ =
+  fail $ "Configure option '" ++ k ++ "' requires an argument"
+
+noArg f _ Nothing  flags = f flags
+noArg f k (Just _) flags =
+  fail $ "Configure option '" ++ k ++ "' doesn't take an argument"
+
+readTargetIncludeDir arg flags =
+  return $ flags {configTargetIncludeDirs = configTargetIncludeDirs flags ++ [arg]}
+
+readTargetLibDir arg flags =
+  return $ flags {configTargetLibDirs = configTargetLibDirs flags ++ [arg]}
+
+readEnableTBB flags =
+  return $ flags {configTBB = True}
+
+-- | An argument is either a key or a key-value pair
+data Argument = Argument String (Maybe String)
+
+-- | Interpret arguments.  Arguments are of the form \"key=value\" or just
+--   a key.
+arguments :: [String] -> [Argument]
+arguments ss = map split_arg ss
+  where
+    split_arg arg = split id arg
+      where
+        split hd ('=':val) = Argument (hd []) (Just val)
+        split hd (c:cs)    = split (hd . (c:)) cs
+        split hd []        = Argument (hd []) Nothing
 
 -------------------------------------------------------------------------------
 
