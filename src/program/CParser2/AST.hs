@@ -244,6 +244,8 @@ data Entity ix =
     VarEnt (LType ix) [Attribute]
     -- | A type declaration
   | TypeEnt (LType ix)
+    -- | A type synonym declaration
+  | TypeSynEnt (LType ix)
     -- | A data type definition
   | DataEnt [Domain ix] (LType ix) [LDataConDecl ix] [Attribute]
     -- | A global constant definition

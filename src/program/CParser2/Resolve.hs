@@ -417,6 +417,10 @@ resolveEntity _ (GlobalName r_name) (TypeEnt ty) = do
   ty' <- resolveLType KindLevel ty
   return $ TypeEnt ty'
 
+resolveEntity _ (GlobalName r_name) (TypeSynEnt ty) = do
+  ty' <- resolveLType TypeLevel ty
+  return $ TypeSynEnt ty'
+
 resolveEntity pos (DataConNames _ data_con_names) (DataEnt params ty cons attrs) = do
   ty' <- resolveLType KindLevel ty
   withMany (resolveDomainT pos) params $ \params' -> do
@@ -449,12 +453,14 @@ resolveDeclName (L pos (Decl name ent)) =
   case ent
   of VarEnt {}                  -> object_level_var
      TypeEnt {}                 -> type_level_con
+     TypeSynEnt {}              -> type_level_var
      DataEnt _ _ constructors _ -> data_definition constructors
      ConstEnt {}                -> object_level_var
      FunEnt {}                  -> object_level_var
   where
     object_level_var = liftM GlobalName $ newRVar pos ObjectLevel name
     type_level_con = liftM GlobalName $ newRCon pos TypeLevel name
+    type_level_var = liftM GlobalName $ newRVar pos TypeLevel name
     data_definition constructors = do
       tycon <- newRCon pos TypeLevel name
       datacons <- sequence [newRCon pos ObjectLevel $ dconVar d

@@ -491,18 +491,36 @@ translateGlobalConstant name pos ty d attrs = do
       def = SystemF.mkDef name (SystemF.DataEnt constant)
   return $ applyDefAttributes True attrs def
 
-declGlobalEntity (L pos decl) =
+declGlobalEntity var _ (FunEnt (L fun_pos f) attrs) =
+  liftM Just $ translateGlobalFun var fun_pos f attrs
+
+declGlobalEntity var pos (ConstEnt ty d attrs) =
+  liftM Just $ translateGlobalConstant var pos ty d attrs
+
+declGlobalEntity _ _ _ =
+  return Nothing
+
+declGlobalEntities :: [RLDecl] -> TransT [Maybe (SystemF.Def SystemF.Ent SystemF.Mem)]
+declGlobalEntities (L pos decl : ldecls) =
   case decl
   of Decl name ent ->
        case ent
-       of FunEnt (L fun_pos f) attrs ->
-            liftM Just $ translateGlobalFun (toVar name) fun_pos f attrs
-          ConstEnt ty d attrs ->
-            liftM Just $ translateGlobalConstant (toVar name) pos ty d attrs
-          _ -> return Nothing
+       of TypeSynEnt ty -> do
+            -- Expand the type synonym
+            ty' <- typeInExp ty
+            withLetTypeSynonym name ty' $ declGlobalEntities ldecls
+
+          _ -> do
+            -- Process this entity and generate a global thing
+            x <- declGlobalEntity (toVar name) pos ent
+
+            -- Process other entities
+            liftM (x:) $ declGlobalEntities ldecls
+
+declGlobalEntities [] = return []
 
 declGlobals decls = do
-  m_defs <- mapM declGlobalEntity decls
+  m_defs <- declGlobalEntities decls
   let defs = catMaybes m_defs
   return $ SystemF.Module builtinModuleName [] [SystemF.Rec defs] []
 

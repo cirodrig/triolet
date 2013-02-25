@@ -551,12 +551,21 @@ pDataConDecl = located $ do
   return $ DataConDecl datacon ex_types args
 
 pTypeDecl :: P PLDecl
-pTypeDecl = located $ do
+pTypeDecl = located $ PS.try $ do
   match TypeTok
   tycon <- identifier
   match ColonTok
   kind <- pType
   return $ Decl tycon $ TypeEnt kind
+
+-- | A global type synonym
+pTypeSynDecl :: P PLDecl
+pTypeSynDecl = located $ PS.try $ do
+  match TypeTok
+  tycon <- identifier
+  match EqualTok
+  ty <- pType
+  return $ Decl tycon $ TypeSynEnt ty
 
 -- | Parse a global variable or constant definition.
 --   Both definitions start the same way.  Constant definitions end with
@@ -589,7 +598,7 @@ pFunDecl = do
   body <- pExp
   return $ L pos $ Decl v $ FunEnt (L pos (Fun ty_params params range body)) attrs
 
-pDecl = pDataDecl <|> pTypeDecl <|> pVarOrConstDecl <|> pFunDecl <?>
+pDecl = pDataDecl <|> pTypeDecl <|> pTypeSynDecl <|> pVarOrConstDecl <|> pFunDecl <?>
         "type, data, variable, or function declaration"
 
 pModule :: P PModule

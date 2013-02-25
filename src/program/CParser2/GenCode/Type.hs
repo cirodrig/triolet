@@ -184,27 +184,39 @@ dataEnt pos core_name dom kind data_cons attrs = do
     let descr = DataTypeDescr core_name params base_kind data_con_descrs abstract algebraic
     return $ UpdateTypeEnv (\env -> insertDataType env descr)
 
--- | Translate a global type-related declaration.
-typeLevelDecl :: LDecl Resolved -> TransT UpdateTypeEnv
-typeLevelDecl (L pos (Decl ident ent)) = do
-  let core_name = toVar ident
-  case ent of
-    VarEnt ty attrs ->
-      varEnt core_name ty attrs
-    TypeEnt ty ->
-      typeEnt core_name ty
-    DataEnt dom ty data_cons attrs ->
-      dataEnt pos core_name dom ty data_cons attrs
+entity core_name _ (VarEnt ty attrs) = varEnt core_name ty attrs
+entity core_name _ (TypeEnt ty) = typeEnt core_name ty
+entity core_name pos (DataEnt dom ty data_cons attrs) =
+  dataEnt pos core_name dom ty data_cons attrs
 
-    -- Translate only the types of functions and constants
-    FunEnt (L pos f) attrs ->
-      varEnt core_name (funType pos showResolvedVar f) attrs
-    ConstEnt ty _ attrs ->
-      varEnt core_name ty attrs
+-- Translate only the types of functions and constants
+entity core_name _ (FunEnt (L pos f) attrs) =
+  varEnt core_name (funType pos showResolvedVar f) attrs
+entity core_name _ (ConstEnt ty _ attrs) =
+  varEnt core_name ty attrs
+         
+-- | Translate a global type-related declaration.
+typeLevelDecls :: [LDecl Resolved] -> TransT UpdateTypeEnv
+typeLevelDecls ldecls = go mempty ldecls
+  where
+    go updates (L pos (Decl ident ent) : ldecls) =
+      case ent
+      of TypeSynEnt ty -> do
+           -- Expand the type synonym
+           (ty', _) <- genType ty 
+           withLetTypeSynonym ident ty' $ go updates ldecls
+         _ -> do
+           -- Process this entity and decide how to update the type environment
+           upd <- entity core_name pos ent
+           go (updates `mappend` upd) ldecls
+      where
+        core_name = toVar ident
+
+    go updates [] = return updates
 
 -- | Create a type environment from the given declarations
 declTypeEnvironment :: RModule -> TransT UpdateTypeEnv
-declTypeEnvironment (Module decls) = liftM mconcat $ mapM typeLevelDecl decls
+declTypeEnvironment (Module decls) = typeLevelDecls decls
 
 typeTranslation :: IdentSupply Var
                 -> [(Var, Type.Type)]
