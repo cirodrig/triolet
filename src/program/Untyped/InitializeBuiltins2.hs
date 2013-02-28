@@ -552,7 +552,9 @@ eqClass tc_map = do
     let head = TupleTy 2 @@ ConTy a @@ ConTy b
         body = MethodsInstance [coreBuiltin The_EqDict_Tuple2_eq,
                                 coreBuiltin The_EqDict_Tuple2_ne]
-        cst = [instancePredicate TheTC_Eq (ConTy a),
+        cst = [instancePredicate TheTC_Repr (ConTy a),
+               instancePredicate TheTC_Repr (ConTy b),
+               instancePredicate TheTC_Eq (ConTy a),
                instancePredicate TheTC_Eq (ConTy b)]
     in return (cst, Instance head body)
   tuple3_instance <-
@@ -560,7 +562,10 @@ eqClass tc_map = do
     let head = TupleTy 3 @@ ConTy a @@ ConTy b @@ ConTy c
         body = MethodsInstance [coreBuiltin The_EqDict_Tuple3_eq,
                                 coreBuiltin The_EqDict_Tuple3_ne]
-        cst = [instancePredicate TheTC_Eq (ConTy a),
+        cst = [instancePredicate TheTC_Repr (ConTy a),
+               instancePredicate TheTC_Repr (ConTy b),
+               instancePredicate TheTC_Repr (ConTy c),
+               instancePredicate TheTC_Eq (ConTy a),
                instancePredicate TheTC_Eq (ConTy b),
                instancePredicate TheTC_Eq (ConTy c)]
     in return (cst, Instance head body)
@@ -587,7 +592,9 @@ ordClass tc_map = do
                                 coreBuiltin The_OrdDict_Tuple2_le,
                                 coreBuiltin The_OrdDict_Tuple2_gt,
                                 coreBuiltin The_OrdDict_Tuple2_ge]
-        cst = [instancePredicate TheTC_Ord (ConTy a),
+        cst = [instancePredicate TheTC_Repr (ConTy a),
+               instancePredicate TheTC_Repr (ConTy b),
+               instancePredicate TheTC_Ord (ConTy a),
                instancePredicate TheTC_Ord (ConTy b)]
     in return (cst, Instance head body)
 
