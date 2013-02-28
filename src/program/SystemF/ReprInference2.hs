@@ -293,10 +293,11 @@ naturalType :: Type -> RI Type
 naturalType ty = do
   k <- withSpecTyping $ typeKind ty
 
-  cond (strip_foralls_and_coercions ty) $
+  natural_kind <-
+    condM (strip_foralls_and_coercions ty)
     [ -- Function type
       do FunT {} <- it
-         lift $ (k |> boxT) ty
+         return boxT
 
     , -- Data type
       do ty' <- it
@@ -304,24 +305,32 @@ naturalType ty = do
          Just dtype <- lift $ withSpecTyping $ lookupDataType con
 
          -- Convert to the natural kind for this data type
-         lift $ (k |> fromBaseKind (dataTypeKind dtype)) ty
+         return $ fromBaseKind (dataTypeKind dtype)
 
     , -- Coercion types are values
       do ty' <- it
          (CoT {}, [_, _]) <- return $ fromTypeApp ty'
-         lift $ (k |> valT) ty
+         return valT
 
     , lift $ internalError $
       "naturalType: Not a function or data type: " ++ show (pprType ty)
     ]
+
+  -- Coerce type
+  (k |> natural_kind) ty
   where
     -- Remove all forall and adapter terms from the head of this type
     strip_foralls_and_coercions ty =
-      case ty
-      of AllT _ t -> strip_foralls_and_coercions t
-         AppT (VarT con) arg
-           | isAdapterCon con -> strip_foralls_and_coercions arg
-         _ -> ty
+      condM (withSpecTyping $ reduceToWhnf ty)
+      [ do AllT _ t' <- it
+           lift $ strip_foralls_and_coercions t'
+
+      , do AppT (VarT con) t' <- it
+           aguard $ isAdapterCon con
+           lift $ strip_foralls_and_coercions t'
+
+      , it
+      ]
 
 -------------------------------------------------------------------------------
 -- Type conversion
