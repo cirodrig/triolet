@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Name shadowing",
+  trioletSources	 = ["foo.tri"],
+  lltrioletSources  = [],
+  cSources	 = [""],
+  cxxSources	 = [],
+  expectedResult = ShouldCompile
+}

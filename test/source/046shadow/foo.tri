@@ -1,0 +1,5 @@
+
+def f(x):
+  return [x + x for x in x]
+
+export cplusplus f : list(float) -> list(float)
