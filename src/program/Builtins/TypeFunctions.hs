@@ -281,7 +281,7 @@ cartPureTF bi = typeFunction 1 $ \[index_type] -> do
     is_int :: EvalMonad m => Type -> m Bool
     is_int ty = do
       ty' <- reduceToWhnf ty
-      return $! case ty
+      return $! case ty'
                 of VarT v -> v == intV
                    _      -> False
     return_dim0, return_dim1, return_dim2, return_dim3 :: EvalMonad m => m Type
