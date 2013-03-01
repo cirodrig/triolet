@@ -382,7 +382,7 @@ coerceTerm src_type result_type src =
 magicTerm :: Predicate -> PE TIExp
 magicTerm result_type =
   let f = mkVarE noSourcePos TIBoxed (SF.coreBuiltin SF.The_fun_undefined)
-  in return $ mkPolyCallE noSourcePos TIBoxed f [mkPredicate result_type] []
+  in return $ mkPolyCallE noSourcePos TIBoxed f [mkPredicate result_type] [mkNoneE noSourcePos]
 
 -- | Get the superclass dictionaries from a class dictionary
 getSuperclasses :: TyCon -> HMType -> SF.Var -> PE [(SF.Var, Predicate)]

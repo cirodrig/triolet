@@ -8179,7 +8179,7 @@ parallel_dim2_reduce1 : forall a : bare.
 -------------------------------------------------------------------------------
 -- Other functions
 
-fun_undefined @(a : box) -> a = except @a;
+fun_undefined @(a : box) (dummy : Boxed (Stored NoneType)) -> a = except @a;
 
 -- Convert an indexed int to a finite indexed int.  Raise an exception
 -- if not finite.

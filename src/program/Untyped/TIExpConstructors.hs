@@ -203,6 +203,9 @@ mkFloatLitE pos n =
       sf_float_type = SF.floatT
   in LitTE (tiInfo pos repr) $ SF.FloatL n sf_float_type
 
+mkNoneE :: SourcePos -> TIExp
+mkNoneE pos = mkLitE pos Untyped.NoneL
+
 mkLitE :: SourcePos -> Untyped.Lit -> TIExp
 mkLitE pos l =
   case l
@@ -232,7 +235,7 @@ mkAppE pos repr oper ts args = AppTE (tiInfo pos repr) oper ts args
 
 mkUndefinedE :: SourcePos -> TIRepr -> TIType -> TIExp
 mkUndefinedE pos repr ty =
-  mkBuiltinCallE pos repr SF.The_fun_undefined [ty] []
+  mkBuiltinCallE pos repr SF.The_fun_undefined [ty] [mkNoneE noSourcePos]
 
 mkCoerceE :: SourcePos -> TIRepr -> TIType -> TIType -> TIExp -> TIExp
 mkCoerceE pos repr from_ty to_ty e =
