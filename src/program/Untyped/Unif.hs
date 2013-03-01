@@ -11,6 +11,8 @@ module Untyped.Unif
         UMonad(..),
 
         -- * Types
+        URep,
+        normalizeRep,
         UVar,
         uVarName, uVarKind,
         UVarSet,
@@ -83,7 +85,7 @@ data UVar term =
                                                  -- identifying this variable
   , _uName :: !(Maybe Label)       -- ^ The variable's name, if any
   , _uKind :: Kind                 -- ^ The variable's kind
-  , _uRep  :: !(IORef (URep term)) -- ^ The variable's value
+  , _uRep  :: {-# UNPACK #-} !(IORef (URep term)) -- ^ The variable's value
   }
 
 uVarName :: UVar term -> Maybe Label
@@ -136,6 +138,7 @@ assertNormalizedUVar v = do
 
 -- | Get the variable or term value of a given unifiable variable
 normalizeUVar :: NormalizeContext term m => UVar term -> m term
+{-# INLINABLE normalizeUVar #-}
 normalizeUVar v = make_term =<< normalizeRep (_uRep v)
   where
     make_term Free           = return $ injectU v
@@ -230,8 +233,12 @@ newRep = liftIO $ newIORef Free
 
 -- | Get the actual value of a 'URep' object.
 --   The 'URep' object is updated in the process.
+--
+--   This should not be called from outside the module, but it is exported
+--   so that it can be specialized.
 normalizeRep :: NormalizeContext term m =>
                 IORef (URep term) -> m (URep term)
+{-# INLINABLE normalizeRep #-}
 normalizeRep rep_ref = readRep rep_ref >>= follow False 
   where
     follow changed rep =

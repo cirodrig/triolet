@@ -55,6 +55,8 @@ import Data.Typeable(Typeable)
 import qualified Data.Map as Map
 import Data.Monoid hiding((<>))
 import qualified Data.Set as Set
+import Debug.Trace
+import GHC.Exts(inline)
 import Text.PrettyPrint.HughesPJ
 import System.IO.Unsafe
 
@@ -69,7 +71,7 @@ import {-# SOURCE #-} Untyped.Classes
 import qualified Untyped.Syntax as Untyped
 import Untyped.Unif
 import Untyped.Type
-import {-# SOURCE #-} Untyped.TIMonad
+import Untyped.TIMonad
 import Untyped.Kind
 import Untyped.Variable
 
@@ -77,6 +79,16 @@ import Untyped.Variable
 --   error occurred.
 kindError loc =
   error $ "Kind error in " ++ loc
+
+-- Most calls to 'normalize' occur in the TE monad.
+-- Specialize 'normalize' for this case.
+{-# SPECIALIZE normalizeRep :: IORef (URep HMType) -> TE (URep HMType) #-}
+{-# SPECIALIZE normalizeUVar :: UVar HMType -> TE HMType #-}
+
+{-# RULES "normalizeTE" forall t. normalize t = normalizeTE t #-}
+
+normalizeTE :: HMType -> TE HMType
+normalizeTE t = inline normalize t
 
 instance UTerm HMType where
   type NormalizeMonadConstraint HMType m = EnvMonad m
@@ -259,6 +271,16 @@ semiUnifyC :: NormalizeContext HMType m =>
            -> HMType            -- ^ Unifiable term
            -> HMType            -- ^ Rigid term
            -> m (Maybe (CSubstitution, Constraint))
+{-# SPECIALIZE semiUnifyC :: TyConSet
+                          -> CSubstitution
+                          -> HMType
+                          -> HMType
+                          -> TI (Maybe (CSubstitution, Constraint)) #-}
+{-# SPECIALIZE semiUnifyC :: TyConSet
+                          -> CSubstitution
+                          -> HMType
+                          -> HMType
+                          -> TE (Maybe (CSubstitution, Constraint)) #-}
 semiUnifyC unifiable_set subst t1 t2 = do
   t1_c <- normalize t1
   t2_c <- normalize t2
