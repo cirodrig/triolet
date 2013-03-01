@@ -4365,12 +4365,12 @@ IndexableDict_array2_get_shape @(a : box)
 
 IndexableDict_array3_at_point @(a : box)
   (rep : Repr (AsBare a))
-  (ay : array3 (AsBare a))
+  (ay : Boxed (array3 (AsBare a)))
   (ix : AsBox (index dim3))
   -> a attribute(inline) =
-  case ay of mk_array3 @(L M N : intindex)
-             lb_z stride_z size_z lb_y stride_y size_y lb_x stride_x size_x
-             ayref.
+  case ay of boxed (mk_array3 @(L M N : intindex)
+                    lb_z stride_z size_z lb_y stride_y size_y lb_x stride_x size_x
+                    ayref).
   case ayref of stuckBox ay.
   let row_repr = repr_arr @N @(AsBare a) size_x rep in
   let plane_repr = repr_arr @M @(arr N (AsBare a)) size_y row_repr in
