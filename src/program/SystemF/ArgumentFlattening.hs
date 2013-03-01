@@ -1079,6 +1079,10 @@ deadValue t = do
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
            | con == floatV ->
                return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
+           | con `isCoreBuiltin` The_LinearMap -> do
+               n <- deadValue (VarT intV)
+               let con = VarCon (coreBuiltin The_LinearMap) [] []
+               return $ ExpM $ ConE defaultExpInfo con [n, n]
          (VarT con, [p])
            | con `isCoreBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor
