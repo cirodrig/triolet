@@ -381,8 +381,8 @@ toHnf' pos pred = do
   case m_reduced of
     Nothing -> do
       hyp <- hypothesis pred
-      doc <- runPpr (pprPredicate pred)
-      liftIO $ print $ text "Inserted" <+> doc
+      --doc <- runPpr (pprPredicate pred)
+      --liftIO $ print $ text "Inserted" <+> doc
       return (hyp, [pred])
     Just x -> return x
 
@@ -750,9 +750,6 @@ reduceContext wanted_cst = do
     execNoDerivation $ mapM_ superclassPredicates $ asProofs wanted_cst
   let superclass_equalities = filter isEqualityPredicate all_superclasses
 
-  c1 <- runPpr (pprConstraint superclass_equalities)
-  liftIO $ print $ text "Superclasses:" <+> c1
-
   -- Reduce until a fixed point is reached
   cst' <- fixed_point_reduce superclass_equalities wanted_cst
 
@@ -773,17 +770,17 @@ reduceContext wanted_cst = do
       -- Do equality constraint simplification
       -- Currently we don't derive proofs here; we just fabricate the
       -- necessary proof objects
-      c2 <- runPpr (pprConstraint cls_cst)
-      liftIO $ print $ text "Expanded:" <+> c2
+      --c2 <- runPpr (pprConstraint cls_cst)
+      --liftIO $ print $ text "Expanded:" <+> c2
       (cls_cst', eq_cst') <-
         evalProgressT $ equalitySimplification noSourcePos cls_cst eq_cst
 
-      c3 <- runPpr (pprConstraint cls_cst')
-      liftIO $ print $ text "Expanded:" <+> c3
+      --c3 <- runPpr (pprConstraint cls_cst')
+      --liftIO $ print $ text "Expanded:" <+> c3
       -- Eliminate redundant proofs
       cls_cst'' <- evalNoDerivation $ addConstraintToContext cls_cst'
-      c4 <- runPpr (pprConstraint cls_cst'')
-      liftIO $ print $ text "Simplified:" <+> c4
+      --c4 <- runPpr (pprConstraint cls_cst'')
+      --liftIO $ print $ text "Simplified:" <+> c4
 
       -- If any new equality predicates were introduced by class reduction,
       -- repeat the proces
@@ -891,7 +888,7 @@ splitConstraint :: Constraint   -- ^ Constraint to partition.
                    -- ^ Returns (retained constraints,
                    -- deferred constraints)
 splitConstraint cst fvars qvars = do
-  runPpr $ do
+  when debugContextReduction $ runPpr $ do
     free_doc <- mapM pprUVar $ Set.toList fvars
     q_doc <- mapM pprUVar $ Set.toList qvars
     cst_doc <- pprConstraint cst

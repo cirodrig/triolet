@@ -229,14 +229,15 @@ prove prd = debug $ do
     Just v  -> return $ Just (v, [])
     Nothing -> createProof prd
   where
-    debug m = do
+    debug m = m
+    {-debug m = do
       proofs <- getProofs
       message <- runPpr $ do
         prd_doc <- pprPredicate prd
         ctx_doc <- pprConstraint $ map fst proofs
         return $ text "Proving" <+> prd_doc $$ text "Given" <+> ctx_doc
       liftIO $ print message
-      m
+      m-}
 
 {-proveConstraint :: Constraint -> PE (Maybe ([TIExp], Constraint))
 proveConstraint cst = dropEffectsOnFailure $ go cst
