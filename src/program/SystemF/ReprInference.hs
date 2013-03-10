@@ -3,7 +3,7 @@
 -}
 
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module SystemF.ReprInference2(insertCoercions)
+module SystemF.ReprInference(insertCoercions)
 where
 
 import Control.Applicative

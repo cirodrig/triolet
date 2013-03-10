@@ -33,7 +33,7 @@ import qualified SystemF.TypecheckMem
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.Rename as SystemF
-import qualified SystemF.ReprInference2 as SystemF
+import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.Floating2 as SystemF
 import qualified SystemF.Simplifier.Rewrite as SystemF
 import qualified SystemF.Simplifier.Simplify as SystemF

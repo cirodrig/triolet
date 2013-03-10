@@ -161,7 +161,7 @@ Executable triolet
     SystemF.PartialEval
     SystemF.Print
     SystemF.PrintMemoryIR
-    SystemF.ReprInference2
+    SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict
     SystemF.Simplifier.AbsValue
