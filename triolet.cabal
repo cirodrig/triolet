@@ -53,7 +53,7 @@ Executable triolet
     ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
     EmptyDataDecls, TypeOperators, TypeFamilies, DeriveDataTypeable,
     FlexibleInstances, BangPatterns, NoMonomorphismRestriction
-  Ghc-Options: -auto
+  Ghc-Options: -auto -rtsopts
   Include-Dirs:
     src/program
   Main-Is:	Main.hs
@@ -72,6 +72,7 @@ Executable triolet
     GlobalVar
     InitializeGlobals
     Job
+    Timer
     CommandLine
     Builtins.BuiltinsTH
     Builtins.Builtins

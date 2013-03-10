@@ -5,6 +5,7 @@ import Control.Exception
 import Control.Monad
 import Data.Binary
 import System.Cmd
+import System.CPUTime
 import System.Directory
 import System.Environment
 import System.Exit
@@ -58,6 +59,7 @@ import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
 import qualified Globals
 import GlobalVar
+import Timer
 
 debugMode = False
 
@@ -69,7 +71,11 @@ main = do
   (global_values, job) <- parseCommandLineArguments
 
   -- Initialiation
+  t1 <- getCPUTime
   loadBuiltins global_values
+  t2 <- getCPUTime
+  print "Initialization time"
+  print (fromIntegral (t2 - t1) * 1e-12)
   
   -- Do work
   runJob runTask job
@@ -150,28 +156,32 @@ invokeCPP macros include_paths inpath outpath = do
     include_path_opts = ["-I" ++ path | path <- include_paths]
 
 -- | General-purpose high-level optimizations
-highLevelOptimizations :: Bool
+highLevelOptimizations :: Times
+                       -> Bool
                        -> SystemF.SimplifierPhase
                        -> SystemF.Module SystemF.Mem
                        -> IO (SystemF.Module SystemF.Mem)
-highLevelOptimizations global_demand_analysis simplifier_phase mod = do
+highLevelOptimizations times global_demand_analysis simplifier_phase mod = do
   -- Run the rewriter (most optimizations are in here)
-  mod <- SystemF.rewriteAtPhase simplifier_phase mod
+  mod <- time times RewriteTimer $
+         SystemF.rewriteAtPhase simplifier_phase mod
 
   -- Specialize on constructors
-  --mod <- SystemF.specializeOnConstructors mod
+  --mod <- time times SpecializeTimer $
+  --       SystemF.specializeOnConstructors mod
 
   -- Demand information was destroyed by the previous passes.
   -- Re-run demand analysis.
-  mod <- if global_demand_analysis
+  mod <- time times DemandTimer $
+         if global_demand_analysis
          then SystemF.demandAnalysis mod
          else SystemF.localDemandAnalysis mod
   
-  when debugMode $ void $ do
+  when debugMode $ void $ do    
     putStrLn "After rewrite"
-    print $ pprMemModule mod
-    evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
-    SystemF.TypecheckMem.typeCheckModule mod
+    time times PrintTimer $ print $ pprMemModule mod
+    time times TypecheckTimer $ evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
+    time times TypecheckTimer $ SystemF.TypecheckMem.typeCheckModule mod
 
   return mod
 
@@ -224,26 +234,28 @@ compilePyonMemToPyonAsm :: CompileFlags -> SystemF.Module SystemF.Mem
                         -> IO LowLevel.Module
 compilePyonMemToPyonAsm compile_flags repr_mod = do
 
+  times <- newTimes
+  
   -- General-purpose, high-level optimizations
-  repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
+  repr_mod <- highLevelOptimizations times True SystemF.GeneralSimplifierPhase repr_mod
 
-  repr_mod <- SystemF.longRangeFloating repr_mod
-  when debugMode $ void $ do
+  repr_mod <- time times FloatingTimer $ SystemF.longRangeFloating repr_mod
+  time times PrintTimer $ when debugMode $ void $ do
     putStrLn "After floating 1"
     print $ pprMemModule repr_mod
     evaluate $ SystemF.checkForShadowingModule repr_mod
 
-  repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
-  repr_mod <- iterateM (highLevelOptimizations False SystemF.GeneralSimplifierPhase) 5 repr_mod
+  repr_mod <- highLevelOptimizations times True SystemF.GeneralSimplifierPhase repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times False SystemF.GeneralSimplifierPhase) 5 repr_mod
   
-  when debugMode $ void $ do
+  time times PrintTimer $ when debugMode $ void $ do
     putStrLn ""
     putStrLn "Before loop dimension analysis"
     print $ pprMemModule repr_mod
 
-  repr_mod <- iterateM (highLevelOptimizations True SystemF.DimensionalitySimplifierPhase) 7 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.DimensionalitySimplifierPhase) 7 repr_mod
 
-  when debugMode $ void $ do
+  time times PrintTimer $ when debugMode $ void $ do
     putStrLn ""
     putStrLn "Before parallelizing"
     print $ pprMemModule repr_mod
@@ -251,60 +263,63 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   -- Parallelize outer loops
   repr_mod <-
     if lookupCompileFlag DoParallelization compile_flags
-    then do repr_mod <- SystemF.parallelLoopRewrite repr_mod
-            when debugMode $ void $ do
+    then do repr_mod <- time times ParallelizeTimer $ SystemF.parallelLoopRewrite repr_mod
+            time times PrintTimer $ when debugMode $ void $ do
               putStrLn ""
               putStrLn "After parallelizing"
               print $ pprMemModule repr_mod
-            highLevelOptimizations False SystemF.DimensionalitySimplifierPhase repr_mod
+            highLevelOptimizations times False SystemF.DimensionalitySimplifierPhase repr_mod
     else return repr_mod
 
   -- Sequentialize remaining loops
-  repr_mod <- iterateM (highLevelOptimizations False SystemF.SequentialSimplifierPhase) 6 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times False SystemF.SequentialSimplifierPhase) 6 repr_mod
 
-  when debugMode $ void $ do
+  time times PrintTimer $ when debugMode $ void $ do
     putStrLn ""
     putStrLn "After Simplifying"
     print $ pprMemModule repr_mod
   
   -- Inline loops
-  repr_mod <- iterateM (highLevelOptimizations False SystemF.FinalSimplifierPhase) 2 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times False SystemF.FinalSimplifierPhase) 2 repr_mod
 
   -- Final floating, to move repr dictionaries out of the way and ensure
   -- that copying is eliminated
-  repr_mod <- SystemF.longRangeFloating repr_mod
+  repr_mod <- time times FloatingTimer $ SystemF.longRangeFloating repr_mod
 
   -- Restructure the code resulting from inlining, which may create new
   -- local functions
-  repr_mod <- iterateM (highLevelOptimizations True SystemF.FinalSimplifierPhase) 3 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.FinalSimplifierPhase) 3 repr_mod
 
   -- Eliminate case-of-case 
-  repr_mod <- iterateM (highLevelOptimizations True SystemF.PostFinalSimplifierPhase) 2 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 2 repr_mod
 
   -- Argument flattening
-  when debugMode $ void $ do
+  time times PrintTimer $ when debugMode $ void $ do
     putStrLn ""
     putStrLn "Before Argument Flattening"
     print $ pprMemModule repr_mod
-  repr_mod <- SystemF.flattenArguments repr_mod
+  repr_mod <- time times FlattenArgumentsTimer $
+              SystemF.flattenArguments repr_mod
   
-  when debugMode $ void $ do
+  time times PrintTimer $ when debugMode $ void $ do
     putStrLn "After argument flattening"
     print $ pprMemModule repr_mod
     evaluate $ SystemF.checkForShadowingModule repr_mod
 
   -- Reconstruct demand information after flattening variables,
   -- so that the next optimization pass can do more work
-  repr_mod <- SystemF.localDemandAnalysis repr_mod
-  repr_mod <- iterateM (highLevelOptimizations True SystemF.PostFinalSimplifierPhase) 5 repr_mod
+  repr_mod <- time times DemandTimer $ SystemF.localDemandAnalysis repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 5 repr_mod
 
-  when debugMode $ void $ do
+  time times PrintTimer $ when debugMode $ void $ do
     putStrLn ""
     putStrLn "Optimized"
     print $ pprMemModule repr_mod
 
-  when debugMode $ void $ do
+  time times TypecheckTimer $ when debugMode $ void $ do
     SystemF.TypecheckMem.typeCheckModule repr_mod
+
+  printTimes times
 
   ll_mod <- SystemF.lowerModule repr_mod
   return ll_mod
