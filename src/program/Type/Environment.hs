@@ -624,7 +624,8 @@ setSizeParameters v size_params = do
   liftIO $ do
     Just (TyConTypeAssignment dtype) <- HT.lookup ht v
     let dtype' = dtype {dataTypeSizeParamTypes = Just size_params}
-    HT.insert ht v (TyConTypeAssignment dtype')
+    HT.update ht v (TyConTypeAssignment dtype')
+    return ()
 
 lookupAndExtract :: TypeEnvMonad m =>
                     (TypeAssignment -> Maybe b) -> Var -> m (Maybe b)
