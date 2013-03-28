@@ -44,13 +44,16 @@ data PprFlags =
 
     -- | Include demand annotations in the pretty-printed output
   , showDemands :: !Bool
+
+    -- | Include imports in the output
+  , showImports :: !Bool
   }
 
-defaultPprFlags = PprFlags True True True
+defaultPprFlags = PprFlags True True True False
 
-briefPprFlags = PprFlags True True False
+briefPprFlags = PprFlags True True False False
 
-tersePprFlags = PprFlags False False False
+tersePprFlags = PprFlags False False False False
 
 defIndent = 2
 letIndent = 2
@@ -66,7 +69,10 @@ pprExTypeBinders ts = [text "&" <> parens (pprVar v <+> text ":" <+> pprType t)
 
 
 pprLit :: Lit -> Doc
-pprLit (IntL n _) = text (show n)
+pprLit (IntL n (VarT v)) 
+  | v == intV  = text (show n)
+  | v == uintV = text (show n ++ "U")
+  | otherwise  = parens $ text "<unknown integer type>" <+> text (show n)
 pprLit (FloatL n _) = text (show n)
 
 pprDmd :: Dmd -> Doc
@@ -229,33 +235,34 @@ pprFunPrecFlags is_lambda flags (FunM fun) =
   in hang (text "lambda" <+> sig_doc <> text ".") defIndent body_doc
      `hasPrec` stmtPrec
 
+pprDefAnn :: DefAnn -> Doc
+pprDefAnn ann =
+  brackets $ sep $ punctuate (text ",") $
+  filter (not . isEmpty) [inl_doc, join_doc, phase_doc, uses_doc]
+  where
+    phase_doc =
+      case defAnnInlinePhase ann
+      of InlNormal -> empty
+         x -> text (show x)
+    inl_doc =
+      if defAnnInlineRequest ann
+      then text "inline"
+      else empty
+    conlike_doc =
+      if defAnnConlike ann
+      then text "conlike"
+      else empty
+    join_doc =
+      if defAnnJoinPoint ann
+      then text "join_point"
+      else empty
+    uses_doc = text $ showMultiplicity (defAnnUses ann)
+
 pprFDef def = pprFDefFlags defaultPprFlags def
 
 pprFDefFlags flags (Def v ann f) =
-  hang (pprVar v <+> ann_doc <+> text "=") defIndent $
+  hang (pprVar v <+> pprDefAnn ann <+> text "=") defIndent $
   pprFunPrecFlags False flags f ? outerPrec
-  where
-    ann_doc =
-      let phase_doc =
-            case defAnnInlinePhase ann
-            of InlNormal -> empty
-               x -> text (show x)
-          inl_doc =
-            if defAnnInlineRequest ann
-            then text "inline"
-            else empty
-          conlike_doc =
-            if defAnnConlike ann
-            then text "conlike"
-            else empty
-          join_doc =
-            if defAnnJoinPoint ann
-            then text "join_point"
-            else empty
-          uses_doc = text $ showMultiplicity (defAnnUses ann)
-      in brackets $ sep $
-         punctuate (text ",") $
-         filter (not . isEmpty) [inl_doc, join_doc, phase_doc, uses_doc]
 
 pprFDefGroup :: DefGroup (FDef Mem) -> Doc
 pprFDefGroup dg = pprFDefGroupFlags defaultPprFlags dg
@@ -276,7 +283,7 @@ pprGDefFlags flags (Def v ann (FunEnt f)) =
   pprFDefFlags flags (Def v ann f)
 
 pprGDefFlags flags (Def v ann (DataEnt d)) =
-  hang (pprVar v <+> colon <+> ty_doc <+> equals) 4 $
+  hang (pprVar v <+> colon <+> ty_doc <+> pprDefAnn ann <+> equals) 4 $
   pprExpFlags flags (constExp d)
   where
     ty_doc = pprType $ constType d
@@ -290,8 +297,10 @@ pprModule m = pprModuleFlags defaultPprFlags m
 
 pprModuleFlags flags (Module modname imports defs exports) =
   text "module" <+> text (showModuleName modname) $$
-  {-text "imports {" $$
-  nest 2 (vcat (map (pprGDefFlags flags) imports)) $$
-  text "}" $$-}
+  (if showImports flags then import_doc else empty) $$
   vcat (map (pprGDefGroupFlags flags) defs) $$
   vcat (map (pprExportFlags flags) exports)
+  where
+    import_doc = text "imports {" $$
+                 nest 2 (vcat (map (pprGDefFlags flags) imports)) $$
+                 text "}"

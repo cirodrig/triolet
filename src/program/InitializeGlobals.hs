@@ -20,8 +20,9 @@ import qualified CParser2.Driver
 import LowLevel.InitializeBuiltins
 import Builtins.Builtins
 import Type.Environment
+import qualified SystemF.PrintMemoryIR
 import qualified SystemF.TypecheckMem
-import SystemF.Datatypes.Structure
+import SystemF.Datatypes.Driver
 import SystemF.Datatypes.Size
 import qualified Untyped.InitializeBuiltins2 as Untyped
 import CommandLine
@@ -73,7 +74,7 @@ loadBuiltins cl_globals = do
   -- IN DEVELOPMENT: Compute size and alignment of each built-in type
   withTheNewVarIdentSupply $ \supply -> do
     mem_types <- readInitGlobalVarIO the_memTypes
-    computeAllDataSizes supply mem_types
+    --(mem_types', defs) <- computeDataTypeInfo supply mem_types
 
     withTheLLVarIdentSupply $ \ll_supply -> do
       testMemoryLayout supply ll_supply mem_types

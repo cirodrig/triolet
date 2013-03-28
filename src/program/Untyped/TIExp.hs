@@ -93,6 +93,9 @@ data TIExp =
   | CaseTE SourcePos TIExp [TIRepr] [TIAlt]
   | CoerceTE !TIInfo TIType TIType TIExp 
   | ArrayTE !TIInfo TIType [TIExp]
+
+    -- A delayed function application
+  | MkExpTE !TIInfo ([SF.Type] -> [SF.ExpSF] -> SF.ExpSF) [TIType] [TIExp]
     
     -- Placeholder expressions
   | PlaceholderTE Placeholder

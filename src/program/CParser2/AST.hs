@@ -4,13 +4,15 @@ single 'Module' contains all the data of a file being parsed by the
 frontend.
 -}
 
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, StandaloneDeriving, FlexibleContexts,
+             UndecidableInstances #-}
 module CParser2.AST where
 
 import Control.Monad
 import Data.Foldable
 import Data.Traversable
 
+import Common.Error
 import Common.Identifier
 import Common.SourcePos
 import Common.Label
@@ -45,7 +47,7 @@ unLoc :: Located a -> a
 unLoc (L _ x) = x
 
 -- | Attribute annotations from the source code
-data Attribute =
+data Attribute ix =
     AbstractAttr                    -- ^ Data type is abstract
   | NonalgebraicAttr                -- ^ Data type is not algebraic
   | ConlikeAttr                     -- ^ Function calls are cheap to reevaluate
@@ -59,7 +61,28 @@ data Attribute =
                                     --   the final optimization phase
   | InlinePostfinalAttr             -- ^ Definition should not be inlined until
                                     --   after redundant copying is removed
-  deriving (Eq, Ord)
+  | BuiltinAttr                     -- ^ Definition of a built-in variable.
+                                    --   This attribute controls name
+                                    --   resolution.
+                                    --   Instead of creating a new variable,
+                                    --   the definition will refer to the
+                                    --   built-in variable.
+
+castAttribute :: Attribute a -> Attribute b
+castAttribute AbstractAttr = AbstractAttr
+castAttribute NonalgebraicAttr = NonalgebraicAttr
+castAttribute ConlikeAttr = ConlikeAttr
+castAttribute InlineAttr = InlineAttr
+castAttribute InlineDimensionalityAttr = InlineDimensionalityAttr
+castAttribute InlineSequentialAttr = InlineSequentialAttr
+castAttribute InlineFinalAttr = InlineFinalAttr
+castAttribute InlinePostfinalAttr = InlinePostfinalAttr
+castAttribute BuiltinAttr = BuiltinAttr
+castAttribute _ = internalError "castAttribute"
+
+deriving instance Eq (Identifier ix) => Eq (Attribute ix)
+
+type Attributes ix = [Attribute ix]
 
 -------------------------------------------------------------------------------
 -- * Abstract Syntax Trees
@@ -142,6 +165,7 @@ boundType' pos get_name (Domain v Nothing) =
 data Exp a =
     VarE (Identifier a)
   | IntE !Integer
+  | UIntE !Integer
   | FloatE !Double
   | TupleE [LExp a]
   | TAppE (LExp a) (LType a)
@@ -193,7 +217,7 @@ data Def ix =
   Def 
   { dName :: Identifier ix
   , dFun :: Fun ix
-  , dAttributes :: [Attribute]
+  , dAttributes :: Attributes ix
   }
 
 type LDef ix = Located (Def ix)
@@ -228,6 +252,8 @@ data DataConDecl ix =
   , dconExTypes :: [Domain ix]
     -- | Fields
   , dconArgs :: [LType ix]
+    -- | Attributes
+  , dconAttributes :: Attributes ix
   }
 
 type LDataConDecl ix = Located (DataConDecl ix)
@@ -241,17 +267,25 @@ data Decl ix = Decl (Identifier ix) !(Entity ix)
 
 data Entity ix = 
     -- | A variable declaration
-    VarEnt (LType ix) [Attribute]
+    VarEnt (LType ix) (Attributes ix)
     -- | A type declaration
   | TypeEnt (LType ix)
     -- | A type synonym declaration
   | TypeSynEnt (LType ix)
     -- | A data type definition
-  | DataEnt [Domain ix] (LType ix) [LDataConDecl ix] [Attribute]
+  | DataEnt [Domain ix] (LType ix) [LDataConDecl ix] (Attributes ix)
     -- | A global constant definition
-  | ConstEnt (LType ix) (LExp ix) [Attribute]
+  | ConstEnt (LType ix) (LExp ix) (Attributes ix)
     -- | A global function
-  | FunEnt (Located (Fun ix)) [Attribute]
+  | FunEnt (Located (Fun ix)) (Attributes ix)
+
+entityAttributes :: Entity ix -> Attributes ix
+entityAttributes (VarEnt _ xs)      = xs
+entityAttributes (TypeEnt _)        = []
+entityAttributes (TypeSynEnt _)     = []
+entityAttributes (DataEnt _ _ _ xs) = xs
+entityAttributes (ConstEnt _ _ xs)  = xs
+entityAttributes (FunEnt _ xs)      = xs
 
 type LDecl ix = Located (Decl ix)
 

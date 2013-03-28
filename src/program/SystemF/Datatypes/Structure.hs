@@ -27,8 +27,7 @@ module SystemF.Datatypes.Structure
         Structure(..),
         computeStructure,
         StructuralTypeVariance(..),
-        computeDataSizes,
-        computeAllDataSizes)
+        computeDataSizes)
 where
 
 import Control.Monad
@@ -47,7 +46,6 @@ import Common.Identifier
 import Common.Supply
 import Common.MonadLogic
 import Common.PrecDoc
-import Builtins.Builtins
 import Type.Type
 import Type.Environment
 import Type.Compare
@@ -165,7 +163,7 @@ computeStructure t = liftTypeEvalM $ do
       | con == intV -> return $ PrimStruct trioletIntType
       | con == uintV -> return $ PrimStruct trioletUintType
       | con == floatV -> return $ PrimStruct trioletFloatType
-      | con `isCoreBuiltin` The_bool -> return BoolStruct
+      {-  | con `isCoreBuiltin` The_bool -> return BoolStruct -}
 
     Just (con, [size, element])
       | con == arrV -> return $ ArrStruct size element
@@ -292,16 +290,15 @@ isVariableIntSubterm ty = do
 --   from an analysis of the data type.
 data StructuralTypeVariance =
   StructuralTypeVariance
-  { -- | Type parameters.  These always correspond one-to-one with the
-    --   corresponding data type's type parameters.
-    --   They are just renamed versions of the data type's type parameters.
+  { -- | Type parameters.
+    --   These are exactly the same as the data type's type parameters.
     dtsTyParams :: [Binder]
 
     -- | Size parameter types
   , dtsSizeParamTypes :: [KindedType]
 
     -- | Statically fixed types
-  , dtsStaticTypes :: [Type]
+  , dtsStaticTypes :: [KindedType]
   }
 
 -- | Create data type size information for a type whose structure does not
@@ -329,7 +326,7 @@ computeDataSizes dtype
           -- Remove duplicates from the lists
           let (size_parameter_types, static_types) = mconcat types
           sp2 <- nubKindTypeList size_parameter_types
-          st2 <- nubTypeList static_types
+          st2 <- nubKindTypeList static_types
           return $ StructuralTypeVariance params sp2 st2
 
         UninhabitedStruct -> invariant
@@ -349,7 +346,7 @@ computeDataSizes dtype
       v' <- newClonedVar v
       return (v' ::: k)
 
-computeAltSizes ::  Alternative -> UnboxedTypeEvalM ([KindedType], [Type])
+computeAltSizes ::  Alternative -> UnboxedTypeEvalM ([KindedType], [KindedType])
 computeAltSizes (Alternative decon fields) =
   withIndependentTypes (deConExTypes decon) $ do
     -- Bare fields produce size parameters
@@ -357,11 +354,14 @@ computeAltSizes (Alternative decon fields) =
 
     -- Val fields produce static types
     static <- concatVariableStructuralSubterms $ valFields [KindedType k t | (k, t) <- fields]
-    return (sizes, map discardBaseKind static)
+    return (sizes, static)
 
+{-
 -- | Compute size information for each data type in the environment.
 --   Update the type environment with computed new size information.
-computeAllDataSizes :: IdentSupply Var -> ITypeEnvBase UnboxedMode -> IO ()
+computeAllDataSizes :: IdentSupply Var
+                    -> ITypeEnvBase UnboxedMode
+                    -> IO (ITypeEnvBase UnboxedMode)
 computeAllDataSizes var_supply env = do
   let data_constructors = getAllDataTypeConstructors env
   env' <- thawTypeEnv env
@@ -382,6 +382,7 @@ computeAllDataSizes var_supply env = do
       setSizeParameters (dataTypeCon dtype) (dtsSizeParamTypes info)
 
       return (dataTypeCon dtype, info)
+-}
 
 -- | Remove duplicate types from the list
 nubTypeList :: [Type] -> UnboxedTypeEvalM [Type]
@@ -421,5 +422,5 @@ pprDataSizes xs =
       text "forall" <+> sep [parens (pprVar v <+> colon <+> pprType t)
                             | v ::: t <- binders] $$
       parens (fsep $ punctuate comma $ map (pprType . discardBaseKind) size_params) $$
-      parens (fsep $ punctuate comma $ map pprType fixed_types)
+      parens (fsep $ punctuate comma $ map (pprType . discardBaseKind) fixed_types)
 

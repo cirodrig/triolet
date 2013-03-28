@@ -26,11 +26,13 @@ import Common.Error
 import Common.Identifier
 import Common.Label
 import Common.MonadLogic
+import Common.SourcePos
 import Common.Supply
 import Builtins.Builtins
 import qualified Type.Environment as SF
 import qualified Type.Eval as SF
 import qualified Type.Type as SF
+import qualified SystemF.Syntax as SF
 import Untyped.Builtins2
 import Untyped.Kind
 import Untyped.Type
@@ -56,6 +58,8 @@ lookupBuiltinVar v m =
      Nothing -> internalError $ "lookupBuiltinThing: Not defined:" ++ show v
 
 type InitM a = MaybeT SF.BoxedTypeEvalM a
+
+errorOnFailure e m = m `mplus` internalError e
 
 runInitM = runMaybeT
 
@@ -200,11 +204,25 @@ withForallParams :: TyConMap -> SF.Type
                  -> InitM a
 withForallParams tc_map sf_type cont = reduceSF sf_type >>= examine
   where
-    examine (SF.AllT (a SF.::: k) rng) = SF.assume a k $ do
-      (a', tc_map') <- translateTyVar tc_map a
+    examine (SF.AllT b rng) =
+      withTypeBinding tc_map b $ \tc_map' a' -> 
       withForallParams tc_map' rng (\tcm bs -> cont tcm (a':bs))
 
     examine t = cont tc_map [] t
+
+withTypeBinding :: TyConMap -> SF.Binder -> (TyConMap -> TyCon -> InitM a)
+                -> InitM a
+withTypeBinding tc_map (a SF.::: k) cont = SF.assume a k $ do
+      (a', tc_map') <- translateTyVar tc_map a
+      cont tc_map' a'
+
+withTypeBindings :: TyConMap -> [SF.Binder] -> (TyConMap -> [TyCon] -> InitM a)
+                 -> InitM a
+withTypeBindings tc_map (b:bs) k =
+  withTypeBinding tc_map b $ \tc_map' b' ->
+  withTypeBindings tc_map' bs $ \tc_map'' bs' -> k tc_map'' (b':bs')
+
+withTypeBindings tc_map [] k = k tc_map []
 
 -- | Extract the constraint from the head of a function type
 frontendConstraint :: TyConMap -> SF.Type -> InitM (Constraint, SF.Type)
@@ -305,6 +323,112 @@ isBoxedKind tenv sf_kind = withCoreTypeEnv tenv (examine sf_kind)
         SF.FunT _ rng -> examine rng
         _ -> return False
 
+-- | Create a class instance representing how to generate 
+--   run-time type information for a data type constructor.
+--
+--   A class instance is created by calling the data type's info
+--   variable (for unboxed types) or by creating the representation of  
+--   a reference (for boxed types).
+--
+--   The type fully boxed type is used 
+reprClassInstance :: SF.TypeEnv
+                  -> TyConMap
+                  -> TyCon
+                  -> InitM (Qualified (Instance ClassInstance))
+reprClassInstance tenv tcm tc = do
+  stored_info <- lookup_stored_info
+
+  -- Get the data type's kind and its size parameters' kinds
+  -- using the core type environment
+  Just dtype <- withCoreTypeEnv tenv $ SF.lookupDataType (tyConSFVar tc)
+  let data_kind = SF.dataTypeKind dtype
+      param_kinds =
+        let layout = SF.dataTypeLayout' dtype
+        in [k | SF.KindedType k _ <- SF.layoutSizeParamTypes layout ++
+                                     SF.layoutStaticTypes layout]
+
+  -- Depending on the data type's kind, build an instance
+  case data_kind of
+    SF.ValK  -> unboxedReprClassInstance (buildValReprInstance stored_info) param_kinds tcm tc
+    SF.BareK -> unboxedReprClassInstance buildBareReprInstance param_kinds tcm tc
+    SF.BoxK  -> boxedReprClassInstance tcm tc
+  where
+    -- Get the info variable for type constructor 'Stored'
+    lookup_stored_info = do
+      Just dtype <- SF.lookupDataType SF.storedV
+      return $ SF.unboxedLayoutInfo $ SF.dataTypeLayout' dtype
+
+boxedReprClassInstance tcm tc = do
+  Just dtype <- SF.lookupDataType (tyConSFVar tc)
+  let layout = SF.dataTypeLayout' dtype
+
+  -- Get the type parameters of the data constructor's type signature
+  let typarams = SF.dataTypeParams dtype
+  withTypeBindings tcm typarams $ \tcm' typarams' -> do
+
+    -- Create a boxed instance
+    let head = ConTy tc `appTys` map ConTy typarams'
+    let inst = AbstractClassInstance (coreBuiltin The_repr_Box) [head]
+    return $ Qualified [] [] $ Instance head inst
+
+-- | Create the representation for a bare type
+buildBareReprInstance :: SF.Var -> SF.DataTypeLayout -> [SF.Type] -> [SF.ExpSF] -> SF.ExpSF
+buildBareReprInstance tycon layout ty_args args =
+  let info = SF.mkExpInfoWithRepresentation
+             noSourcePos SF.BoxedRepresentation
+      op = SF.ExpSF $ SF.VarE info (SF.unboxedLayoutInfo layout)
+  in if null ty_args && null args
+     then op 
+     else SF.ExpSF $ SF.AppE info op ty_args args
+
+-- | Create the representation for the bare form of a val type
+buildValReprInstance :: SF.Var -> SF.Var -> SF.DataTypeLayout -> [SF.Type] -> [SF.ExpSF] -> SF.ExpSF
+buildValReprInstance stored_info tycon layout ty_args args =
+  let info = SF.mkExpInfoWithRepresentation
+             noSourcePos SF.BoxedRepresentation
+      op = SF.ExpSF $ SF.VarE info (SF.unboxedLayoutInfo layout)
+
+      -- Has type @ValInfo (T as)@
+      ty = tycon `SF.varApp` ty_args
+      val_repr = if null ty_args && null args
+                 then op
+                 else SF.ExpSF $ SF.AppE info op ty_args args
+
+      op2 = SF.ExpSF $ SF.VarE info stored_info
+  in SF.ExpSF $ SF.AppE info op2 [ty] [val_repr]
+
+unboxedReprClassInstance :: (SF.Var -> SF.DataTypeLayout -> [SF.Type] -> [SF.ExpSF] -> SF.ExpSF)
+                         -> [SF.BaseKind]
+                         -> TyConMap
+                         -> TyCon
+                         -> InitM (Qualified (Instance ClassInstance))
+unboxedReprClassInstance build_instance param_kinds tcm tc = do
+  Just dtype <- SF.lookupDataType (tyConSFVar tc)
+  let layout = SF.dataTypeLayout' dtype
+
+  -- Get the type parameters of the data constructor's type signature
+  let typarams = SF.dataTypeParams dtype
+  withTypeBindings tcm typarams $ \tcm' typarams' -> do
+
+    -- Get the size parameters, which will be the info constructor's
+    -- instance constraint
+    let sf_params = [t | SF.KindedType _ t <- SF.layoutSizeParamTypes layout ++
+                                              SF.layoutStaticTypes layout]
+    constraint <- zipWithM (mk_repr_predicate tcm') param_kinds sf_params
+
+    -- Create the class instance
+    let inst = Instance (ConTy tc `appTys` map ConTy typarams') $
+               NewAbstractClassInstance (build_instance (tyConSFVar tc) layout)
+
+    return $ Qualified typarams' constraint inst
+  where
+    mk_repr_predicate :: TyConMap -> SF.BaseKind -> SF.Type -> InitM Predicate
+    mk_repr_predicate tcm SF.BareK ty =
+      instancePredicate TheTC_Repr `liftM` frontendType tcm ty
+
+    -- Size parameters of kind 'val' are not supported
+    mk_repr_predicate tcm SF.ValK _ = mzero
+
 -------------------------------------------------------------------------------
 -- Type constructor initialization
 
@@ -317,7 +441,7 @@ data TyConInitializer =
     --   The frontend cannot create data or case expressions of
     --   abstract class dictionaries.  Abstract classes have empty
     --   method lists and abstract instances.
-  | TyClsInitializer Bool (TyConMap -> InitM (Instances ClassInstance))
+  | TyClsInitializer Bool (SF.TypeEnv -> TyConMap -> InitM (Instances ClassInstance))
 
 initializerClass :: TyConInitializer -> TyConClass
 initializerClass (TyConInitializer {}) = TCCCon
@@ -381,6 +505,9 @@ tyConInitializers =
       , (TheTC_Cartesian,      The_CartesianDict,    False, cartesianClass)
         {- TODO: Vector -}
       ]
+
+dataTypeConstructors :: [BuiltinTyCon]
+dataTypeConstructors = [c | (c, _, TyConInitializer) <- tyConInitializers]
 
 shapeTyFamily, indexTyFamily, sliceTyFamily, cartesianTyFamily ::
   TyConMap -> InitM (Instances TyFamilyInstance)
@@ -454,10 +581,22 @@ cartesianTyFamily tc_map = do
              (tuple2, The_dim2),
              (tuple3, The_dim3)]
 
-reprClass tc_map = do
-  let instances1 =
+reprClass core_env tc_map = do
+  -- Type class instances for normal data type constructors
+  data_instances <-
+    MaybeT $ do
+      -- Ignore data types for which instances can't be constructed
+      xs <- forM dataTypeConstructors $ \c -> do
+        runMaybeT $ reprClassInstance core_env tc_map (builtinTyCon c)
+      return $ Just $ catMaybes xs
+
+  -- Special instance for 'Stream', which is a type function
+  stream_instance <- mk_boxed_instance The_Stream
+
+  {-let instances1 =
         [return $ Instance head (AbstractClassInstance (coreBuiltin inst_var) [])
         | (head, inst_var) <- monomorphic_instances]
+
   instances2 <-
     sequence [polymorphic [Star] $ \ [a] ->
                let head = ConTy (builtinTyCon tycon) @@ ConTy a
@@ -470,7 +609,9 @@ reprClass tc_map = do
     let head = ConTy (builtinTyCon TheTC_Maybe) @@ ConTy a
         inst = AbstractClassInstance (coreBuiltin The_frontend_repr_Maybe) [ConTy a]
         cst = [instancePredicate TheTC_Repr (ConTy a)]
-    in return (cst, Instance head inst)
+    in return (cst, Instance head inst)-}
+
+  -- Instances for tuples
   tuple2_instance <-
     polymorphic [Star, Star] $ \ [a, b] ->
     let head = TupleTy 2 @@ ConTy a @@ ConTy b
@@ -495,9 +636,9 @@ reprClass tc_map = do
                instancePredicate TheTC_Repr (ConTy c),
                instancePredicate TheTC_Repr (ConTy d)]
     in return (cst, Instance head inst)
-  return $
-    [maybe_instance, tuple2_instance, tuple3_instance, tuple4_instance] ++
-    instances1 ++ instances2 ++ instances3
+  return $ data_instances ++ [stream_instance, tuple2_instance, tuple3_instance, tuple4_instance]
+    --[maybe_instance, tuple2_instance, tuple3_instance, tuple4_instance] ++
+    --instances1 ++ instances2 ++ instances3
   where
     monomorphic_instances =
       [(lookupBuiltinVar SF.intV tc_map, The_repr_int),
@@ -532,13 +673,14 @@ reprClass tc_map = do
       let tc@(ConTy tycon) = lookupBuiltinCon thing tc_map
           (dom, rng) = fromArrowKind $ tyConKind tycon
 
-      -- Create a polymorphic instance
+      -- Create a polymorphic boxed instance
       polymorphic dom $ \ty_args ->
         let head = tc `appTys` map ConTy ty_args 
             inst = AbstractClassInstance (coreBuiltin The_repr_Box) [head]
+        --in mkPolyCallE noSourcePos TIBoxed sf_op [mkType head] args
         in return ([], Instance head inst)
 
-eqClass tc_map = do
+eqClass _ tc_map = do
   let int_instance =
         monomorphicClassInstance (lookupBuiltinVar SF.intV tc_map)
         [coreBuiltin The_EqDict_int_eq,
@@ -572,7 +714,7 @@ eqClass tc_map = do
 
   return [int_instance, float_instance, tuple2_instance, tuple3_instance]
 
-ordClass tc_map = do
+ordClass _ tc_map = do
   let int_instance =
         monomorphicClassInstance (lookupBuiltinVar SF.intV tc_map)
         [coreBuiltin The_OrdDict_int_lt,
@@ -600,7 +742,7 @@ ordClass tc_map = do
 
   return [int_instance, float_instance, tuple2_instance]
 
-traversableClass tc_map = do
+traversableClass _ tc_map = do
   let instances1 = [monomorphicClassInstance head methods
                    | (head, methods) <- monomorphic_instances]
   iter_instance <- polymorphic [Star] $ \ [sh] ->
@@ -649,7 +791,7 @@ traversableClass tc_map = do
         [coreBuiltin The_TraversableDict_view_dim3_traverse,
          coreBuiltin The_TraversableDict_view_dim3_build])]
 
-shapeClass tc_map = do
+shapeClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -707,7 +849,7 @@ shapeClass tc_map = do
          coreBuiltin The_ShapeDict_dim3_zipWith4,
          coreBuiltin The_ShapeDict_dim3_slice])]
 
-indexableClass tc_map = do
+indexableClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -746,7 +888,7 @@ indexableClass tc_map = do
         [coreBuiltin The_IndexableDict_barray3_at_point,
          coreBuiltin The_IndexableDict_barray3_get_shape])]
 
-additiveClass tc_map = do
+additiveClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -776,7 +918,7 @@ additiveClass tc_map = do
          coreBuiltin The_AdditiveDict_float_negate,
          coreBuiltin The_AdditiveDict_float_zero])]
 
-multiplicativeClass tc_map = do
+multiplicativeClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -792,7 +934,7 @@ multiplicativeClass tc_map = do
          coreBuiltin The_MultiplicativeDict_float_fromInt,
          coreBuiltin The_MultiplicativeDict_float_one])]
 
-remainderClass tc_map = do
+remainderClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -806,7 +948,7 @@ remainderClass tc_map = do
         [coreBuiltin The_RemainderDict_float_floordiv,
          coreBuiltin The_RemainderDict_float_mod])]
 
-fractionalClass tc_map = do
+fractionalClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -816,7 +958,7 @@ fractionalClass tc_map = do
       [(ConTy $ builtinTyCon TheTC_float,
         [coreBuiltin The_FractionalDict_float_div])]
 
-floatingClass tc_map = do
+floatingClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -834,7 +976,7 @@ floatingClass tc_map = do
          coreBuiltin The_FloatingDict_float_tan,
          coreBuiltin The_FloatingDict_float_pi])]
 
-cartesianClass tc_map = do
+cartesianClass _ tc_map = do
   let instances =
         [monomorphicClassInstance head methods
         | (head, methods) <- monomorphic_instances]
@@ -957,7 +1099,7 @@ mkTypeBindings tc_map core_type_env = do
            TyFamInitializer mk_instances ->
              mkTypeFamilyBinding tc_var (mk_instances tc_map)
            TyClsInitializer abstract mk_instances ->
-             mkTypeClassBinding tc_map tc_var abstract (mk_instances tc_map)
+             mkTypeClassBinding tc_map tc_var abstract (mk_instances core_type_env tc_map)
       return (tc_var, binding)
 
 mkDataTypeBinding :: TyCon -> SF.TypeEnv -> InitM TypeBinding

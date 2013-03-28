@@ -42,6 +42,7 @@ module SystemF.Datatypes.Layout
         MemoryField(..),
         memoryFieldSize,
         memoryLayout,
+        LLDynTypeInfo,
         computeLayout,
         memorySize,
         headerLayout,
@@ -384,9 +385,16 @@ memoryLayout adt = mapMAlgData memory_field adt
 -------------------------------------------------------------------------------
 -- Computing layouts
 
+-- | Dynamic type information in terms of low-level values
+type LLDynTypeInfo = DynTypeInfo SizeAlign SizeAlign L.Val
+
+instance DefaultValue SizeAlign where dummy = emptySizeAlign
+                                     
+instance DefaultValue L.Val where dummy = nativeIntV 0
+
 -- | Determine the physical layout of a type, using the arguments to choose
 --   layouts for unknowns.
-computeLayout :: DynTypeInfo    -- ^ Dynamic type information
+computeLayout :: LLDynTypeInfo  -- ^ Dynamic type information
               -> BaseKind       -- ^ Kind of the data structure
               -> Structure
               -> GenM Layout

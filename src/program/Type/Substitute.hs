@@ -100,12 +100,12 @@ substituteBinder rn (x ::: t) k = do
       -- This seems unnecessary, but can happen --
       -- "Secrets of the GHC Inliner" section 3.2.
       let rn' = exclude x rn
-      assume x t' $ k rn' (x ::: t')
+      assume x t' $ rn' `seq` k rn' (x ::: t')
     Just _  -> do
       -- In scope: rename and add to the substitution
       x' <- newClonedVar x
       let rn' = extend x (VarT x') rn
-      assume x' t' $ k rn' (x' ::: t')
+      assume x' t' $ rn' `seq` k rn' (x' ::: t')
 
 substituteBinders :: EvalMonad m =>
                       TypeSubst
@@ -174,7 +174,7 @@ instance Substitutable Type where
   substituteWorker sb ty =
     case ty
     of VarT v ->
-         return $ fromMaybe ty $ lookup v sb
+         return $! fromMaybe ty $ lookup v sb
        AppT op arg ->
          liftM2 AppT (substitute sb op) (substitute sb arg)
        FunT dom rng ->

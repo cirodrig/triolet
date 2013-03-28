@@ -98,6 +98,7 @@ assumeLocalVar v v_size is_pointerless k =
     return x-}
 
 -- | Code can return a value, or \"return\" by producing a side effect
+--   TODO: eliminate 'NoVal' since everything returns a value now
 data RetVal = RetVal !LL.Val | NoVal
 
 fromRetVal (RetVal v) = v
@@ -232,6 +233,8 @@ lowerLit lit =
        of Just (con, [])
             | con == intV ->
               LL.LitV $ LL.IntL LL.Signed LL.trioletIntSize n
+            | con == uintV ->
+              LL.LitV $ LL.IntL LL.Unsigned LL.trioletIntSize n
      FloatL n ty ->
        case fromVarApp ty
        of Just (con, [])

@@ -21,8 +21,20 @@ import Common.Supply
 import Common.SourcePos
 import Common.Label
 import Type.Var
-import Type.Type(Level(..), HasLevel(..))
+import qualified Type.Type
+import Type.Type(Level(..), HasLevel(..), builtinVarTable)
 import CParser2.AST
+
+-- | If the attribute list contains a 'BuiltinAttr' attribute, look up the
+--   designated builtin variable
+lookupBuiltinVariable :: Identifier Parsed -> Attributes Parsed -> Maybe ResolvedVar
+lookupBuiltinVariable name attrs =
+  case [() | BuiltinAttr <- attrs]
+  of []   -> Nothing
+     [()] -> case lookup name builtinVarTable
+             of Just v  -> Just (ResolvedVar v)
+                Nothing -> error $ "Unrecognized builtin variable '" ++ name ++ "'"
+     _    -> error "At most one builtin variable annotation permitted on a definition"
 
 -------------------------------------------------------------------------------
 -- Name resolution environments
@@ -217,6 +229,13 @@ levelCheck pos expected actual = logErrorIf (e_level /= a_level) message
 -------------------------------------------------------------------------------
 -- Name resolution
 
+resolveAttr :: SourcePos -> Attribute Parsed -> NR (Attribute Resolved)
+resolveAttr pos attr =
+  case attr
+  of _ -> return $ castAttribute attr
+
+resolveAttrs pos xs = mapM (resolveAttr pos) xs
+
 resolveL :: (SourcePos -> a -> NR b) -> Located a -> NR (Located b)
 resolveL f (L pos x) = L pos <$> f pos x
 
@@ -225,16 +244,41 @@ resolveMaybe f (Just x) = liftM Just $ f x
 resolveMaybe _ Nothing  = return Nothing
 
 -- | Create and define a new variable inhabiting the current module.
-newRVarOrCon :: Bool -> SourcePos -> Level -> Identifier Parsed -> NR ResolvedVar
-newRVarOrCon is_con pos lv parsed_name = do
-  modname <- getModuleName
-  id <- fresh
-  let label = plainLabel modname parsed_name
-      v = ResolvedVar (mkVar id (Just label) lv)
-  if is_con
-    then defCon pos parsed_name v
-    else def pos parsed_name v
-  return v
+newRVarOrCon :: Bool            -- ^ True for constructors; False for variables
+             -> SourcePos       -- ^ Location of variable definition
+             -> Maybe ResolvedVar -- ^ Predefined variable to use instead of
+                                  --   creating a new one
+             -> Level           -- ^ Level of variable
+             -> Identifier Parsed -- ^ Name of variable
+             -> NR ResolvedVar
+newRVarOrCon is_con pos builtin_var lv parsed_name =
+  case builtin_var of
+    -- Create a new variable
+    Nothing -> do
+      modname <- getModuleName
+      id <- fresh
+      let label = plainLabel modname parsed_name
+          v = ResolvedVar (mkVar id (Just label) lv)
+      define v
+      return v
+
+    -- Verify that the given variable has the right name and level
+    Just given_v@(ResolvedVar builtin_v)
+      | getLevel builtin_v /= lv ->
+          error "Builtin variable has wrong level"
+
+      | let Just builtin_name = varName builtin_v
+        in labelLocalNameAsString builtin_name /= parsed_name ->
+          error "Builtin variable has wrong name"
+
+      | otherwise -> do
+          define given_v
+          return given_v
+  where
+    define v =
+      if is_con
+      then defCon pos parsed_name v
+      else def pos parsed_name v
 
 newRVar = newRVarOrCon False
 newRCon = newRVarOrCon True
@@ -294,7 +338,7 @@ resolveDomain :: SourcePos -> Level -> Domain Parsed
               -> (Domain Resolved -> NR a) -> NR a
 resolveDomain pos level (Domain binder t) k = do
   t' <- resolveMaybe (resolveLType (succ level)) t
-  enter $ do binder' <- newRVar pos level binder
+  enter $ do binder' <- newRVar pos Nothing level binder
              k (Domain binder' t')
 
 {-
@@ -321,6 +365,7 @@ resolveExp pos expression =
   case expression
   of VarE v -> VarE <$> use v pos
      IntE n -> pure $ IntE n
+     UIntE n -> pure $ UIntE n
      FloatE n -> pure $ FloatE n
      TupleE ts -> TupleE <$> mapM (resolveL resolveExp) ts
      TAppE e t -> do
@@ -336,7 +381,7 @@ resolveExp pos expression =
          return $ LetE binder' rhs' body'
      LetTypeE lhs rhs body -> do
        rhs' <- resolveLType TypeLevel rhs 
-       enter $ do lhs' <- newRVar pos TypeLevel lhs
+       enter $ do lhs' <- newRVar pos Nothing TypeLevel lhs
                   body' <- resolveL resolveExp body
                   return $ LetTypeE lhs' rhs' body'
      LetfunE defs e ->
@@ -356,14 +401,15 @@ resolveExp pos expression =
 resolveDefGroup :: [LDef Parsed] -> ([LDef Resolved] -> NR a) -> NR a
 resolveDefGroup defs k = enter $ do
   -- Create a new variable for each local variable
-  resolved <- sequence [newRVar pos ObjectLevel (dName d) | L pos d <- defs]
+  resolved <- sequence [newRVar pos Nothing ObjectLevel (dName d) | L pos d <- defs]
   
   -- Process local functions and pass them to the continuation
   k =<< zipWithM resolve_def resolved defs
   where
     resolve_def new_var (L pos (Def _ f attrs)) = do
       f' <- resolveFun pos f
-      return $ L pos (Def new_var f' attrs)
+      attrs' <- resolveAttrs pos attrs
+      return $ L pos (Def new_var f' attrs')
 
 resolveAlt :: SourcePos -> Alt Parsed -> NR (Alt Resolved)
 resolveAlt pos (Alt pattern body) = do
@@ -401,17 +447,19 @@ resolveDataConDecl :: SourcePos
                    -> ResolvedVar -- ^ The resolved data constructor
                    -> DataConDecl Parsed
                    -> NR (DataConDecl Resolved)
-resolveDataConDecl pos v' (DataConDecl _ ex_types args) = do
+resolveDataConDecl pos v' (DataConDecl _ ex_types args attrs) = do
+  attrs' <- resolveAttrs pos attrs
   enter $
     withMany (resolveDomainT pos) ex_types $ \ex_types' -> do
       args' <- mapM (resolveLType TypeLevel) args
-      return $ DataConDecl v' ex_types' args'
+      return $ DataConDecl v' ex_types' args' attrs'
 
 resolveEntity :: SourcePos -> ResolvedDeclName -> Entity Parsed
               -> NR (Entity Resolved)
-resolveEntity _ _ (VarEnt ty attrs) = do
+resolveEntity pos _ (VarEnt ty attrs) = do
   ty' <- resolveLType TypeLevel ty
-  return $ VarEnt ty' attrs
+  attrs' <- resolveAttrs pos attrs
+  return $ VarEnt ty' attrs'
 
 resolveEntity _ (GlobalName r_name) (TypeEnt ty) = do
   ty' <- resolveLType KindLevel ty
@@ -423,19 +471,22 @@ resolveEntity _ (GlobalName r_name) (TypeSynEnt ty) = do
 
 resolveEntity pos (DataConNames _ data_con_names) (DataEnt params ty cons attrs) = do
   ty' <- resolveLType KindLevel ty
+  attrs' <- resolveAttrs pos attrs
   withMany (resolveDomainT pos) params $ \params' -> do
     cons' <- sequence [L pos <$> resolveDataConDecl pos v con
                       | (v, L pos con) <- zip data_con_names cons]
-    return $ DataEnt params' ty' cons' attrs
+    return $ DataEnt params' ty' cons' attrs'
 
-resolveEntity _ _ (ConstEnt ty e attrs) = do
+resolveEntity pos _ (ConstEnt ty e attrs) = do
   ty' <- resolveLType TypeLevel ty
+  attrs' <- resolveAttrs pos attrs
   e' <- resolveL resolveExp e
-  return $ ConstEnt ty' e' attrs
+  return $ ConstEnt ty' e' attrs'
 
-resolveEntity _ _ (FunEnt f attrs) = do
+resolveEntity pos _ (FunEnt f attrs) = do
   f' <- resolveL resolveFun f
-  return $ FunEnt f' attrs
+  attrs' <- resolveAttrs pos attrs
+  return $ FunEnt f' attrs'
 
 -- | Resolve a global declaration.  The declared variable should be in the
 --   environment already.
@@ -458,14 +509,26 @@ resolveDeclName (L pos (Decl name ent)) =
      ConstEnt {}                -> object_level_var
      FunEnt {}                  -> object_level_var
   where
-    object_level_var = liftM GlobalName $ newRVar pos ObjectLevel name
-    type_level_con = liftM GlobalName $ newRCon pos TypeLevel name
-    type_level_var = liftM GlobalName $ newRVar pos TypeLevel name
+    -- If the entity is annotated with a builtin variable name, use that.
+    -- Otherwise, create a new variable.
+    builtin = lookupBuiltinVariable name $ entityAttributes ent
+
+    object_level_var =
+      liftM GlobalName $ newRVar pos builtin ObjectLevel name
+    type_level_con =
+      liftM GlobalName $ newRCon pos builtin TypeLevel name
+    type_level_var =
+      liftM GlobalName $ newRVar pos builtin TypeLevel name
     data_definition constructors = do
-      tycon <- newRCon pos TypeLevel name
-      datacons <- sequence [newRCon pos ObjectLevel $ dconVar d
-                           | L _ d <- constructors]
+      tycon <- newRCon pos builtin TypeLevel name
+      datacons <- mapM data_constructor constructors
       return $ DataConNames tycon datacons
+
+    -- Look up data constructors in the builtin table.
+    -- Create a new variable if not builtin.
+    data_constructor (L _ d) =
+      let bi = lookupBuiltinVariable (dconVar d) $ dconAttributes d
+      in newRCon pos bi ObjectLevel $ dconVar d
 
 -- | Resolve top-level declarations, with limited error recovery
 resolveDecls decls = do

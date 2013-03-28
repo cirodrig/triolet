@@ -19,8 +19,10 @@ import Common.Label
 import Builtins.TypeFunctions
 import CParser2.AST
 import CParser2.AdjustTypes
+import SystemF.Datatypes.Driver
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
+import SystemF.PrintMemoryIR
 import qualified SystemF.SpecToMem as SystemF
 import qualified SystemF.Typecheck
 import qualified SystemF.TypecheckMem
@@ -54,7 +56,7 @@ runExprTranslation s type_synonyms type_functions tenv m =
   runTypeTranslation s tenv type_synonyms type_functions m
 
 -- | Convert function definition attributes
-defAttributes :: [Attribute] -> (SystemF.DefAnn -> SystemF.DefAnn)
+defAttributes :: [Attribute Resolved] -> (SystemF.DefAnn -> SystemF.DefAnn)
 defAttributes attrs ann =
   case check_attrs 
   of () -> foldr insert_attribute ann attrs
@@ -91,6 +93,10 @@ defAttributes attrs ann =
     insert_attribute InlinePostfinalAttr ann =
       ann {SystemF.defAnnInlinePhase = SystemF.InlPostfinal}
 
+    -- The 'builtin' attribute is only used during parsing
+    insert_attribute BuiltinAttr ann =
+      ann
+
     insert_attribute _ _ =
       internalError "Unexpected function attribute"
 
@@ -98,7 +104,7 @@ defAttributes attrs ann =
 --   to properties of the annotation.
 --   If functions are is labeled as exported.
 applyDefAttributes :: Bool
-                   -> [Attribute]
+                   -> [Attribute Resolved]
                    -> SystemF.Def t SystemF.Mem
                    -> SystemF.Def t SystemF.Mem
 applyDefAttributes is_global attrs def = SystemF.modifyDefAnnotation f def 
@@ -205,6 +211,9 @@ expr (L pos expression) =
      IntE n ->
        let e = SystemF.ExpM $ SystemF.LitE inf (SystemF.IntL n int_type)
        in return (e, int_type)
+     UIntE n ->
+       let e = SystemF.ExpM $ SystemF.LitE inf (SystemF.IntL n uint_type)
+       in return (e, uint_type)
      FloatE n ->
        let e = SystemF.ExpM $ SystemF.LitE inf (SystemF.FloatL n float_type)
        in return (e, float_type)
@@ -261,6 +270,7 @@ expr (L pos expression) =
        return (SystemF.ExpM $ SystemF.CoerceE inf ft tt body', tt)
   where
     int_type = Type.intT
+    uint_type = Type.uintT
     float_type = Type.floatT
     inf = SystemF.mkExpInfo pos
 
@@ -569,13 +579,36 @@ createCoreModule var_supply mod@(Module decls) = do
   kind_env <- kindTranslation var_supply type_subst builtin_type_functions mod
 
   -- Create a type environment with type information.
-  -- The kind environment is used while gathering type information.
+  -- The kind environment is used while gathering type information, but is
+  -- not part of the final type environment.
+  -- Type constructors' info variables are annotated onto the type
+  -- constructors at this point.
   type_env <- typeTranslation var_supply type_subst kind_env builtin_type_functions mod
+
+  -- Compute size parameters in this type environment, updating 'type_env'
+  type_info_defs <- computeDataTypeInfo var_supply type_env
+
+  -- Add size parameters to the type environment
+  let type_info_types = [(v, SystemF.entityType ens)
+                        | SystemF.Def v _ ens <- type_info_defs]
+
+  forM_ type_info_types $ \(v, t) -> insertGlobalType type_env v t
 
   -- Translate functions using this type environment
   mem_env <- runTypeEnvM type_env freezeTypeEnv :: IO (ITypeEnvBase UnboxedMode)
-  mem_module <- runExprTranslation var_supply type_subst builtin_type_functions type_env $
-                 declGlobals decls
+  mem_module <- do
+    m <- runExprTranslation var_supply type_subst builtin_type_functions type_env $
+         declGlobals decls
+
+    -- Add generated definitions to the module
+    let new_defs = case SystemF.modDefs m
+                   of [SystemF.Rec ds] ->
+                        [SystemF.Rec (type_info_defs ++ ds)]
+    return $ m {SystemF.modDefs = new_defs}
+
+  -- DEBUG
+  putStrLn "Parsed module"
+  print $ pprModule mem_module
 
   -- Construct final expressions and type environments
   (spec_env, sf_env) <- convertFromMemTypeEnv name_table mem_env

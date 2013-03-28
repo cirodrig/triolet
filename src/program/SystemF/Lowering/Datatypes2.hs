@@ -337,12 +337,12 @@ memDynamicObjectType :: MemLayout -> GenLower (LL.Val, LL.Val, LL.Val)
 memDynamicObjectType (StaticMemLayout vt) =
   return (nativeWordV $ LL.sizeOf vt,
           nativeWordV $ LL.alignOf vt,
-          boolV $ LL.pointerlessness vt)
+          booleanV $ LL.pointerlessness vt)
 
 memDynamicObjectType IndirectMemLayout =
   return (nativeWordV $ LL.sizeOf LL.PointerType,
           nativeWordV $ LL.alignOf LL.PointerType,
-          boolV False)
+          booleanV False)
 
 memDynamicObjectType (DynamicMemLayout l) = l
 
@@ -361,10 +361,10 @@ memDynamicFieldType :: MemLayout
                     -> Maybe (GenLower (LL.DynamicFieldType, LL.Val))
 memDynamicFieldType (StaticMemLayout vt) = Just $ do
   return (toDynamicFieldType $ LL.valueToFieldType vt,
-          boolV $ LL.pointerlessness vt)
+          booleanV $ LL.pointerlessness vt)
 
 memDynamicFieldType IndirectMemLayout = Just $ do
-  return (LL.PrimField LL.PointerType, boolV False)
+  return (LL.PrimField LL.PointerType, booleanV False)
 
 memDynamicFieldType (DynamicMemLayout l) = Just $ do
   (size, alignment, pointerless) <- l
@@ -377,7 +377,7 @@ dynamicFieldType (MemLayout ml) = memDynamicFieldType ml
 dynamicFieldType (ValLayout VErased) = Nothing
 dynamicFieldType (ValLayout (VLayout t)) =
   Just $ return (toDynamicFieldType $ LL.valueToFieldType t,
-                 boolV $ LL.pointerlessness t)
+                 booleanV $ LL.pointerlessness t)
 
 staticFieldType :: Layout -> Maybe (LL.StaticFieldType, Bool)
 staticFieldType (MemLayout ml) = memStaticFieldType ml
@@ -398,7 +398,7 @@ dynamicRecordLayout mutable layouts
       recd <- case mutable
               of LL.Mutable -> createMutableDynamicRecord fields
                  LL.Constant -> createConstDynamicRecord fields
-      pointerless <- foldM primAnd (boolV True) pointerlesss
+      pointerless <- foldM primAnd (booleanV True) pointerlesss
       return (recd, pointerless)
   | otherwise =
       -- Create a static record layout
@@ -407,7 +407,7 @@ dynamicRecordLayout mutable layouts
           record_type = case mutable
                         of LL.Mutable -> LL.mutableStaticRecord field_types
                            LL.Constant -> LL.constStaticRecord field_types
-      in return (toDynamicRecord record_type, boolV $ or pointerlesss)
+      in return (toDynamicRecord record_type, booleanV $ or pointerlesss)
   where
     is_dynamic (MemLayout (DynamicMemLayout _)) = True
     is_dynamic _ = False
@@ -709,7 +709,7 @@ unionLayout layouts =
       mapM memDynamicObjectType layouts
     max_size <- computeMaximum sizes
     max_align <- computeMaximum alignments
-    is_pointerless <- foldM primAnd (boolV True) pointerlessnesses
+    is_pointerless <- foldM primAnd (booleanV True) pointerlessnesses
     return (max_size, max_align, is_pointerless)
 
 -- | Layout of an object that consists of undifferentiated bytes
@@ -958,7 +958,7 @@ objectLayout mem_layout =
       recd <- mk_object_record layout
       -- The header has pointers that must be tracked,
       -- so pointerlessness is False
-      return (recd, boolV False)
+      return (recd, booleanV False)
 
     mk_object_record layout = do
       (payload, _) <- case memDynamicFieldType layout of Just m -> m

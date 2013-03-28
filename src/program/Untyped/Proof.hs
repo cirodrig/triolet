@@ -338,11 +338,14 @@ instanceTerm prd@(IsInst tycon inst_type) inst c_ty_args c_premises
              i_ty_args i_premises = do
   -- Construct a dictionary
   Just cls <- getTyConClass tycon
-  liftIO $ putStrLn ("instanceTerm " ++ show (length c_premises) ++ " " ++ show (length i_premises)) -- DEBUG
   case instBody inst of
     AbstractClassInstance fun type_args ->
       -- Create a function call
       return $ instantiate type_args fun
+
+    NewAbstractClassInstance fun ->
+      -- Create a function call
+      return $ instantiate_fun fun
 
     MethodsInstance methods ->
       -- Create a class dictionary
@@ -360,6 +363,13 @@ instanceTerm prd@(IsInst tycon inst_type) inst c_ty_args c_premises
           fun_repr = polyThingRepr TIBoxed type_args fun_args
           fun = mkVarE noSourcePos fun_repr f_var
       in mkPolyCallE noSourcePos TIBoxed fun fun_ty_args fun_args
+
+    -- Apply a function to the instance type arguments and methods
+    instantiate_fun f =
+      let fun_ty_args = map mkType i_ty_args
+          fun_args = map (uncurry proofExp) i_premises
+          fun_repr = polyThingRepr TIBoxed i_ty_args fun_args
+      in mkMkExpE noSourcePos TIBoxed f fun_ty_args fun_args
 
 instanceTerm _ _ _ _ _ _ = internalError "instanceTerm: Not a class instance"
 

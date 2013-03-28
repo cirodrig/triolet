@@ -169,7 +169,7 @@ caseOfSomeIndInt scrutinee mk_body =
 
 defineAndInspectIndInt int_value mk_body =
   let define_indexed_int =
-        varAppE (coreBuiltin The_defineIntIndex) [] [int_value]
+        mkVarAppE (coreBuiltin The_defineIntIndex) [] [int_value]
   in caseOfSomeIndInt define_indexed_int mk_body
 
 caseOfFinIndInt :: RW ExpM
@@ -375,7 +375,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
     count_expr =
       mkConE defaultExpInfo view_stream
       [appExp
-       (varAppE (coreBuiltin The_view_generate)
+       (mkVarAppE (coreBuiltin The_view_generate)
         [VarT $ coreBuiltin The_list_dim]
         [mkVarE (coreBuiltin The_ShapeDict_list_dim)])
        [boxedIntType]
@@ -465,7 +465,7 @@ rwAsBare inf [bare_type] [repr, arg]
       whnf_type <- reduceToWhnf bare_type
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
-          | ty_op `isCoreBuiltin` The_Ref ->
+          | ty_op == refV ->
               return $ Just $ construct_stored_box boxed_type
         _ -> do
           -- If the boxed type is "Boxed t", then
@@ -484,7 +484,7 @@ rwAsBare inf [bare_type] [repr, arg]
     --
     -- > storedBox boxed_type arg
     construct_stored_box boxed_type =
-      conE inf (VarCon (coreBuiltin The_ref) [boxed_type] []) [arg]
+      conE inf (VarCon ref_conV [boxed_type] []) [arg]
 
     -- Create the expression
     --
@@ -494,7 +494,7 @@ rwAsBare inf [bare_type] [repr, arg]
         [mkAlt (coreBuiltin The_boxed)
          [whnf_type]
          (\ [] [unboxed_ref] ->
-           varAppE (coreBuiltin The_copy) [whnf_type]
+           mkVarAppE (coreBuiltin The_copy) [whnf_type]
            [return repr, mkVarE unboxed_ref])]
 
 rwAsBare inf [ty] [repr, arg, ret] = do
@@ -520,7 +520,7 @@ rwAsBox inf [bare_type] [repr, arg]
       whnf_type <- reduceToWhnf bare_type
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
-          | ty_op `isCoreBuiltin` The_Ref ->
+          | ty_op == refV ->
               fmap Just $ deconstruct_stored_box boxed_type
         _ -> do
           -- If the boxed type is "Boxed t", then construct the value
@@ -540,7 +540,7 @@ rwAsBox inf [bare_type] [repr, arg]
       localE bare_type (return arg)
         (\arg_val ->
           caseE (mkVarE arg_val) 
-          [mkAlt (coreBuiltin The_ref)
+          [mkAlt ref_conV
            [boxed_type]
            (\ [] [boxed_ref] -> mkVarE boxed_ref)])
     

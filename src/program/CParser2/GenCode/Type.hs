@@ -26,13 +26,20 @@ import qualified Type.Eval as Type
 import qualified Type.Type as Type
 import Type.Var
 
+data VarAttrs =
+  VarAttrs
+  { isConlike :: !Bool          -- ^ @True@ if conlike
+  }
+
 -- | Extract information from an attribute list on a variable declaration
-fromVarAttrs :: [Attribute] -> Bool
+fromVarAttrs :: [Attribute Resolved] -> VarAttrs
 fromVarAttrs attrs =
   -- Start with default attributes and modify given each attribute
-  foldl' interpret False attrs
+  foldl' interpret empty_attrs attrs
   where
-    interpret st ConlikeAttr = True
+    empty_attrs = VarAttrs False
+
+    interpret st ConlikeAttr = st {isConlike = True}
 
     -- Ignore inlining attributes
     interpret st InlineAttr = st
@@ -40,6 +47,9 @@ fromVarAttrs attrs =
     interpret st InlineDimensionalityAttr = st
     interpret st InlineFinalAttr = st
     interpret st InlinePostfinalAttr = st
+
+    -- Ignore builtin attribute
+    interpret st BuiltinAttr = st
 
     interpret st _ =
       error "Unexpected attribute on type declaration"
@@ -54,7 +64,6 @@ toBaseKind pos k = do
                 | v == Type.valV  -> return Type.ValK
                 | v == Type.outV  -> return Type.OutK
     _ -> Type.throwTypeError $ Type.UninhabitedError pos Type.KindLevel k
-  
 
 genTypes ts = mapAndUnzipM genType ts
 
@@ -153,12 +162,13 @@ translateDataConDecl data_type_con (L pos decl) =
         dcon_var = toVar $ dconVar decl
     return (DataConDescr dcon_var ex_types fields)
 
-varEnt :: Var -> LType Resolved -> [Attribute] -> TransT UpdateTypeEnv
+varEnt :: Var -> LType Resolved -> [Attribute Resolved] -> TransT UpdateTypeEnv
 varEnt ident ty attrs = do
-  let conlike = fromVarAttrs attrs
+  let !(VarAttrs conlike) = fromVarAttrs attrs
   (ty', _) <- genType ty
-  let update = UpdateTypeEnv (\env -> insertGlobalTypeWithProperties env ident ty' conlike)
-  return $! conlike `seq` update
+
+  let update1 = UpdateTypeEnv (\env -> insertGlobalTypeWithProperties env ident ty' conlike)
+  return update1
 
 typeEnt ident kind = do
   kind' <- genKind kind

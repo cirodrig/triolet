@@ -444,6 +444,8 @@ data ClassInstance =
     -- > f t1 a b x y
     AbstractClassInstance SF.Var [HMType]
 
+  | NewAbstractClassInstance ([SF.Type] -> [SF.ExpSF] -> SF.ExpSF)
+
     -- | A class instance that is a data structure
     --
     -- > ClsDict t (f1 a b x y) (f2 a b x y)

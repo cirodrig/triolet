@@ -82,7 +82,7 @@ getSFInfo :: VariableNameTable -> SFInfo
 getSFInfo tbl =
   let v_Init   = initConV
       v_Stored = lookupVariableByName tbl "Stored"
-      v_Ref    = lookupVariableByName tbl "Ref"
+      v_Ref    = refV
       v_Boxed  = lookupVariableByName tbl "Boxed"
       v_AsBox  = lookupVariableByName tbl "AsBox"
       v_AsBare = lookupVariableByName tbl "AsBare"

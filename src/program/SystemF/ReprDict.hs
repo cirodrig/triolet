@@ -302,7 +302,7 @@ createDictEnv = do
     (arrT `typeApp` [VarT arg1, VarT arg2],
      createDict_array arg1 arg2)
   ref_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (coreBuiltin The_Ref) [VarT arg],
+    (varApp refV [VarT arg],
      createDict_ref arg)
   
   index_dict <- DictEnv.pattern1 $ \arg ->
@@ -523,7 +523,7 @@ createBoxedDictPattern con arity = do
     DictEnv.pattern param_vars (match_type param_vars) (create_dict param_vars)
   where
     match_type param_vars =
-      varApp (coreBuiltin The_Ref) [varApp con (map VarT param_vars)]
+      varApp refV [varApp con (map VarT param_vars)]
 
     -- Create a function call expression
     --

@@ -94,6 +94,8 @@ evExp expression =
                   evType from_t <*> evType to_t <*> evExp b)
      U.ArrayTE info t es ->
        ExpSF <$> (ArrayE <$> evExpInfo info <*> evType t <*> mapM evExp es)
+     U.MkExpTE info f ts es ->
+       f <$> mapM evType ts <*> mapM evExp es
      U.PlaceholderTE ph ->
        evExp =<< evPlaceholder ph
      

@@ -37,6 +37,17 @@ module Type.Environment
         TypeEnv,
         BoxedTypeEnv,
         DataType(..),
+        dataTypeLayout',
+        unboxedLayoutInfo,
+        boxedLayoutInfo,
+        layoutInfoVars,
+        dataTypeInfoType,
+        boxedDataTypeLayout,
+        unboxedDataTypeLayout,
+        DataTypeLayout(..),
+        sizeParamType,
+        infoType,
+        infoTycon,
         dataTypeFullKind,
         DataConType(..),
         dataConTyParams,
@@ -71,7 +82,7 @@ module Type.Environment
         locallyInsertType,
         insertDataType,
         insertTypeFunction,
-        setSizeParameters,
+        setLayout,
        
         -- * New conversion routines
         isAdapterCon,
@@ -84,6 +95,7 @@ import Prelude hiding(mapM)
 import Control.Applicative
 import Control.Monad hiding(mapM)
 import Control.Monad.Reader hiding(mapM)
+import Control.Monad.Writer hiding(mapM)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.HashTable as HT
@@ -176,8 +188,16 @@ instance TypeEnvMonad m => TypeEnvMonad (MaybeT m) where
   type EvalBoxingMode (MaybeT m) = EvalBoxingMode m
   getTypeEnv = lift getTypeEnv
   liftTypeEnvM m = lift (liftTypeEnvM m)
-  --askTypeEnv f = lift (askTypeEnv f)
-  --assumeWithProperties v t b (MaybeT m) = MaybeT (assumeWithProperties v t b m)
+
+instance TypeEnvMonad m => TypeEnvMonad (ReaderT r m) where
+  type EvalBoxingMode (ReaderT r m) = EvalBoxingMode m
+  getTypeEnv = lift getTypeEnv
+  liftTypeEnvM m = lift (liftTypeEnvM m)
+
+instance (Monoid w, TypeEnvMonad m) => TypeEnvMonad (WriterT w m) where
+  type EvalBoxingMode (WriterT w m) = EvalBoxingMode m
+  getTypeEnv = lift getTypeEnv
+  liftTypeEnvM m = lift (liftTypeEnvM m)
 
 -- | A simple model of TypeEnvMonad
 newtype TypeEnvM b a = TypeEnvM (ReaderT (MTypeEnvBase b) IO a)
@@ -313,17 +333,16 @@ data DataType =
     --   constructing a value and when deconstructing it.
   , dataTypeParams :: [Binder]
 
-    -- | Size parameter types along with their kinds.
-    --   This list holds the type itself, not the type of its size
-    --   (e.g., @int@ rather than @SizeAlignVal int@).
-    --   A 'Nothing' value means the size parameter types have not been 
-    --   computed yet.
-  , dataTypeSizeParamTypes :: !(Maybe [KindedType])
+    -- | Memory layout information for this type.  The layout is
+    --   'Nothing' if the layout information hasn't been computed.
+    --   The layout is always 'Nothing' for abstract data types.
+    --   The layout is a predefined value for non-algebraic data types.
+  , dataTypeLayout :: !(Maybe DataTypeLayout)
 
     -- | The kind of a value whose type is a
     --   fully applied instance of this data type.
   , dataTypeKind :: !BaseKind
-    
+
     -- | Abstractness of the data type.
     --   If a data type is abstract, then the compiler should not introduce
     --   data constructor expressions or case expressions for this type.
@@ -341,6 +360,105 @@ data DataType =
   , dataTypeDataConstructors :: [Var]
 
   }
+
+dataTypeLayout' :: DataType -> DataTypeLayout
+dataTypeLayout' dtype =
+  case dataTypeLayout dtype
+  of Just l -> l
+     Nothing -> internalError "dataTypeLayout': Layout is not set"
+
+-- | Get the info variable for an unboxed data type
+unboxedLayoutInfo :: DataTypeLayout -> Var
+unboxedLayoutInfo (DataTypeLayout _ _ HasUnboxedInfo (UnboxedInfo i)) = i
+
+-- | Get the info variable for a boxed data type's data constructor
+boxedLayoutInfo :: DataTypeLayout -> Var -> Var
+boxedLayoutInfo (DataTypeLayout _ _ HasBoxedInfo (BoxedInfo assoc_list)) con =
+  let Just i = lookup con assoc_list
+  in i
+
+-- | Get all info variables from a 'layout'
+layoutInfoVars :: DataTypeLayout -> [Var]
+layoutInfoVars (DataTypeLayout _ _ info_type info) =
+  case info_type
+  of HasUnboxedInfo -> case info of UnboxedInfo i -> [i]
+     HasBoxedInfo   -> case info of BoxedInfo xs  -> map snd xs
+
+-- | Get the type of a data type's info type constructor function
+dataTypeInfoType :: DataType -> Type
+dataTypeInfoType dtype =
+  let l = dataTypeLayout' dtype
+  in infoConstructorType dtype l
+
+-- | Create the type of an info constructor function
+infoConstructorType :: DataType -> DataTypeLayout -> Type
+infoConstructorType dtype layout =
+  forallType (dataTypeParams dtype) $
+  funType size_param_types $
+  varApp info_tycon [VarT v | v ::: _ <- dataTypeParams dtype]
+  where
+    size_param_types = map sizeParamType $ layoutSizeParamTypes layout
+    info_tycon = infoTycon (dataTypeKind dtype)
+
+data DataTypeLayoutInfoType info where
+  HasBoxedInfo :: DataTypeLayoutInfoType BoxedInfo
+  HasUnboxedInfo :: DataTypeLayoutInfoType UnboxedInfo
+
+-- | Info variables associated with a boxed 'DataType'.
+--   The list is an association list from data constructor to info variable.
+newtype BoxedInfo = BoxedInfo [(Var, Var)]
+
+-- | An info variable constructor associated with an unboxed 'DataType'.
+newtype UnboxedInfo = UnboxedInfo Var
+
+  -- | Memory layout information associated with a 'DataType'.
+data DataTypeLayout = forall info.
+  DataTypeLayout
+  { -- | Types whose sizes must be known dynamically when creating or 
+    --   inspecting objects.
+    --   This list holds the type itself, not the type of its size
+    --   (e.g., @int@ rather than @SizeAlignVal int@).
+    layoutSizeParamTypes :: [KindedType]
+
+    -- | Types whose sizes must be known statically in order to manipulate
+    --   objects.
+  , layoutStaticTypes :: [KindedType]
+
+  , layoutInfoType :: !(DataTypeLayoutInfoType info)
+
+    -- | Global variables that construct run-time type information for
+    --   this data type.
+    --   This is a 'Var', 'BoxedInfo', or 'UnboxedInfo'. 
+    --   This constructor's type is given by 'layoutInfoType'.
+  , layoutInfo :: !info
+  }
+
+unboxedDataTypeLayout size_param static inf =
+  DataTypeLayout size_param static HasUnboxedInfo (UnboxedInfo inf)
+
+boxedDataTypeLayout size_param static inf =
+  DataTypeLayout size_param static HasBoxedInfo (BoxedInfo inf)
+
+-- | Get the type holding size information for the given kind
+sizeParamType :: KindedType -> Type
+sizeParamType (KindedType k ty) =
+  case k
+  of ValK  -> sizeAlignValT `AppT` ty
+     BareK -> sizeAlignT `AppT` ty
+
+-- | Get the type holding size information for the given kind
+infoType :: KindedType -> Type
+infoType (KindedType k ty) =
+  case k
+  of ValK  -> valInfoT `AppT` ty
+     BareK -> bareInfoT `AppT` ty
+
+-- | Get the type constructor that constructs info types for
+--   the given base kind
+infoTycon :: BaseKind -> Var
+infoTycon ValK  = valInfoV
+infoTycon BareK = bareInfoV
+infoTycon BoxK  = boxInfoV
 
 -- | Get the kind of a data type constructor
 dataTypeFullKind :: DataType -> Kind
@@ -453,7 +571,11 @@ mkEmptyTypeEnv :: IO (MTypeEnvBase b)
 mkEmptyTypeEnv = do ht <- HT.new (==) hashVar
                     return $ MTypeEnv ht
 
--- | A Type environment containing the variables defined in "Type.Type"
+-- | An environment containing type assignments for predefined variables.
+--
+--   Variables appear in this environment if they can't be defined in
+--   @coremodule@ or if they are needed during parsing or type checking.
+--   These variables are defined in "Type.Type".
 mkWiredInTypeEnv :: IO (MTypeEnvBase UnboxedMode)
 mkWiredInTypeEnv = do
   env@(MTypeEnv ht) <- mkEmptyTypeEnv
@@ -474,56 +596,88 @@ mkWiredInTypeEnv = do
                (arrV, TyConTypeAssignment arr_data_type),
                (intV, TyConTypeAssignment int_data_type),
                (uintV, TyConTypeAssignment uint_data_type),
-               (floatV, TyConTypeAssignment float_data_type)]
+               (floatV, TyConTypeAssignment float_data_type),
+               (refV, TyConTypeAssignment ref_data_type),
+               (ref_conV, DataConTypeAssignment ref_datacon_type)]
 
     store_data_type =
       DataType { dataTypeCon = storeV
                , dataTypeParams = []
-               , dataTypeSizeParamTypes = Just []
+               , dataTypeLayout = Just layout
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
+      where
+        layout = unboxedDataTypeLayout [] [] valInfo_storeV
 
     arr_data_type =
       DataType { dataTypeCon = arrV
-               , dataTypeParams = [(arrTypeParameter1 ::: intindexT),
-                                   (arrTypeParameter2 ::: bareT)]
-               , dataTypeSizeParamTypes = Just [KindedType IntIndexK
-                                                (VarT arrTypeParameter1),
-                                                KindedType BareK
-                                                (VarT arrTypeParameter2)]
+               , dataTypeParams = [(arrTypeParameter1V ::: intindexT),
+                                   (arrTypeParameter2V ::: bareT)]
+               , dataTypeLayout = Just layout
                , dataTypeKind = BareK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
+      where
+        layout = unboxedDataTypeLayout
+                 [KindedType IntIndexK arrTypeParameter1T,
+                  KindedType BareK arrTypeParameter2T]
+                 []
+                 bareInfo_arrV
 
     int_data_type =
       DataType { dataTypeCon = intV
                , dataTypeParams = []
-               , dataTypeSizeParamTypes = Just []
+               , dataTypeLayout = Just int_layout
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
+      where
+        int_layout = unboxedDataTypeLayout [] [] valInfo_intV
 
     uint_data_type =
       DataType { dataTypeCon = uintV
                , dataTypeParams = []
-               , dataTypeSizeParamTypes = Just []
+               , dataTypeLayout = Just uint_layout
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
+      where
+        uint_layout = unboxedDataTypeLayout [] [] valInfo_uintV
 
     float_data_type =
       DataType { dataTypeCon = floatV
                , dataTypeParams = []
-               , dataTypeSizeParamTypes = Just []
+               , dataTypeLayout = Just float_layout
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
+      where
+        float_layout = unboxedDataTypeLayout [] [] valInfo_floatV
+
+    ref_data_type =
+      DataType { dataTypeCon = refV
+               , dataTypeParams = [refTypeParameterV ::: boxT]
+               , dataTypeLayout = Just ref_layout
+               , dataTypeKind = BareK
+               , dataTypeIsAbstract = False
+               , dataTypeIsAlgebraic = True
+               , dataTypeDataConstructors = [ref_conV]}
+      where
+        ref_layout = unboxedDataTypeLayout
+                     [KindedType BoxK refTypeParameterT] []
+                     bareInfo_refV
+
+    ref_datacon_type =
+      DataConType { dataConCon = ref_conV
+                  , dataConExTypes = []
+                  , dataConFields = [(refTypeParameterT, BoxK)]
+                  , dataConType = ref_data_type}
 
 locallyInsertType :: MonadIO m =>
                      MTypeEnvBase b -- ^ Type environment
@@ -617,13 +771,17 @@ insertTypeFunction :: MTypeEnvBase b ->
 insertTypeFunction (MTypeEnv ht) v ty f = do 
   HT.insert ht v (TyFunTypeAssignment ty f)
 
--- | Set a data type's size parameters
-setSizeParameters :: TypeEnvMonad m => Var -> [KindedType] -> m ()
-setSizeParameters v size_params = do 
+-- | Set a data type's layout information
+setLayout :: TypeEnvMonad m => Var -> DataTypeLayout -> m ()
+setLayout v layout = do 
   MTypeEnv ht <- getTypeEnv
   liftIO $ do
     Just (TyConTypeAssignment dtype) <- HT.lookup ht v
-    let dtype' = dtype {dataTypeSizeParamTypes = Just size_params}
+    -- Error if size parameters are already computed
+    unless (isNothing $ dataTypeLayout dtype) $
+      internalError $ "setSizeParameters: Already set: " ++ show v
+
+    let dtype' = dtype {dataTypeLayout = Just layout}
     HT.update ht v (TyConTypeAssignment dtype')
     return ()
 
@@ -790,7 +948,7 @@ isAdapterCon v = v `elem` adapters
   where
     adapters = [initConV,       -- Init
                 coreBuiltin The_Stored,
-                coreBuiltin The_Ref,
+                refV,           -- Ref
                 coreBuiltin The_Boxed,
                 coreBuiltin The_AsBox,
                 coreBuiltin The_AsBare]
@@ -848,15 +1006,21 @@ specializeTypeEnv basekind_f kind_f type_f tybind_f (MTypeEnv m) = do
 
     kind_assignment (DataConTypeAssignment _) = Nothing
 
-    data_type (DataType con params size_params k
+    data_type (DataType con params l k
                is_abstract is_algebraic ctors) = do
       params' <- specializeBinders kind_f params
-      size_params' <- mapM (mapM size_parameter) size_params
+      l' <- mapM layout l
       k' <- basekind_f k
-      return $ DataType con params' size_params' k'
+      return $ DataType con params' l' k'
         is_abstract is_algebraic ctors
 
-    size_parameter (KindedType k t) = KindedType <$> basekind_f k <*> type_f t
+    layout (DataTypeLayout size_params fixed_types info_type info) =
+      DataTypeLayout <$> mapM kinded_type size_params
+                     <*> mapM kinded_type fixed_types
+                     <*> pure info_type
+                     <*> pure info
+
+    kinded_type (KindedType k t) = KindedType <$> basekind_f k <*> type_f t
 
     -- Process everything at value level.
     -- The kind environment has already been translated, and it is used

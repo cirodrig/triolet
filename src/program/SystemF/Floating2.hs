@@ -58,10 +58,10 @@ isFloatableFunction v args =
   where
     floatable_op =
       isReprCon v ||
-      v `isCoreBuiltin` The_addI ||
-      v `isCoreBuiltin` The_subI ||
-      v `isCoreBuiltin` The_max_int ||
-      v `isCoreBuiltin` The_min_int
+      v == addIV ||
+      v == subIV ||
+      v `isCoreBuiltin` The_maxI ||
+      v `isCoreBuiltin` The_minI
 
 -- | Return 'True' if it is okay to float a function call in which
 --   this expression appears as a subexpression.

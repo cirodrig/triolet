@@ -78,7 +78,7 @@ instance Monad (Compute ev deriv) where
     g ctx s'
 
 instance TypeEnvMonad (Compute ev deriv) where
-  type TypeFunctionInfo (Compute ev deriv) = TypeFunction
+  type EvalBoxingMode (Compute ev deriv) = UnboxedMode
   getTypeEnv = Compute (\ctx s -> return (s, ctxTypeEnv ctx))
   askTypeEnv f = Compute (\ctx s -> return (s, f $ ctxTypeEnv ctx))
   assumeWithProperties v t b (Compute f) = Compute $ \ctx s ->

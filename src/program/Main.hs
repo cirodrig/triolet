@@ -207,7 +207,7 @@ compilePyonToPyonMem compile_flags path text = do
     putStrLn "System F"
     print $ SystemF.pprModule sf_mod
 
-  _ <- SystemF.TypecheckSF.typeCheckModule sf_mod
+  -- _ <- SystemF.TypecheckSF.typeCheckModule sf_mod
 
   -- Convert to explicit memory representation  
   repr_mod <- SystemF.insertCoercions sf_mod

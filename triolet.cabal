@@ -136,6 +136,7 @@ Executable triolet
     SystemF.Build
     SystemF.Context
     SystemF.ConSpecialization
+    SystemF.Datatypes.Driver
     --SystemF.Datatypes.TypeLayout
     --SystemF.Datatypes.ComputeLayout
     --SystemF.Datatypes.RuntimeLayout
@@ -143,6 +144,7 @@ Executable triolet
     SystemF.Datatypes.Layout
     SystemF.Datatypes.Size
     SystemF.Datatypes.Structure
+    SystemF.Datatypes.TypeObject
     SystemF.Datatypes.Util
     SystemF.Demand
     SystemF.DemandAnalysis
@@ -182,6 +184,7 @@ Executable triolet
     CParser2.GenCode2
     CParser2.LexData
     CParser2.Lexer
+    CParser2.MoveFunctions
     CParser2.Parser
     CParser2.Resolve
     LLParser.AST
@@ -228,6 +231,7 @@ Executable triolet
     LowLevel.RemoveUnits
     LowLevel.Rename
     LowLevel.Types
+    Type.BuiltinVar
     Type.Compare
     Type.Environment
     Type.Error

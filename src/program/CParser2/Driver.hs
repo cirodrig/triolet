@@ -30,7 +30,8 @@ predefinedVarDetails :: [(String, Var)]
 predefinedVarDetails =
   [(name v, v) | v <- [valV, boxV, bareV, outV, intindexV, initV,
                        initConV, outPtrV, storeV, posInftyV, negInftyV,
-                       arrV, intV, uintV, floatV]]
+                       arrV, intV, uintV, floatV,
+                       refV, ref_conV]]
   where
     name v =
       case varName v

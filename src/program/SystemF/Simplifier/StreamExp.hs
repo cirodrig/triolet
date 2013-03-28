@@ -1813,7 +1813,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
   of OpSE inf (GenerateOp _ gen_ty) _ [shape, f] [] Nothing -> do
        -- Create a @for@ loop
        tenv <- getTypeEnv
-       varAppE (coreBuiltin The_primitive_list_dim_fold)
+       mkVarAppE (coreBuiltin The_primitive_list_dim_fold)
          [acc_ty]
          [mkVarE acc_repr_var,
           return shape,
@@ -1829,7 +1829,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
      OpSE inf (TraverseListOp ty) [repr] [l] [] Nothing -> do
        -- Create a fold over the list
        tenv <- getTypeEnv
-       varAppE (coreBuiltin The_llist_fold)
+       mkVarAppE (coreBuiltin The_llist_fold)
          [ty, acc_ty]
          [return repr,
           mkVarE acc_repr_var,
@@ -1859,7 +1859,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
 
      OpSE inf (EmptyOp _ _) _ _ [] Nothing ->
        -- Return the accumulator
-       varAppE (coreBuiltin The_copy) [acc_ty] [mkVarE acc_repr_var, return acc]
+       mkVarAppE (coreBuiltin The_copy) [acc_ty] [mkVarE acc_repr_var, return acc]
 
      OpSE inf (ChainOp _) [_] [] [s1, s2] Nothing -> do
        -- Fold over the first stream, then over the second
@@ -1906,7 +1906,7 @@ sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner source =
 
        -- Create a @for@ loop that uses the combiner
        tenv <- getTypeEnv
-       varAppE (coreBuiltin The_primitive_list_dim_fold)
+       mkVarAppE (coreBuiltin The_primitive_list_dim_fold)
          [acc_ty]
          [mkVarE acc_repr_var,
           return shp,

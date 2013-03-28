@@ -522,8 +522,8 @@ uint16V n
       internalError "uint16V: Integer out of range"
   | otherwise = LitV $ IntL Unsigned S16 $ fromIntegral n
 
-boolV :: Bool -> Val
-boolV b = LitV (BoolL b)
+booleanV :: Bool -> Val
+booleanV b = LitV (BoolL b)
 
 -------------------------------------------------------------------------------
 -- Record operations

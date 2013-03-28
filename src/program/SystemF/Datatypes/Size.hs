@@ -136,14 +136,14 @@ dummyLayoutInfo xs =
 
 genCase :: DataType             -- ^ Data type to deconstruct
         -> [Var]                -- ^ Type parameters
-        -> DynTypeInfo          -- ^ Layout info for each unknown type
+        -> LLDynTypeInfo        -- ^ Layout info for each unknown type
         -> [ValueType]          -- ^ Return type of case expression
         -> L.Val                            -- ^ Scrutinee
         -> (Int -> [L.Val] -> GenM [L.Val]) -- ^ Branch code generators
         -> GenM [L.Val]                     -- ^ Case code generator
 genCase dtype ty_params v_layouts result_types scrutinee handlers = do
   -- Compute algebraic data type layout
-  DataLayout adt <- dataTypeLayout dtype ty_params v_layouts
+  DataLayout adt <- algebraicDataLayout dtype ty_params v_layouts
 
   -- Handle value and reference types differently 
   case dataTypeKind dtype of
@@ -161,12 +161,12 @@ genCase dtype ty_params v_layouts result_types scrutinee handlers = do
 -- | Create a constructor function for an algebraic data type
 genConstructor :: DataType             -- ^ Data type to deconstruct
                -> [Var]                -- ^ Type parameters
-               -> DynTypeInfo          -- ^ Layout info for each unknown type
+               -> LLDynTypeInfo -- ^ Layout info for each unknown type
                -> Int                  -- ^ Constructor index
                -> GenM L.Val           -- ^ Constructor code generator
 genConstructor dtype ty_params v_layouts con_index = do
   -- Compute algebraic data type layout
-  DataLayout adt <- dataTypeLayout dtype ty_params v_layouts
+  DataLayout adt <- algebraicDataLayout dtype ty_params v_layouts
 
   -- Handle value and reference types differently 
   case dataTypeKind dtype of
@@ -181,8 +181,8 @@ genConstructor dtype ty_params v_layouts con_index = do
       mem_adt <- memoryLayout adt
       memoryConstructor mem_adt con_index
 
-dataTypeLayout :: DataType -> [Var] -> DynTypeInfo -> GenM Layout
-dataTypeLayout dtype params v_layouts =
+algebraicDataLayout :: DataType -> [Var] -> LLDynTypeInfo -> GenM Layout
+algebraicDataLayout dtype params v_layouts =
   let t = dataTypeCon dtype `varApp` map VarT params
       k = dataTypeKind dtype
   in computeLayout v_layouts k =<< computeStructure t

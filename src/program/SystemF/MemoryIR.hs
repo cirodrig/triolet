@@ -23,8 +23,8 @@ module SystemF.MemoryIR
         Alt(..),
         Fun(..),
         PatM, ExpM, AltM, FunM,
-        varE, litE, appE, conE,
-        varE', litE', appE', conE',
+        varE, litE, appE, conE, varAppE,
+        varE', litE', appE', conE', varAppE',
         unpackVarAppM, unpackDataConAppM, isDataConAppM,
         assumePatM, assumePatMs,
         assumeTyPat, assumeTyPats,
@@ -128,10 +128,13 @@ appE inf op type_args args = ExpM (AppE inf op type_args args)
 conE :: ExpInfo -> ConInst -> [ExpM] -> ExpM
 conE inf op args = ExpM (ConE inf op args)
 
+varAppE inf op ty_args args = appE inf (varE' op) ty_args args
+
 varE' = varE defaultExpInfo
 litE' = litE defaultExpInfo
 appE' = appE defaultExpInfo
 conE' = conE defaultExpInfo
+varAppE' = varAppE defaultExpInfo
 
 {- Obsolete; 'BaseAlt' is isomorphic to this tuple type now
 -- | Construct a case alternative given a 'MonoCon' and the other required 

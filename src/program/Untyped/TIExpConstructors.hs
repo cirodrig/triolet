@@ -312,6 +312,14 @@ mkDictE pos cls inst_type scs methods =
   mkConE pos TIBoxed (clsSFDictCon cls) [inst_type] [] []
   (scs ++ methods)
 
+-- | Create a mixed System F and type-inferred expression. 
+--   After the given types and expressions are converted to System F,
+--   they will be applied to the function to create an expression.
+mkMkExpE :: SourcePos -> TIRepr -> ([SF.Type] -> [SF.ExpSF] -> SF.ExpSF)
+         -> [TIType] -> [TIExp] -> TIExp
+mkMkExpE pos repr f ty_args args =
+  MkExpTE (tiInfo pos repr) f ty_args args
+
 mkAnnotation :: FunctionAnn -> SF.DefAnn
 mkAnnotation (FunctionAnn _ inline) =
   let insert_inline_ann d = d {SF.defAnnInlineRequest = inline}

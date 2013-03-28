@@ -60,8 +60,9 @@ rules :- ----------------------------------------------------------------------
 
 -- Numbers
 
-<0,att>	@signed @fractional @exponent?	{ posn mkFloat }
-<0,att>	@signed			{ posn mkInt }
+<0,att>	@signed @fractional @exponent? / @eow	{ posn mkFloat }
+<0,att>	@signed / @eow		{ posn mkInt }
+<0,att>	@signed "U" / @eow	{ posn mkUInt }
 
 -- Identifiers
 

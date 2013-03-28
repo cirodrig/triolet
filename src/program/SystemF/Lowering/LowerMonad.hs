@@ -100,7 +100,7 @@ mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
 mkGlobalReprEnv = do
   -- All boxed objects use the same representation
   box_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (coreBuiltin The_Ref) [VarT arg], mk_boxed_dict arg)
+    (varApp refV [VarT arg], mk_boxed_dict arg)
 
   -- Value dictionaries
   let int_dict = mono_dict (stored_type intT) LL.the_bivar_repr_int

@@ -90,6 +90,12 @@ int = PS.tokenPrim showToken nextPosition matchAndReturn
       matchAndReturn (Token _ (IntTok n)) = Just n
       matchAndReturn _                    = Nothing
 
+uint :: P Integer
+uint = PS.tokenPrim showToken nextPosition matchAndReturn
+    where
+      matchAndReturn (Token _ (UIntTok n)) = Just n
+      matchAndReturn _                    = Nothing
+
 float :: P Double
 float = PS.tokenPrim showToken nextPosition matchAndReturn
     where
@@ -146,10 +152,10 @@ parenOrTuple p = do
 -------------------------------------------------------------------------------
 -- * Attributes
 
-attributeList :: P [Attribute]
+attributeList :: P (Attributes Parsed)
 attributeList = option [] (match AttributeTok >> commaList attr)
 
-attr :: P Attribute
+attr :: forall ix. P (Attribute Parsed)
 attr = do
   name <- identifier
   fromMaybe (fail "Unrecognized attribute") $ lookup name attr_table
@@ -162,7 +168,8 @@ attr = do
        ("inline_dimensionality", return InlineDimensionalityAttr),
        ("inline_sequential", return InlineSequentialAttr),
        ("inline_final", return InlineFinalAttr),
-       ("inline_postfinal", return InlinePostfinalAttr)]
+       ("inline_postfinal", return InlinePostfinalAttr),
+       ("builtin", return BuiltinAttr)]
 
 -------------------------------------------------------------------------------
 -- * Type parsing
@@ -446,7 +453,7 @@ appExp = do
           operand <- atomicExp  -- Non-atomic expressions must be parenthesized
           apply loc (L loc $ AppE f operand)
 
-atomicExp = varE <|> intE <|> floatE <|> parenExp
+atomicExp = varE <|> intE <|> uintE <|> floatE <|> parenExp
 
 -- An expression in parentheses
 parenExp = do
@@ -458,6 +465,9 @@ varE = located (VarE <$> identifier) <?> "variable"
 
 intE :: P PLExp
 intE = located (IntE <$> int) <?> "integer"
+
+uintE :: P PLExp
+uintE = located (UIntE <$> uint) <?> "integer"
 
 floatE :: P PLExp
 floatE = located (FloatE <$> float) <?> "floating-point number"
@@ -546,9 +556,10 @@ pDataDecl = located $ do
 pDataConDecl :: P (LDataConDecl Parsed)
 pDataConDecl = located $ do
   datacon <- identifier
-  (concat -> ex_types) <- commaList pDomains
+  ex_types <- typeParameters
   args <- commaList pType
-  return $ DataConDecl datacon ex_types args
+  attrs <- attributeList
+  return $ DataConDecl datacon ex_types args attrs
 
 pTypeDecl :: P PLDecl
 pTypeDecl = located $ PS.try $ do

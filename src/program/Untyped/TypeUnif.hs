@@ -402,10 +402,13 @@ instance CTerm ClassMethod where
 
 instance CTerm ClassInstance where
   freeC (AbstractClassInstance _ ts) = freeC ts
+  freeC (NewAbstractClassInstance _) = return Set.empty
   freeC (MethodsInstance _) = return Set.empty
 
   substituteC subst (AbstractClassInstance v ts) =
     AbstractClassInstance v <$> substituteC subst ts
+
+  substituteC subst inst@(NewAbstractClassInstance _) = return inst
 
   substituteC subst inst@(MethodsInstance _) = return inst
 
@@ -539,6 +542,9 @@ pprClassInstance (AbstractClassInstance v ts) = do
                then empty
                else text "with" <+> sep ts'
   return $ text "Abstract instance" <+> text (show v) <+> ts_doc
+
+pprClassInstance (NewAbstractClassInstance f) =
+  return $ text "New abstract instance"
 
 pprClassInstance (MethodsInstance vs) =
   return $ braces $ fsep $ punctuate comma $ map (text . show) vs

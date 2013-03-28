@@ -527,7 +527,7 @@ boxedMemTF bi = typeFunction 1 compute_boxed
       case fromVarApp arg
       of Just (op, args')
            | isBuiltin bi The_AsBare op ||
-             isBuiltin bi The_Ref op ->
+             op == refV ->
                -- AsBox (AsBare t)   =  t
                -- AsBox (StoredBox t)  =  t
                case args'
@@ -591,6 +591,6 @@ bareMemTF bi = typeFunction 1 compute_bare
                  _ -> cannot_reduce
       where
         stored_type =
-          return $ varApp (getBuiltin bi The_Ref) [arg]
+          return $ varApp refV [arg]
         cannot_reduce =
           return $ varApp (getBuiltin bi The_AsBare) [arg]
