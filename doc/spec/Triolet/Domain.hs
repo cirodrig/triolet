@@ -5,18 +5,64 @@ range operations.  These operations are used in slicing, zips, and domain
 transfromations.
 -}
 
-import Control.Monad
+{-# LANGUAGE GADTs, TypeFamilies #-}
+module Triolet.Domain where
+
 import Data.Maybe
-import Debug.Trace
-import Test.HUnit
 import Test.QuickCheck
-import Test.QuickCheck.Test
+
+-------------------------------------------------------------------------------
+-- Domains
+
+-- | Domains of sequences.
+
+--   Exists in coremodule, named "list_dim"
+data ListDim = ListDim !(Maybe Int)
+             deriving(Eq, Show)
+
+-- | The domain of nonempty subsets of 'Bool'
+data ChainDim = ChainBoth | ChainFirst | ChainLast
+
+-- Exists in coremodule, named "dim0"
+data Dim0 = Dim0
+
+-- Exists in coremodule, named "dim1"
+data Dim1 = Dim1 !Interval !LinearMap
+          deriving(Eq, Show)
+
+-- Exists in coremodule, named "dim2"
+data Dim2 = Dim2 !Dim1 !Dim1
+
+-- Exists in coremodule, named "dim3"
+data Dim3 = Dim3 !Dim1 !Dim1 !Dim1
+
+-- Exists in coremodule, named "index"
+type family Index d
+
+type instance Index ListDim = Int
+type instance Index ChainDim = Bool
+type instance Index Dim0 = ()
+type instance Index Dim1 = Int
+type instance Index Dim2 = (Int, Int)
+type instance Index Dim3 = (Int, Int, Int)
+
+type family Offset d
+
+type instance Offset ListDim = Int
+type instance Offset ChainDim = ()
+type instance Offset Dim0 = ()
+type instance Offset Dim1 = ()
+type instance Offset Dim2 = ()
+type instance Offset Dim3 = ()
+
+-------------------------------------------------------------------------------
+-- Slices and integer linear algebra
 
 -- | A slice has optional lower and upper bounds.  Optionally, a slice
 --   has an optional stride.
-data Slice = Slice (Maybe Int) (Maybe Int) (Maybe (Maybe Int))
+data SliceObject = SliceObject (Maybe Int) (Maybe Int) (Maybe (Maybe Int))
 
--- | An integer linear mapping @{x |-> sx + a | x <- Z}@.
+-- | An integer linear mapping @{x |-> s*x + a | x <- Z}@.
 data LinearMap =
   LinearMap
   { lsStride :: !Int
@@ -32,16 +78,6 @@ negationMap = LinearMap (-1) 0
 -- | Decide whether the int is in the range of the linear map
 inRange :: Int -> LinearMap -> Bool
 n `inRange` LinearMap s a = n `mod` s == a `mod` s
-
-instance Arbitrary LinearMap where
-  arbitrary = do
-    -- The magic number 610 is less than the cube root of 2^31.  This choice
-    -- is to avoid numeric overflow.
-    a <- choose (-610, 610)
-    -- Choose a nonzero stride
-    s <- do x <- choose (-610, 609)
-            return $! if x < 0 then x else x + 1
-    return $! LinearMap s a
 
 class Linear a where
   -- | Apply a linear mapping to a value
@@ -62,18 +98,6 @@ instance Linear LinearMap where
   LinearMap t b +< LinearMap s a =
     LinearMap (t `div` s) ((b - a) `div` s)
 
--- | A linear transformation between two strided sequences consists of
---   un-applying one transformation, then applying another.
-data Transform = Transform !LinearMap !LinearMap
-              deriving(Show)
-
-invertTransform :: Transform -> Transform
-invertTransform (Transform s t) = Transform t s
-
-instance Linear Transform where
-  Transform s1 s2 +> s3 = Transform s1 (s2 +> s3)
-  Transform s1 s2 +< s3 = Transform s1 (s2 +< s3)
-
 -- | An interval @{x | l <= x < u}@.  The upper bound is
 --   greater than or equal to the lower bound.  'Nothing' represents negative
 --   infinity for the lower bound, or positive infinity for the upper bound.
@@ -91,6 +115,31 @@ i `inInterval` Interval l u = inL && inU
     inL = maybe True (i >=) l
     inU = maybe True (i <) u
 
+intersectInterval :: Interval -> Interval -> Interval
+intersectInterval (Interval l1 l2) (Interval h1 h2) = let
+  l = case l1
+      of Nothing -> l2
+         Just x -> case l2
+                   of Nothing -> l1
+                      Just y -> Just (max x y)
+  h = case h1
+      of Nothing -> h2
+         Just x -> case h2
+                   of Nothing -> h1
+                      Just y -> Just (min x y)
+  nonempty = Interval l h
+
+  -- Ensure that l is less than or equal to h
+  in case l
+     of Just x ->
+          case h
+          of Just y ->
+               if x > y
+               then emptyInterval
+               else nonempty
+             _ -> nonempty
+        _ -> nonempty
+
 instance Linear Interval where
   Interval l h +> m =
     if reversing m
@@ -102,36 +151,7 @@ instance Linear Interval where
     then Interval (fmap (+< m) h) (fmap (+< m) l)
     else Interval (fmap (+< m) l) (fmap (+< m) h)
 
-class Domain a where
-  emptyDomain :: a
-  intersection :: a -> a -> a
-
-instance Domain Interval where
-  emptyDomain = Interval (Just 0) (Just 0)
-  intersection (Interval l1 l2) (Interval h1 h2) = let
-    l = case l1
-        of Nothing -> l2
-           Just x -> case l2
-                     of Nothing -> l1
-                        Just y -> Just (max x y)
-    h = case h1
-        of Nothing -> h2
-           Just x -> case h2
-                     of Nothing -> h1
-                        Just y -> Just (min x y)
-    nonempty = Interval l h
-
-    -- Ensure that l is less than or equal to h
-    in case l
-       of Just x ->
-            case h
-            of Just y ->
-                 if x > y
-                 then emptyDomain
-                 else nonempty
-               _ -> nonempty
-          _ -> nonempty
-
+{-
 -- | A list domain is described by its size only.  The size may be infinite.
 newtype ListDomain = ListDomain (Maybe Int)
                    deriving(Eq, Show)
@@ -141,11 +161,22 @@ newtype ListDomain = ListDomain (Maybe Int)
 --   and less than the stride.  The bounds are in the range of the linear map.
 data ArrayDomain = ArrayDomain !Interval !LinearMap
                  deriving(Eq, Show)
+-}
+
+emptyDim1 :: Dim1
+emptyDim1 = Dim1 emptyInterval identityMap
+
+intersectDim1 :: Dim1 -> Dim1 -> Dim1
+intersectDim1 (Dim1 i1 m1) (Dim1 i2 m2) =
+  case intersectLinearMaps m1 m2
+  of Nothing -> emptyDim1
+     Just m3 -> let i3 = trimInterval (intersectInterval i1 i2) m3
+                in Dim1 i3 m3
 
 -- | Slice a list.  Return a new list domain and a map from an element of the 
 --   slice to the original domain.
-sliceList :: Slice -> ListDomain -> (ListDomain, LinearMap)
-sliceList (Slice m_slice_lo m_slice_hi m_m_stride) (ListDomain list_size) = let
+sliceList :: SliceObject -> ListDim -> (ListDim, LinearMap)
+sliceList (SliceObject m_slice_lo m_slice_hi m_m_stride) (ListDim list_size) = let
   -- Direction is 'True' if slice counts upward, 'False' if slice
   -- counts downward.  Inclusiveness of the slice bounds depends on 
   -- the direction.
@@ -218,19 +249,19 @@ sliceList (Slice m_slice_lo m_slice_hi m_m_stride) (ListDomain list_size) = let
                         in Just $ (abs_delta + abs_stride - 1) `div` abs_stride
 
             in case size 
-               of Just n | n < 0 -> (ListDomain (Just 0), identityMap)
-                  _ -> (ListDomain size, linear_map)
+               of Just n | n < 0 -> (ListDim (Just 0), identityMap)
+                  _ -> (ListDim size, linear_map)
 
 -- | Convert a slice to an array domain.
-sliceToDomain :: Slice -> ArrayDomain
-sliceToDomain (Slice m_slice_lo m_slice_hi m_m_stride) = let
+sliceToDomain :: SliceObject -> Dim1
+sliceToDomain (SliceObject m_slice_lo m_slice_hi m_m_stride) = let
   stride = fromMaybe 1 $ fromMaybe Nothing m_m_stride
   alignment = fromMaybe 0 m_slice_lo `mod` stride
   map = LinearMap stride alignment
   interval = trimInterval (Interval m_slice_lo m_slice_hi) map
   in if stride <= 0 
      then error "Array slice must have positive stride"
-     else ArrayDomain interval map
+     else Dim1 interval map
 
 -- | Coerce the interval's bounds to members of the linear map.  The
 --   intersection of the input interval with the linear map's range is equal
@@ -311,80 +342,43 @@ extgcd_x a b = step 0 1 a b
       x'  = lastx - q * x
       in step x' x b r
 
-instance Domain ArrayDomain where
-  emptyDomain = ArrayDomain emptyDomain identityMap
-  intersection (ArrayDomain i1 m1) (ArrayDomain i2 m2) =
+{-
+instance Domain Dim1 where
+  emptyDomain = Dim1 emptyDomain identityMap
+  intersection (Dim1 i1 m1) (Dim1 i2 m2) =
     case intersectLinearMaps m1 m2
     of Nothing -> emptyDomain
        Just m3 -> let i3 = trimInterval (intersection i1 i2) m3
-                  in ArrayDomain i3 m3
+                  in Dim1 i3 m3
+-}
 
 -- | Slice an array.  Return the domain of the sliced subarray.
-sliceArray :: Slice -> ArrayDomain -> ArrayDomain
-sliceArray slice d = intersection (sliceToDomain slice) d
+sliceArray :: SliceObject -> Dim1 -> Dim1
+sliceArray slice d = intersectDim1 (sliceToDomain slice) d
 
-tests :: Test
-tests = TestList
-  [ let prop :: LinearMap -> LinearMap -> Bool
-        prop s1 s2 = s1 == s1 +> s2 +< s2
-    in TestCase $ (fmap isSuccess $ quickCheckResult prop) @?
-       "Invertibility of (+>)"
-  , TestCase $ assertBool "range(100)[1:]" $
-    sliceList (Slice (Just 1) Nothing Nothing) (ListDomain (Just 100)) ==
-    (ListDomain (Just 99), LinearMap 1 1)
 
-    -- List slice tests
-  , TestCase $ assertBool "range(100)[::-1]" $
-    sliceList (Slice Nothing Nothing (Just (Just (-1)))) (ListDomain (Just 100)) ==
-    (ListDomain (Just 100), LinearMap (-1) 99)
-  , TestCase $ assertBool "range(100)[::-2]" $
-    sliceList (Slice Nothing Nothing (Just (Just (-2)))) (ListDomain (Just 100)) ==
-    (ListDomain (Just 50), LinearMap (-2) 99)
-  , TestCase $ assertBool "range(100)[::-3]" $
-    sliceList (Slice Nothing Nothing (Just (Just (-3)))) (ListDomain (Just 100)) ==
-    (ListDomain (Just 34), LinearMap (-3) 99)
-  
-    -- Array slice tests
-  , TestCase $ assertBool "array stride (::1)" $
-    sliceToDomain (Slice Nothing Nothing (Just (Just 1))) ==
-    ArrayDomain (Interval Nothing Nothing) (LinearMap 1 0)
-  , TestCase $ assertBool "array stride (0:100:3)" $
-    sliceToDomain (Slice (Just 0) (Just 100) (Just (Just 3))) ==
-    ArrayDomain (Interval (Just 0) (Just 102)) (LinearMap 3 0)
-    
-    -- Trim test.
-    -- The intersection of I and M is the same as the intersection
-    -- of (trimInterval I M) and M.
-  , let prop :: Gen Property
-        prop = do
-          l <- choose (-50, 50)
-          n <- choose (0, 20)
-          s <- choose (1, 20)
-          a <- choose (0, s - 1)
-          let i = Interval (Just l) (Just (l + n))
-              m = LinearMap s a
-              i' = trimInterval i m
-          return $ forAll (choose (-100, 100)) $ \x ->
-            (x `inInterval` i && x `inRange` m) ==
-            (x `inInterval` i' && x `inRange` m)
-    in TestCase $ (fmap isSuccess $ quickCheckResult prop) @?
-       "Trimming does not change interval membership"
+-------------------------------------------------------------------------------
+-- For testing
 
-    -- Intersection test.
-    -- X is a member of (intersectLinearMaps m1 m2)
-    -- iff X is a member of both m1 and m2.
-  , let prop :: Gen (Int -> Bool)
-        prop = do
-          s1 <- arbitrary `suchThat` \s -> lsStride s > 0
-          s2 <- arbitrary `suchThat` \s -> lsStride s > 0
-          let s3 = intersectLinearMaps s1 s2
-          return $ \n ->
-            (n `inRange` s1 && n `inRange` s2) ==
-            (case s3
-             of Nothing -> False
-                Just s -> n `inRange` s)
-    in TestCase $ (fmap isSuccess $ quickCheckResult prop) @?
-       "Intersection of linear maps is a subset"
-  ]
+-- | A linear transformation between two strided sequences consists of
+--   un-applying one transformation, then applying another.
+data Transform = Transform !LinearMap !LinearMap
+              deriving(Show)
 
-main = runTestTT tests
+invertTransform :: Transform -> Transform
+invertTransform (Transform s t) = Transform t s
+
+instance Linear Transform where
+  Transform s1 s2 +> s3 = Transform s1 (s2 +> s3)
+  Transform s1 s2 +< s3 = Transform s1 (s2 +< s3)
+
+instance Arbitrary LinearMap where
+  arbitrary = do
+    -- The magic number 610 is less than the cube root of 2^31.  This choice
+    -- is to avoid numeric overflow.
+    a <- choose (-610, 610)
+    -- Choose a nonzero stride
+    s <- do x <- choose (-610, 609)
+            return $! if x < 0 then x else x + 1
+    return $! LinearMap s a
+
