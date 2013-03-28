@@ -271,6 +271,7 @@ usePreprocessor pp verb lbi search_paths path =
           preprocessor = ppCabalPreprocessor pp (buildInfo exe) lbi
           prerequisites = ppPrerequisites pp lbi dst_path
           rule = dst_path ?= do
+            Shake.need [found_path]
             Shake.need prerequisites
             liftIO $ runSimplePreProcessor preprocessor
                      found_path dst_path verb
