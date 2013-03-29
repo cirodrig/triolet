@@ -710,7 +710,7 @@ boxedScatter @(a b : box) (rep : Repr (AsBare b))
   (init : a)
   -> Scatter (StuckRef a) (AsBare b) =
   mk_scatter @(StuckRef a) @(AsBare b) @(StuckRef a) @(NoneType -> a) @(a -> a)
-  (repr_StuckRef @a)
+  (unboxedinfo StuckRef @a)
   -- Initializer
   (\ (init_f : NoneType -> a) (p : OutPtr (StuckRef a)) -> EffTok.
      toEffTok @(StuckRef a) (stuckRef @a (init_f None) p))
@@ -2426,8 +2426,6 @@ repr_blist @(a : bare) -> Repr (blist a)
 repr_Complex : forall a : bare. Repr a -> Repr (Complex a);
 
 repr_Maybe : forall a : bare. Repr a -> Repr (Maybe a);
--- repr_MaybeVal_int : Repr (MaybeVal int);
--- repr_MaybeVal_MaybeVal_int : Repr (MaybeVal (MaybeVal int));
 
 -- This is only used for coercions.  Since we don't have
 -- kind polymorphism, we cheat a bit on the type.
@@ -2615,22 +2613,22 @@ frontend_repr_barray3 @(a : box) -> Repr (barray3 (AsBare a)) =
 frontend_repr_Tuple1 @(a : box)
   (rep_a : Repr (AsBare a))
   -> Repr (Tuple1 (AsBare a)) =
-  repr_Tuple1 @(AsBare a) rep_a;
+  unboxedinfo Tuple1 @(AsBare a) rep_a;
 
 frontend_repr_Tuple2 @(a b : box)
   (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b))
   -> Repr (Tuple2 (AsBare a) (AsBare b)) =
-  repr_Tuple2 @(AsBare a) @(AsBare b) rep_a rep_b;
+  unboxedinfo Tuple2 @(AsBare a) @(AsBare b) rep_a rep_b;
 
 frontend_repr_Tuple3 @(a b c : box)
   (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b)) (rep_c : Repr (AsBare c))
   -> Repr (Tuple3 (AsBare a) (AsBare b) (AsBare c)) =
-  repr_Tuple3 @(AsBare a) @(AsBare b) @(AsBare c) rep_a rep_b rep_c;
+  unboxedinfo Tuple3 @(AsBare a) @(AsBare b) @(AsBare c) rep_a rep_b rep_c;
 
 frontend_repr_Tuple4 @(a b c d : box)
   (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b)) (rep_c : Repr (AsBare c)) (rep_d : Repr (AsBare d))
   -> Repr (Tuple4 (AsBare a) (AsBare b) (AsBare c) (AsBare d)) =
-  repr_Tuple4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) rep_a rep_b rep_c rep_d;
+  unboxedinfo Tuple4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) rep_a rep_b rep_c rep_d;
 
 frontend_repr_arr @(n : intindex) @(e : box)
   (size : Boxed (Stored int)) (repr_e : Repr (AsBare e))

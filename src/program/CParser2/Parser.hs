@@ -453,12 +453,17 @@ appExp = do
           operand <- atomicExp  -- Non-atomic expressions must be parenthesized
           apply loc (L loc $ AppE f operand)
 
-atomicExp = varE <|> intE <|> uintE <|> floatE <|> parenExp
+atomicExp = varE <|> intE <|> uintE <|> floatE <|>
+            unboxedInfoE <|> boxedInfoE <|> parenExp
 
 -- An expression in parentheses
 parenExp = do
   pos <- locatePosition
   either id (\es -> L pos (TupleE es)) `liftM` parenOrTuple pExp
+
+unboxedInfoE = match UnboxedInfoTok *> located (UnboxedInfoE <$> identifier)
+
+boxedInfoE = match BoxedInfoTok *> located (BoxedInfoE <$> identifier)
 
 varE :: P PLExp
 varE = located (VarE <$> identifier) <?> "variable"

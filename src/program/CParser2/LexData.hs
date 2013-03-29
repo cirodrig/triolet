@@ -14,8 +14,8 @@ data Token = Token !SourcePos !Tok
 
 -- | A token produced by lexical analysis
 data Tok =
-    IntTok {-# UNPACK #-} !Integer
-  | UIntTok {-# UNPACK #-} !Integer
+    IntTok !Integer
+  | UIntTok !Integer
   | FloatTok {-# UNPACK #-} !Double
   | IdentTok String
   | OperTok String
@@ -35,6 +35,7 @@ data Tok =
   | ColonTok
   | ArrowTok
   | AttributeTok
+  | BoxedInfoTok
   | CaseTok
   | CoerceTok
   | DataTok
@@ -48,6 +49,7 @@ data Tok =
   | OfTok
   | ThenTok
   | TypeTok
+  | UnboxedInfoTok
   | WildTok
     deriving(Eq)
 
@@ -75,6 +77,7 @@ showTok t =
        ColonTok     -> "colon"
        ArrowTok     -> "arrow"
        AttributeTok -> "'attribute'"
+       BoxedInfoTok -> "'boxedinfo'"
        CaseTok      -> "'case'"
        CoerceTok    -> "'coerce'"
        DataTok      -> "'data'"
@@ -88,6 +91,7 @@ showTok t =
        OfTok        -> "'of'"
        ThenTok      -> "'then'"
        TypeTok      -> "'type'"
+       UnboxedInfoTok -> "'unboxedinfo'"
        WildTok      -> "underscore"
 
 showToken :: Token -> String

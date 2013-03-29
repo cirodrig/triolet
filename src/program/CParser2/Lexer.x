@@ -67,6 +67,7 @@ rules :- ----------------------------------------------------------------------
 -- Identifiers
 
 <0>     "attribute" / @eow	{ posnTok AttributeTok }
+<0>     "boxedinfo" / @eow	{ posnTok BoxedInfoTok }
 <0>     "case" / @eow		{ posnTok CaseTok }
 <0>     "coerce" / @eow		{ posnTok CoerceTok }
 <0>     "data" / @eow		{ posnTok DataTok }
@@ -80,6 +81,7 @@ rules :- ----------------------------------------------------------------------
 <0>     "of" / @eow		{ posnTok OfTok }
 <0>	"then" / @eow		{ posnTok ThenTok }
 <0>     "type" / @eow		{ posnTok TypeTok }
+<0>     "unboxedinfo" / @eow	{ posnTok UnboxedInfoTok }
 <0>	"_" / @eow		{ posnTok WildTok }
 <0>	@word			{ posn mkIdent }
 

@@ -204,10 +204,8 @@ expr (L pos expression) =
        case m_data_con of
          Just (type_con, data_con) ->
            translateCon inf type_con data_con (toVar v) [] []
-         Nothing -> do
-           let v' = toVar v
-           ty <- liftTypeEvalM $ SystemF.TypecheckMem.tcVar pos v'
-           return (SystemF.varE inf v', ty)
+         Nothing ->
+           variable_with_type $ toVar v
      IntE n ->
        let e = SystemF.ExpM $ SystemF.LitE inf (SystemF.IntL n int_type)
        in return (e, int_type)
@@ -263,16 +261,36 @@ expr (L pos expression) =
      ExceptE t -> do
        t' <- typeInExp t
        return (SystemF.ExpM $ SystemF.ExceptE inf t', t')
+
      CoerceE from_t to_t body -> do
        ft <- typeInExp from_t
        tt <- typeInExp to_t
        (body', _) <- expr body
        return (SystemF.ExpM $ SystemF.CoerceE inf ft tt body', tt)
+
+     -- Resolve info variables to simple variables
+     BoxedInfoE data_con -> do
+       let con = toVar data_con
+       m_datatype <- lookupDataConWithType con
+       data_type <- case m_datatype
+                    of Just (data_type, _) -> return data_type
+                       Nothing -> error $ "No info for data constructor " ++ show con
+       variable_with_type $ boxedLayoutInfo (dataTypeLayout' data_type) con
+     UnboxedInfoE type_con -> do
+       m_datatype <- lookupDataType (toVar type_con)
+       data_type <- case m_datatype
+                    of Just data_type -> return data_type
+                       Nothing -> error $ "No info for type constructor" ++ show (toVar type_con)
+       variable_with_type $ unboxedLayoutInfo (dataTypeLayout' data_type)
   where
     int_type = Type.intT
     uint_type = Type.uintT
     float_type = Type.floatT
     inf = SystemF.mkExpInfo pos
+
+    variable_with_type v = do
+      ty <- liftTypeEvalM $ SystemF.TypecheckMem.tcVar pos v
+      return (SystemF.varE inf v, ty)
 
 -- | Translate an application to an appropriate term.
 --   It's either a function application or data constructor application.

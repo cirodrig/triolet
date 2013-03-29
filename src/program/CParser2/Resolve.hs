@@ -398,6 +398,9 @@ resolveExp pos expression =
        body' <- resolveL resolveExp body
        return $ CoerceE from_t' to_t' body'
 
+     BoxedInfoE v -> BoxedInfoE <$> use v pos
+     UnboxedInfoE v -> UnboxedInfoE <$> use v pos
+
 resolveDefGroup :: [LDef Parsed] -> ([LDef Resolved] -> NR a) -> NR a
 resolveDefGroup defs k = enter $ do
   -- Create a new variable for each local variable

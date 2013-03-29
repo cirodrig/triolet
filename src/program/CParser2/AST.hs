@@ -179,6 +179,10 @@ data Exp a =
   | LetfunE [LDef a] (LExp a)
   | ExceptE (LType a)
   | CoerceE (LType a) (LType a) (LExp a)
+    -- | Get an unboxed data type constructor's info variable.
+  | UnboxedInfoE (Identifier a)
+    -- | Get a boxed data constructor's info variable.
+  | BoxedInfoE (Identifier a)
 
 type LExp ix = Located (Exp ix)
 
