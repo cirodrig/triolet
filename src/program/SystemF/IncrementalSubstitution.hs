@@ -163,7 +163,7 @@ freshenHead (ExpSM s (ExpM expression)) = liftTypeEvalM $
   -- This is basically a copy of 'substituteWorker' for expressions,
   -- except that subexpressions are turned into 'ExpSM' terms.
   case expression
-    of VarE inf v ->
+    of VarE inf v -> {-# SCC "freshenHead.VarE" #-}
          case lookupV v $ valueSubst s
          of Just (RenamedVar v')    -> return (VarE inf v')
             Just (SubstitutedVar e) -> freshenAndDeferInnerTerms e
