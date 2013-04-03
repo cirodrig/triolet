@@ -207,12 +207,13 @@ data ReprVal (a : val) : box
   attribute(builtin);
 };
 
--- Run-time type info for boxed objects
+-- Run-time type info for boxed objects.
+-- Each instantiated data constructor is described by a TypeObject.
 data TypeObject (a : box) : box
   attribute(builtin)
 {
   typeObject
-  ()                  -- No fields
+  (uint)                  -- Data constructor index
   attribute(builtin);
 };
 

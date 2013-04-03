@@ -67,6 +67,12 @@ isPointerFree, notPointerFree :: PointerFree
 isPointerFree = PointerFree (conE' (VarCon true_conV [] []) [])
 notPointerFree = PointerFree (conE' (VarCon false_conV [] []) [])
 
+-- | The unpacked fields of a 'TypeObject' object
+data BoxInfo =
+  BoxInfo
+  { box_info_conid :: !ExpM    -- An unsigned integer
+  }
+
 -- | The unpacked fields of a 'Repr' object
 data BareInfo =
   BareInfo 
@@ -218,6 +224,16 @@ packRepr :: Type -> BareInfo -> ExpM
 packRepr ty (BareInfo sa copy asbox asbare (PointerFree just_bytes)) =
   conE' (VarCon bareInfo_conV [ty] [])
   [packSizeAlign ty sa, copy, asbox, asbare, just_bytes]
+
+unpackTypeObject :: Type -> ExpM -> Gen BoxInfo
+unpackTypeObject ty e = do
+  ([], [conid]) <-
+    decon (boxInfoV `varApp` [ty]) e
+  return $ BoxInfo conid
+
+packTypeObject :: Type -> BoxInfo -> ExpM
+packTypeObject ty (BoxInfo conid) =
+  conE' (VarCon boxInfo_conV [ty] []) [conid]
 
 unpackLength :: Type -> ExpM -> Gen Length
 unpackLength ty e = do
@@ -737,7 +753,8 @@ bareInfoDefinition dtype = do
 
 boxInfoDefinitions :: DataType -> UnboxedTypeEvalM [GDef Mem]
 boxInfoDefinitions dtype = forM (dataTypeDataConstructors dtype) $ \c -> do
-  ent <- typeInfoDefinition dtype $ boxInfoDefinition' dtype c
+  Just dcon_type <- lookupDataCon c
+  ent <- typeInfoDefinition dtype $ boxInfoDefinition' dtype dcon_type
   return $ mkDef (boxedLayoutInfo (dataTypeLayout' dtype) c) ent
 
 typeInfoDefinition :: DataType
@@ -789,4 +806,5 @@ bareInfoDefinition' dtype dyn_info = do
 boxInfoDefinition' dtype con dyn_info = do
   let ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
       ty = dataTypeCon dtype `varApp` ty_args
-  return $ conE' (VarCon boxInfo_conV [ty] []) []
+  let rep = BoxInfo (uintL $ dataConIndex con)
+  return $ packTypeObject ty rep

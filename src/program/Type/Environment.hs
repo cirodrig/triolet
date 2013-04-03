@@ -50,6 +50,7 @@ module Type.Environment
         infoTycon,
         dataTypeFullKind,
         DataConType(..),
+        dataConIndex,
         dataConTyParams,
         dataConTyCon,
         dataConFieldTypes,
@@ -100,6 +101,7 @@ import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.HashTable as HT
 import qualified Data.IntMap as IntMap
+import Data.List
 import Data.Maybe
 import Data.Traversable
 import Text.PrettyPrint.HughesPJ
@@ -490,6 +492,15 @@ data DataConType =
     --   This field must be lazy.
   , dataConType :: DataType
   }
+
+-- | Get the data constructor's index, which identifies it among all the
+--   data constructors of the same type.  Indices are numbered starting from
+--   zero.
+dataConIndex :: DataConType -> Int
+dataConIndex con =
+  let c      = dataConCon con
+      Just i = findIndex (c ==) (dataTypeDataConstructors $ dataConType con)
+  in i
 
 dataConTyParams :: DataConType -> [Binder]
 dataConTyParams t = dataTypeParams $ dataConType t
