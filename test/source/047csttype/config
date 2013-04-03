@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Explicit type equality constraint",
+  trioletSources = ["foo.tri"],
+  lltrioletSources  = [],
+  cSources	 = [""],
+  cxxSources	 = [],
+  expectedResult = ShouldCompile
+}

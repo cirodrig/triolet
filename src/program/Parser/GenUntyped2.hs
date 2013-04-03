@@ -214,6 +214,10 @@ predicateExp (Loc pos e) =
        con <- lookupTypeClassVar op_v
        arg' <- typeExp arg
        return $ U.IsInst con arg'
+     Binary (Python.Equality {}) a b -> do
+       a' <- typeExp a
+       b' <- typeExp b
+       return $ U.IsEqual a' b'
      _ -> error "Invalid predicate in constraint"
 
 -------------------------------------------------------------------------------

@@ -1,0 +1,7 @@
+
+@forall(t : type -> type, a)
+@where(Repr(t(a)), Repr(a), Traversable(t), list_dim == shape(t))
+def size(A : t(a)) -> int:
+  ones = [1 for x in A]
+  require ones : view(list_dim, int)
+  return sum(ones)
