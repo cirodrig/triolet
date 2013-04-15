@@ -386,8 +386,9 @@ resolveExp pos expression =
                   return $ LetTypeE lhs' rhs' body'
      LetfunE defs e ->
        resolveDefGroup defs $ \defs' -> LetfunE defs' <$> resolveL resolveExp e
-     CaseE scr alts -> CaseE <$> resolveL resolveExp scr <*>
-                       mapM (resolveL resolveAlt) alts
+     CaseE scr sps alts -> CaseE <$> resolveL resolveExp scr <*>
+                           mapM (resolveL resolveExp) sps <*>
+                           mapM (resolveL resolveAlt) alts
      ExceptE t -> do
        t' <- resolveLType TypeLevel t
        return $ ExceptE t'
@@ -420,11 +421,12 @@ resolveAlt pos (Alt pattern body) = do
     body' <- resolveL resolveExp body
     return $ Alt pattern' body'
 
-resolvePattern pos (ConPattern con ex_types fields) k = do
+resolvePattern pos (ConPattern size_args con ex_types fields) k = do
+  size_args' <- mapM (resolveL resolveExp) size_args
   con' <- use con pos
   withMany (resolveDomainT pos) ex_types $ \ex_types' ->
     withMany (resolvePattern pos) fields $ \fields' ->
-    k (ConPattern con' ex_types' fields')
+    k (ConPattern size_args' con' ex_types' fields')
 
 resolvePattern pos (TuplePattern fields) k =
     withMany (resolvePattern pos) fields $ \fields' ->
@@ -435,7 +437,7 @@ resolvePattern pos (VarPattern dom) k =
 
 resolvePattern pos (ConOrVarPattern ident) k =
   ifM (isConstructor ident)
-  (resolvePattern pos (ConPattern ident [] []) k)
+  (resolvePattern pos (ConPattern [] ident [] []) k)
   (resolvePattern pos (VarPattern (Domain ident Nothing)) k)
 
 resolveFun :: SourcePos -> PFun -> NR RFun

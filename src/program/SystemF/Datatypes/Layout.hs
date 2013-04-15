@@ -412,9 +412,9 @@ computeLayout type_info kind layout =
 
     var_layout v
       | kind == ValK =
-          BlockLayout `liftM` lookupValTypeInfo type_info v
+          BlockLayout `liftM` lookupValTypeInfo' type_info v
       | kind == BareK =
-          BlockLayout `liftM` lookupBareTypeInfo type_info v
+          BlockLayout `liftM` lookupBareTypeInfo' type_info v
       | otherwise =
           internalError "computeLayout: Unexpected kind"
 
@@ -444,7 +444,7 @@ computeLayout type_info kind layout =
       assumeBinder b $ continue kind =<< computeStructure t
 
     arr_layout size elem = do
-      size_val <- lookupIntTypeInfo type_info size
+      size_val <- lookupIntTypeInfo' type_info size
       -- Array elements are bare objects
       elem_size <- memorySize =<< continue BareK =<< computeStructure elem
       liftM BlockLayout $ arraySize size_val elem_size

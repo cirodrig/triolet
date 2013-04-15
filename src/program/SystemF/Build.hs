@@ -4,6 +4,8 @@
 {-# LANGUAGE FlexibleContexts, Rank2Types #-}
 module SystemF.Build where
 
+import Control.Monad
+
 import Common.Error
 import Common.Supply
 import SystemF.Syntax
@@ -32,10 +34,13 @@ appExp op t_args args = do
   args' <- sequence args
   return $ mkAppE op' t_args args'
 
-mkConE :: Supplies m VarID => ExpInfo -> ConInst -> [m ExpM] -> m ExpM
-mkConE inf op args = do
+mkConE :: Supplies m VarID =>
+          ExpInfo -> ConInst -> [m ExpM] -> Maybe (m ExpM) -> [m ExpM] -> m ExpM
+mkConE inf op sps ty_obj args = do
+  sps' <- sequence sps
+  ty_obj' <- maybe (return Nothing) (liftM Just) ty_obj
   args' <- sequence args
-  return $ conE inf op args'
+  return $ conE inf op sps' ty_obj' args'
 
 -- | Create an application term, uncurrying the operator if possible
 mkAppE :: ExpM -> [Type] -> [ExpM] -> ExpM
@@ -65,8 +70,8 @@ letE :: PatM -> ExpM -> ExpM -> ExpM
 letE pat val body = ExpM $ LetE defaultExpInfo pat val body
 
 initLocalE :: (Supplies m VarID) =>
-              Type -> (Var -> m ExpM) -> (Var -> m ExpM) -> m ExpM
-initLocalE ty mk_rhs mk_body = localE ty rhs mk_body
+              Type -> m ExpM -> (Var -> m ExpM) -> (Var -> m ExpM) -> m ExpM
+initLocalE ty mk_repr mk_rhs mk_body = localE ty mk_repr rhs mk_body
   where
     rhs = do
       -- Create a lambda expression (\x : OutPtr t. e1)
@@ -81,49 +86,44 @@ initLocalE ty mk_rhs mk_body = localE ty rhs mk_body
       return $ ExpM $ LamE defaultExpInfo rhs_fun
 
 localE :: (Supplies m VarID) =>
-          Type -> m ExpM -> (Var -> m ExpM) -> m ExpM
-localE ty mk_rhs mk_body = do
+          Type -> m ExpM -> m ExpM -> (Var -> m ExpM) -> m ExpM
+localE ty mk_repr mk_rhs mk_body = do
+  repr <- mk_repr
   rhs <- mk_rhs
   tmpvar_body <- newAnonymousVar ObjectLevel
   body <- mk_body tmpvar_body
   let binder = tmpvar_body ::: ty
-  return $ letViaBoxed binder rhs body
+  return $ letViaBoxed binder repr rhs body
 
 localE' :: (Supplies m VarID) =>
-          Type -> m ExpM -> m (Var, ExpM -> ExpM)
-localE' ty mk_rhs = do
+          Type -> m ExpM -> m ExpM -> m (Var, ExpM -> ExpM)
+localE' ty mk_repr mk_rhs = do
+  repr <- mk_repr
   rhs <- mk_rhs
   tmpvar_body <- newAnonymousVar ObjectLevel
   let binder = tmpvar_body ::: ty
-  return (tmpvar_body, \body -> letViaBoxed binder rhs body)
+  return (tmpvar_body, \body -> letViaBoxed binder repr rhs body)
 
 -- | Construct what amounts to a 'let' expression for bare objects.
 --   Initialize a new boxed object, then read the boxed object.
 --
---   TODO: Define localE in terms of this function.
-letViaBoxed :: Binder -> ExpM -> ExpM -> ExpM
-letViaBoxed binder rhs body =
-  let -- Apply the 'boxed' constructor to the RHS
-      ty = binderType binder
-      boxed_con = VarCon (coreBuiltin The_boxed) [ty] []
-      boxed_rhs = conE defaultExpInfo boxed_con [rhs]
-  
-      -- Create a case statement that binds a temporary value for the body
-      expr = ExpM $ CaseE defaultExpInfo boxed_rhs [alt]
-      decon = VarDeCon (coreBuiltin The_boxed) [ty] []
-      alt = AltM $ Alt { altCon = decon
-                       , altParams = [patM binder]
-                       , altBody = body}
-  in expr
+-- > let BINDER = initToBare @T REP RHS in BODY
+letViaBoxed :: Binder -> ExpM -> ExpM -> ExpM -> ExpM
+letViaBoxed binder bare_rep rhs body =
+  let ty = binderType binder
+      call = varAppE' (coreBuiltin The_initToBare) [ty] [bare_rep, rhs]
+  in ExpM $ LetE defaultExpInfo (patM binder) call body
 
 letfunE :: DefGroup (FDef Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
 
-caseE :: (Supplies m VarID) => m ExpM -> [m AltM] -> m ExpM
-caseE scr alts = do
+caseE :: (Supplies m VarID) =>
+         m ExpM -> [m ExpM] -> [m AltM] -> m ExpM
+caseE scr sps alts = do
   scr' <- scr
+  sps' <- sequence sps
   alts' <- sequence alts
-  return $ ExpM $ CaseE defaultExpInfo scr' alts'
+  return $ ExpM $ CaseE defaultExpInfo scr' sps' alts'
 
 exceptE :: (Supplies m VarID) => Type -> m ExpM
 exceptE ty = return $ ExpM $ ExceptE defaultExpInfo ty
@@ -135,9 +135,9 @@ ifE mk_cond mk_tr mk_fa = do
   fa <- mk_fa
   let true_con = VarDeCon (coreBuiltin The_True) [] []
       false_con = VarDeCon (coreBuiltin The_False) [] []
-      true  = AltM $ Alt true_con [] tr
-      false = AltM $ Alt false_con [] fa
-  return $ ExpM $ CaseE defaultExpInfo cond [true, false]
+      true  = AltM $ Alt true_con Nothing [] tr
+      false = AltM $ Alt false_con Nothing [] fa
+  return $ ExpM $ CaseE defaultExpInfo cond [] [true, false]
 
 mkFun :: forall m. (Supplies m VarID) =>
          [Type]
@@ -178,7 +178,7 @@ mkAlt con ty_args mk_body = do
            patterns = [patM (v ::: ty)
                       | (v, ty) <- zip pat_vars param_types]
            decon = VarDeCon con ty_args ex_params
-       return $ AltM $ Alt decon patterns body
+       return $ AltM $ Alt decon Nothing patterns body
     _ -> internalError "mkAlt"
 
 outType t = outPtrT `typeApp` [t]

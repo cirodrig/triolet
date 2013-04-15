@@ -226,7 +226,9 @@ desugarPattern (TupleP _ ps) = do
       unpack_fields <- mapM dsUnpackBoundVar sub_patterns
 
       -- Compute size parameters
-      size_params <- mapM (requireRepr . dsType) sub_patterns 
+      size_params <- forM sub_patterns $ \p -> do
+        repr <- requireRepr $ dsType p
+        return $ TISize (mkType $ dsType p) repr
 
       return $ \e ->
         -- Unpack the tuple, then unpack each field 
@@ -728,8 +730,9 @@ tiUndefined pos = do
 tiTuple pos fs = do
   (ti_elements, ti_reprs, ti_types) <- liftM unzip3 $ mapM tiExp fs
   let ty = tupleTy ti_types
+  let sizes = zipWith TISize (map mkType ti_types) ti_reprs
   repr <- requireRepr ty
-  let tuple = mkTupleE pos repr (map mkType ti_types) ti_reprs ti_elements
+  let tuple = mkTupleE pos repr (map mkType ti_types) sizes ti_elements
   return (tuple, repr, ty)
 
 tiCall pos op args = do

@@ -48,6 +48,7 @@ module SystemF.Context
 where
 
 import Control.Monad
+import Control.Monad.Trans
 import Data.List
 import Data.Maybe
 import qualified Data.Set as Set
@@ -55,6 +56,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Identifier
 import Common.Supply
+import Common.MonadLogic
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Rename
@@ -73,13 +75,6 @@ import Type.Substitute(substitute, freshen, Substitutable(..))
 intersects :: Ord a => Set.Set a -> Set.Set a -> Bool
 s1 `intersects` s2 = not $ Set.null $ Set.intersection s1 s2
 
--- | Is this a singleton type?
-isSingletonType :: Type -> Bool
-isSingletonType ty =
-  case fromVarApp ty
-  of Just (op, _) -> isSingletonCon op
-     _ -> False
-
 -- | Whether the argument is a case statement that has multiple non-excepting
 --   branches.
 isUnfloatableCase :: ExpM -> Bool
@@ -93,7 +88,7 @@ isExceptingExp (ExpM exp) =
   case exp
   of LetE _ _ _ body  -> isExceptingExp body
      LetfunE _ _ body -> isExceptingExp body
-     CaseE _ scr alts -> all isExceptingAlt alts
+     CaseE _ scr _ alts -> all isExceptingAlt alts
      ExceptE {}       -> True
      _                -> False
 
@@ -120,30 +115,34 @@ data CtxItem =
     --
     --   The normal alternative's fields are included as part of the context.
     --
-    --   @case <scrutinee> 
+    --   @case <scrutinee> [<size-parameters>]
     --    of { <alternative>. (...); <excepting alternatives>}@
-  | CaseCtx ExpInfo ExpM !AltBinders [AltBinders]
+  | CaseCtx ExpInfo ExpM [ExpM] !AltBinders [AltBinders]
 
     -- | A group of function definitions
   | LetfunCtx ExpInfo !(DefGroup (FDef Mem))
 
 -- | The binders from a case alternative
-data AltBinders = AltBinders !DeConInst [PatM]
+data AltBinders = AltBinders !DeConInst (Maybe PatM) [PatM]
 
-renameAltBinders rn (AltBinders decon params) k =
+renameAltBinders rn (AltBinders decon ty_ob params) k =
   renameDeConInst rn decon $ \rn' decon' ->
-  renamePatMs rn' params $ \rn'' params' ->
-  k rn'' (AltBinders decon' params')
+  renameMaybePatM rn' ty_ob $ \rn'' ty_ob' ->
+  renamePatMs rn'' params $ \rn''' params' ->
+  k rn''' (AltBinders decon' ty_ob' params')
 
-altBindersFreeVariables (AltBinders decon params) =
+altBindersFreeVariables (AltBinders decon ty_ob params) =
   deConFreeVariables decon $
   freeVariables (map patMDmd params) `Set.union`
+  freeVariables (fmap patMDmd ty_ob) `Set.union`
+  freeVariables (fmap patMType ty_ob) `Set.union`
   freeVariables (map patMType params)
 
-substituteAltBinders s (AltBinders decon params) k =
+substituteAltBinders s (AltBinders decon ty_ob params) k =
   substituteDeConInst (typeSubst s) decon $ \ts' decon' ->
-  substitutePatMs (setTypeSubst ts' s) params $ \s' params' ->
-  k s' (AltBinders decon' params')
+  substituteMaybePatM (setTypeSubst ts' s) ty_ob $ \s' ty_ob' ->
+  substitutePatMs s' params $ \s'' params' ->
+  k s'' (AltBinders decon' ty_ob' params')
 
 ctxItemFreeVariables :: CtxItem -> Set.Set Var
 ctxItemFreeVariables (LetCtx _ pat rhs) =
@@ -151,8 +150,9 @@ ctxItemFreeVariables (LetCtx _ pat rhs) =
   freeVariables (patMDmd pat) `Set.union`
   freeVariables rhs
 
-ctxItemFreeVariables (CaseCtx _ scr normal_alt exc_alts) =
+ctxItemFreeVariables (CaseCtx _ scr sps normal_alt exc_alts) =
   freeVariables scr `Set.union`
+  freeVariables sps `Set.union`
   Set.unions (map altBindersFreeVariables (normal_alt : exc_alts))
 
 ctxItemFreeVariables (LetfunCtx _ defs) =
@@ -162,8 +162,10 @@ ctxItemBoundVariables :: CtxItem -> Set.Set Var
 ctxItemBoundVariables (LetCtx _ pat rhs) =
   Set.singleton $ patMVar pat
 
-ctxItemBoundVariables (CaseCtx _ _ (AltBinders decon params) _) =
-  Set.fromList $ [v | v ::: _ <- deConExTypes decon] ++ map patMVar params
+ctxItemBoundVariables (CaseCtx _ _ _ (AltBinders decon ty_ob params) _) =
+  let ex_vars = [v | v ::: _ <- deConExTypes decon]
+      param_vars = map patMVar $ maybeToList ty_ob ++ params
+  in Set.fromList $ ex_vars ++ param_vars
 
 ctxItemBoundVariables (LetfunCtx _ group) =
   Set.fromList $ map definiendum $ defGroupMembers group
@@ -174,11 +176,12 @@ renameCtxItem rn ctx k =
        let rhs' = rename rn rhs
        in renamePatM rn pat $ \rn' pat' ->
           k rn' (LetCtx inf pat' rhs')
-     CaseCtx inf scr normal_alt exc_alts ->
+     CaseCtx inf scr sps normal_alt exc_alts ->
        let scr' = rename rn scr
+           sps' = rename rn sps
            exc_alts' = [renameAltBinders rn alt (\_ x -> x) | alt <- exc_alts]
        in renameAltBinders rn normal_alt $ \rn' normal_alt' ->  
-          k rn' (CaseCtx inf scr' normal_alt' exc_alts')
+          k rn' (CaseCtx inf scr' sps' normal_alt' exc_alts')
      LetfunCtx inf defs ->
        renameDefGroup rn defs $ \rn' defs' ->
        k rn' (LetfunCtx inf defs')
@@ -189,12 +192,13 @@ substituteCtxItem s ctx k =
        rhs' <- substitute s rhs
        substitutePatM s pat $ \s' pat' ->
          k s' (LetCtx inf pat' rhs')
-     CaseCtx inf scr normal_alt exc_alts -> do
+     CaseCtx inf scr sps normal_alt exc_alts -> do
        scr' <- substitute s scr
+       sps' <- substitute s sps
        exc_alts' <- forM exc_alts $ \alt ->
          substituteAltBinders s alt $ \_ alt' -> return alt'
        substituteAltBinders s normal_alt $ \s' normal_alt' -> 
-         k s' (CaseCtx inf scr' normal_alt' exc_alts')
+         k s' (CaseCtx inf scr' sps' normal_alt' exc_alts')
      LetfunCtx inf defs ->
        substituteDefGroup substitute s defs $ \s' defs' ->
        k s' (LetfunCtx inf defs')
@@ -203,8 +207,9 @@ assumeCtxItem :: TypeEnvMonad m => CtxItem -> m a -> m a
 assumeCtxItem (LetCtx _ pat _) m =
   assumePatM pat m
 
-assumeCtxItem (CaseCtx _ _ (AltBinders decon params) _) m =
-  assumeBinders (deConExTypes decon) $ assumePatMs params m
+assumeCtxItem (CaseCtx _ _ _ (AltBinders decon ty_ob params) _) m =
+  assumeBinders (deConExTypes decon) $
+  assumeMaybePatM ty_ob $ assumePatMs params m
 
 assumeCtxItem (LetfunCtx _ defs) m = assume_defs m
   where
@@ -260,16 +265,16 @@ ctxExpression ctx return_type body = go ctx
     raise_exception =
       ExpM $ ExceptE defaultExpInfo return_type
 
-    alt alt_body (AltBinders decon params) =
-      AltM $ Alt decon params alt_body
+    alt alt_body (AltBinders decon ty_ob params) =
+      AltM $ Alt decon ty_ob params alt_body
 
     go (LetCtx inf pat rhs : ctx') =
       ExpM $ LetE inf pat rhs (go ctx')
 
-    go (CaseCtx inf scr normal_alt exc_alts : ctx') =
+    go (CaseCtx inf scr sps normal_alt exc_alts : ctx') =
       let case_alternatives =
             alt (go ctx') normal_alt : map (alt raise_exception) exc_alts
-      in ExpM $ CaseE inf scr case_alternatives
+      in ExpM $ CaseE inf scr sps case_alternatives
     
     go (LetfunCtx inf defs : ctx') =
       ExpM $ LetfunE inf defs (go ctx')
@@ -350,15 +355,16 @@ letContext keep_demands inf pat rhs body =
 
 -- | Add a @case@ term to the outside of the given context
 caseContext :: Bool             -- ^ Whether to preserve demand annotations
-            -> ExpInfo -> ExpM -> DeConInst -> [PatM] -> [AltM]
+            -> ExpInfo -> ExpM -> [ExpM] -> DeConInst
+            -> Maybe PatM -> [PatM] -> [AltM]
             -> Contexted a -> Contexted a
-caseContext keep_demands inf scr decon params ex_alts body =
+caseContext keep_demands inf scr sps decon ty_ob params ex_alts body =
   let fix_demands = if keep_demands then id else clearDemand
       ex_binders =
-        [AltBinders decon (map fix_demands pats)
-        | AltM (Alt decon pats _) <- ex_alts]
-      normal_binder = AltBinders decon (map fix_demands params)
-  in addContextItem (CaseCtx inf scr normal_binder ex_binders) body
+        [AltBinders decon ty_ob (map fix_demands pats)
+        | AltM (Alt decon ty_ob pats _) <- ex_alts]
+      normal_binder = AltBinders decon ty_ob (map fix_demands params)
+  in addContextItem (CaseCtx inf scr sps normal_binder ex_binders) body
 
 -- | Add a @letfun@ term to the outside of the given context
 letfunContext :: ExpInfo -> DefGroup (FDef Mem) -> Contexted a -> Contexted a
@@ -392,12 +398,12 @@ asLetContext ty expression = do
 --   the expression can be decomposed this way.  There must be exactly one
 --   case alternative that does not always raise an exception.
 asCaseContext :: Bool -> ExpM -> Maybe (Contexted ExpM)
-asCaseContext keep_demands (ExpM (CaseE inf scr alts)) =
+asCaseContext keep_demands (ExpM (CaseE inf scr sps alts)) =
   let (exc_alts, normal_alts) = partition isExceptingAlt alts
       exc_binders = map from_exc_alt exc_alts
   in case normal_alts
-     of [AltM (Alt decon params body)] -> 
-          let ctx = [CaseCtx inf scr (AltBinders decon (map fix_demands params)) exc_binders]
+     of [AltM (Alt decon ty_ob params body)] -> 
+          let ctx = [CaseCtx inf scr sps (AltBinders decon ty_ob (map fix_demands params)) exc_binders]
           in Just $ ApplyContext { _ctxFree = ctxFreeVariables ctx
                                  , _ctxContext = ctx
                                  , _ctxBody = body}
@@ -405,8 +411,8 @@ asCaseContext keep_demands (ExpM (CaseE inf scr alts)) =
   where
     fix_demands = if keep_demands then id else clearDemand
 
-    from_exc_alt (AltM (Alt decon params _)) =
-      AltBinders decon (map fix_demands params)
+    from_exc_alt (AltM (Alt decon ty_ob params _)) =
+      AltBinders decon ty_ob (map fix_demands params)
 
 asCaseContext _ _ = Nothing
 
@@ -446,12 +452,15 @@ pprContext show_body (ApplyContext {_ctxContext = c, _ctxBody = b}) =
     show_context (LetCtx _ pat e) =
       text "let" <+> pprPat pat <+> text "=" <+> pprExp e
 
-    show_context (CaseCtx _ scr (AltBinders decon pats) other_alts) =
+    show_context (CaseCtx _ scr sps (AltBinders decon ty_ob pats) other_alts) =
       text "let" <+> hang decon_doc 4 (vcat $ map exception other_alts)
       where
+        ty_ob_doc = maybe empty (brackets . pprPat) ty_ob
+        sps_doc = brackets $ sep $ punctuate comma $ map pprExp sps
         decon_doc =
-          hang (pprPatternMatch decon pats <+> text "=") 4 (pprExp scr)
-        exception (AltBinders decon pats) =
+          hang (sep [pprPatternMatch decon pats, sps_doc] <+> text "=") 4
+          (pprExp scr)
+        exception (AltBinders decon ty_ob pats) =
           text "except if" <+> pprPatternMatch decon pats
 
     show_context (LetfunCtx _ defs) =
@@ -723,18 +732,22 @@ nubContext' (ApplyContext {_ctxContext = ctx, _ctxBody = body_value}) =
       substituteCtxItem subst c $ \subst' c' ->
       
       -- Only let-bindings of singleton types can be eliminated
-      case c'
-      of LetCtx _ pat rhs | isSingletonType (patMType pat) -> do
-           -- Is there already a definition of this variable?
-           defined_var <- findByType (patMType pat) types
-           case defined_var of
-             Just v ->
-               -- Eliminate this item and rename
-               eliminate_item subst' (patMVar pat) v
-             Nothing ->
-               -- Keep this item and add to list of dictionary types
-               keep_item subst' (Just (patMType pat, patMVar pat)) c'
-         _ -> keep_item subst' Nothing c'
+      cond c'
+      [ do LetCtx _ pat rhs <- it
+           Just (op, _) <- lift $ deconVarAppType $ patMType pat
+           aguard $ isSingletonCon op
+           lift $ do
+             -- Is there already a definition of this variable?
+             defined_var <- findByType (patMType pat) types
+             case defined_var of
+               Just v ->
+                 -- Eliminate this item and rename
+                 eliminate_item subst' (patMVar pat) v
+               Nothing ->
+                 -- Keep this item and add to list of dictionary types
+                 keep_item subst' (Just (patMType pat, patMVar pat)) c'
+      , lift $ keep_item subst' Nothing c'
+      ]
       where
         eliminate_item subst' eliminated_v replacement_v =
           let subst'' =

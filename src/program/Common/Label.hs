@@ -23,8 +23,9 @@ module Common.Label
        )
 where
 
+import Control.DeepSeq
 import Language.Haskell.TH.Syntax(Lift(..))
-  
+
 import Common.Error
 import Common.Identifier
 import Common.Supply
@@ -32,6 +33,8 @@ import LowLevel.Types
 
 newtype ModuleName = ModuleName {showModuleName :: String}
                    deriving(Eq, Ord, Show)
+
+instance NFData ModuleName where rnf (ModuleName s) = rnf s
 
 instance Lift ModuleName where
   lift (ModuleName s) = [| ModuleName s |]
@@ -55,9 +58,13 @@ data LabelTag =
   | InexactEntryLabel
     deriving(Eq, Ord, Enum, Bounded)
 
+instance NFData LabelTag where rnf t = t `seq` () 
+
 -- | A local variable ID.  Local variable IDs are assigned to anonymous
 --   variables that will be exported from a module.
 newtype LocalID = LocalID Int deriving(Eq, Ord)
+
+instance NFData LocalID where rnf (LocalID n) = rnf n
 
 newLocalIDSupply :: IO (Supply LocalID)
 newLocalIDSupply = newSupply (LocalID 0) (\(LocalID n) -> LocalID (1+n))
@@ -88,6 +95,9 @@ data Label =
   , labelExternalName :: !(Maybe String)
   }
   deriving(Eq, Ord)
+
+instance NFData Label where
+  rnf (Label m n t e) = rnf m `seq` rnf n `seq` rnf t `seq` rnf e
 
 -- | Print a human-readable summary of the label.
 showLabel :: Label -> String

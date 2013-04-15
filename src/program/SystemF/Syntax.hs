@@ -63,6 +63,7 @@ module SystemF.Syntax
      DefAnn(..),
      defaultDefAnn,
      InliningAnnotation(..),
+     InliningEagerness(..),
      DefGroup(..), defGroupMembers,
      
      -- ** Top-level constructs
@@ -77,9 +78,9 @@ module SystemF.Syntax
      isValueExp,
      unpackPolymorphicCall,
      isDictionaryTypeCon,
-     isDictionaryDataCon,
+     --isDictionaryDataCon,
      isSingletonCon,
-     isReprCon
+     --isReprCon
     )
 where
 
@@ -140,21 +141,30 @@ data Specificity =
   | Copied
     -- ^ Copied by 'copy'.
 
-  | Decond !DeConInst [Specificity]
+  | Decond !DeConInst [Dmd]
     -- ^ Deconstructed at a known constructor.
+    --   Data with this specificity has type @T ts@ for
+    --   some algebraic data constuctor or tuple type @T@.
     --
     --   We save the type arguments and existential type parameters
     --   of the data constructor
     --   so that we can create a @case@ statement from this info.
     --
-    --   Includes a list describing how each field is used.  There is one list
-    --   member for each value field.
+    --   There is a demand for each data field.  The demand is the upper bounds
+    --   of the demands at all use sites.
 
-  | Written Specificity
-    -- ^ An initializer function is executed, and its result is demanded.
+  | Written !Var (HeapMap Specificity)
+    -- ^ An initializer function @\x -> E@.  The variable stands for
+    --   the address to which the initializer function writes.  Data
+    --   with this specificity has type @Mut t -> Store@, for some
+    --   bare type @t@.
+    --
+    --   The fields represent a lambda function taking a mutable reference
+    -- This is similar to 'Decond'.
 
   | Read (HeapMap Specificity)
     -- ^ Values are read out of memory and used at the given specificities.
+    --   Data with this specificity has type @Store@.
     --
     --   Any heap location that is not in the map is 'Unused'.
 
@@ -302,12 +312,28 @@ data BaseExp s =
     { expInfo :: ExpInfo
     , expLit :: !Lit
     }
-    -- | A data constructor application.
-    --   Data constructor applications produce a value or initializer function.
+    -- | A data constructor application.  This term describes all the pieces 
+    --   of data that go into building a new value.
+    --
+    --   The constructor instance determines how many other arguments to 
+    --   expect.  Suppose we're constructing an object of type @T a b@.   
+    --
+    -- * If @T a b : box@, then a value of type
+    --   @TypeObject t@ must be passed in 'expTypeObject'.  Otherwise,
+    --   nothing should be passed for this argument.
+    --
+    -- * Size parameters should be passed as indicated by the
+    --   'DataTypeLayout' associated with this data type.
+    --
+    -- * An argument should be passed for each field.  For value and boxed
+    --   fields, the field value is passed; for bare fields, an initializer
+    --   is passed.
   | ConE
     { expInfo      :: ExpInfo
-    , expCon       :: !ConInst
-    , expArgs      :: [Exp s]
+    , expCon       :: !ConInst      -- ^ Instantiated data constructor
+    , expSizeParams :: [Exp s]      -- ^ Run-time size info
+    , expTyObject  :: Maybe (Exp s) -- ^ Type info for this constructor
+    , expArgs      :: [Exp s]       -- ^ Field values or initializers
     }
     -- | Function application.
     --   Data constructor applications are represented by 'ConE' instead.
@@ -335,10 +361,11 @@ data BaseExp s =
     , expDefs :: DefGroup (FDef s)
     , expBody :: Exp s
     }
-    -- | Case analysis 
+    -- | Case analysis.
   | CaseE
     { expInfo :: ExpInfo
     , expScrutinee :: Exp s
+    , expSizeParams :: [Exp s]  -- ^ Run-time size info
     , expAlternatives :: [Alt s]
     }
     -- | Interrupt execution.  This expression does not return.
@@ -367,6 +394,10 @@ data BaseExp s =
 
 data BaseAlt s =
   Alt { altCon :: !DeConInst
+        -- | A pattern that binds a type object.  This is always 'Nothing' in  
+        --   System F.  Only present when deconstructing boxed types in Core.
+      , altTyObject :: !(Maybe (Pat s))
+        -- | Patterns bound to each field
       , altParams :: [Pat s]
       , altBody :: Exp s
       }
@@ -540,9 +571,8 @@ data DefAnn =
   { -- | A tag controlling when inlining occurs
     defAnnInlinePhase :: !InliningAnnotation
     
-    -- | A tag controlling how aggressively to inline.  If 'True', the
-    --   function should be aggressively inlined.
-  , defAnnInlineRequest :: !Bool
+    -- | A tag controlling how aggressively to inline
+  , defAnnInlineRequest :: !InliningEagerness
 
     -- | True for functions that are very cheap to re-execute.
   , defAnnConlike :: !Bool
@@ -563,7 +593,7 @@ data DefAnn =
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn InlNormal False False False False ManyUnsafe
+defaultDefAnn = DefAnn InlNormal InlConservatively False False False ManyUnsafe
 
 -- | An annotation controlling when a function may be inlined.
 --
@@ -592,6 +622,13 @@ data InliningAnnotation =
   | InlPostfinal                -- ^ A sequential loop function.  The function
                                 --   should be inlined after eliminating
                                 --   redundant copying.
+    deriving (Eq, Enum, Show)
+
+-- | How eagerly to decide whether to inline
+data InliningEagerness =
+    InlNever
+  | InlConservatively
+  | InlAggressively
     deriving (Eq, Enum, Show)
 
 -- | A definition group consists of either a single non-recursive definition
@@ -683,6 +720,15 @@ isDictionaryTypeCon v =
            , coreBuiltin The_VectorDict
            ]
 
+-- | Return True if this is a singleton type constructor.
+--   Return False if not a singleton type constructor, or if unknown.
+--
+--   Singleton types are data types that have exactly one value.
+isSingletonCon :: Var -> Bool
+isSingletonCon v = isDictionaryTypeCon v
+
+
+{-
 -- | Return True iff this is a dictionary data constructor.
 isDictionaryDataCon :: Var -> Bool
 isDictionaryDataCon v =
@@ -699,13 +745,6 @@ isDictionaryDataCon v =
            , coreBuiltin The_floatingDict
            , coreBuiltin The_vectorDict
            ]
-
--- | Return True if this is a singleton type constructor.
---   Return False if not a singleton type constructor, or if unknown.
---
---   Singleton types are data types that have exactly one value.
-isSingletonCon :: Var -> Bool
-isSingletonCon v = isDictionaryTypeCon v
 
 -- | Return True iff this is a @Repr@ dictionary constructor.
 isReprCon :: Var -> Bool
@@ -724,7 +763,6 @@ isReprCon v =
            , coreBuiltin The_repr_barray1
            , coreBuiltin The_repr_barray2
            , coreBuiltin The_repr_barray3
-           , coreBuiltin The_repr_Complex
            , coreBuiltin The_repr_Tuple2
            , coreBuiltin The_repr_Tuple3
            , coreBuiltin The_repr_Tuple4
@@ -733,3 +771,4 @@ isReprCon v =
            , coreBuiltin The_repr_StuckRef
            , coreBuiltin The_repr_Ref
            ]
+-}

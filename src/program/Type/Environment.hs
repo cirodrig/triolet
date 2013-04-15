@@ -38,10 +38,13 @@ module Type.Environment
         BoxedTypeEnv,
         DataType(..),
         dataTypeLayout',
-        unboxedLayoutInfo,
-        boxedLayoutInfo,
+        dataTypeUnboxedInfoVar,
+        dataTypeBoxedInfoVar,
+        layoutUnboxedInfoVar,
+        layoutBoxedInfoVar,
+        dataTypeFieldSizeVar,
         layoutInfoVars,
-        dataTypeInfoType,
+        dataTypeInfoVarType,
         boxedDataTypeLayout,
         unboxedDataTypeLayout,
         DataTypeLayout(..),
@@ -53,6 +56,7 @@ module Type.Environment
         dataConIndex,
         dataConTyParams,
         dataConTyCon,
+        dataConSizeParams,
         dataConFieldTypes,
         dataConFieldKinds,
         dataConPatternRange,
@@ -74,6 +78,8 @@ module Type.Environment
         getAllKinds,
         getAllTypes,
         pprTypeEnv,
+        pprDataType,
+        pprDataTypeLayout,
         mkEmptyTypeEnv,
         mkWiredInTypeEnv,
         --insertTypeWithProperties,
@@ -94,6 +100,7 @@ where
 import Prelude hiding(mapM)
 
 import Control.Applicative
+import Control.DeepSeq
 import Control.Monad hiding(mapM)
 import Control.Monad.Reader hiding(mapM)
 import Control.Monad.Writer hiding(mapM)
@@ -104,6 +111,7 @@ import qualified Data.IntMap as IntMap
 import Data.List
 import Data.Maybe
 import Data.Traversable
+import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
@@ -315,6 +323,13 @@ data TypeAssignment =
     , tyFunType :: !BuiltinTypeFunction
     }
 
+instance NFData TypeAssignment where
+  rnf (VarTypeAssignment t c) = rnf t `seq` rnf c
+  rnf (TyConTypeAssignment x) = rnf x
+  rnf (DataConTypeAssignment x) = rnf x
+  rnf (DataConTypeAssignment x) = rnf x
+  rnf (TyFunTypeAssignment t f) = rnf t `seq` rnf f
+
 -- | Create a 'VarTypeAssignment' with default properties.
 varTypeAssignment :: Type -> TypeAssignment
 varTypeAssignment t = VarTypeAssignment t False
@@ -363,32 +378,53 @@ data DataType =
 
   }
 
+instance NFData DataType where
+  rnf (DataType c p l k b1 b2 cs) =
+    rnf c `seq` rnf p `seq` rnf l `seq` rnf k `seq` rnf b1 `seq`
+    rnf b2 `seq` rnf cs
+
 dataTypeLayout' :: DataType -> DataTypeLayout
 dataTypeLayout' dtype =
   case dataTypeLayout dtype
   of Just l -> l
-     Nothing -> internalError "dataTypeLayout': Layout is not set"
+     Nothing -> traceShow (pprDataType dtype) $ internalError $ "dataTypeLayout': Layout is not set for " ++ show (dataTypeCon dtype)
 
 -- | Get the info variable for an unboxed data type
-unboxedLayoutInfo :: DataTypeLayout -> Var
-unboxedLayoutInfo (DataTypeLayout _ _ HasUnboxedInfo (UnboxedInfo i)) = i
+dataTypeUnboxedInfoVar :: DataType -> Var
+dataTypeUnboxedInfoVar dtype = layoutUnboxedInfoVar $ dataTypeLayout' dtype
+
+layoutUnboxedInfoVar :: DataTypeLayout -> Var
+layoutUnboxedInfoVar (DataTypeLayout _ _ HasUnboxedInfo (UnboxedInfo i) _) = i
 
 -- | Get the info variable for a boxed data type's data constructor
-boxedLayoutInfo :: DataTypeLayout -> Var -> Var
-boxedLayoutInfo (DataTypeLayout _ _ HasBoxedInfo (BoxedInfo assoc_list)) con =
-  let Just i = lookup con assoc_list
-  in i
+dataTypeBoxedInfoVar :: DataType -> Var -> Var
+dataTypeBoxedInfoVar dtype con = layoutBoxedInfoVar (dataTypeLayout' dtype) con
+  
+layoutBoxedInfoVar :: DataTypeLayout -> Var -> Var
+layoutBoxedInfoVar (DataTypeLayout _ _ HasBoxedInfo (BoxedInfo assoc_list) _) con =
+  let Just i = lookup con assoc_list in i
+
+layoutBoxedInfoVar dtype c =
+  error $ "layoutBoxedInfoVar: Not boxed: " ++ show c
+
+-- | Get the field size variable for a data constructor
+dataTypeFieldSizeVar :: DataType -> Var -> Var
+dataTypeFieldSizeVar dtype con =
+  case dataTypeLayout' dtype
+  of DataTypeLayout _ _ _ _ assoc_list ->
+       let Just i = lookup con assoc_list
+       in i
 
 -- | Get all info variables from a 'layout'
 layoutInfoVars :: DataTypeLayout -> [Var]
-layoutInfoVars (DataTypeLayout _ _ info_type info) =
+layoutInfoVars (DataTypeLayout _ _ info_type info _) =
   case info_type
   of HasUnboxedInfo -> case info of UnboxedInfo i -> [i]
      HasBoxedInfo   -> case info of BoxedInfo xs  -> map snd xs
 
 -- | Get the type of a data type's info type constructor function
-dataTypeInfoType :: DataType -> Type
-dataTypeInfoType dtype =
+dataTypeInfoVarType :: DataType -> Type
+dataTypeInfoVarType dtype =
   let l = dataTypeLayout' dtype
   in infoConstructorType dtype l
 
@@ -433,20 +469,34 @@ data DataTypeLayout = forall info.
     --   This is a 'Var', 'BoxedInfo', or 'UnboxedInfo'. 
     --   This constructor's type is given by 'layoutInfoType'.
   , layoutInfo :: !info
+
+    -- | A lookup table from constructors to
+    --   functions for computing the sizes of data structure fields.
+    --   These functions take size parameters and return a tuple of
+    --   size parameters.
+  , layoutFieldSizes :: [(Var, Var)]
   }
 
-unboxedDataTypeLayout size_param static inf =
-  DataTypeLayout size_param static HasUnboxedInfo (UnboxedInfo inf)
+instance NFData DataTypeLayout where
+  rnf (DataTypeLayout a b HasBoxedInfo (BoxedInfo d) e) =
+    rnf a `seq` rnf b `seq` rnf d `seq` rnf e
+  rnf (DataTypeLayout a b HasUnboxedInfo (UnboxedInfo d) e) =
+    rnf a `seq` rnf b `seq` rnf d `seq` rnf e
 
-boxedDataTypeLayout size_param static inf =
-  DataTypeLayout size_param static HasBoxedInfo (BoxedInfo inf)
+unboxedDataTypeLayout size_param static inf fsizes =
+  DataTypeLayout size_param static HasUnboxedInfo (UnboxedInfo inf) fsizes
+
+boxedDataTypeLayout size_param static inf fsizes =
+  DataTypeLayout size_param static HasBoxedInfo (BoxedInfo inf) fsizes
 
 -- | Get the type holding size information for the given kind
 sizeParamType :: KindedType -> Type
 sizeParamType (KindedType k ty) =
   case k
-  of ValK  -> sizeAlignValT `AppT` ty
-     BareK -> sizeAlignT `AppT` ty
+  of ValK      -> sizeAlignValT `AppT` ty
+     BareK     -> sizeAlignT `AppT` ty
+     IntIndexK -> fiIntT `AppT` ty
+     BoxK      -> internalError "sizeParamType: Boxed types not permitted"
 
 -- | Get the type holding size information for the given kind
 infoType :: KindedType -> Type
@@ -454,6 +504,7 @@ infoType (KindedType k ty) =
   case k
   of ValK  -> valInfoT `AppT` ty
      BareK -> bareInfoT `AppT` ty
+     BoxK -> boxInfoT `AppT` ty
 
 -- | Get the type constructor that constructs info types for
 --   the given base kind
@@ -493,6 +544,9 @@ data DataConType =
   , dataConType :: DataType
   }
 
+instance NFData DataConType where
+  rnf (DataConType a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
+
 -- | Get the data constructor's index, which identifies it among all the
 --   data constructors of the same type.  Indices are numbered starting from
 --   zero.
@@ -507,6 +561,10 @@ dataConTyParams t = dataTypeParams $ dataConType t
 
 dataConTyCon :: DataConType -> Var
 dataConTyCon t = dataTypeCon $ dataConType t
+
+dataConSizeParams :: DataConType -> [KindedType]
+dataConSizeParams t =
+  layoutSizeParamTypes $ dataTypeLayout' $ dataConType t
 
 dataConFieldTypes :: DataConType -> [Type]
 dataConFieldTypes t = map fst $ dataConFields t
@@ -534,6 +592,8 @@ data TypeFunction =
   , _tyfunReduction :: !(forall b. BoxingMode b => [Type] -> TypeEvalM b Type)
   }
 
+instance NFData TypeFunction where rnf (TypeFunction a b) = ()
+
 -- | Create a type function
 typeFunction :: Int
              -> (forall b. BoxingMode b => [Type] -> TypeEvalM b Type)
@@ -558,9 +618,14 @@ data BuiltinTypeFunction =
   , builtinMemTypeFunction :: !TypeFunction
   }
 
+instance NFData BuiltinTypeFunction where
+  rnf (BuiltinTypeFunction a b c) = rnf a `seq` rnf b `seq` rnf c
+
 -- | An immutable type environment
 newtype ITypeEnvBase boxing_mode =
   ITypeEnv [(Var, TypeAssignment)]
+
+instance NFData (ITypeEnvBase boxing_mode) where rnf (ITypeEnv x) = rnf x
 
 freezeTypeEnv :: TypeEnvMonad m => m (ITypeEnvBase (EvalBoxingMode m))
 freezeTypeEnv = do
@@ -620,7 +685,7 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        layout = unboxedDataTypeLayout [] [] valInfo_storeV
+        layout = unboxedDataTypeLayout [] [] valInfo_storeV []
 
     arr_data_type =
       DataType { dataTypeCon = arrV
@@ -637,6 +702,7 @@ mkWiredInTypeEnv = do
                   KindedType BareK arrTypeParameter2T]
                  []
                  bareInfo_arrV
+                 []
 
     int_data_type =
       DataType { dataTypeCon = intV
@@ -647,7 +713,7 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        int_layout = unboxedDataTypeLayout [] [] valInfo_intV
+        int_layout = unboxedDataTypeLayout [] [] valInfo_intV []
 
     uint_data_type =
       DataType { dataTypeCon = uintV
@@ -658,7 +724,7 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        uint_layout = unboxedDataTypeLayout [] [] valInfo_uintV
+        uint_layout = unboxedDataTypeLayout [] [] valInfo_uintV []
 
     float_data_type =
       DataType { dataTypeCon = floatV
@@ -669,7 +735,7 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        float_layout = unboxedDataTypeLayout [] [] valInfo_floatV
+        float_layout = unboxedDataTypeLayout [] [] valInfo_floatV []
 
     ref_data_type =
       DataType { dataTypeCon = refV
@@ -681,8 +747,8 @@ mkWiredInTypeEnv = do
                , dataTypeDataConstructors = [ref_conV]}
       where
         ref_layout = unboxedDataTypeLayout
-                     [KindedType BoxK refTypeParameterT] []
-                     bareInfo_refV
+                     [] [] bareInfo_refV
+                     [(ref_conV, fieldInfo_refV)]
 
     ref_datacon_type =
       DataConType { dataConCon = ref_conV
@@ -782,7 +848,11 @@ insertTypeFunction :: MTypeEnvBase b ->
 insertTypeFunction (MTypeEnv ht) v ty f = do 
   HT.insert ht v (TyFunTypeAssignment ty f)
 
--- | Set a data type's layout information
+-- | Set a data type's layout information.
+  
+--   This is a mutating operation.  Since a data type's data constructors
+--   hold references to the data type, all data constructors must be
+--   updated as well.
 setLayout :: TypeEnvMonad m => Var -> DataTypeLayout -> m ()
 setLayout v layout = do 
   MTypeEnv ht <- getTypeEnv
@@ -794,7 +864,16 @@ setLayout v layout = do
 
     let dtype' = dtype {dataTypeLayout = Just layout}
     HT.update ht v (TyConTypeAssignment dtype')
-    return ()
+
+    -- Update all data constructors
+    mapM_ (set_data_type ht dtype') $ dataTypeDataConstructors dtype'
+
+  where
+    -- Update the data type stored in the data constructor
+    set_data_type ht dtype con = do
+      Just (DataConTypeAssignment dcon_type) <- HT.lookup ht con
+      let dcon_type' = dcon_type {dataConType = dtype}
+      HT.update ht con (DataConTypeAssignment dcon_type')
 
 lookupAndExtract :: TypeEnvMonad m =>
                     (TypeAssignment -> Maybe b) -> Var -> m (Maybe b)
@@ -937,9 +1016,29 @@ pprTypeEnv (ITypeEnv assocs) =
 
 pprTypeAssignment :: TypeAssignment -> Doc
 pprTypeAssignment (VarTypeAssignment ty _) = pprType ty
-pprTypeAssignment (TyConTypeAssignment dtype) = pprType $ dataTypeFullKind dtype
+pprTypeAssignment (TyConTypeAssignment dtype) = pprDataType dtype
 pprTypeAssignment (DataConTypeAssignment c) = pprDataConType c
 pprTypeAssignment (TyFunTypeAssignment k _) = pprType k
+
+pprDataType dtype =
+  let params_doc = [parens (pprVar v <+> colon <+> pprType t)
+                   | v ::: t <- dataTypeParams dtype]
+      type_doc = sep $ pprVar (dataTypeCon dtype) : params_doc
+      intro = type_doc <+> colon <+>
+              pprType (fromBaseKind $ dataTypeKind dtype)
+
+      layout_doc = maybe (text "<no layout>") pprDataTypeLayout $
+                   dataTypeLayout dtype
+  in intro $$ layout_doc
+
+pprDataTypeLayout l =
+  let size_params = map pprKindedType $ layoutSizeParamTypes l
+      static_types = map pprKindedType $ layoutStaticTypes l
+  in text "SP:" <+> sep (punctuate comma size_params) $$
+     text "ST:" <+> sep (punctuate comma static_types)
+  where
+    pprKindedType (KindedType k t) =
+      pprType t <+> colon <+> pprType (fromBaseKind k)
 
 pprDataConType c =
   let constructed_type =
@@ -1025,11 +1124,12 @@ specializeTypeEnv basekind_f kind_f type_f tybind_f (MTypeEnv m) = do
       return $ DataType con params' l' k'
         is_abstract is_algebraic ctors
 
-    layout (DataTypeLayout size_params fixed_types info_type info) =
+    layout (DataTypeLayout size_params fixed_types info_type info fields) =
       DataTypeLayout <$> mapM kinded_type size_params
                      <*> mapM kinded_type fixed_types
                      <*> pure info_type
                      <*> pure info
+                     <*> pure fields
 
     kinded_type (KindedType k t) = KindedType <$> basekind_f k <*> type_f t
 

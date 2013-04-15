@@ -61,17 +61,16 @@ data Stream
 
 data RWEnv =
   RWEnv
-  { rwIntDict     :: IntIndexEnv
-  , rwIdentSupply :: {-#UNPACK#-}!(IdentSupply Var)
+  { rwIdentSupply :: {-#UNPACK#-}!(IdentSupply Var)
   , rwTypeEnv     :: TypeEnv
   }
 
 newtype RW a = RW {unRW :: ReaderT RWEnv IO a}
              deriving(Functor, Applicative, Monad, MonadIO)
 
-runRW :: RW a -> IdentSupply Var -> IntIndexEnv -> TypeEnv -> IO a
-runRW (RW (ReaderT f)) var_supply ienv tenv =
-  f (RWEnv ienv var_supply tenv)
+runRW :: RW a -> IdentSupply Var -> TypeEnv -> IO a
+runRW (RW (ReaderT f)) var_supply tenv =
+  f (RWEnv var_supply tenv)
 
 instance Supplies RW (Ident Var) where
   fresh = RW (ReaderT (\env -> supplyValue (rwIdentSupply env)))
@@ -90,6 +89,7 @@ liftFreshVarM m = RW $ ReaderT $ \env -> runFreshVarM (rwIdentSupply env) m
 -------------------------------------------------------------------------------
 -- Helper functions for writing code
 
+{-
 -- | Load a value.
 --
 -- > case x of stored t (y : t). y
@@ -109,7 +109,7 @@ load ty val =
 -- >                        (p : Referenced (array n list_type)).
 -- >      case p
 -- >      of referenced ay. $(make_body n sz ay)
-{-caseOfList :: TypeEnv
+caseOfList :: TypeEnv
            -> RW ExpM           -- ^ List to inspect
            -> Type              -- ^ Type of list element
            -> (Var -> Var -> Var -> RW ExpM)
@@ -148,7 +148,7 @@ caseOfMatrix tenv scrutinee elt_type mk_body =
     -- Create the type (array m (array n elt_type))
     array_type size_y_index size_x_index =
       varApp (coreBuiltin The_arr) [VarT size_y_index,
-                                    varApp (coreBuiltin The_arr) [VarT size_x_index, elt_type]]-}
+                                    varApp (coreBuiltin The_arr) [VarT size_x_index, elt_type]]
 
 caseOfTraversableDict :: RW ExpM
                       -> Type
@@ -212,7 +212,7 @@ caseOfIndInt' scrutinee int_index mk_finite mk_infinite =
 -- | Create a list where each array element is a function of its index only
 --
 --   If no return pointer is given, a writer function is generated.
-{-defineList :: Type             -- Array element type
+defineList :: Type             -- Array element type
            -> Type             -- Array size type index
            -> RW ExpM    -- Array size
            -> RW ExpM    -- Array element representation
@@ -365,33 +365,10 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
 
     exprs = [(coreBuiltin The_count, count_expr)]
     
-    -- The following expression represents the "count" stream:
-    --
-    -- > viewStream @(Boxed (Stored int))
-    -- > (view_generate @list_dim ShapeDict_list_dim
-    -- >  @(Boxed (Stored int)) repr_int
-    -- >   (mk_list_dim (nothingVal @int))
-    -- >   (\i. i))
+    -- Turn 'count' into a call to 'count_helper'
     count_expr =
-      mkConE defaultExpInfo view_stream
-      [appExp
-       (mkVarAppE (coreBuiltin The_view_generate)
-        [VarT $ coreBuiltin The_list_dim]
-        [mkVarE (coreBuiltin The_ShapeDict_list_dim)])
-       [boxedIntType]
-       [mkVarE (coreBuiltin The_repr_int), 
-        return $ conE defaultExpInfo mk_list_dim [conE defaultExpInfo nothing_val []],
-        lamE $ mkFun [] (\ [] -> return ([boxedIntType], boxedIntType)) (\ [] [x] -> mkVarE x)]]
-      where
-        view_stream =
-          VarCon (coreBuiltin The_viewStream) [boxedIntType] []
-        mk_list_dim =
-          VarCon (coreBuiltin The_mk_list_dim) [] []
-        nothing_val =
-          VarCon (coreBuiltin The_nothingVal) [intT] []
-        mk_view =
-          VarCon (coreBuiltin The_mk_view)
-          [VarT $ coreBuiltin The_list_dim, boxedIntType] []
+      mkVarAppE (coreBuiltin The_count_helper) []
+      [return $ valConE' (VarCon (coreBuiltin The_None) [] []) []]
 
     int0_expr = return $ litE' $ IntL 0 intT
     int1_expr = return $ litE' $ IntL 1 intT
@@ -428,17 +405,16 @@ sequentializingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
 --   The type environment is only used for looking up data types and
 --   constructors.
 rewriteApp :: RewriteRuleSet
-           -> IntIndexEnv
            -> IdentSupply Var
            -> TypeEnv
            -> ExpInfo -> Var -> [Type] -> [ExpSM]
            -> IO (Maybe ExpM)
-rewriteApp ruleset int_env id_supply tenv inf op_var ty_args args =
+rewriteApp ruleset id_supply tenv inf op_var ty_args args =
   case Map.lookup op_var $ rewriteRules ruleset
   of Just rw -> let do_rewrite = do
                       subst_args <- mapM applySubstitution args
                       trace_rewrite subst_args $ rw inf ty_args subst_args
-                in runRW do_rewrite id_supply int_env tenv
+                in runRW do_rewrite id_supply tenv
      Nothing -> return Nothing
   where
     trace_rewrite _ m = m
@@ -460,6 +436,7 @@ rwAsBare inf [bare_type] [repr, arg]
       -- Cancel applications of these constructors 
       -- asbare (repr, asbox (_, e)) = e
       return $ Just arg'
+{-
   | otherwise = do
       -- If the bare type is "Ref t", then construct the value
       whnf_type <- reduceToWhnf bare_type
@@ -475,7 +452,7 @@ rwAsBare inf [bare_type] [repr, arg]
           case fromVarApp boxed_type of
             Just (ty_op, [_])
               | ty_op `isCoreBuiltin` The_Boxed ->
-                  fmap Just $ deconstruct_boxed whnf_type
+                  fmap Just $ deconstruct_boxed whnf_type repr
             _ ->
               -- Otherwise, cannot simplify
               return Nothing
@@ -484,18 +461,19 @@ rwAsBare inf [bare_type] [repr, arg]
     --
     -- > storedBox boxed_type arg
     construct_stored_box boxed_type =
-      conE inf (VarCon ref_conV [boxed_type] []) [arg]
+      conE inf (VarCon ref_conV [boxed_type] []) Nothing [] [arg]
 
     -- Create the expression
     --
     -- > case arg of boxed bare_type (x : bare_type) -> copy bare_type repr x
-    deconstruct_boxed whnf_type = do
+    deconstruct_boxed whnf_type repr = do
       caseE (return arg)
+        [mkVarAppE (coreBuiltin The_reprSizeAlign) [whnf_type] [return repr]]
         [mkAlt (coreBuiltin The_boxed)
          [whnf_type]
          (\ [] [unboxed_ref] ->
            mkVarAppE (coreBuiltin The_copy) [whnf_type]
-           [return repr, mkVarE unboxed_ref])]
+           [return repr, mkVarE unboxed_ref])]-}
 
 rwAsBare inf [ty] [repr, arg, ret] = do
   -- Convert the partial application
@@ -515,13 +493,13 @@ rwAsBox inf [bare_type] [repr, arg]
       -- Cancel applications of these constructors 
       -- asbox (_, asbare (_, e)) = e
       return $ Just arg'
-  | otherwise = do
+{-  | otherwise = do
       -- If the bare type is "Ref t", then deconstruct the value
       whnf_type <- reduceToWhnf bare_type
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
           | ty_op == refV ->
-              fmap Just $ deconstruct_stored_box boxed_type
+              fmap Just $ deconstruct_stored_box boxed_type repr
         _ -> do
           -- If the boxed type is "Boxed t", then construct the value
           boxed_type <-
@@ -536,7 +514,7 @@ rwAsBox inf [bare_type] [repr, arg]
   where
     -- Argument is an initializer expression whose output has 'Ref' type.
     -- Bind it to a temporary value, then deconstruct it.
-    deconstruct_stored_box boxed_type = do
+    deconstruct_stored_box boxed_type repr = do
       localE bare_type (return arg)
         (\arg_val ->
           caseE (mkVarE arg_val) 
@@ -545,7 +523,7 @@ rwAsBox inf [bare_type] [repr, arg]
            (\ [] [boxed_ref] -> mkVarE boxed_ref)])
     
     construct_boxed whnf_type = do
-      conE inf (VarCon (coreBuiltin The_boxed) [whnf_type] []) [arg]
+      conE inf (VarCon (coreBuiltin The_boxed) [whnf_type] []) [arg]-}
 
 rwAsBox _ _ _ = return Nothing
 
@@ -1251,9 +1229,9 @@ generalizedZipStream2 out_type out_repr transformer shape_type streams = do
 rwDefineIntIndex :: RewriteRule
 rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
   let IntL m _ = lit
-      fin_int = conE inf (VarCon (coreBuiltin The_fiInt) [IntT m] [])
+      fin_int = valConE inf (VarCon (coreBuiltin The_fiInt) [IntT m] [])
                 [integer_value]
-      package = conE inf (VarCon (coreBuiltin The_someIInt) [] [IntT m])
+      package = valConE inf (VarCon (coreBuiltin The_someIInt) [] [IntT m])
                 [fin_int]
   in return $! Just $! package
 
@@ -1280,8 +1258,8 @@ rwIntComparison op inf [] [arg1, arg2]
                             False -> false_value
   | otherwise = return Nothing
   where
-    true_value = ExpM (ConE inf (VarCon (coreBuiltin The_True) [] []) [])
-    false_value = ExpM (ConE inf (VarCon (coreBuiltin The_False) [] []) [])
+    true_value = valConE inf (VarCon (coreBuiltin The_True) [] []) []
+    false_value = valConE inf (VarCon (coreBuiltin The_False) [] []) []
 
 rwNegateInt :: RewriteRule
 rwNegateInt inf [] [ExpM (LitE _ lit)] =

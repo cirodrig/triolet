@@ -387,6 +387,9 @@ data DataCon =
     --   The 'TyCon' must be a data type constructor.
     --   The constraint must be empty.
     dcSignature :: Qualified ([HMType], FOConstructor TyCon)
+    -- | The type object constructor function for this data constructor. 
+    --   This is a 'Just' value for boxed data types, and 'Nothing' otherwise.
+  , dcTyObjectConstructor :: !(Maybe SF.Var)
   }
 
 -------------------------------------------------------------------------------
@@ -404,11 +407,12 @@ data DataCon =
 -- be impossible to access.
 data Class =
   Class
-  { clsTyCon      :: SF.Var      -- ^ Dictionary type constructor
-  , clsSFDictCon  :: SF.Var      -- ^ Dictionary data constructor
-  , clsIsAbstract :: !Bool       -- ^ True if class is abstract
-  , clsSignature  :: Qualified [ClassMethod] -- ^ Type signature of contents
-  , clsInstances  :: Instances ClassInstance -- ^ Instances
+  { clsTyCon       :: SF.Var      -- ^ Dictionary type constructor
+  , clsSFDictCon   :: SF.Var      -- ^ Dictionary data constructor
+  , clsTyObjectCon :: SF.Var     -- ^ Type object constructor function
+  , clsIsAbstract  :: !Bool       -- ^ True if class is abstract
+  , clsSignature   :: Qualified [ClassMethod] -- ^ Type signature of contents
+  , clsInstances   :: Instances ClassInstance -- ^ Instances
   }
 
 instance Eq Class where (==) = (==) `on` clsTyCon

@@ -3,19 +3,35 @@
 {-# OPTIONS_GHC -no-auto #-}
 module SystemF.Rename
        (Subst(..),
+        PartialSubst(..),
         ValAss(..),
+        ValPartialSubst(..),
         renameMany,
         emptySubst,
         isEmptySubst,
         composeSubst,
         setTypeSubst, modifyTypeSubst,
         setValueSubst, modifyValueSubst,
+        emptyPartialSubst,
+        isEmptyPartialSubst,
+        composePartialSubst,
+        setTypePartialSubst, modifyTypePartialSubst,
+        setValuePartialSubst, modifyValuePartialSubst,
         emptyV,
         lookupV,
         extendV,
         singletonV,
         fromListV,
+        emptyPV,
+        nullPV,
+        singletonPV,
+        fromListPV,
+        extendPV,
+        excludePV,
+        lookupPV,
+        renameMaybePatM,
         renamePatM,
+        freshenMaybePatM,
         freshenPatM,
         renamePatMs,
         freshenPatMs,
@@ -26,6 +42,7 @@ module SystemF.Rename
         renameDefGroup,
         deConFreeVariables,
         defGroupFreeVariables,
+        substituteMaybePatM,
         substitutePatM,
         substitutePatMs,
         substituteTyPat,
@@ -38,10 +55,10 @@ module SystemF.Rename
         checkForShadowingModule)
 where
 
-import Prelude hiding(mapM)
+import Prelude hiding(mapM, sequence)
 import Control.Applicative
-import Control.Monad hiding(mapM)
-import Control.Monad.Reader hiding(mapM)
+import Control.Monad hiding(mapM, sequence)
+import Control.Monad.Reader hiding(mapM, sequence)
 import qualified Data.IntSet as IntSet
 import Data.List hiding(mapAccumL)
 import Data.Maybe
@@ -58,7 +75,6 @@ import Common.Supply
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
-import SystemF.TypecheckMem(functionType)
 import Type.Environment
 import Type.Type
 import Type.Rename(Renaming, Renameable(..),
@@ -127,6 +143,59 @@ excludeV v (S s) = S (IntMap.delete (fromIdent $ varID v) s)
 lookupV :: Var -> ValSubst -> Maybe ValAss
 lookupV v (S m) = IntMap.lookup (fromIdent $ varID v) m
 
+-------------------------------------------------------------------------------
+
+-- | A partial substitution on values.
+--   These partial substitutions are used for analysis information that cannot 
+--   represent all possible values.  Unrepresentable values are 'Nothing'.
+newtype ValPartialSubst = PS {unPS :: IntMap.IntMap (Maybe Var)}
+
+emptyPV :: ValPartialSubst
+emptyPV = PS IntMap.empty
+
+nullPV :: ValPartialSubst -> Bool
+nullPV (PS s) = IntMap.null s
+
+singletonPV :: Var -> Maybe Var -> ValPartialSubst
+singletonPV v t = PS (IntMap.singleton (fromIdent $ varID v) t)
+
+fromListPV :: [(Var, Maybe Var)] -> ValPartialSubst
+fromListPV xs = PS $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
+
+-- | Compute the union of two substitutions on disjoint sets of variables.
+--
+--   Disjointness is not verified.
+unionPV :: ValPartialSubst -> ValPartialSubst -> ValPartialSubst
+unionPV (PS r1) (PS r2) = PS (IntMap.union r1 r2)
+
+-- | @s2 `composeV` s1@ is a substitution equivalent to applying @s1@, then
+--   applying @s2@.
+composePV :: EvalMonad m => PartialSubst -> ValPartialSubst -> m ValPartialSubst
+s2 `composePV` s1 = do
+  -- Apply s2 to the range of s1
+  s1' <- traverse substitute_in_assignment (unPS s1)
+
+  -- Combine s1 and s2, preferring elements of s1
+  return $ PS $ IntMap.union s1' (unPS $ partialValueSubst s2)
+  where
+    substitute_in_assignment ass@(Just v) =
+      return $! case lookupPV v (partialValueSubst s2)
+                of Nothing   -> ass
+                   Just ass' -> ass'
+                   
+    substitute_in_assignment Nothing = return Nothing
+
+extendPV :: Var -> Maybe Var -> ValPartialSubst -> ValPartialSubst
+extendPV v t (PS s) = PS (IntMap.insert (fromIdent $ varID v) t s)
+
+excludePV :: Var -> ValPartialSubst -> ValPartialSubst
+excludePV v (PS s) = PS (IntMap.delete (fromIdent $ varID v) s)
+
+lookupPV :: Var -> ValPartialSubst -> Maybe (Maybe Var)
+lookupPV v (PS m) = IntMap.lookup (fromIdent $ varID v) m
+
+-------------------------------------------------------------------------------
+
 -- | A combined value and type substitution
 data Subst = Subst {typeSubst :: !TypeSubst, valueSubst :: !ValSubst}
 
@@ -161,6 +230,53 @@ instance SubstitutionMap Subst where
 
 -------------------------------------------------------------------------------
 
+-- | A combined partial value and type substitution
+data PartialSubst = PartialSubst
+                    { partialTypeSubst :: !TypeSubst
+                    , partialValueSubst :: !ValPartialSubst}
+
+emptyPartialSubst = PartialSubst Substitute.empty emptyPV
+
+-- | Convert a 'Subst' to a 'PartialSubst'.  All unrepresentable values become
+--   'Nothing'.
+mkPartialSubst :: Subst -> PartialSubst
+mkPartialSubst (Subst ts vs) = let partial_vs = IntMap.map to_partial (unS vs)
+                               in PartialSubst ts (PS partial_vs)
+  where
+    to_partial (RenamedVar v)     = Just v
+    to_partial (SubstitutedVar _) = Nothing
+    
+
+isEmptyPartialSubst (PartialSubst t v) = Substitute.null t && nullPV v
+
+composePartialSubst :: EvalMonad m =>
+                       PartialSubst -> PartialSubst -> m PartialSubst
+s2 `composePartialSubst` PartialSubst ts1 vs1 = liftTypeEvalM $ do
+  -- Compute the effect of applying vs1 followed by s2 on values
+  vs1' <- s2 `composePV` vs1
+  -- Compute the effect of applying ts1 followed by typeSubst s2 on types
+  type_subst <- partialTypeSubst s2 `Substitute.compose` ts1
+  return $ PartialSubst type_subst vs1'
+
+setTypePartialSubst :: TypeSubst -> PartialSubst -> PartialSubst
+setTypePartialSubst x s = s {partialTypeSubst = x}
+
+modifyTypePartialSubst :: (TypeSubst -> TypeSubst) -> PartialSubst -> PartialSubst
+modifyTypePartialSubst f s = s {partialTypeSubst = f $ partialTypeSubst s}
+
+setValuePartialSubst :: ValPartialSubst -> PartialSubst -> PartialSubst
+setValuePartialSubst x s = s {partialValueSubst = x}
+
+modifyValuePartialSubst :: (ValPartialSubst -> ValPartialSubst)
+                        -> PartialSubst -> PartialSubst
+modifyValuePartialSubst f s = s {partialValueSubst = f $ partialValueSubst s}
+
+instance SubstitutionMap PartialSubst where
+  emptySubstitution = emptyPartialSubst
+  isEmptySubstitution = isEmptyPartialSubst
+
+-------------------------------------------------------------------------------
+
 renameMany :: (st -> a -> (st -> a -> b) -> b)
            -> st -> [a] -> (st -> [a] -> b) -> b
 renameMany f rn (x:xs) k =
@@ -183,6 +299,13 @@ renamePatM :: Renaming -> PatM -> (Renaming -> PatM -> a) -> a
 renamePatM rn (PatM binding uses) k =
   Rename.renameBinder rn binding $ \rn' binding' ->
   k rn' (PatM binding' (rename rn uses))
+
+renameMaybePatM rn Nothing k = k rn Nothing
+renameMaybePatM rn (Just p) k = renamePatM rn p $ \rn' p' -> k rn' (Just p')
+
+freshenMaybePatM Nothing = return (Nothing, Rename.empty)
+freshenMaybePatM (Just p) = do (p', rn) <- freshenPatM p
+                               return (Just p', rn)
 
 -- | Replace the pattern variable with a fresh name
 freshenPatM :: Supplies m (Ident Var) => PatM -> m (PatM, Renaming)
@@ -316,11 +439,15 @@ substituteValueBinder s (x ::: t) k = do
       let s' = modifyValueSubst (extendV x (RenamedVar x')) s
       assume x' t' $ k s' (x' ::: t')
 
+substituteMaybePatM s Nothing  k = k s Nothing
+substituteMaybePatM s (Just p) k =
+  substitutePatM s p $ \s' p' -> k s' (Just p')
+
 -- | Apply a substitution to a pattern
 substitutePatM :: EvalMonad m =>
                   Subst -> PatM -> (Subst -> PatM -> m a) -> m a
 substitutePatM s (PatM binder uses) k = do
-  uses' <- substitute (typeSubst s) uses
+  uses' <- substitute (mkPartialSubst s) uses
   substituteValueBinder s binder $ \s' binder' -> k s' (PatM binder' uses')
 
 substitutePatMs :: EvalMonad m =>
@@ -403,7 +530,7 @@ instance Renameable Dmd where
   freeVariables dmd = freeVariables $ specificity dmd
 
 instance Substitutable Dmd where
-  type Substitution Dmd = TypeSubst
+  type Substitution Dmd = PartialSubst
   substituteWorker s dmd = do
     spc <- substituteWorker s $ specificity dmd
     return $ Dmd (multiplicity dmd) spc
@@ -416,12 +543,12 @@ instance Renameable Specificity where
          let spcs' = rename rn' spcs
          in Decond decon' spcs'
 
-       Written spc -> Written (rename rn spc)
+       Written v m -> 
+         -- Remove the bound variable from the environment; it is shadowed
+         let rn' = Rename.exclude v rn
+         in Written v (renameHeapMap rn' m)
 
-       Read (HeapMap xs) ->
-         let rename_assoc (addr, val) =
-               (fromMaybe addr $ Rename.lookup addr rn, rename rn val)
-         in Read (HeapMap $ map rename_assoc xs)
+       Read m -> Read $ renameHeapMap rn m
        
        -- Other constructors don't mention variables
        _ -> spc
@@ -432,19 +559,41 @@ instance Renameable Specificity where
        Inspected         -> Set.empty
        Copied            -> Set.empty
        Decond decon spcs -> deConFreeVariables decon $ freeVariables spcs
-       Written spc       -> freeVariables spc
+       Written v spc     -> Set.delete v $ fvHeapMap spc
        Unused            -> Set.empty
 
+renameHeapMap rn (HeapMap xs) = HeapMap $ map rename_assoc xs
+  where rename_assoc (addr, val) =
+          (fromMaybe addr $ Rename.lookup addr rn, rename rn val)
+
+fvHeapMap (HeapMap xs) =
+  Set.unions [Set.insert v $ freeVariables s | (v, s) <- xs]
+
 instance Substitutable Specificity where
-  type Substitution Specificity = TypeSubst
+  type Substitution Specificity = PartialSubst
   substituteWorker s spc =
     case spc
-    of Decond decon spcs -> 
-         substituteDeConInst s decon $ \s' decon' -> do
+    of Decond decon spcs ->
+         substituteDeConInst (partialTypeSubst s) decon $ \ts' decon' -> do
+           let s' = setTypePartialSubst ts' s
            spcs' <- mapM (substitute s') spcs
            return $ Decond decon' spcs'
        
-       Written spc' -> liftM Written $ substitute s spc'
+       Written v heap_map -> do
+         -- Rename 'v' if it's in scope
+         type_assignment <- lookupType v
+         (s', v') <- case type_assignment of
+           Nothing -> return (modifyValuePartialSubst (excludePV v) s, v)
+           Just _  -> do
+             v' <- newClonedVar v
+             let s' = modifyValuePartialSubst (extendPV v (Just v')) s
+             return (s', v')
+
+         -- Substitute the rest
+         m_heap_map' <- substituteHeapMap s' heap_map
+         return $! case m_heap_map'
+                   of Just heap_map' -> Written v' heap_map'
+                      Nothing        -> Used -- Not representable
 
        Read _ -> internalError "substitute: Not implemented"
        
@@ -453,6 +602,24 @@ instance Substitutable Specificity where
        Inspected -> return spc
        Copied -> return spc
        Unused -> return spc
+
+substituteHeapMap :: EvalMonad m =>
+                     PartialSubst -> HeapMap Specificity
+                  -> m (Maybe (HeapMap Specificity))
+substituteHeapMap s (HeapMap xs) = do 
+  substituted_entries <- mapM substitute_entry xs
+  return $ fmap HeapMap $ sequence substituted_entries
+  where
+    substitute_entry (k, spc) =
+      -- Try to rename 'k'
+      case lookupPV k $ partialValueSubst s
+      of Just (Just v') -> continue v'
+         Just Nothing   -> return Nothing
+         Nothing        -> continue k
+      where
+        continue k' = do
+          spc' <- substitute s spc
+          return $ Just (k', spc')
 
 instance Renameable ConInst where
   rename rn (VarCon con ty_args ex_types) =
@@ -474,8 +641,8 @@ instance Renameable (Exp Mem) where
          of Just v' -> VarE inf v'
             Nothing -> expression
        LitE {} -> expression
-       ConE inf op args ->
-         ConE inf (rename rn op) (rename rn args)
+       ConE inf op ty_ob sps args ->
+         ConE inf (rename rn op) (rename rn ty_ob) (rename rn sps) (rename rn args)
        AppE inf op ts es ->
          AppE inf (rename rn op) (rename rn ts) (rename rn es)
        LamE inf f ->
@@ -486,8 +653,8 @@ instance Renameable (Exp Mem) where
        LetfunE inf defs body ->
          renameDefGroup rn defs $ \rn' defs' ->
          LetfunE inf defs' (rename rn' body)
-       CaseE inf scr alts ->
-         CaseE inf (rename rn scr) (rename rn alts)
+       CaseE inf scr sps alts ->
+         CaseE inf (rename rn scr) (rename rn sps) (rename rn alts)
        ExceptE inf rty ->
          ExceptE inf (rename rn rty)
        CoerceE inf t1 t2 e ->
@@ -500,7 +667,11 @@ instance Renameable (Exp Mem) where
     case expression
     of VarE _ v -> Set.singleton v
        LitE _ _ -> Set.empty
-       ConE _ op args -> freeVariables op `Set.union` freeVariables args
+       ConE _ op ty_ob sps args ->
+         freeVariables op `Set.union`
+         freeVariables ty_ob `Set.union`
+         freeVariables sps `Set.union`
+         freeVariables args
        AppE _ op ty_args args -> Set.union (freeVariables op) $
                                  Set.union (freeVariables ty_args) $
                                  freeVariables args
@@ -516,8 +687,8 @@ instance Renameable (Exp Mem) where
              fn_fv = Set.unions $ map (freeVariables . definiens) defs
              body_fv = freeVariables body
          in foldr Set.delete (Set.union fn_fv body_fv) local_functions
-       CaseE _ scr alts ->
-         freeVariables scr `Set.union` freeVariables alts
+       CaseE _ scr sps alts ->
+         freeVariables scr `Set.union` freeVariables sps `Set.union` freeVariables alts
        ExceptE _ rty ->
          freeVariables rty
        CoerceE _ t1 t2 e ->
@@ -526,15 +697,18 @@ instance Renameable (Exp Mem) where
          freeVariables ty `Set.union` freeVariables es
 
 instance Renameable (Alt Mem) where
-  rename rn (AltM (Alt con params body)) =
+  rename rn (AltM (Alt con ty_ob params body)) =
     renameDeConInst rn con $ \rn' con' ->
-    renamePatMs rn' params $ \rn'' params' ->
-    AltM $ Alt con' params' (rename rn'' body)
+    renameMaybePatM rn' ty_ob $ \rn'' ty_ob' ->
+    renamePatMs rn'' params $ \rn''' params' ->
+    AltM $ Alt con' ty_ob' params' (rename rn''' body)
 
-  freeVariables (AltM (Alt decon params body)) =
+  freeVariables (AltM (Alt decon ty_ob params body)) =
     deConFreeVariables decon $
-    let uses_fv = freeVariables (map patMDmd params) 
+    let uses_fv = freeVariables (map patMDmd params) `Set.union`
+                  freeVariables (fmap patMDmd ty_ob)
         params_fv = Rename.bindersFreeVariables (map patMBinder params) $
+                    maybe id (Rename.binderFreeVariables . patMBinder) ty_ob $
                     freeVariables body
     in Set.union uses_fv params_fv
 
@@ -579,10 +753,12 @@ instance Substitutable (Exp Mem) where
             Just (SubstitutedVar e) -> return e
             Nothing                 -> return (ExpM expression)
        LitE {} -> return (ExpM expression)
-       ConE inf con args -> do
+       ConE inf con ty_ob sps args -> do
          con' <- substitute (typeSubst s) con
+         ty_ob' <- substitute s ty_ob
+         sps' <- substitute s sps
          args' <- substitute s args
-         return $ ExpM $ ConE inf con' args'
+         return $ ExpM $ ConE inf con' ty_ob' sps' args'
        AppE inf op ts es -> do
          op' <- substitute s op
          ts' <- substitute (typeSubst s) ts
@@ -600,10 +776,11 @@ instance Substitutable (Exp Mem) where
          substituteDefGroup substitute s defs $ \s' defs' -> do
            body' <- substitute s' body
            return $ ExpM $ LetfunE inf defs' body'
-       CaseE inf scr alts -> do
+       CaseE inf scr sps alts -> do
          scr' <- substitute s scr
+         sps' <- substitute s sps
          alts' <- mapM (substitute s) alts
-         return $ ExpM $ CaseE inf scr' alts'
+         return $ ExpM $ CaseE inf scr' sps' alts'
        ExceptE inf ty -> do
          ty' <- substitute (typeSubst s) ty
          return $ ExpM $ ExceptE inf ty'
@@ -619,11 +796,12 @@ instance Substitutable (Exp Mem) where
 
 instance Substitutable (Alt Mem) where
   type Substitution (Alt Mem) = Subst
-  substituteWorker s (AltM (Alt con params body)) =
+  substituteWorker s (AltM (Alt con ty_ob params body)) =
     substituteDeConInst (typeSubst s) con $ \ts' con' ->
-    substitutePatMs (setTypeSubst ts' s) params $ \s' params' -> do
-      body' <- substitute s' body
-      return $ AltM $ Alt con' params' body'
+    substituteMaybePatM (setTypeSubst ts' s) ty_ob $ \s' ty_ob' -> do
+    substitutePatMs s' params $ \s'' params' -> do
+      body' <- substitute s'' body
+      return $ AltM $ Alt con' ty_ob' params' body'
 
 instance Substitutable (Fun Mem) where
   type Substitution (Fun Mem) = Subst
@@ -653,8 +831,10 @@ checkForShadowingExpSet in_scope e =
   case fromExpM e
   of VarE {} -> ()
      LitE {} -> ()
-     ConE _ con args ->
+     ConE _ con sps ty_ob args ->
        checkForShadowingConSet in_scope con `seq`
+       continues sps `seq`
+       maybe () continue ty_ob `seq`
        continues args
      AppE _ op ty_args args ->
        continue op `seq`
@@ -669,8 +849,9 @@ checkForShadowingExpSet in_scope e =
        checkForShadowingExpSet (insert (patMVar pat) in_scope) body
      LetfunE _ defs body ->
        checkForShadowingGroupSet checkForShadowingFunSet checkForShadowingExpSet body in_scope defs
-     CaseE _ scr alts ->
+     CaseE _ scr sps alts ->
        continue scr `seq`
+       continues sps `seq`
        (foldr seq () $ map (checkForShadowingAltSet in_scope) alts)
      ExceptE _ ty ->
        checkForShadowingSet in_scope ty
@@ -749,7 +930,7 @@ checkForShadowingGlobalDefSet in_scope (DataEnt d) =
   checkForShadowingDataSet in_scope d
 
 checkForShadowingAltSet :: CheckForShadowing AltM
-checkForShadowingAltSet in_scope (AltM (Alt decon params body)) =
+checkForShadowingAltSet in_scope (AltM (Alt decon ty_ob params body)) =
   let ex_vars = map binderVar $ deConExTypes decon
       kinds = deConTyArgs decon ++ map binderType (deConExTypes decon)
       ty_scope = inserts ex_vars in_scope

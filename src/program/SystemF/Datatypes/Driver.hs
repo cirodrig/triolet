@@ -2,10 +2,12 @@
 module SystemF.Datatypes.Driver(computeDataTypeInfo)
 where
 
+import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.Maybe
+import Debug.Trace
   
 import Common.Error
 import Common.Identifier
@@ -40,17 +42,29 @@ computeDataTypeInfo var_supply type_env =
       let dtypes_needing_info = catMaybes m_dtypes_needing_info
 
       -- Create and return definitions of the info variables
-      defss <- assume_info_vars dtypes_needing_info $
-        mapM define_info_var dtypes_needing_info
+      defss <-
+        assume_info_vars dtypes_needing_info $ sequence
+        [ -- Algebraic types
+          liftM concat $ mapM define_info_var dtypes_needing_info
+
+          -- Primitive types
+        , define_primitive_info_var intV
+        , define_primitive_info_var uintV
+        , define_primitive_info_var floatV
+        ]
       return $ concat defss
+
+    define_primitive_info_var data_type_con = do
+      Just dtype <- lookupDataType data_type_con
+      definePrimitiveValInfo dtype
 
     -- Create definitions for the info variables
     define_info_var :: Var -> UnboxedTypeEvalM [GDef Mem]
     define_info_var data_type_con = do
       Just dtype <- lookupDataType data_type_con
       case dataTypeKind dtype of
-        ValK  -> return `liftM` valInfoDefinition dtype
-        BareK -> return `liftM` bareInfoDefinition dtype
+        ValK  -> valInfoDefinition dtype
+        BareK -> bareInfoDefinition dtype
         BoxK  -> boxInfoDefinitions dtype
 
     -- Given a list of data type constructors, add all their info variables
@@ -61,7 +75,7 @@ computeDataTypeInfo var_supply type_env =
 
       -- For each data type, for each info variable, create a binding
       let bindings :: [Binder]
-          bindings = [ v ::: dataTypeInfoType dtype
+          bindings = [ v ::: dataTypeInfoVarType dtype
                      | m_dtype <- dtypes
                      , let Just dtype = m_dtype
                      , v <- layoutInfoVars $ dataTypeLayout' dtype
@@ -105,28 +119,39 @@ createLayouts dtype size_param_types static_types =
   where
     -- Create one layout for each data constructor
     constructor_layouts = do
-      xs <- forM (dataTypeDataConstructors dtype) $ \c -> do
-        i <- createInfoVariable $ varName c
-        return (c, i)
-      return $ boxedDataTypeLayout size_param_types static_types xs
+      -- Create an info constructor and field size computation code
+      xs <- createConstructorTable createInfoVariable dtype
+      fs <- createConstructorTable createSizeVariable dtype
+      return $ boxedDataTypeLayout size_param_types static_types xs fs
 
     -- Create one layout for the data type
     unboxed_layout = do
       i <- createInfoVariable (varName $ dataTypeCon dtype)
-      return $ unboxedDataTypeLayout size_param_types static_types i
+      fs <- createConstructorTable createSizeVariable dtype
+      return $ unboxedDataTypeLayout size_param_types static_types i fs
 
--- | Create an info variable for this data type, if it doesn't already have
---   one.  Save it in the type environment.
---   If a variable was created, return the data constructor's name.
-createInfoVariable :: Maybe Label -> UnboxedTypeEvalM Var
-createInfoVariable data_label = do
-  -- Name the variable by appending "_info" to the data type constructor name
+-- | Create a lookup table indexed by constructors.
+createConstructorTable :: (Maybe Label -> UnboxedTypeEvalM a) -> DataType
+                       -> UnboxedTypeEvalM [(Var, a)]
+createConstructorTable f dtype =
+  forM (dataTypeDataConstructors dtype) $ \c -> do
+    i <- f $ varName c
+    return (c, i)
+
+-- | Create a new variable whose name consists of the given label
+--   extended with some extra string.
+createVariable :: String -> Maybe Label -> UnboxedTypeEvalM Var
+createVariable str data_label = do
   let info_name =
         case data_label
         of Nothing -> Nothing
            Just lab -> case labelLocalName lab
-                       of Left s -> let s' = s ++ "_info"
+                       of Left s -> let s' = s ++ str
                                     in Just (lab {labelLocalName = Left s'})
                           Right _ -> Nothing
 
   newVar info_name ObjectLevel
+
+createInfoVariable = createVariable "_info"
+createSizeVariable = createVariable "_size"
+

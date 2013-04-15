@@ -236,6 +236,11 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
 
   times <- newTimes
   
+  -- DEBUG: Run demand analysis
+  repr_mod <- SystemF.demandAnalysis repr_mod
+  putStrLn "After demand analysis"
+  print $ pprMemModule repr_mod
+
   -- General-purpose, high-level optimizations
   repr_mod <- highLevelOptimizations times True SystemF.GeneralSimplifierPhase repr_mod
 

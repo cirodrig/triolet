@@ -1,5 +1,10 @@
 {-| Type object generation.
 
+There are several, similar pieces of code here for computing type
+information.  Some code computes type objects, some code computes sizes. 
+Out of the code that computes type objects, some computes bare objects
+and some computes value objects.
+
 This code creates a global type object for each algebraic data type definition.
 In many ways, type objects hold 
 
@@ -9,7 +14,8 @@ the global type object is a function or constant of type
 -}
 
 module SystemF.Datatypes.TypeObject
-       (valInfoDefinition,
+       (definePrimitiveValInfo,
+        valInfoDefinition,
         bareInfoDefinition,
         boxInfoDefinitions)
 where
@@ -29,8 +35,8 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
 import Common.Supply
-import Builtins.Builtins
 import qualified LowLevel.Types as LL
 import SystemF.Syntax
 import SystemF.MemoryIR
@@ -38,428 +44,14 @@ import SystemF.Datatypes.DynamicTypeInfo
 import SystemF.Datatypes.Structure
 import SystemF.Datatypes.Util(tagType)
 import SystemF.Datatypes.Layout
+import SystemF.Datatypes.InfoCall
+import SystemF.Datatypes.Code
 import Type.Type
 import Type.Environment
 import Type.Eval
 
--- | Simple expression contexts for let bindings
-newtype MkExp = MkExp (ExpM -> ExpM)
-
-instance Monoid MkExp where
-  mempty = MkExp id
-  mappend (MkExp f) (MkExp g) = MkExp (f . g)
-
-type Gen a = WriterT MkExp UnboxedTypeEvalM a
-
--- | Size and alignment of an object.
---   Corresponds to data type @SizeAlign@ or @SizeAlignVal@.
-data SizeAlign = SizeAlign {objectSize :: !Sz, objectAlign :: !Al}
-
--- | A length value, holding an 'int'
-newtype Length = Length ExpM
-
--- | A boolean vaule, indicating whether a data structure doesn't
---   contain pointers to heap objects.
---   'True' means the structure has no pointers.
-newtype PointerFree = PointerFree ExpM
-
-isPointerFree, notPointerFree :: PointerFree
-isPointerFree = PointerFree (conE' (VarCon true_conV [] []) [])
-notPointerFree = PointerFree (conE' (VarCon false_conV [] []) [])
-
--- | The unpacked fields of a 'TypeObject' object
-data BoxInfo =
-  BoxInfo
-  { box_info_conid :: !ExpM    -- An unsigned integer
-  }
-
--- | The unpacked fields of a 'Repr' object
-data BareInfo =
-  BareInfo 
-  { bare_info_size    :: !SizeAlign 
-  , bare_info_copy    :: !ExpM
-  , bare_info_asbox   :: !ExpM
-  , bare_info_asbare  :: !ExpM
-  , bare_info_pointers :: !PointerFree
-  }
-
--- | The unpacked fields of a 'ReprVal' object
-data ValInfo =
-  ValInfo
-  { val_info_size     :: !SizeAlign
-  , val_info_pointers :: !PointerFree
-  }
-
-runGen :: Gen ExpM -> UnboxedTypeEvalM ExpM
-runGen m = do (x, MkExp f) <- runWriterT m
-              return $ f x
-
--- | Bind an expression's result to a variable.
---
---   This is done when an expression may be used multiple times, 
---   to avoid introducing redundant work.
-emit :: Type -> ExpM -> Gen ExpM
-
--- Don't bind literals, variables, or nullary constructors to variables
-emit ty rhs@(ExpM (VarE {})) = return rhs
-emit ty rhs@(ExpM (LitE {})) = return rhs
-emit ty rhs@(ExpM (ConE _ (VarCon _ [] []) [])) = return rhs
-
-emit ty rhs = do
-  v <- lift $ newAnonymousVar ObjectLevel
-  tell $ MkExp (\body -> ExpM $ LetE defaultExpInfo (patM (v ::: ty)) rhs body)
-  return (varE' v)
-
--- | Deconstruct a single-constructor type.  Return the existential types and
---   field types.
-decon :: Type -> ExpM -> Gen ([Var], [ExpM])
-decon prod_type scrutinee = do
-  (decon_inst, field_types) <- lift $ do
-    -- Get data constructor type
-    Just (tycon, ty_args) <- deconVarAppType prod_type
-    Just data_type <- lookupDataType tycon
-    let [data_con] = dataTypeDataConstructors data_type
-    Just data_con_type <- lookupDataCon data_con
-
-    -- Instantiate the type
-    (ex_binders, field_types, _) <-
-      instantiateDataConTypeWithFreshVariables data_con_type ty_args
-
-    let decon_inst = VarDeCon data_con ty_args ex_binders
-    return (decon_inst, field_types)
-
-  field_binders <- lift $ forM field_types $ \t -> do
-    v <- newAnonymousVar ObjectLevel
-    return $ patM (v ::: t)
-  
-  -- Create the case expression
-  let mk_case body =
-        ExpM $ CaseE defaultExpInfo scrutinee
-        [AltM $ Alt decon_inst field_binders body]
-  tell (MkExp mk_case)
-
-  let ex_vars = map binderVar $ deConExTypes decon_inst
-      fields = map (varE' . patMVar) field_binders
-  return (ex_vars, fields)
-
--- | Create a case expression to deconstruct a multiple-constructor type.
---   Handle the alternatives in-place.
-mkCase :: Type -> ExpM -> [(Var, [Type] -> [ExpM] -> UnboxedTypeEvalM ExpM)]
-       -> UnboxedTypeEvalM ExpM
-mkCase ty scrutinee alt_handlers = do
-    -- Get data constructor type
-    Just (tycon, ty_args) <- deconVarAppType ty
-    Just data_type <- lookupDataType tycon
-
-    -- Handle each disjunct
-    alts <- forM (dataTypeDataConstructors data_type) $ \data_con -> do
-      let Just handle_alt = lookup data_con alt_handlers
-
-      -- Create a pattern to match this constructor
-      Just data_con_type <- lookupDataCon data_con
-      (ex_binders, field_types, _) <-
-        instantiateDataConTypeWithFreshVariables data_con_type ty_args
-
-      let decon = VarDeCon data_con ty_args ex_binders
-
-      param_vars <- replicateM (length field_types) $
-                    newAnonymousVar ObjectLevel
-      let field_binders = map patM $ zipWith (:::) param_vars field_types
-
-      -- Create the body expression
-      body <- let ex_types = map (VarT . binderVar) ex_binders
-                  fields = map (varE' . patMVar) field_binders
-              in assumeBinders ex_binders $ assumePatMs field_binders $
-                 handle_alt ex_types fields
-        
-      return $ AltM $ Alt decon field_binders body
-
-    -- Build case expression
-    return $ ExpM $ CaseE defaultExpInfo scrutinee alts
-
--- | Extract the fields of a @SizeAlignVal a@ term.
-unpackSizeAlignVal :: Type -> ExpM -> Gen SizeAlign
-unpackSizeAlignVal ty e = do
-  ([], [s, a]) <- decon (sizeAlignValV `varApp` [ty]) e
-  return $ SizeAlign s a
-
--- | Construct a @SizeAlignVal a@ term.
-packSizeAlignVal :: Type -> SizeAlign -> ExpM
-packSizeAlignVal ty (SizeAlign s a) =
-  conE' (VarCon sizeAlignVal_conV [ty] []) [s, a]
-
--- | Extract the fields of a @ReprVal a@ term.
-unpackReprVal :: Type -> ExpM -> Gen ValInfo
-unpackReprVal ty e = do
-  ([], [sa, p]) <- decon (valInfoV `varApp` [ty]) e
-  sa' <- unpackSizeAlignVal ty sa
-  return $ ValInfo sa' (PointerFree p)
-
--- | Construct a @SizeAlignVal a@ term.
-packReprVal :: Type -> ValInfo -> ExpM
-packReprVal ty (ValInfo sa (PointerFree p)) =
-  conE' (VarCon valInfo_conV [ty] []) [packSizeAlignVal ty sa, p]
-
--- | Extract the fields of a @SizeAlign a@ term.
-unpackSizeAlign :: Type -> ExpM -> Gen SizeAlign
-unpackSizeAlign ty e = do
-  ([], [s, a]) <- decon (sizeAlignV `varApp` [ty]) e
-  return $ SizeAlign s a
-
--- | Construct a @SizeAlign a@ term.
-packSizeAlign :: Type -> SizeAlign -> ExpM
-packSizeAlign ty (SizeAlign s a) =
-  conE' (VarCon sizeAlign_conV [ty] []) [s, a]
-
--- | Extract the fields of a @Repr a@ term.
-unpackRepr :: Type -> ExpM -> Gen BareInfo
-unpackRepr ty e = do
-  ([], [size_align, copy, asbox, asbare, just_bytes]) <-
-    decon (bareInfoV `varApp` [ty]) e
-  sa <- unpackSizeAlign ty size_align
-  return $ BareInfo sa copy asbox asbare (PointerFree just_bytes)
-
--- | Rebuild a @Repr a@ term.
-packRepr :: Type -> BareInfo -> ExpM
-packRepr ty (BareInfo sa copy asbox asbare (PointerFree just_bytes)) =
-  conE' (VarCon bareInfo_conV [ty] [])
-  [packSizeAlign ty sa, copy, asbox, asbare, just_bytes]
-
-unpackTypeObject :: Type -> ExpM -> Gen BoxInfo
-unpackTypeObject ty e = do
-  ([], [conid]) <-
-    decon (boxInfoV `varApp` [ty]) e
-  return $ BoxInfo conid
-
-packTypeObject :: Type -> BoxInfo -> ExpM
-packTypeObject ty (BoxInfo conid) =
-  conE' (VarCon boxInfo_conV [ty] []) [conid]
-
-unpackLength :: Type -> ExpM -> Gen Length
-unpackLength ty e = do
-  ([], [x]) <- decon (fiIntV `varApp` [ty]) e
-  return $ Length x
-
-packLength :: Type -> Length -> ExpM
-packLength ty (Length e) =
-  conE' (VarCon fiInt_conV [ty] []) [e]
 
 -------------------------------------------------------------------------------
-
-intL :: Integral a => a -> ExpM
-intL n = litE' $ IntL (fromIntegral n) intT
-
-uintL :: Integral a => a -> ExpM
-uintL n = litE' $ IntL (fromIntegral n) uintT
-
-fromIntL :: ExpM -> Maybe Integer
-fromIntL (ExpM (LitE _ (IntL n (VarT type_var)))) | type_var == intV = Just n
-fromIntL _ = Nothing
-
-fromUintL :: ExpM -> Maybe Integer
-fromUintL (ExpM (LitE _ (IntL n (VarT type_var)))) | type_var == uintV = Just n
-fromUintL _ = Nothing
-
-uintToIntE :: ExpM -> ExpM
-uintToIntE e
-  | Just x <- fromUintL e = intL x
-  | otherwise = varAppE' uintToIntV [] [e]
-
-intToUintE :: ExpM -> ExpM
-intToUintE e
-  | Just x <- fromIntL e = uintL x
-  | otherwise = varAppE' intToUintV [] [e]
-
--- | Add two integers; evaluate constants immediately if possible
-addIE :: ExpM -> ExpM -> ExpM
-addIE e1 e2
-  | Just x <- fromIntL e1, Just y <- fromIntL e2 = intL (x + y)
-  | Just 0 <- fromIntL e1 = e2
-  | Just 0 <- fromIntL e2 = e1
-  | otherwise = varAppE' addIV [] [e1, e2]
-
-negIE :: ExpM -> ExpM
-negIE e
-  | Just x <- fromIntL e = intL (negate x)
-  | otherwise = varAppE' negateIV [] [e]
-
--- | Compute the modulus @e1 `mod` e2@.  If possible, the modulus
---   is computed statically.  Expression e2 is assumed to be greater than zero.
-modIE_safe :: ExpM -> ExpM -> ExpM
-modIE_safe e1 e2
-  | Just x <- fromIntL e1, Just y <- fromIntL e2 = intL (x `mod` y)
-  -- 0 `mod` x == 0
-  | Just 0 <- fromIntL e1 = intL 0
-  -- -1 `mod` x == x - 1 for any x > 0
-  | Just (-1) <- fromIntL e2 = addIE (intL (-1)) e1
-  | otherwise = varAppE' modIV [] [e1, e2]
-
--- | Take the maximum of two integers
-maxUE :: ExpM -> ExpM -> ExpM
-maxUE e1 e2
-  | Just x <- fromUintL e1, Just y <- fromUintL e2 = uintL (max x y)
-  | Just 0 <- fromUintL e1 = e2
-  | Just 0 <- fromUintL e2 = e1
-  | otherwise = varAppE' maxUV [] [e1, e2]
-
--- | Take the maximum of two integers.  The integers are assumed to be
---   greater than or equal to 1.
-maxUE_1 :: ExpM -> ExpM -> ExpM
-maxUE_1 e1 e2
-  | Just x <- fromUintL e1, Just y <- fromUintL e2 = uintL (max x y)
-  | Just 1 <- fromUintL e1 = e2
-  | Just 1 <- fromUintL e2 = e1
-  | otherwise = varAppE' maxUV [] [e1, e2]
-
-andIE :: ExpM -> ExpM -> ExpM
-andIE e1 e2
-  | is_true e1  = e2
-  | is_false e1 = e1
-  | is_true e2  = e1
-  | is_false e2 = e2
-  | otherwise   = varAppE' andV [] [e1, e2]
-  where
-    is_true (ExpM (ConE _ (VarCon c _ _) _)) = c == true_conV
-    is_true _ = False
-
-    is_false (ExpM (ConE _ (VarCon c _ _) _)) = c == false_conV
-    is_false _ = False
-
--- negateI, addI, subI, modI
--- addU, subU, modU
--- intToUint, uintToInt
-
--- | An offset, with type 'int'
-newtype Off = Off ExpM
-
-zero :: Off
-zero = Off (intL 0)
-
--- | A size, with type 'uint'
-type Sz = ExpM
-
--- | An alignment, with type 'uint'
-type Al = ExpM
-
-instance DefaultValue SizeAlign where dummy = emptySizeAlign
-
-instance DefaultValue Length where dummy = Length (intL 0)
-
-instance DefaultValue PointerFree where
-  dummy = PointerFree (conE' (VarCon false_conV [] []) [])
-
-instance DefaultValue ValInfo where dummy = ValInfo dummy dummy
-
-instance DefaultValue BareInfo where
-  dummy = BareInfo dummy z z z dummy
-    where
-      z = intL 0
-
-emptySizeAlign :: SizeAlign
-emptySizeAlign = SizeAlign (uintL 0) (uintL 1)
-
-data OffAlign = OffAlign {offsetOff :: !Off, offsetAlign :: !Al}
-
-emptyOffAlign :: OffAlign
-emptyOffAlign = OffAlign zero (uintL 1)
-
--- | Convert an offset and alignment to a size and alignment
-offAlignToSize :: OffAlign -> SizeAlign
-offAlignToSize (OffAlign (Off o) a) =
-  SizeAlign (intToUintE o) a
-
--- | Round up an offset to the nearest multiple of an alignment
-addRecordPadding :: Off -> Al -> Gen Off
-addRecordPadding (Off o) a = do
-  let disp = modIE_safe (negIE o) (uintToIntE a)
-  o' <- emit intT $ addIE o disp
-  return $ Off o'
-
--- | Add an object's size to an offset
-addSize :: Off -> Sz -> Gen Off
-addSize (Off off) size = do
-  off' <- emit intT $ addIE off (uintToIntE size)
-  return (Off off')
-
--- | Add padding to an offset.
---   Return the field offset and the new offset.
-padOff :: OffAlign -> SizeAlign -> Gen (Off, OffAlign)
-padOff (OffAlign off al) sa = do
-  off' <- addRecordPadding off (objectAlign sa)
-  off'' <- addSize off' (objectSize sa)
-  al' <- emit uintT $ maxUE_1 al (objectAlign sa)
-  return (off', OffAlign off'' al')
-
--- | Add padding to an offset.
---   Return the field offset and the new offset.
-padOffMaybe :: OffAlign -> Maybe SizeAlign -> Gen (Maybe Off, OffAlign)
-padOffMaybe start_off Nothing = return (Nothing, start_off)
-padOffMaybe o (Just sa) = do
-  (o', next_off) <- padOff o sa
-  return (Just o', next_off)
-
--- | Compute the size of an array, given the size of an array element.
---   The number of array elements is an @int@.
-arraySize :: Length -> SizeAlign -> Gen SizeAlign
-arraySize (Length n_elements) (SizeAlign elem_size elem_align) = do
-  -- Add padding to each array element
-  let off1 = Off (uintToIntE elem_size)
-  elem_size <- addRecordPadding off1 elem_align
-
-  -- Multiply by number of elements.  Convert to a size.
-  let array_size =
-        intToUintE $
-        varAppE' mulIV [] [n_elements, case elem_size of Off o -> o]
-
-  return $ SizeAlign array_size elem_align
-
--- | Compute the size of a data structure consisting of two fields
---   placed consecutively in memory, with padding
-abut :: OffAlign -> SizeAlign -> Gen OffAlign
-abut o s = do
-  (_, o') <- padOff o s
-  return o'
-
--- | Compute the size of a data structure consisting of the given fields
---   placed consecutively in memory, with padding
-structSize :: [SizeAlign] -> Gen SizeAlign
-structSize xs = offAlignToSize `liftM` foldM abut emptyOffAlign xs
-
--- | Compute the size and alignment of two overlaid objects
-overlay :: SizeAlign -> SizeAlign -> Gen SizeAlign
-overlay (SizeAlign s1 a1) (SizeAlign s2 a2) = do
-  s <- emit uintT $ maxUE s1 s2
-  a <- emit uintT $ maxUE_1 a1 a2
-  return $ SizeAlign s a
-
-overlays :: [SizeAlign] -> Gen SizeAlign
-overlays (x:xs) = foldM overlay x xs
-
-maxAlignments :: [Al] -> Gen Al
-maxAlignments xs = emit uintT $ foldl' maxUE_1 (uintL 1) xs
-
--- | Compute the logical AND of some boolean expressions
-andE :: [ExpM] -> Gen ExpM
-andE xs = emit boolT $ foldl' andIE (conE' (VarCon true_conV [] []) []) xs
-
-allPointerFree :: [PointerFree] -> Gen PointerFree
-allPointerFree xs = liftM PointerFree $ andE [e | PointerFree e <- xs]
-
--- | Information about how a field of an object is represented
-data FieldInfo = FieldInfo Type !FieldDetails
-
-fiDetails (FieldInfo _ d) = d
-
--- | Kind-specific information about how a field of an object is represented
-data FieldDetails =
-    ValDetails ValInfo
-  | BareDetails BareInfo
-  | BoxDetails
-
--------------------------------------------------------------------------------
-
--- | Static type information
-type CoreStaticTypeInfo = DynTypeInfo ValInfo BareInfo Length
 
 -- | Compute the size and alignment of an object header.
 --   Size and alignment depend on whether the object is boxed and how many
@@ -486,31 +78,29 @@ headerSize boxing n_constructors =
                     in (size2, oh_align `max` LL.alignOf ty)
 
 -- | Compute the size and alignment of a type of kind 'val'
-structureSize :: CoreDynTypeInfo
-              -> Structure
-              -> Gen ValInfo
-structureSize type_info layout =
+computeValInfo :: CoreDynTypeInfo
+               -> Structure
+               -> Gen ValInfo
+computeValInfo type_info layout =
   case layout
   of PrimStruct pt            -> return $ primSize pt
-     -- BoolStruct               -> return $ DataLayout BoolD
-     -- ArrStruct t ts           -> arrSize type_info t ts
-     DataStruct (Data tag fs) -> sumSize type_info tag fs
+     DataStruct (Data tag fs) -> sumValInfo type_info tag fs
      ForallStruct fa          -> forall_layout fa
      VarStruct v              -> var_layout v
      UninhabitedStruct        -> internalError "computeLayout: Uninhabited"
   where
-    var_layout v = lift $ lookupValTypeInfo type_info v
+    var_layout v = lift $ lookupValTypeInfo' type_info v
 
     forall_layout (Forall b t) = assumeBinder b $ do
       s <- lift $ computeStructure t
-      structureSize type_info s
+      computeValInfo type_info s
 
-sumSize :: CoreDynTypeInfo -> Boxing -> Alternatives
-        -> Gen ValInfo
-sumSize _ _ [] =
-  internalError "structureSize: Uninhabited type"
+sumValInfo :: CoreDynTypeInfo -> Boxing -> Alternatives
+           -> Gen ValInfo
+sumValInfo _ _ [] =
+  internalError "computeValInfo: Uninhabited type"
 
-sumSize type_info tag alts = do
+sumValInfo type_info tag alts = do
   let header_layout = headerSize tag (length alts)
   disjunct_info <- mapM (alt_layout header_layout) alts
 
@@ -532,11 +122,6 @@ sumSize type_info tag alts = do
 
     field_layout (k, t) = fieldInfo type_info (k, t)
 
-{-arrSize type_info size elem = do
-  size_val <- lift $ lookupIntTypeInfo type_info size
-  elem_repr <- structureRepr type_info =<< lift (computeStructure elem)
-  arraySize size_val (bare_info_size elem_repr)-}
-
 primSize pt = ValInfo (SizeAlign size alignment) pointer_free
   where
     size = uintL $ LL.sizeOf pt 
@@ -547,6 +132,17 @@ primSize pt = ValInfo (SizeAlign size alignment) pointer_free
                       LL.BoolType {}  -> isPointerFree
                       LL.IntType {}   -> isPointerFree
                       LL.FloatType {} -> isPointerFree
+
+-- | Information about how a field of an object is represented
+data FieldInfo = FieldInfo Type !FieldDetails
+
+fiDetails (FieldInfo _ d) = d
+
+-- | Kind-specific information about how a field of an object is represented
+data FieldDetails =
+    ValDetails ValInfo
+  | BareDetails BareInfo
+  | BoxDetails
 
 fieldDetailsSize :: FieldDetails -> SizeAlign
 fieldDetailsSize BoxDetails      = val_info_size $ primSize LL.OwnedType
@@ -568,94 +164,204 @@ fieldInfo type_info (k, t) = do
 fieldDetails :: CoreDynTypeInfo -> BaseKind -> Type -> Gen FieldDetails
 fieldDetails type_info k t =
   case k
-  of BoxK -> return BoxDetails
-     BareK -> do s <- lift $ computeStructure t
-                 r <- structureRepr type_info t s
-                 return $ BareDetails r
-     ValK -> do s <- lift $ computeStructure t
-                r <- structureSize type_info s
-                return $ ValDetails r
+  of BoxK  -> return BoxDetails
+     _    -> condM (lift $ deconVarAppType t)
+             [ -- Algebraic data type: call the info function
+               do aguard False  -- Disabled; doesn't work properly with existential types
+                  Just (op, args) <- it
+                  Just data_type <- lift $ lookupDataType op
+                  lift $ do e <- callKnownUnboxedInfoFunction type_info data_type args
+                            unpack_info e
+               -- Otherwise, call 'structureRepr'
+             , lift $ do s <- lift $ computeStructure t
+                         structure_info s
+             ]
+  where
+    -- Unpack an info value
+    unpack_info e
+      | k == BareK = fmap BareDetails $ unpackRepr t e
+      | k == ValK  = fmap ValDetails $ unpackReprVal t e
+
+    -- Compute info from a structure
+    structure_info s
+      | k == BareK = fmap BareDetails $ structureRepr type_info Nothing t s
+      | k == ValK  = fmap ValDetails $ computeValInfo type_info s
+
+-- | Information about the size of a field of an object.
+--   A 'FieldSize' contains size information about an unboxed field.
+--   For a boxed field, it contains 'Nothing'.
+data FieldSize = FieldSize Type !(Maybe SizeAlign)
+
+fsSize (FieldSize _ d) = d
+
+-- | Get the size of a field.  If boxed, it's the size of a pointer.
+fsSize' (FieldSize _ Nothing)  = val_info_size $ primSize LL.OwnedType
+fsSize' (FieldSize _ (Just s)) = s
+
+-- | Get information about a field's representation
+fieldSize :: CoreDynSizeInfo -> (BaseKind, Type) -> Gen FieldSize
+fieldSize type_info (k, t) = do
+  d <- case k
+       of BoxK  -> return Nothing
+          BareK -> liftM Just field_details
+          ValK  -> liftM Just field_details
+  return $ FieldSize t d
+  where
+    field_details = do s <- lift $ computeStructure t
+                       structureSize type_info k t s
+
+-------------------------------------------------------------------------------
+
+-- | Dynamic size info
+type CoreDynSizeInfo = DynTypeInfo SizeAlign SizeAlign Length
+
+-- | Compute dynamic size information of an unboxed data structure
+structureSize :: CoreDynSizeInfo -> BaseKind -> Type -> Structure -> Gen SizeAlign
+structureSize type_info kind ty layout =
+  case layout
+  of DataStruct (Data tag fs) -> sumSize type_info ty tag fs
+     ForallStruct fa          -> forall_layout fa
+     VarStruct v              -> var_layout v
+     ArrStruct t ts           -> arrSize type_info ty t ts
+     PrimStruct pt            -> return $ val_info_size $ primSize pt
+     UninhabitedStruct        -> internalError "structureSize: Uninhabited"
+  where
+    continue k t l = structureSize type_info k t l
+
+    var_layout v = 
+      case kind
+      of ValK  -> lift $ lookupValTypeInfo' type_info v
+         BareK -> lift $ lookupBareTypeInfo' type_info v
+
+    forall_layout (Forall b t) = assumeBinder b $ do
+      structureSize type_info kind t =<< lift (computeStructure t)
+
+sumSize type_info ty tag alts = do
+  let header_layout = headerSize tag (length alts)
+
+  -- Compute size of all data constructors
+  constructor_sizes <-
+    forM alts $ \(Alternative decon fs) ->
+    assumeBinders (deConExTypes decon) $ do
+      -- Compute field sizes
+      sizes <- mapM (return . fsSize' <=< fieldSize type_info) fs
+
+      -- Compute size of this disjunct
+      structSize (header_layout : sizes)
+
+  -- Combine isizes
+  overlays constructor_sizes
+
+arrSize type_info ty size elem = do
+  size_val <- lift $ lookupIntTypeInfo' type_info size
+  elem_size <- structureSize type_info BareK ty =<< lift (computeStructure elem)
+  arraySize size_val elem_size
+
+-- | Compute sizes of all unboxed fields of one disjunct of a data type.
+--   Return a list with one value per field.  Boxed fields are represented
+--   by 'Nothing'.
+disjunctSizes :: CoreDynSizeInfo -> Type -> Data -> Var
+              -> Gen [Maybe SizeAlign]
+disjunctSizes type_info ty (Data tag djs) con =
+  let Alternative decon fs = findAlternative con djs
+  in assumeBinders (deConExTypes decon) $ do
+
+    -- Compute size of each unboxed field
+    forM fs $ \f -> do
+      field_info <- fieldSize type_info f
+      return $! fsSize field_info
 
 -------------------------------------------------------------------------------
 -- Representations
 
--- | Dynamic type info
-type CoreDynTypeInfo = DynTypeInfo ValInfo BareInfo Length
-
 -- | Compute dynamic type information of a bare data structure
-structureRepr :: CoreDynTypeInfo -> Type -> Structure -> Gen BareInfo
-structureRepr type_info ty layout =
+structureRepr :: CoreDynTypeInfo
+              -> Maybe ExpM     -- ^ An expression that evaluates to
+                                --   the representation of this type.
+                                --   'Nothing' if not an algebraic data
+                                --   structure.  This expression can only
+                                --   be used lazily, under a lambda.
+              -> Type
+              -> Structure
+              -> Gen BareInfo
+structureRepr type_info m_rec_exp ty layout =
   case layout
-  of DataStruct (Data tag fs) -> sumRepr type_info ty tag fs
+  of DataStruct (Data tag fs) -> let Just rec_exp = m_rec_exp  
+                                 in sumRepr type_info rec_exp ty tag fs
      ForallStruct fa          -> forall_layout fa
      VarStruct v              -> var_layout v
      ArrStruct t ts           -> arrRepr type_info t ts
      PrimStruct pt            -> internalError "structureRepr: Unexpected type"
      UninhabitedStruct        -> internalError "structureRepr: Uninhabited"
   where
-    continue t l = structureRepr type_info t l
+    continue t l = structureRepr type_info Nothing t l
 
-    var_layout v = lift $ lookupBareTypeInfo type_info v
+    var_layout v = lift $ lookupBareTypeInfo' type_info v
 
     forall_layout (Forall b t) =
       assumeBinder b $ continue t =<< lift (computeStructure t)
 
-sumRepr type_info ty tag alts = do
+sumRepr type_info rec_exp ty tag alts = do
   let header_layout = headerSize tag (length alts)
 
-  -- Compute representation info for all constructors
-  constructor_info <- mapM (alt_repr header_layout) alts
-  let (sizes, reconstructors, pointers) = unzip3 constructor_info
+  -- Compute representation info for all data constructors
+  field_info <-
+    forM alts $ \(Alternative decon fs) ->
+    assumeBinders (deConExTypes decon) $
+    mapM (fieldInfo type_info) fs
+    
+  -- Compute properties of data constructors
+  constructor_info <- zipWithM (alt_repr header_layout) field_info alts
+
+  -- A recursive call that constructs this info object; needed for
+  -- converting to boxed
+  lazy_rec_exp <- lazyExp (bareInfoT `AppT` ty) rec_exp
 
   -- Combine info
-  sum_size <- overlays sizes
-  pointer_free <- allPointerFree pointers
-  copy_fun <- lift $ sumCopyFunction ty reconstructors
-  let as_box = varAppE' defaultAsBoxV [ty] []
-  let as_bare = varAppE' defaultAsBareV [ty] [copy_fun]
+  sum_size <- overlays $ map fst constructor_info
+  pointer_free <- allPointerFree $ map snd constructor_info
+  copy_fun <- sumCopyFunction type_info ty (zip field_info alts)
+  let as_box = varAppE' defaultAsBoxV [ty] [lazy_rec_exp]
+  let as_bare = varAppE' defaultAsBareV [ty]
+                [packSizeAlign ty sum_size, copy_fun]
   return $ BareInfo sum_size copy_fun as_box as_bare pointer_free
   where
     -- Compute repr information for one constructor.
     -- The returned tuple contains values for the size, copy, and pointerless 
     -- fields of 'BareInfo'.
-    alt_repr :: SizeAlign -> Alternative
-             -> Gen (SizeAlign,
-                     (Var, [Type] -> [ExpM] -> ExpM),
-                     PointerFree)
-    alt_repr header_layout (Alternative decon fs) =
+    alt_repr :: SizeAlign -> [FieldInfo] -> Alternative
+             -> Gen (SizeAlign, PointerFree)
+    alt_repr header_layout field_info (Alternative decon fs) =
       assumeBinders (deConExTypes decon) $ do
-        field_info <- mapM (fieldInfo type_info) fs
-
         size <- let sizes = [fieldDetailsSize d | FieldInfo _ d <- field_info]
                 in structSize (header_layout : sizes)
-
-        -- Copy: construct a new object.  Copy fields.
-        let copy =
-              case decon
-              of VarDeCon con ty_args _ ->
-                   let f ex_types fields =
-                         copyConstructor con ty_args ex_types
-                         (zip field_info fields)
-                   in (con, f)
 
         -- Pointerless: logical 'and' of all fields; False if any fields are
         -- boxed
         bytes <- allPointerFree [fieldDetailsPointerFree d | FieldInfo _ d <- field_info]
 
-        return (size, copy, bytes)
+        return (size, bytes)
         
-sumCopyFunction :: Type
-                -> [(Var, [Type] -> [ExpM] -> ExpM)]
-                -> UnboxedTypeEvalM ExpM
-sumCopyFunction ty disjuncts = do
-  copy_src <- newAnonymousVar ObjectLevel
-  copy_dst <- newAnonymousVar ObjectLevel
+sumCopyFunction :: CoreDynTypeInfo
+                -> Type
+                -> [([FieldInfo], Alternative)]
+                -> Gen ExpM
+sumCopyFunction type_info ty disjuncts = do
+  -- Create size parameters
+  let Just (con, ty_args) = fromVarApp ty
+  Just data_type <- lookupDataType con
+  size_param_types <- lift $ instantiateSizeParams data_type ty_args
+  size_params <- mapM (constructKnownSizeParameter type_info) size_param_types
 
-  -- Create case expression
-  let reconstructor f = \ts es -> return $ appE' (f ts es) [] [varE' copy_dst]
-  copy_exp <- assume copy_src ty $ assume copy_dst (AppT outPtrT ty) $
-              mkCase ty (varE' copy_src)
-              [(v, reconstructor f) | (v, f) <- disjuncts]
+  -- Create variables
+  copy_src <- lift $ newAnonymousVar ObjectLevel
+  copy_dst <- lift $ newAnonymousVar ObjectLevel
+
+  -- Create an expression that copies from src to dst
+  copy_exp <-
+    lift $ assume copy_src ty $ assume copy_dst (AppT outPtrT ty) $
+    mkCase ty (varE' copy_src) size_params
+    (reconstructors ty_args size_params copy_dst)
 
   -- Create function
   let copy_fun = FunM $ Fun { funInfo = defaultExpInfo
@@ -666,13 +372,34 @@ sumCopyFunction ty disjuncts = do
                             , funBody = copy_exp}
 
   return $ ExpM $ LamE defaultExpInfo copy_fun
-
--- | Create a copy of an object.  For bare objects, create an initializer.
-copyConstructor :: Var -> [Type] -> [Type] -> [(FieldInfo, ExpM)] -> ExpM
-copyConstructor con ty_args ex_types fields =
-  conE' (VarCon con ty_args ex_types) (map field_expr fields)
   where
-    field_expr (FieldInfo ty details, e) = 
+    reconstructors ty_args size_params copy_dst =
+      [(con, reconstruct ty_args size_params copy_dst field_info alt)
+      | (field_info, alt@(Alternative (VarDeCon con _ _) _)) <- disjuncts]
+
+    -- Reconstruct one case alternative from the given
+    -- 'ex_types' and 'field_vals'
+    reconstruct ty_args size_params copy_dst field_info
+      (Alternative decon field_types) ex_types field_vals =
+
+      assumeBinders (deConExTypes decon) $ do
+        let VarDeCon con _ _ = decon
+
+        -- Create a data constructor expression
+        let copy = copyConstructor type_info con ty_args size_params ex_types
+                   (zip field_info field_vals)
+
+        -- Apply to the return value
+        return $ appE' copy [] [varE' copy_dst]
+
+-- | Construct a bare object from the given fields.  Convert bare fields to
+--   initializers.
+copyConstructor :: CoreDynTypeInfo -> Var -> [Type] -> [ExpM]
+                -> [Type] -> [(FieldInfo, ExpM)] -> ExpM
+copyConstructor type_info con ty_args size_params ex_types fields =
+  unboxedConE' (VarCon con ty_args ex_types) size_params (map field_expr fields)
+  where
+    field_expr (FieldInfo ty details, e) =
       case details
       of ValDetails _  -> e
          BoxDetails    -> e
@@ -681,8 +408,8 @@ copyConstructor con ty_args ex_types fields =
 arrRepr :: CoreDynTypeInfo -> Type -> Type -> Gen BareInfo
 arrRepr type_info size elem = do
   let array_type = varApp arrV [size, elem]
-  size_val <- lift $ lookupIntTypeInfo type_info size
-  elem_repr <- structureRepr type_info elem =<< lift (computeStructure elem)
+  size_val <- lift $ lookupIntTypeInfo' type_info size
+  elem_repr <- structureRepr type_info Nothing elem =<< lift (computeStructure elem)
 
   -- Call 'repr_arr' to compute the array's representation
   let expr = varAppE' bareInfo_arrV [size, elem]
@@ -705,6 +432,25 @@ makeDynTypeInfo bs = do
     mk_update (v, KindedType BareK t) = do 
       rep <- unpackRepr t (varE' v)
       return $ insertBareTypeInfo t rep
+
+    mk_update (v, KindedType IntIndexK t) = do
+      l <- unpackLength t (varE' v)
+      return $ insertIntTypeInfo t l
+
+-- | Construct dynamic type information from a set of bindings.
+makeDynSizeInfo :: [(Var, KindedType)] -> Gen CoreDynSizeInfo
+makeDynSizeInfo bs = do
+  updates <- mapM mk_update bs
+  return $ foldr ($) emptyTypeInfo updates
+  where
+    -- Extract untyped size information from the data structure
+    mk_update (v, KindedType ValK t) = do
+      sa <- unpackSizeAlignVal t (varE' v)
+      return $ insertValTypeInfo t sa
+
+    mk_update (v, KindedType BareK t) = do 
+      sa <- unpackSizeAlign t (varE' v)
+      return $ insertBareTypeInfo t sa
 
     mk_update (v, KindedType IntIndexK t) = do
       l <- unpackLength t (varE' v)
@@ -738,25 +484,10 @@ parametricDefinition ty_params param_tys return_ty mk_body = do
                  }
   return entity
 
--- | Create definitions of the data type's info constructors.
---   One definition is created for unboxed types, or one per data constructor
---   for boxed types.
-valInfoDefinition :: DataType -> UnboxedTypeEvalM (GDef Mem)
-valInfoDefinition dtype = do
-  ent <- typeInfoDefinition dtype $ valInfoDefinition' dtype
-  return $ mkDef (unboxedLayoutInfo $ dataTypeLayout' dtype) ent
-
-bareInfoDefinition :: DataType -> UnboxedTypeEvalM (GDef Mem)
-bareInfoDefinition dtype = do
-  ent <- typeInfoDefinition dtype $ bareInfoDefinition' dtype
-  return $ mkDef (unboxedLayoutInfo $ dataTypeLayout' dtype) ent
-
-boxInfoDefinitions :: DataType -> UnboxedTypeEvalM [GDef Mem]
-boxInfoDefinitions dtype = forM (dataTypeDataConstructors dtype) $ \c -> do
-  Just dcon_type <- lookupDataCon c
-  ent <- typeInfoDefinition dtype $ boxInfoDefinition' dtype dcon_type
-  return $ mkDef (boxedLayoutInfo (dataTypeLayout' dtype) c) ent
-
+-- | Create a function definition for a data type's info variable.
+--
+--   This function creates function parameters and returns, and sets up
+--   the lookup table of dynamic type information
 typeInfoDefinition :: DataType
                    -> (CoreDynTypeInfo -> Gen ExpM)
                    -> UnboxedTypeEvalM (Ent Mem)
@@ -778,33 +509,180 @@ typeInfoDefinition dtype construct_info =
                   [dataTypeCon dtype `varApp`
                    [VarT v | v ::: _ <- dataTypeParams dtype]]
 
-
     -- Set up dynamic type information and construct an info term
     make_body parameters = runGen $ do
       dyn_info <- makeDynTypeInfo (zip parameters param_types)
       construct_info dyn_info
 
--- | Create the type info term for a value type.
+-- | Compute the size types of a data constructor fields.
+--   The returned list contains one value per field.  The value is 'Nothing'
+--   for boxed fields, or the type of the field's run-time size information
+--   otherwise.
+sizeInfoFieldTypes :: DataConType -> [Maybe Type]
+sizeInfoFieldTypes dcon_type = let 
+    dtype = dataConType dcon_type
+
+    -- Type parameters come directly from the data type definition
+    ty_params = dataTypeParams dtype
+    ex_types = dataConExTypes dcon_type
+
+    -- Compute field sizes
+    field_size (_, BoxK)  = Nothing
+    field_size (t, ValK)  = Just $ sizeAlignValT `AppT` t
+    field_size (t, BareK) = Just $ sizeAlignT `AppT` t
+
+    in map field_size $ dataConFields dcon_type
+
+-- | Create a function definition for computing a data constructor's
+--   fields' sizes.
 --
---   The created term extracts 'SizeAlign' values from all parameters,
---   computes the size of an object, and packages it into a new
---   object.
-valInfoDefinition' dtype dyn_info = do
-  let ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
-      ty = dataTypeCon dtype `varApp` ty_args
-  sa <- structureSize dyn_info =<< lift (computeStructure ty)
-  return $ packReprVal ty sa
+--   This function creates function parameters and returns, and sets up
+--   the lookup table of dynamic type information.
+--
+--   The function definition is parameterized over both the data type's
+--   parameters and the data constructor's existential type parameters.
+--   Existential types don't affect the result's value, but they may
+--   affect its type.
+sizeInfoDefinition :: DataConType -> UnboxedTypeEvalM (Ent Mem)
+sizeInfoDefinition dcon_type =
+  parametricDefinition (ty_params ++ ex_types)
+  param_size_types return_type make_body
+  where
+    dtype = dataConType dcon_type
 
--- | Create the type info term for a bare type
-bareInfoDefinition' dtype dyn_info = do
-  let ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
-      ty = dataTypeCon dtype `varApp` ty_args
-  rep <- structureRepr dyn_info ty =<< lift (computeStructure ty)
-  return $ packRepr ty rep
+    -- Type parameters come directly from the data type definition
+    ty_params = dataTypeParams dtype
+    ex_types = dataConExTypes dcon_type
 
--- | Create the type info term for a boxed type
-boxInfoDefinition' dtype con dyn_info = do
-  let ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
-      ty = dataTypeCon dtype `varApp` ty_args
-  let rep = BoxInfo (uintL $ dataConIndex con)
-  return $ packTypeObject ty rep
+    -- Parameters are based on size parameters and static types
+    param_types =
+      let l = dataTypeLayout' dtype
+      in layoutSizeParamTypes l ++ layoutStaticTypes l
+
+    param_size_types = map sizeParamType param_types
+
+    -- Type of size information for each field
+    field_size_types = sizeInfoFieldTypes dcon_type
+
+    -- The returned tuple contains all size informations
+    return_field_types = catMaybes field_size_types
+    return_type =
+      let field_kinds = [ValK | _ <- return_field_types]
+      in UTupleT field_kinds `typeApp` return_field_types
+
+    -- Construct a data structure for the size of a field,
+    -- given its type and unlifted value
+    pack_fields :: [Maybe SizeAlign] -> ExpM
+    pack_fields field_values =
+      let packed_values =
+            catMaybes $
+            zipWith pack_field (dataConFields dcon_type) field_values
+          tuple_con = TupleCon return_field_types
+      in valConE' tuple_con packed_values
+      where
+        pack_field (ty, ValK)  (Just sa) = Just $ packSizeAlignVal ty sa 
+        pack_field (ty, BareK) (Just sa) = Just $ packSizeAlign ty sa 
+        pack_field (ty, BoxK)  Nothing   = Nothing
+
+    -- Set up dynamic type information and compute sizes of disjuncts
+    make_body parameters = runGen $ do
+      dyn_info <- makeDynSizeInfo (zip parameters param_types)
+      let ty = dataTypeCon dtype `varApp` [VarT v | v ::: _ <- ty_params]
+
+      -- Compute sizes
+      DataStruct dat <- lift $ computeStructure ty
+      field_sizes <- disjunctSizes dyn_info ty dat (dataConCon dcon_type)
+
+      -- Create a tuple
+      return $ pack_fields field_sizes
+
+sizeInfoDefinitions dtype =
+  forM (dataTypeDataConstructors dtype) $ \c -> do
+    Just dcon_type <- lookupDataCon c
+    ent <- sizeInfoDefinition dcon_type
+    return $ mkDef (dataTypeFieldSizeVar dtype c) ent
+
+-------------------------------------------------------------------------------
+-- Entry points
+
+-- | Define an info variable for a primitive value type.
+--   Primitive types have no data constructors, so there are no size info 
+--   variables.
+definePrimitiveValInfo :: DataType -> UnboxedTypeEvalM [GDef Mem]
+definePrimitiveValInfo dtype
+  | dataTypeIsAbstract dtype && not (dataTypeIsAlgebraic dtype) &&
+    null (dataTypeDataConstructors dtype) =
+      valInfoDefinition dtype
+  | otherwise =
+      internalError "definePrimitiveValInfo"
+
+-- | Create definitions of layout information for the data type.
+--   One definition is created for unboxed types, or one per data constructor
+--   for boxed types.
+valInfoDefinition :: DataType -> UnboxedTypeEvalM [GDef Mem]
+valInfoDefinition dtype = do
+  ent <- typeInfoDefinition dtype build_info
+  let info_def = mkDef (dataTypeUnboxedInfoVar dtype) ent
+  size_defs <- sizeInfoDefinitions dtype
+  return (info_def : size_defs)
+  where
+    ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
+    ty = dataTypeCon dtype `varApp` ty_args
+
+    -- Create the info object for this data type constructor
+    build_info dyn_info = do
+      sa <- computeValInfo dyn_info =<< lift (computeStructure ty)
+      return $ packReprVal ty sa
+
+bareInfoDefinition :: DataType -> UnboxedTypeEvalM [GDef Mem]
+bareInfoDefinition dtype = do
+  ent <- typeInfoDefinition dtype build_info
+  let info_def = add_attributes $ mkDef info_var ent
+  size_defs <- sizeInfoDefinitions dtype
+  return (info_def : size_defs)
+  where
+    ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
+    ty = dataTypeCon dtype `varApp` ty_args
+    info_var = dataTypeUnboxedInfoVar dtype
+
+    -- Create the info object for this data type constructor
+    build_info dyn_info = do
+      -- Create a recursive call to the info object for this type constructor
+      info_e <- callKnownUnboxedInfoFunction dyn_info dtype ty_args
+      rep <- structureRepr dyn_info (Just info_e) ty =<< lift (computeStructure ty)
+      return $ packRepr ty rep
+
+    -- Temporarily mark type object constructors as "inline_never".
+    -- These objects may be recursive, and the simplifier doesn't terminate
+    -- correctly for this form of recursion. 
+    -- This needs a better fix, because inlining these objects is important.
+    add_attributes def =
+      modifyDefAnnotation (\d -> d {defAnnInlineRequest = InlNever}) def
+
+boxInfoDefinitions :: DataType -> UnboxedTypeEvalM [GDef Mem]
+boxInfoDefinitions dtype = do 
+  info_defs <- forM (dataTypeDataConstructors dtype) $ \c -> do
+    Just dcon_type <- lookupDataCon c
+    ent <- typeInfoDefinition dtype $ build_info dcon_type
+    return $ add_attributes $ mkDef (dataTypeBoxedInfoVar dtype c) ent
+  size_defs <- sizeInfoDefinitions dtype
+  return (info_defs ++ size_defs)
+  where
+    ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
+    ty = dataTypeCon dtype `varApp` ty_args
+
+    -- Create the info object for this data type constructor
+    build_info dcon_type _ = do
+      let rep = BoxInfo (uintL $ dataConIndex dcon_type)
+      return $ packTypeObject ty rep
+
+    -- Type object constructors 
+    -- with no value parameters are marked "inline_never".
+    -- These objects may be recursive, and the simplifier doesn't terminate
+    -- correctly for this form of recursion. 
+    -- Besides, they're not very useful to inline because we don't
+    -- deconstruct them very often.
+    add_attributes def
+      | FunEnt (FunM f) <- definiens def, null $ funParams f =
+          modifyDefAnnotation (\d -> d {defAnnInlineRequest = InlNever}) def
+      | otherwise = def

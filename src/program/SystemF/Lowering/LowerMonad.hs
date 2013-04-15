@@ -68,7 +68,7 @@ initializeLowerEnv :: IdentSupply Var
                    -> Map.Map Var LL.Var
                    -> IO LowerEnv
 initializeLowerEnv var_supply ll_var_supply type_env var_map = do
-  repr_env <- runFreshVarM var_supply mkGlobalReprEnv
+  let repr_env = DictEnv.empty
   int_env <- runFreshVarM var_supply mkGlobalIntEnv
   let global_map = IntMap.fromList [(fromIdent $ varID v, v')
                                    | (v, v') <- Map.toList var_map]
@@ -98,6 +98,8 @@ mkGlobalIntEnv = do
 -- | Create the global representation dictionary environment
 mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
 mkGlobalReprEnv = do
+  internalError "mkGlobalReprEnv"
+  {-
   -- All boxed objects use the same representation
   box_dict <- DictEnv.pattern1 $ \arg ->
     (varApp refV [VarT arg], mk_boxed_dict arg)
@@ -155,6 +157,7 @@ mkGlobalReprEnv = do
     tuple_dict_constructor 2 = LL.llBuiltin LL.the_fun_repr_Tuple2
     tuple_dict_constructor 3 = LL.llBuiltin LL.the_fun_repr_Tuple3
     tuple_dict_constructor 4 = LL.llBuiltin LL.the_fun_repr_Tuple4
+-}
 
 instance Supplies Lower (Ident Var) where
   fresh = Lower $ ReaderT $ \env -> supplyValue $ varSupply env

@@ -585,12 +585,17 @@ pprTypeEnvironment m = do
   return $ vcat assocs
 
 pprDataCon :: NormalizeContext HMType m => DataCon -> Ppr m Doc
-pprDataCon (DataCon sig) = pprTyScheme function_sig
+pprDataCon (DataCon sig tyob) = do scm <- pprTyScheme function_sig 
+                                   return $ scm $$ type_object_doc
   where
     -- Create a function type from the type signature
     function_sig = do (tys, FOConstructor tycon) <- sig
                       let range = ConTy tycon `appTys` map ConTy (qParams sig)
                       return $ functionTy tys range
+    type_object_doc =
+      case tyob
+      of Nothing -> empty
+         Just v  -> text "Type object" <+> SF.pprVar v
 
 pprValueBinding :: NormalizeContext HMType m => ValueBinding -> Ppr m Doc
 pprValueBinding binding =

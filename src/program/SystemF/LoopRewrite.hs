@@ -46,7 +46,6 @@ data LREnv =
   LREnv
   { loopNesting :: {-#UNPACK#-}!LoopNesting
   , typeEnv :: TypeEnv
-  , dictEnv :: SingletonValueEnv
   , varSupply :: !(IdentSupply Var)
   }
 
@@ -86,19 +85,16 @@ parLoopOperator v =
             coreBuiltin The_parallel_list_dim_reduce1,
             coreBuiltin The_parallel_dim1_reduce1,
             coreBuiltin The_parallel_dim2_reduce1,
-            coreBuiltin The_parallel_list_dim_scatter,
-            --coreBuiltin The_parallel_list_dim_list,
-            --coreBuiltin The_parallel_dim1_array,
-            --coreBuiltin The_parallel_dim2_array,
+            --coreBuiltin The_parallel_list_dim_scatter,
             coreBuiltin The_Sequence_parallel_reduce,
-            coreBuiltin The_Sequence_parallel_build,
-            coreBuiltin The_Sequence_parallel_scatter            
+            coreBuiltin The_Sequence_parallel_build --,
+            --coreBuiltin The_Sequence_parallel_scatter
            ] 
   
 otherLoopOperator v =
   v `elem` [coreBuiltin The_for,
             coreBuiltin The_doall,
-            coreBuiltin The_histogram,
+            --coreBuiltin The_histogram,
             coreBuiltin The_fun_reduce,
             coreBuiltin The_fun_reduce1,
             coreBuiltin The_TraversableDict_list_build,
@@ -107,17 +103,14 @@ otherLoopOperator v =
             coreBuiltin The_primitive_dim2_reduce,
             coreBuiltin The_primitive_list_dim_reduce1,
             coreBuiltin The_primitive_dim1_reduce1,
-            coreBuiltin The_primitive_dim2_reduce1,
-            coreBuiltin The_primitive_list_dim_scatter
-            --coreBuiltin The_primitive_list_dim_list,
-            --coreBuiltin The_primitive_dim1_array,
-            --coreBuiltin The_primitive_dim2_array
+            coreBuiltin The_primitive_dim2_reduce1 --,
+            --coreBuiltin The_primitive_list_dim_scatter
             ]
 
 -- | Use rewrite rules on an application
 useRewriteRules :: ExpInfo -> Var -> [Type] -> [ExpM] -> LRW (Maybe ExpM)
 useRewriteRules inf op_var ty_args args = LRW $ ReaderT $ \env ->
-  rewriteApp parallelizingRewrites (intIndexEnv (dictEnv env)) (varSupply env) (typeEnv env)
+  rewriteApp parallelizingRewrites (varSupply env) (typeEnv env)
   inf op_var ty_args (map deferEmptySubstitution args)
 
 data Rewrite =
@@ -174,22 +167,16 @@ replaceWithParallelApp inf op_var ty_args args =
          ReplaceWith $ coreBuiltin The_parallel_dim1_reduce1)
       , (coreBuiltin The_primitive_dim2_reduce1,
          ReplaceWith $ coreBuiltin The_parallel_dim2_reduce1)
-      , (coreBuiltin The_primitive_list_dim_scatter,
-         ReplaceWith $ coreBuiltin The_parallel_list_dim_scatter)
-      --, (coreBuiltin The_primitive_list_dim_list,
-        --ReplaceWith $ coreBuiltin The_parallel_list_dim_list)
-      --, (coreBuiltin The_primitive_dim1_array,
-        --ReplaceWith $ coreBuiltin The_parallel_dim1_array)
-      --, (coreBuiltin The_primitive_dim2_array,
-        --ReplaceWith $ coreBuiltin The_parallel_dim2_array)
+      --, (coreBuiltin The_primitive_list_dim_scatter,
+        --ReplaceWith $ coreBuiltin The_parallel_list_dim_scatter)
       , (coreBuiltin The_doall,
          ReplaceWith $ coreBuiltin The_parallel_doall)
       , (coreBuiltin The_Sequence_reduce,
          Rewrite rewriteSequenceReduce)
       , (coreBuiltin The_Sequence_list_build,
          Rewrite rewriteSequenceBuildList)
-      , (coreBuiltin The_Sequence_scatter,
-         Rewrite rewriteSequenceScatter)
+      --, (coreBuiltin The_Sequence_scatter,
+        --Rewrite rewriteSequenceScatter)
       ]
 
 -- | Attempt to rewrite a reduction over a sequence.
@@ -265,12 +252,14 @@ rwExp expression =
   case fromExpM expression
   of VarE {} -> return expression
      LitE {} -> return expression
-     ConE inf op args -> ExpM <$> ConE inf op <$> mapM rwExp args
+     ConE inf op ty_ob sps args ->
+       ExpM <$> ConE inf op ty_ob sps <$> mapM rwExp args
      AppE inf op ty_args args -> rwApp inf op ty_args args 
      LamE inf f -> ExpM <$> LamE inf <$> rwFun f
      LetE inf b rhs body -> ExpM <$> (LetE inf b <$> rwExp rhs <*> rwExp body)
      LetfunE inf defs body -> ExpM <$> (LetfunE inf <$> mapM rwDef defs <*> rwExp body)
-     CaseE inf scr alts -> ExpM <$> (CaseE inf <$> rwExp scr <*> mapM rwAlt alts)
+     CaseE inf scr sps alts ->
+       ExpM <$> (CaseE inf <$> rwExp scr <*> pure sps <*> mapM rwAlt alts)
      ExceptE _ _ -> return expression
      CoerceE inf arg ret body -> ExpM <$> (CoerceE inf arg ret <$> rwExp body)
      ArrayE inf ty es -> ExpM <$> (ArrayE inf ty <$> mapM rwExp es)
@@ -342,8 +331,7 @@ parallelLoopRewrite (Module modname imports defss exports) =
     -- Set up globals
     i_tenv <- readInitGlobalVarIO the_memTypes
     tenv <- thawTypeEnv i_tenv
-    dict_env <- runFreshVarM var_supply createDictEnv
-    let global_context = LREnv (LoopNesting 0 0) tenv dict_env var_supply
+    let global_context = LREnv (LoopNesting 0 0) tenv var_supply
         LRW rewrite = rwTopLevel defss exports
 
     (defss', exports') <- runReaderT rewrite global_context

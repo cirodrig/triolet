@@ -165,6 +165,27 @@ binderTypeMismatch pos bound_var expected actual = let
   loc = text "binding of" <+> pprVar bound_var
   in TypeMismatch pos TypeLevel loc expected actual
 
+typeObjTypeMismatch :: SourcePos -> Type -> Type -> TypeCheckError
+typeObjTypeMismatch pos expected actual =
+  TypeMismatch pos TypeLevel (text "constructor type object") expected actual
+
+missingTypeObj :: SourcePos -> TypeCheckError
+missingTypeObj pos = MiscError pos (text "Missing type object")
+
+unwantedTypeObj :: SourcePos -> TypeCheckError
+unwantedTypeObj pos = MiscError pos (text "Unexpected type object")
+
+sizeParamTypeMismatch :: SourcePos -> Int -> Type -> Type -> TypeCheckError
+sizeParamTypeMismatch pos index expected actual = let
+  ord = text $ showOrdinal index ++ " size parameter"
+  in TypeMismatch pos TypeLevel ord expected actual
+
+sizeParamLengthMismatch :: SourcePos -> Int -> Int -> TypeCheckError
+sizeParamLengthMismatch pos expected actual = let
+  message = "Expecting " ++ show expected ++ "size parameters, got " ++
+            show actual
+  in MiscError pos (text message)
+
 conFieldTypeMismatch :: SourcePos -> Int -> Type -> Type -> TypeCheckError
 conFieldTypeMismatch pos index expected actual = let
   ord = text $ showOrdinal index ++ " constructor field"

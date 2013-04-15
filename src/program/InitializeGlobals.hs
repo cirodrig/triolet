@@ -71,11 +71,11 @@ loadBuiltins cl_globals = do
       mem_types <- readInitGlobalVarIO the_memTypes
       initializeLowLevelBuiltins supply ll_supply mem_types
 
-  -- IN DEVELOPMENT: Compute size and alignment of each built-in type
+  {- -- IN DEVELOPMENT: Compute size and alignment of each built-in type
   withTheNewVarIdentSupply $ \supply -> do
     mem_types <- readInitGlobalVarIO the_memTypes
     --(mem_types', defs) <- computeDataTypeInfo supply mem_types
 
     withTheLLVarIdentSupply $ \ll_supply -> do
-      testMemoryLayout supply ll_supply mem_types
+      testMemoryLayout supply ll_supply mem_types -}
 

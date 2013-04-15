@@ -106,6 +106,7 @@ isTupleCon v = v `elem` cons
            , coreBuiltin The_tuple4
            ]
 
+{-
 tupleReprCon :: Int -> Var
 tupleReprCon n | n < 0 = internalError "tupleReprCon"
                    | n >= 5 = internalError "tupleReprCon: Unsupported size"
@@ -117,6 +118,7 @@ tupleReprCon n | n < 0 = internalError "tupleReprCon"
            , coreBuiltin The_repr_Tuple3
            , coreBuiltin The_repr_Tuple4
            ]
+-}
 
 -- | Fully boxed wrappers around representation dictionaries for use by
 --   the frontend
@@ -125,7 +127,7 @@ feTupleReprCon n | n < 0 = internalError "feTupleReprCon"
                    | n >= 5 = internalError "feTupleReprCon: Unsupported size"
                    | otherwise = cons !! n
   where
-    cons = [ coreBuiltin The_repr_Tuple0 -- Does not need a wrapper
+    cons = [ coreBuiltin The_frontend_repr_Tuple0
            , coreBuiltin The_frontend_repr_Tuple1
            , coreBuiltin The_frontend_repr_Tuple2
            , coreBuiltin The_frontend_repr_Tuple3
@@ -146,7 +148,8 @@ initializeBuiltins name_environment = do
   bi_is_empty <- isEmptyMVar the_CoreBuiltins
   unless bi_is_empty $ internalError "Attempted to re-initialize core builtins"
 
-  eval_builtins $ elems builtin_array
+  putStrLn "DEBUG: not forcing builtins"
+  -- eval_builtins $ elems builtin_array
   putMVar the_CoreBuiltins builtin_array
   where
     -- Look up each builtin type and variable

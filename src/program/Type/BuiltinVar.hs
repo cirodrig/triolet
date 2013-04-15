@@ -110,6 +110,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("float", "float", TypeLevel, False)
 
         , ("bool", "bool", TypeLevel, True)
+        , ("noneType", "NoneType", TypeLevel, True)
         , ("valInfo", "ReprVal", TypeLevel, True)
         , ("bareInfo", "Repr", TypeLevel, True)
         , ("boxInfo", "TypeObject", TypeLevel, True)
@@ -137,12 +138,16 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("stored_con", "stored", ObjectLevel, True)
 
           -- Global size information variables
+        , ("boxInfo_valInfo", "typeObject_reprVal", ObjectLevel, True)
+        , ("boxInfo_bareInfo", "typeObject_repr", ObjectLevel, True)
+        , ("boxInfo_boxInfo", "typeObject_typeObject", ObjectLevel, True)
         , ("valInfo_store", "reprVal_store", ObjectLevel, True)
         , ("valInfo_int", "reprVal_int", ObjectLevel, True)
         , ("valInfo_uint", "reprVal_uint", ObjectLevel, True)
         , ("valInfo_float", "reprVal_float", ObjectLevel, True)
         , ("bareInfo_arr", "repr_arr", ObjectLevel, True)
         , ("bareInfo_ref", "repr_Ref", ObjectLevel, True)
+        , ("fieldInfo_ref", "fieldSize_ref", ObjectLevel, True)
           
           -- Global variables used for generating address arithmetic and
           -- size computation

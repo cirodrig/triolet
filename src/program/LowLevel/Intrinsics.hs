@@ -108,7 +108,7 @@ lowerIntrinsicOp v
          dead_box)
       , (coreBuiltin The_unsafeMakeCoercion,
          proof_object)
-      , (coreBuiltin The_sizealign_int,
+      {-, (coreBuiltin The_sizealign_int,
          sizealign_int)
       , (coreBuiltin The_sizealign_uint,
          sizealign_uint)
@@ -141,7 +141,7 @@ lowerIntrinsicOp v
       , (coreBuiltin The_sizealign_barray2,
          sizealign_barray2)
       , (coreBuiltin The_sizealign_blist,
-         sizealign_blist)
+         sizealign_blist) -}
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we

@@ -45,6 +45,9 @@ singleton v t = S (IntMap.singleton (fromIdent $ varID v) t)
 fromList :: [(Var, Type)] -> TypeSubst
 fromList xs = S $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
 
+fromBinderList :: [(Binder, Type)] -> TypeSubst
+fromBinderList xs = fromList [(v, t) | (v ::: _, t) <- xs]
+
 -- | Compute the union of two substitutions on disjoint sets of variables.
 --
 --   Disjointness is not verified.
@@ -168,6 +171,11 @@ newtype Nameless s a = Nameless a
 instance SubstitutionMap s => Substitutable (Nameless s a) where
   type Substitution (Nameless s a) = s
   substituteWorker _ x = return x
+
+instance Substitutable KindedType where
+  type Substitution KindedType = TypeSubst
+  substituteWorker sb (KindedType k t) =
+    KindedType k `liftM` substituteWorker sb t
 
 instance Substitutable Type where
   type Substitution Type = TypeSubst

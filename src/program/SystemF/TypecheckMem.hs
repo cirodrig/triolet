@@ -40,6 +40,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
 import Common.Supply
 import Common.SourcePos
 
@@ -90,8 +91,8 @@ tcExp (ExpM expression) =
     case expression
     of VarE inf v -> tcVar pos v
        LitE inf l -> tcLit pos l
-       ConE inf con args ->
-         typeInferConE (ExpM expression) pos con args
+       ConE inf con sps ty_obj args ->
+         typeInferConE (ExpM expression) pos con sps ty_obj args
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
          typeInferAppE (ExpM expression) pos op ts args
        LamE {expInfo = inf, expFun = f} -> do
@@ -100,8 +101,8 @@ tcExp (ExpM expression) =
          typeInferLetE inf pat e body
        LetfunE {expInfo = inf, expDefs = defs, expBody = body} ->
          typeInferLetfunE inf defs body
-       CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
-         typeInferCaseE inf scr alts
+       CaseE inf scr sps alts ->
+         typeInferCaseE inf scr sps alts
        ExceptE {expInfo = inf, expType = rt} -> do
          typeCheckType rt
          return rt
@@ -130,15 +131,34 @@ tcLit pos l = do
   -- checkLiteralType l
   return literal_type
 
-typeInferConE :: ExpM -> SourcePos -> ConInst -> [ExpM] -> TC Type
-typeInferConE orig_exp pos con args = do
+typeInferConE :: ExpM -> SourcePos -> ConInst -> [ExpM] -> Maybe ExpM
+              -> [ExpM] -> TC Type
+typeInferConE orig_exp pos con sps ty_obj args = do
+  sp_types <- mapM tcExp sps
+  ty_obj_type <- mapM tcExp ty_obj
   arg_types <- mapM tcExp args
-  tcCon pos con arg_types
+  tcCon pos con sp_types ty_obj_type arg_types
 
-tcCon :: SourcePos -> ConInst -> [Type] -> TC Type
-tcCon pos con arg_tys = do
-  (field_tys, result_ty) <- typeInferCon pos con
-  
+tcCon :: SourcePos -> ConInst -> [Type] -> Maybe Type -> [Type] -> TC Type
+tcCon pos con sp_tys ty_obj_ty arg_tys = do
+  (expected_ty_obj_ty, expected_sps, field_tys, result_ty) <-
+    typeInferCon pos con
+
+  -- Check type object
+  case (expected_ty_obj_ty, ty_obj_ty) of
+    (Nothing, Nothing) -> return ()
+    (Just et, Just gt) -> checkType (typeObjTypeMismatch pos) et gt
+    (Just _, Nothing)  -> throwTypeError $ missingTypeObj pos
+    (Nothing, Just _)  -> throwTypeError $ unwantedTypeObj pos
+
+  -- Check size parameters
+  let expected_num_sps = length expected_sps
+      given_num_sps = length sp_tys
+  when (expected_num_sps /= given_num_sps) $
+    throwTypeError $ sizeParamLengthMismatch pos given_num_sps expected_num_sps
+  sequence_ [checkType (sizeParamTypeMismatch pos index) et gt
+            | (index, et, gt) <- zip3 [1..] expected_sps sp_tys]
+
   -- Check number of arguments
   let num_fields = length field_tys
       num_args = length arg_tys
@@ -151,22 +171,34 @@ tcCon pos con arg_tys = do
 
   return result_ty
 
--- | Infer the type of a constructor instance.  Return the parameter types
+-- | Infer the type of a constructor instance.
+--   Return the type object type, size parameter types, field parameter types,
 --   and return type.
-typeInferCon :: EvalMonad m => SourcePos -> ConInst -> m ([Type], Type)
+typeInferCon :: EvalMonad m => SourcePos -> ConInst
+             -> m (Maybe Type, [Type], [Type], Type)
 typeInferCon pos con@(VarCon op ty_args ex_types) = do
   Just (type_con, data_con) <- lookupDataConWithType op
   (field_types, result_type) <-
     instantiateDataConTypeWithExistentials data_con (ty_args ++ ex_types)
 
+  -- Get the type object
+  ty_obj_type <-
+    case dataTypeKind type_con
+    of BoxK -> do t <- instantiateInfoType type_con ty_args
+                  return $ Just t
+       _ -> return Nothing
+
+  -- Get types of size parameters from the type constructor's properties
+  size_param_kinded_types <- instantiateSizeParams type_con ty_args 
+  let size_param_types = map sizeParamType size_param_kinded_types
+
   -- Convert fields to initializers
-  tenv <- getTypeEnv
   let field_kinds = dataConFieldKinds data_con
       con_field_types = zipWith make_initializer field_kinds field_types
 
   -- Convert result type to initializer
   let con_result_type = make_initializer (dataTypeKind type_con) result_type
-  return (con_field_types, con_result_type)
+  return (ty_obj_type, size_param_types, con_field_types, con_result_type)
   where
     make_initializer BareK ty = initType ty
     make_initializer _ ty = ty
@@ -182,7 +214,7 @@ typeInferCon pos con@(TupleCon types) = do
   maybe (return ()) throwTypeError $ msum $ zipWith check_kind [1..] kinds
 
   let tuple_type = typeApp (UTupleT $ map toBaseKind kinds) types
-  return (types, tuple_type)
+  return (Nothing, [], types, tuple_type)
 
 typeInferAppE orig_expr pos op ty_args args = do
   op_type <- tcExp op
@@ -262,12 +294,37 @@ typeInferLetfunE :: ExpInfo -> DefGroup (FDef Mem) -> ExpM -> TC Type
 typeInferLetfunE inf defs body =
   typeCheckDefGroup defs $ tcExp body
 
-typeInferCaseE :: ExpInfo -> ExpM -> [AltM] -> TC Type
-typeInferCaseE inf scr alts = do
+typeInferCaseE :: ExpInfo -> ExpM -> [ExpM] -> [AltM] -> TC Type
+typeInferCaseE inf scr sps alts = do
   let pos = getSourcePos inf
 
   -- Get the scrutinee's type
   scr_type <- tcExp scr
+
+  -- Check size parameter types
+  expected_sps_types <-
+    -- Look up the algebraic data type and instantiate its size parameter types
+    condM (reduceToWhnf scr_type)
+    [ -- Algebraic data type constructor
+      do (VarT con, ty_args) <- fmap fromTypeApp it
+         Just data_type <- lift $ lookupDataType con
+         lift $ do size_param_types <- instantiateSizeParams data_type ty_args
+                   return $ map sizeParamType size_param_types
+
+      -- Unboxed tuple types do not take size parameters
+    , do (UTupleT _, _) <- fmap fromTypeApp it
+         return []
+
+    , lift $ throwTypeError $
+      MiscError pos (text "Scrutinee has type" <+> pprType scr_type <> comma $$
+                     text "but only algebraic data types can be scrutinized")
+    ]
+
+  when (length expected_sps_types /= length sps) $
+    throwTypeError $ sizeParamLengthMismatch pos (length expected_sps_types) (length sps)
+  sps_types <- mapM tcExp sps
+  forM_ (zip3 [1..] expected_sps_types sps_types) $ \(i, e, g) ->
+    checkType (sizeParamTypeMismatch pos i) e g
 
   -- Match against each alternative
   when (null alts) $ throwTypeError (emptyCaseError pos)
@@ -312,7 +369,7 @@ typeInferDeCon pos decon@(TupleDeCon types) = do
   return (types, tuple_type)
 
 typeCheckAlternative :: SourcePos -> Type -> AltM -> TC Type
-typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
+typeCheckAlternative pos scr_type alt@(AltM (Alt con m_ty_param fields body)) = do
   -- Check constructor type
   (field_types, expected_scr_type) <- typeInferDeCon pos con
   
@@ -327,6 +384,26 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con fields body)) = do
   -- Verify that applied type matches constructor type
   checkType (scrutineeTypeMismatch pos) expected_scr_type scr_type
 
+  -- If the scrutinee is a boxed data type, check the type object parameter
+  -- Otherwise, there should be no type object parameter
+  case fromVarApp expected_scr_type of
+    Just (tycon, args) -> do 
+      Just data_type <- lookupDataType tycon
+      case (dataTypeKind data_type, m_ty_param) of
+        (BoxK, Just pat) -> do
+          expected_type <- instantiateInfoType data_type (deConTyArgs con)
+          checkType (typeObjTypeMismatch pos) expected_type (patMType pat)
+        (BoxK, Nothing) ->
+          throwTypeError $ missingTypeObj pos
+        (_, Just _) ->
+          throwTypeError $ unwantedTypeObj pos
+        (_, Nothing) ->
+          return ()
+    Nothing ->
+      case m_ty_param
+      of Nothing -> return ()
+         Just _ -> throwTypeError $ unwantedTypeObj pos
+          
   -- Add existential variables to environment
   assumeBinders (deConExTypes con) $ do
 
@@ -455,7 +532,7 @@ inferExpType expression =
     -- but their definitions are skipped.
     infer_exp expression =
       case fromExpM expression
-      of ConE _ con _ ->
+      of ConE _ con _ _ _ ->
            inferConAppType con
          AppE _ op ty_args args ->
            inferAppTypeQuickly op ty_args args
@@ -465,7 +542,7 @@ inferExpType expression =
            assumeAndAnnotatePat pat $ infer_exp body
          LetfunE _ defs body ->
            assumeDefs defs $ infer_exp body
-         CaseE _ _ (alt : _) ->
+         CaseE _ _ _ (alt : _) ->
            infer_alt alt
          ExceptE _ rt ->
            return rt
@@ -476,8 +553,9 @@ inferExpType expression =
          _ ->
            tcExp expression
 
-    infer_alt (AltM (Alt con params body)) =
-      assumeBinders (deConExTypes con) $ assumePatMs params $ infer_exp body
+    infer_alt (AltM (Alt con ty_ob params body)) =
+      assumeBinders (deConExTypes con) $ maybe id assumePatM ty_ob $
+      assumePatMs params $ infer_exp body
 
     debug = traceShow (text "inferExpType" <+> pprExp expression)
 
@@ -547,8 +625,9 @@ inferAppType op_type ty_args arg_types =
                 vcat (map ((text "@" <+>) . pprType) ty_args) $$
                 vcat (map ((text ">" <+>) . pprType) arg_types)
 
--- | Get the parameter types and result type of a data constructor application.
-conInstType :: EvalMonad m => ConInst -> m ([Type], Type)
+-- | Get the type object type, size parameter types, 
+--   parameter types and result type of a data constructor application.
+conInstType :: EvalMonad m => ConInst -> m (Maybe Type, [Type], [Type], Type)
 conInstType c = typeInferCon noSourcePos c
 
 -- | Get the type described by a 'DeConInst'.

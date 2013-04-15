@@ -6,9 +6,12 @@
 module SystemF.ReprInference(insertCoercions)
 where
 
+import Prelude hiding(mapM, sequence)
+
 import Control.Applicative
-import Control.Monad
-import Control.Monad.Reader
+import Control.Monad hiding(mapM, sequence)
+import Control.Monad.Reader hiding(mapM, sequence)
+import Data.Traversable
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -89,6 +92,9 @@ assumeBinderSpec (v ::: t) m = do
   spec_type_env <- getSpecTypeEnv
   locallyInsertType spec_type_env v t m
 
+assumeMaybeBinderSpec :: Maybe Binder -> RI a -> RI a
+assumeMaybeBinderSpec Nothing m = m
+assumeMaybeBinderSpec (Just b) m = assumeBinderSpec b m
 {-
 unpackFunT :: Type -> RI (Type, Type)
 unpackFunT ty = do
@@ -409,32 +415,71 @@ kindCoerceExp rep t1 t2 expression = do
   where
     exp_info = case expression of ExpM e -> mkExpInfo (getSourcePos e)
 
-    stored_con val_type e =
-      return $ conE exp_info (VarCon (coreBuiltin The_stored) [val_type] []) [e]
+    stored_con val_type e = do
+      let con_inst = VarCon (coreBuiltin The_stored) [val_type] []
+      return $ conE exp_info con_inst [] Nothing [e]
 
-    boxed_con boxed_type e =
-      return $ conE exp_info (VarCon (coreBuiltin The_boxed) [boxed_type] []) [e]
+    boxed_con bare_type e = do
+      let con_inst = VarCon (coreBuiltin The_boxed) [bare_type] []
+
+      -- Create a type object and a 
+      -- size parameter holding the size of the boxed object
+      rep <- rep_e bare_type
+      type_info <- withSpecTyping $
+                   boxedDataInfo exp_info (coreBuiltin The_boxed)
+                   [bare_type] [rep]
+      let size_param =
+            varAppE exp_info (coreBuiltin The_reprSizeAlign) [bare_type] [rep]
+      return $ conE exp_info con_inst [size_param] (Just type_info) [e]
 
     stored_decon val_type e = do
       x <- newAnonymousVar ObjectLevel
       let decon = VarDeCon (coreBuiltin The_stored) [val_type] []
-      return $ ExpM $ CaseE exp_info e
-        [AltM $ Alt decon [patM (x ::: val_type)] (varE' x)]
+      return $ ExpM $ CaseE exp_info e []
+        [AltM $ Alt decon Nothing [patM (x ::: val_type)] (varE' x)]
 
     boxed_decon bare_type e = do
       x <- newAnonymousVar ObjectLevel
+      rep <- rep_e bare_type
+
+      -- Create pattern for the type object
+      ty_ob <- newAnonymousVar ObjectLevel
+      Just boxed_type <- withUnboxedTyping $ lookupDataType $ coreBuiltin The_Boxed
+      info_type <- withUnboxedTyping $ instantiateInfoType boxed_type [bare_type]
+      let ty_ob_pat = patM (ty_ob ::: info_type)
+      
       let decon = VarDeCon (coreBuiltin The_boxed) [bare_type] []
-      return $ ExpM $ CaseE exp_info e
-        [AltM $ Alt decon [patM (x ::: bare_type)] (varE' x)]
+
+      -- Create a size parameter holding the size of the boxed object
+      let size_param =
+            varAppE exp_info (coreBuiltin The_reprSizeAlign) [bare_type] [rep]
+      
+      return $ ExpM $ CaseE exp_info e [size_param]
+        [AltM $ Alt decon (Just ty_ob_pat) [patM (x ::: bare_type)] (varE' x)]
 
     -- Write into a new boxed object, then return a bare reference
     allocate_boxed_storage bare_type e = do
       let con = VarCon (coreBuiltin The_stuckBox) [bare_type] []
           decon = VarDeCon (coreBuiltin The_stuckBox) [bare_type] []
-          boxed_expr = conE exp_info con [e]
+      rep <- rep_e bare_type
+      type_info <- withSpecTyping $
+                   boxedDataInfo exp_info (coreBuiltin The_stuckBox)
+                   [bare_type] [rep]
+
+      -- Create pattern for the type object
+      ty_ob <- newAnonymousVar ObjectLevel
+      Just stuckbox_type <- withUnboxedTyping $ lookupDataType $ coreBuiltin The_StuckBox
+      info_type <- withUnboxedTyping $ instantiateInfoType stuckbox_type [bare_type]
+      let ty_ob_pat = patM (ty_ob ::: info_type)
+
+      -- Create a size parameter holding the size of the boxed object
+      let size_param =
+            varAppE exp_info (coreBuiltin The_reprSizeAlign) [bare_type] [rep]
+
+      let boxed_expr = conE exp_info con [size_param] (Just type_info) [e]
       x <- newAnonymousVar ObjectLevel
-      return $ ExpM $ CaseE exp_info boxed_expr
-        [AltM $ Alt decon [patM (x ::: bare_type)] (varE' x)]
+      return $ ExpM $ CaseE exp_info boxed_expr [size_param]
+        [AltM $ Alt decon (Just ty_ob_pat) [patM (x ::: bare_type)] (varE' x)]
 
     -- Get the representation dictionary as an expression 
     rep_e bare_type =
@@ -521,14 +566,14 @@ elaborateExpression' form expression =
   case fromExpSF expression
   of VarE _ v -> coerce =<< elaborateVar info rep v
      LitE _ l -> coerce =<< elaborateLit info rep l
-     ConE _ con args -> coerce =<< elaborateCon info rep con args
+     ConE _ con to sps args -> coerce =<< elaborateCon info rep con to sps args
      AppE _ op ty_args args -> coerce =<< elaborateApp info rep op ty_args args
      LamE _ f -> coerce =<< elaborateLam info rep f
 
      -- Let, letfun, and case are not annotated with 'rep' terms
      LetE _ b rhs body -> elaborateLet info form b rhs body
      LetfunE _ defs b -> elaborateLetfun info form defs b
-     CaseE _ scr alts -> elaborateCase info form scr alts
+     CaseE _ scr sps alts -> elaborateCase info form scr sps alts
 
      CoerceE _ t t' body -> coerce =<< elaborateCoerce info rep t t' body
      ArrayE _ ty elts -> coerce =<< elaborateArray info rep ty elts
@@ -564,10 +609,12 @@ elaborateLit info rep l = do
   let ty = literalType l
   return $ EExp ty (ExpM $ LitE info l)
 
-elaborateCon info rep con args = do
+elaborateCon info rep con ty_obj sps args = do
   (con', field_types, result_type) <- elaborateConInst con
+  ty_obj' <- mapM (fmap snd . elaborateExpressionNatural) ty_obj
+  sps' <- mapM (fmap snd . elaborateExpressionNatural) sps
   args' <- zipWithM elaborateExpressionTo field_types args
-  return $ EExp result_type (ExpM $ ConE info con' args')
+  return $ EExp result_type (ExpM $ ConE info con' ty_obj' sps' args')
 
 -- | Elaborate a data constructor instance.  Compute the elaborated
 -- parameter and return types.
@@ -689,22 +736,40 @@ elaborateLetfun info target_type (NonRec def) body = do
     EExp ty body' <- elaborateExpression' target_type body
     return $ EExp ty (ExpM $ LetfunE info (NonRec def') body')
 
-elaborateCase info target_type scr alts = do
+elaborateCase info target_type scr sps alts = do
   (_, scr') <- elaborateExpressionNatural scr
+  sps' <- mapM (fmap snd . elaborateExpressionNatural) sps
   (result_type, alts') <- elaborateAlts target_type alts
-  return $ EExp result_type (ExpM $ CaseE info scr' alts')
+  return $ EExp result_type (ExpM $ CaseE info scr' sps' alts')
 
 elaborateAlts target_type alts = do
   (result_types, alts') <- mapAndUnzipM (elaborateAlt target_type) alts
   return (head result_types, alts')
 
 elaborateAlt :: ElaboratedForm -> AltSF -> RI (Type, AltM)
-elaborateAlt target_type (AltSF (Alt decon params body)) = do
+elaborateAlt target_type (AltSF (Alt decon m_tyob params body)) = do
   (decon', field_types) <- elaborateDeConInst decon
   let params' = [patM (v ::: ty) | (VarP v _, ty) <- zip params field_types]
-  assumeBindersSpec (map patMBinder params') $ do
-    EExp result_type body' <- elaborateExpression' target_type body
-    return (result_type, AltM (Alt decon' params' body'))
+
+  -- Type object binder
+  m_ty_ob' <-
+    case m_tyob
+    of Nothing -> return Nothing
+       Just (VarP v _) ->
+         withUnboxedTyping $ do
+           -- This is a boxed algebraic data type pattern
+           let VarDeCon con _ _ = decon'
+           Just dcon_type <- lookupDataCon con
+           unless (dataTypeKind (dataConType dcon_type) == BoxK) $ 
+             internalError "elaborateAlt"
+           info_ty <-
+             instantiateInfoType (dataConType dcon_type) (deConTyArgs decon')
+           return $ Just $ patM (v ::: info_ty)
+
+  assumeMaybeBinderSpec (fmap patMBinder m_ty_ob') $
+    assumeBindersSpec (map patMBinder params') $ do
+      EExp result_type body' <- elaborateExpression' target_type body
+      return (result_type, AltM (Alt decon' m_ty_ob' params' body'))
 
 elaborateCoerce info rep t t' body = do
   -- Convert types.  Make sure they have the same kind.  Use the natural

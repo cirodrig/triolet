@@ -12,6 +12,7 @@ module Type.Var
 where
 
 import Control.Applicative
+import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Trans
 import Text.PrettyPrint.HughesPJ
@@ -49,6 +50,9 @@ instance Show Var where
 
 instance HasLevel Var where
   getLevel v = _varLevel v
+
+instance NFData Var where
+  rnf (Var id n l) = rnf id `seq` rnf n `seq` rnf l
 
 type VarID = Ident Var
   

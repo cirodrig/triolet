@@ -6,9 +6,10 @@
 -- assignments.
 
 {-# LANGUAGE ViewPatterns #-}
-module SystemF.PartialEval(partialEvaluateModule)
+module SystemF.PartialEval()
 where
 
+  {-
 import Prelude hiding(mapM)
 import Control.Monad.Reader hiding(mapM)
 import Data.List
@@ -306,3 +307,4 @@ pevalAlt :: AltSF -> PE AltSF
 pevalAlt (AltSF alt) = do
   body' <- pevalExp $ altBody alt
   return $ AltSF $ alt {altBody = body'}
+-}

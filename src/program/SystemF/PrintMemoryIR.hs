@@ -62,6 +62,8 @@ caseIndent = 6
 
 pprParenList xs = parens $ sep $ punctuate (text ",") xs
 
+pprList xs = brackets $ sep $ punctuate (text ",") xs
+
 pprTyArgs ts = [text "@" <> pprTypePrec t ?+ appPrec | t <- ts]
 pprExTypeArgs ts = [text "&" <> pprTypePrec t ?+ appPrec | t <- ts]
 pprExTypeBinders ts = [text "&" <> parens (pprVar v <+> text ":" <+> pprType t)
@@ -92,14 +94,17 @@ pprSpecificity (Decond mono_type spcs) =
            TupleDeCon ty_args ->
              let types_doc = [pprType t | t <- ty_args]
              in parens $ sep $ punctuate (text ",") types_doc
-  in text "D" <> braces (type_doc <> text ":" <> cat (map pprSpecificity spcs))
+  in text "D" <> braces (type_doc <> text ":" <> cat (map pprDmd spcs))
 
-pprSpecificity (Written spc) = text "W" <> pprSpecificity spc
-pprSpecificity (Read (HeapMap m)) =
-  text "R" <> parens (cat $ punctuate (text ",") cells)
+pprSpecificity (Written v spc) =
+  text "W" <+> parens (text "lambda" <+> pprVar v <> text "." <+> pprHeapMap spc)
+pprSpecificity (Read m) =
+  text "R" <> pprHeapMap m
+pprSpecificity Unused = text "0"
+
+pprHeapMap (HeapMap m) = parens (cat $ punctuate (text ",") cells)
   where
     cells = [text "()" <+> text "|->" <+> pprSpecificity s | (v, s) <- m]
-pprSpecificity Unused = text "0"
 
 pprTyPat :: TyPat -> Doc
 pprTyPat (TyPat (v ::: t)) = pprVar v <+> text ":" <+> pprType t
@@ -129,10 +134,10 @@ pprExpPrecFlags flags (ExpM expression) =
   case expression
   of VarE _ v -> hasAtomicPrec $ pprVar v
      LitE _ l -> hasAtomicPrec $ pprLit l
-     ConE _ (VarCon op ty_args ex_types) args ->
-       con op ty_args ex_types args `hasPrec` appPrec
+     ConE _ (VarCon op ty_args ex_types) sps ty_obj args ->
+       con op ty_args ex_types sps ty_obj args `hasPrec` appPrec
 
-     ConE _ (TupleCon _) args ->
+     ConE _ (TupleCon _) [] Nothing args ->
        hasAtomicPrec $ pprParenList (map (pprExpFlags flags) args)
 
      AppE _ op ty_args args ->
@@ -150,13 +155,16 @@ pprExpPrecFlags flags (ExpM expression) =
            body_doc = continue body ? stmtPrec
        in text "letfun" <+> defs_doc $$ body_doc
           `hasPrec` stmtPrec
-     CaseE _ scr [AltM alt] ->
-       let binder_doc = text "let" <+> pprAltPatternFlags flags alt <+> text "="
+     CaseE _ scr sps [AltM alt] ->
+       let sps_doc = pprList $ map (pprExpFlags flags) sps
+           alt_doc = pprAltPatternFlags flags alt
+           binder_doc = text "let" <+> sps_doc <+> alt_doc <+> text "="
            scr_doc = continue scr ? stmtPrec
            body_doc = continue (altBody alt) ? stmtPrec
        in hang binder_doc caseIndent scr_doc $$ body_doc `hasPrec` stmtPrec
-     CaseE _ scr alts ->
-       let case_doc = text "case" <+> continue scr ? stmtPrec 
+     CaseE _ scr sps alts ->
+       let sps_doc = pprList $ map (pprExpFlags flags) sps
+           case_doc = text "case" <+> sep [continue scr ? stmtPrec, sps_doc]
            of_doc = text "of" <+> vcat (map (pprAltFlags flags) alts)
        in case_doc $$ of_doc `hasPrec` stmtPrec
      ExceptE _ rt ->
@@ -172,15 +180,19 @@ pprExpPrecFlags flags (ExpM expression) =
   where
     continue e = pprExpPrecFlags flags e
 
-    con op ty_args ex_types args =
+    con op ty_args ex_types sps ty_obj args =
       let op_doc = text "<" <> pprVar op <> text ">"
           ty_args_doc = pprTyArgs ty_args
+          ty_obj_doc = case ty_obj
+                       of Nothing -> empty
+                          Just e  -> brackets $ continue e ? outerPrec
           ex_types_doc = pprExTypeArgs ex_types
+          sps_doc = pprList $ map (pprExpFlags flags) sps
           args_doc = [continue arg ?+ appPrec | arg <- args]
           visible_args_doc =
             if showInferableTypes flags
-            then ty_args_doc ++ ex_types_doc ++ args_doc
-            else ex_types_doc ++ args_doc
+            then ty_args_doc ++ ex_types_doc ++ [sps_doc] ++ [ty_obj_doc] ++ args_doc
+            else ex_types_doc ++ [sps_doc] ++ [ty_obj_doc] ++ args_doc
        in hang op_doc appIndent (sep visible_args_doc)
 
     app op ty_args args =
@@ -245,9 +257,9 @@ pprDefAnn ann =
       of InlNormal -> empty
          x -> text (show x)
     inl_doc =
-      if defAnnInlineRequest ann
-      then text "inline"
-      else empty
+      case defAnnInlineRequest ann
+      of InlConservatively -> empty
+         x -> text (show x)
     conlike_doc =
       if defAnnConlike ann
       then text "conlike"

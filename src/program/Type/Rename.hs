@@ -94,7 +94,7 @@ lookup v (R m) = IntMap.lookup (fromIdent $ varID v) m
 renameBinder :: Renaming -> Binder -> (Renaming -> Binder -> a) -> a
 renameBinder rn (x ::: t) k =
   -- Remove the bound variable from the environment; it is shadowed
-  let rn' = R $ IntMap.delete (fromIdent $ varID x) (unR rn)
+  let rn' = exclude x rn
   in k rn' (x ::: rename rn t)
 
 renameBinders :: Renaming -> [Binder] -> (Renaming -> [Binder] -> a) -> a

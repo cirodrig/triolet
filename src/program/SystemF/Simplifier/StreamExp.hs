@@ -1,4 +1,10 @@
 
+module SystemF.Simplifier.StreamExp
+where
+
+-- This module is no longer used
+  
+{-
 {-# LANGUAGE FlexibleInstances, ViewPatterns #-}
 module SystemF.Simplifier.StreamExp
        (isStreamAppExp,
@@ -2013,3 +2019,5 @@ sequentializeFoldCaseAlternative acc_ty a_ty acc_repr_var a_repr acc combiner
   (AltS (Alt decon params body)) = do
     body' <- sequentializeFold acc_ty a_ty acc_repr_var a_repr acc combiner body
     return $ AltM (Alt decon (map fromPatS params) body')
+
+-}

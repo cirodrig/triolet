@@ -22,7 +22,7 @@ module SystemF.Datatypes.Structure
         withIndependentTypes,
         Data(..), Boxing(..), ifBoxed,
         DeConInst(..), deConExTypes, 
-        Alternative(..), Alternatives, nullaryAlternative,
+        Alternative(..), Alternatives, nullaryAlternative, findAlternative,
         Forall(..),
         Structure(..),
         computeStructure,
@@ -91,6 +91,13 @@ type Alternatives = [Alternative]
 
 nullaryAlternative (Alternative _ []) = True
 nullaryAlternative _                  = False
+
+-- | Find an alternative by its data constructor
+findAlternative :: Var -> Alternatives -> Alternative
+findAlternative con xs = case find is_alternative xs of Just x -> x
+  where
+    is_alternative (Alternative (VarDeCon c _ _) _) = con == c
+    is_alternative _ = False
 
 -- | A universally quantified data structure
 data Forall = Forall Binder Type

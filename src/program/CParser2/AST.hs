@@ -53,6 +53,7 @@ data Attribute ix =
   | ConlikeAttr                     -- ^ Function calls are cheap to reevaluate
   | InlineAttr                      -- ^ Definition should be aggressively
                                     --   inlined
+  | InlineNeverAttr                 -- ^ Definition should never be inlined
   | InlineDimensionalityAttr         -- ^ Definition should not be inlined until
                                     --   the fixed-dimensionality compilation phase
   | InlineSequentialAttr            -- ^ Definition should not be inlined until
@@ -73,6 +74,7 @@ castAttribute AbstractAttr = AbstractAttr
 castAttribute NonalgebraicAttr = NonalgebraicAttr
 castAttribute ConlikeAttr = ConlikeAttr
 castAttribute InlineAttr = InlineAttr
+castAttribute InlineNeverAttr = InlineNeverAttr
 castAttribute InlineDimensionalityAttr = InlineDimensionalityAttr
 castAttribute InlineSequentialAttr = InlineSequentialAttr
 castAttribute InlineFinalAttr = InlineFinalAttr
@@ -171,7 +173,7 @@ data Exp a =
   | TAppE (LExp a) (LType a)
   | AppE (LExp a) (LExp a)
   | LamE (Fun a)
-  | CaseE (LExp a) [LAlt a]
+  | CaseE (LExp a) [LExp a] [LAlt a]
   | LetE (Domain a) (LExp a) (LExp a)
     -- | Define a local type synonym.  Type synonyms are substituted before
     --   converting to Core.
@@ -194,7 +196,11 @@ data Alt a =
 
 data Pattern a =
     ConPattern
-    { altCon :: Identifier a
+    { -- | Size arguments are only allowed in nested patterns.  When the
+      --   nested pattern is expanded into a case expression, these are used 
+      --   as the case's size arguments.
+      _altSizeArgs :: [LExp a]
+    , altCon :: Identifier a
     , _altExTypes :: [Domain a]
     , altFields :: [Pattern a]
     }
@@ -211,6 +217,11 @@ data Pattern a =
   | ConOrVarPattern 
     { altIdentifier :: Identifier a
     }
+
+altSizeArgs (ConPattern {_altSizeArgs = es}) = es
+altSizeArgs (TuplePattern {}) = []
+altSizeArgs (VarPattern {}) = []
+altSizeArgs (ConOrVarPattern {}) = []
 
 altExTypes (ConPattern {_altExTypes = ts}) = ts
 altExTypes (TuplePattern {}) = []

@@ -165,6 +165,7 @@ attr = do
        ("nonalgebraic", return NonalgebraicAttr),
        ("conlike", return ConlikeAttr),
        ("inline", return InlineAttr),
+       ("inline_never", return InlineNeverAttr),
        ("inline_dimensionality", return InlineDimensionalityAttr),
        ("inline_sequential", return InlineSequentialAttr),
        ("inline_final", return InlineFinalAttr),
@@ -297,7 +298,11 @@ pOptParenDomains = simple_domain <|> parens pOptDomains
 
 -------------------------------------------------------------------------------
 -- * Expressions
-  
+
+-- | Parse an optional sequence of size arguments in square brackets
+sizeArgs :: P [PLExp]
+sizeArgs = option [] $ brackets $ pExp `sepBy` match CommaTok
+
 pExp :: P PLExp
 pExp = caseE <|> ifE <|> lamE <|> letE <|> letfunE <|> exceptE <|> coerceE <|>
        operExp
@@ -308,8 +313,9 @@ caseE = located $ do
   match CaseTok
   scrutinee <- pExp
   match OfTok
+  sps <- sizeArgs
   alts <- alt_list <|> one_alt
-  return $ CaseE scrutinee alts
+  return $ CaseE scrutinee sps alts
   where
     one_alt = (:[]) <$> pAlt
     alt_list = braces $ pAlt `sepBy` match SemiTok
@@ -324,8 +330,8 @@ ifE = located $ do
   else_pos <- locatePosition
   match ElseTok
   y <- pExp
-  return $ CaseE scrutinee [ L then_pos $ Alt (ConPattern "True" [] []) x
-                           , L else_pos $ Alt (ConPattern "False" [] []) y]
+  return $ CaseE scrutinee [] [ L then_pos $ Alt (ConPattern [] "True" [] []) x
+                              , L else_pos $ Alt (ConPattern [] "False" [] []) y]
 
 lamE :: P PLExp
 lamE = located $ do
@@ -481,18 +487,19 @@ floatE = located (FloatE <$> float) <?> "floating-point number"
 --   application or a tuple application.
 pAlt :: P PLAlt
 pAlt = located $ do
-  pat <- pattern
+  pat <- pattern False
   match DotTok
   body <- pExp
   return $ Alt pat body
 
-pattern :: P (Pattern Parsed)
-pattern = con_pattern <|> var_pattern <|> atomicPattern
+pattern :: Bool -> P (Pattern Parsed)
+pattern allow_sizes = con_pattern <|> var_pattern <|> atomicPattern
   where
     -- A constructor pattern starts with an identifier. 
     -- It must have at least one parameter; otherwise it's parsed as an
     -- ambiguous pattern.
     con_pattern = PS.try $ do
+      size_args <- if allow_sizes then sizeArgs else return []
       ident <- identifier
       ty_params <- optTypeParameters
       params <- many atomicPattern
@@ -500,7 +507,7 @@ pattern = con_pattern <|> var_pattern <|> atomicPattern
       -- Do not accept this parse if there are no parameters
       if null ty_params && null params
         then mzero
-        else return $ ConPattern ident ty_params params
+        else return $ ConPattern size_args ident ty_params params
 
     -- Only accept this pattern if it has a type annotation.
     -- Otherwise, it's ambiguous and should be handled by con_var_pattern
@@ -513,11 +520,7 @@ atomicPattern = paren_pattern <|> con_var_pattern
     con_var_pattern = ConOrVarPattern <$> identifier
 
     -- A pattern starting with a parenthesis may be a tuple pattern
-    paren_pattern = either id TuplePattern <$> parenOrTuple pattern
-
--- | A space-separated list of patterns appearing in a constructor argument
-patternList :: P [Pattern Parsed]
-patternList = many pattern
+    paren_pattern = either id TuplePattern <$> parenOrTuple (pattern True)
 
 typeParameters :: P [PDomain]
 typeParameters = fmap concat $ many (match AtTok *> parens pDomains)

@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleInstances, FlexibleContexts, TypeSynonymInstances, 
     Rank2Types #-}
 module SystemF.ReprDict where
-
+{-
 import Prelude hiding(mapM)
 import Control.Monad hiding(mapM)
 import Control.Monad.Trans
@@ -132,7 +132,7 @@ lookupIndexedInt ty = do
     -- Create an indexed integer constant
     create_indexed_int :: forall. Integer -> m (Maybe ExpM)
     create_indexed_int n =
-      let e = conE defaultExpInfo (VarCon (coreBuiltin The_fiInt) [IntT n] [])
+      let e = valConE' (VarCon (coreBuiltin The_fiInt) [IntT n] [])
               [ExpM $ LitE defaultExpInfo (IntL n intT)]
       in return $ Just e
 
@@ -295,9 +295,6 @@ createDictEnv = do
   array3_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (coreBuiltin The_array3) [VarT arg],
      createDict_array3 arg)
-  complex_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (coreBuiltin The_Complex) [VarT arg],
-     createDict_complex arg)
   array_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (arrT `typeApp` [VarT arg1, VarT arg2],
      createDict_array arg1 arg2)
@@ -320,7 +317,7 @@ createDictEnv = do
                                   stuckref_dict,
                                   list_dict, array1_dict, array2_dict, array3_dict,
                                   blist_dict, barray1_dict, barray2_dict, barray3_dict,
-                                  complex_dict, array_dict,
+                                  array_dict,
                                   {-referenced_dict,-} maybe_dict,
                                   tuple1_dict, tuple2_dict, tuple3_dict, tuple4_dict,
                                   eq_dict, ord_dict,
@@ -484,14 +481,6 @@ createDict_Maybe param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_Maybe)
 
-createDict_complex :: Var -> TypeSubst -> MkDict
-createDict_complex param_var subst = MkDict $
-  withReprDict param $ \elt_dict ->
-  return $ ExpM $ AppE defaultExpInfo oper [param] [elt_dict]
-  where
-    param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_repr_Complex)
-
 createDict_array :: Var -> Var -> TypeSubst -> MkDict
 createDict_array param_var1 param_var2 subst = MkDict $
   withReprDict param2 $ \dict2 -> do
@@ -574,3 +563,4 @@ createInt_minus param_var1 param_var2 subst = MkDict $ do
     param2 = getParamType param_var2 subst
 
     oper = ExpM $ VarE defaultExpInfo (coreBuiltin The_minus_fii)
+-}

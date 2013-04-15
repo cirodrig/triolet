@@ -56,6 +56,12 @@ data TIRepr =
     --   Arguments are eventually turned into an expression.
   | TICoreRepr SF.Var [TIType] [Either TIExp TIRepr]
 
+-- | Run-time size information.  It's possible to extract a 'TIRepr'
+--   from a 'TISize'.
+data TISize =
+  -- | A run-time size is extracted from a 'TIRepr'
+  TISize TIType TIRepr
+
 -- | Create the representation of the evidence of a predicate.
 --
 --   Class dictionaries are always boxed.
@@ -83,14 +89,16 @@ data TIExp =
     -- Expressions that translate directly to System F
     VarTE !TIInfo !SF.Var
   | LitTE !TIInfo !SF.Lit
-  | ConTE !TIInfo !TIConInst [TIRepr] [TIExp]
+    -- | A data constructor takes size parameters, an optional type object
+    --   constructor function, and field values.
+  | ConTE !TIInfo !TIConInst [TISize] !(Maybe SF.Var) [TIExp]
   | AppTE !TIInfo TIExp [TIType] [TIExp]
   | LamTE !TIInfo TIFun
     -- Let, Letfun, and Case expressions aren't annotated with representation
     -- information
   | LetTE SourcePos TIPat TIExp TIExp
   | LetfunTE SourcePos (DefGroup TIDef) TIExp
-  | CaseTE SourcePos TIExp [TIRepr] [TIAlt]
+  | CaseTE SourcePos TIExp [TISize] [TIAlt]
   | CoerceTE !TIInfo TIType TIType TIExp 
   | ArrayTE !TIInfo TIType [TIExp]
 
@@ -100,22 +108,9 @@ data TIExp =
     -- Placeholder expressions
   | PlaceholderTE Placeholder
 
-  | RecVarPH
-    { phExpInfo :: !TIInfo
-    , phExpVariable :: Untyped.Variable
-    , phExpTyVar :: TyCon
-    , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
-    }
-    -- | A placeholder for a class dictionary
-  | DictPH
-    { phExpInfo :: !TIInfo
-    , phExpPredicate :: Predicate
-    , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
-    }
-
 data TIPat =
     TIWildP TIType
-  | TIVarP SF.Var TIType
+  | TIVarP !SF.Var TIType
   | TITupleP [TIPat]
 
 data TITyPat = TITyPat SF.Var TIType
@@ -130,8 +125,11 @@ data TIFun =
 data TIDef =
   TIDef SF.Var SF.DefAnn TIFun
 
+-- | A case alternative.
+--   If an extra type is given, it's used as the type parameter of a
+--   type object binding.
 data TIAlt =
-  TIAlt !TIDeConInst [TIPat] TIExp
+  TIAlt !TIDeConInst !(Maybe TIType) [TIPat] TIExp
 
 -- | A Placeholder stands for a dictionary or recursive variable
 data Placeholder = DictPlaceholder DictP | RecVarPlaceholder RecVarP
@@ -161,5 +159,5 @@ data TIConInst = TIConInst !SF.Var [TIType] [TIType]
 
 data TIDeConInst = TIDeConInst !SF.Var [TIType] [TITyPat]
 
-data TIExport = TIExport !SourcePos ExportSpec TIFun
+data TIExport = TIExport !SourcePos !ExportSpec TIFun
 

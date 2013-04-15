@@ -9,7 +9,8 @@ and some local expression reordering.
 -}
 
 {-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types,
-    ViewPatterns #-}
+    ViewPatterns, ConstraintKinds #-}
+{-# OPTIONS_GHC -auto-all #-}
 module SystemF.Simplifier.Simplify
        (SimplifierPhase(..),
         rewriteLocalExpr,
@@ -53,8 +54,8 @@ import Common.Error
 import Common.Identifier
 import Common.MonadLogic
 import Common.Supply
-import qualified SystemF.DictEnv as DictEnv
-import SystemF.ReprDict
+import SystemF.Datatypes.Code
+import SystemF.Datatypes.InfoCall
 import Type.Compare
 import qualified Type.Rename as Rename
 import qualified Type.Substitute as Substitute
@@ -65,6 +66,9 @@ import Type.Environment
 
 import Globals
 import GlobalVar
+
+-- TODO: Remove this constrinat
+type ReprDictMonad m = ()
 
 -- | Return True if the expression is a variable or literal, False otherwise.
 isTrivialExp :: ExpM -> Bool
@@ -88,6 +92,24 @@ functionTypeSM (FunSM (Fun {funTyParams = ty_params
                            , funReturn = ret})) =
   forallType [b | TyPat b <- ty_params] $
   funType (map (patMType . fromPatSM) params) ret
+
+-- | Verify that the argument is an unboxed run-time representation object
+checkRepr :: ExpM -> LR ()
+checkRepr e = do
+  e_ty <- inferExpType e
+  case fromVarApp e_ty of
+    Just (op, args)
+      | op == valInfoV || op == bareInfoV -> return ()
+    _ -> internalError $ "checkRepr: Invalid type:\n" ++ show (pprExp e)
+
+-- | Verify that the argument is an unboxed run-time size object
+checkSize :: ExpM -> LR ()
+checkSize e = do
+  e_ty <- inferExpType e
+  case fromVarApp e_ty of
+    Just (op, args)
+      | op == sizeAlignV || op == sizeAlignV -> return ()
+    _ -> internalError $ "checkSize: Invalid type:\n" ++ show (pprExp e)
 
 -- | Different features of the simplifier are enabled
 --   depending on the stage of compilation.
@@ -148,7 +170,7 @@ data LREnv =
   , lrTypeEnv :: TypeEnv
     
     -- | Singleton values such as class dictionaries
-  , lrDictEnv :: SingletonValueEnv
+--  , lrDictEnv :: SingletonValueEnv
     
     -- | The return parameter of the current function, if there is one
   , lrReturnParameter :: !(Maybe PatM)
@@ -193,6 +215,7 @@ instance EvalMonad LR where
   liftTypeEvalM m = LR $ \env -> do
     liftM Just $ runTypeEvalM m (lrIdSupply $ lrConstants env) (lrTypeEnv env)
 
+{-
 instance ReprDictMonad LR where
   withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply $ lrConstants env) env
   withTypeEnv f = LR $ \env -> runLR (f $ lrTypeEnv env) env
@@ -200,6 +223,7 @@ instance ReprDictMonad LR where
   localDictEnv f m = LR $ \env ->
     let env' = env {lrDictEnv = f $ lrDictEnv env}
     in runLR m env'
+-}
 
 liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
@@ -250,9 +274,9 @@ lookupKnownValue v = LR $ \env ->
 -- | Add a variable's known value to the environment 
 withKnownValue :: Var -> AbsCode -> LR a -> LR a
 withKnownValue v val m = LR $ \env ->
-  let env' = env {lrKnownValues = insertAbstractValue v val $
-                                  lrKnownValues env}
-  in runLR m env'
+  let kv' = insertAbstractValue v val $ lrKnownValues env
+      env' = env {lrKnownValues = kv'}
+  in kv' `seq` env' `seq` runLR m env'
   where
     -- Debugging: Show the known value for this variable
     -- TODO: implement pretty-printing
@@ -333,17 +357,18 @@ isRecInliningCandidate _ def =
 --   must either be used only once (to avoid code size explosion)
 --   or be marked for aggressive inlining.
 isInliningCandidate :: SimplifierPhase -> FDef Mem -> Bool
-isInliningCandidate phase def = phase_ok && code_growth_ok
+isInliningCandidate phase def = inlining_ok && phase_ok && code_growth_ok
   where
     ann = defAnnotation def
     phase_ok = phasePermitsInlining phase def
+    inlining_ok = defAnnInlineRequest ann /= InlNever
 
     -- Decide whether code growth is reasonable
     code_growth_ok =
       is_wrapper || is_used_once || is_marked_inline || is_small || is_stream
       where
         is_wrapper = defAnnInlinePhase ann == InlWrapper
-        is_marked_inline = defAnnInlineRequest ann
+        is_marked_inline = defAnnInlineRequest ann == InlAggressively
         is_used_once = usesSuggestInlining def
 
         is_small =
@@ -424,7 +449,7 @@ phasePermitsInlining phase def =
 --   The pattern must not be a local variable pattern.
 assumePattern :: PatM -> LR a -> LR a
 assumePattern pat m =
-  saveReprDictPattern pat $ assumePatM pat m
+  {- saveReprDictPattern pat $ -} assumePatM pat m
 
 assumePatterns :: [PatM] -> LR a -> LR a
 assumePatterns pats m = foldr assumePattern m pats
@@ -505,7 +530,7 @@ makeExpValue (ExpM expression) =
 
 rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
   x <- rewriteApp (lrRewriteRules $ lrConstants env)
-       (intIndexEnv $ lrDictEnv env)
+       -- (intIndexEnv $ lrDictEnv env)
        (lrIdSupply $ lrConstants env) (lrTypeEnv env)
        inf operator ty_args args
   return $ Just x
@@ -520,8 +545,11 @@ rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
 interpretStreamInSimplifier :: ExpInfo -> ExpM -> [Type] -> [ExpM]
                             -> LR (Maybe ExpM)
 interpretStreamInSimplifier inf op ty_args args = LR $ \env ->
+  return $ Just Nothing
+  -- Stream rewrites are disabled
+  {-
   let phase = lrPhase $ lrConstants env
-  in if True {- Temporarily turned off -} -- phase > FinalSimplifierPhase
+  in if phase > FinalSimplifierPhase
      then return $ Just Nothing
      else do
        x <- runTypeEvalM (interpret_stream phase) (lrIdSupply $ lrConstants env) (lrTypeEnv env)
@@ -549,6 +577,7 @@ interpretStreamInSimplifier inf op ty_args args = LR $ \env ->
       {- case s' of
         Nothing -> return Nothing
         Just x -> traceShow (text "INTERPRETED" <+> pprExp x) $ return (Just x) -}
+-}
 
 -------------------------------------------------------------------------------
 -- Estimating code size
@@ -577,19 +606,19 @@ expSize (ExpM expression) =
   case expression
   of VarE {} -> codeSize 1
      LitE {} -> codeSize 1
-     ConE _ con es -> codeSize 1 `mappend` expSizes es
+     ConE _ con sps ty_ob es -> codeSize 1 `mappend` expSizes (sps ++ maybeToList ty_ob ++ es)
      AppE _ op ts args -> codeSize (1 + length ts) `mappend` expSizes (op : args)
      LamE _ f -> funSize f
      LetE _ b rhs body -> codeSize 1 `mappend` expSize rhs `mappend` expSize body
      LetfunE _ defs body ->
        mconcat (expSize body : map (funSize . definiens) (defGroupMembers defs))
-     CaseE _ scr alts -> expSize scr `mappend` alt_sizes alts
+     CaseE _ scr sps alts -> expSize scr `mappend` expSizes sps `mappend` alt_sizes alts
      ExceptE {} -> codeSize 1
      CoerceE _ _ _ b -> codeSize 1 `mappend` expSize b
      ArrayE _ _ es -> codeSize 1 `mappend` expSizes es
   where
     alt_sizes xs = mconcat $ map alt_size xs
-    alt_size (AltM (Alt decon params body)) =
+    alt_size (AltM (Alt decon ty_ob params body)) =
       decon_size decon `mappend` codeSize (length params) `mappend` expSize body
     
     con_size con = codeSize (length $ conTypes con)
@@ -685,16 +714,21 @@ inlckConlike dmd _ = return False
 --   The arguments must be trivial values (val or box fields) 
 --   or bare data constructor applications (bare fields).
 inlckBareDataCon :: InlineCheck
-inlckBareDataCon dmd (ExpM (ConE _ (VarCon con _ _) args)) = do
-  m_dcon <- lookupDataCon con
-  case m_dcon of
-    Just dcon ->
-      let field_kinds = dataConFieldKinds dcon
-          check_field BareK arg = inlckBareDataCon unknownDmd arg
-          check_field ValK  arg = inlckTrivial unknownDmd arg
-          check_field BoxK  arg = inlckTrivial unknownDmd arg
-      in andM $ zipWith check_field field_kinds args
-    _ -> return False
+inlckBareDataCon dmd (ExpM (ConE _ (VarCon con _ _) sps ty_ob args)) =
+  allM (inlckTrivial unknownDmd) sps >&&>
+  maybe (return True) (inlckTrivial unknownDmd) ty_ob >&&>
+  check_fields
+  where
+  check_fields = do
+    m_dcon <- lookupDataCon con
+    case m_dcon of
+      Just dcon ->
+        let field_kinds = dataConFieldKinds dcon
+            check_field BareK arg = inlckBareDataCon unknownDmd arg
+            check_field ValK  arg = inlckTrivial unknownDmd arg
+            check_field BoxK  arg = inlckTrivial unknownDmd arg
+        in andM $ zipWith check_field field_kinds args
+      _ -> return False
 
 -- | Create a substitution that pre-inlines the given list of variables
 preinlineSubst :: [(Var, ExpM)] -> Subst
@@ -794,6 +828,25 @@ betaReduce' is_stream_arg inf (FunM fun) ty_args args
             rwLam inf =<< substitute subst new_fun
       in caseInspectorBindings (zip applied_params args) simplify_new_fun
 
+-- | Insert let-bindings for the parameters of a function that's been inlined
+caseInspectorBindings :: [(PatSM, ExpSM)] -> (Subst -> LR (ExpM, AbsCode))
+                      -> LR (ExpM, AbsCode)
+caseInspectorBindings ((param, initializer):fs) compute_body =
+  caseInspectorBinding param initializer $ \subst ->
+  caseInspectorBindings fs (apply subst)
+  where
+    apply subst subst' = compute_body =<< (subst' `composeSubst` subst)
+
+caseInspectorBindings [] compute_body = compute_body emptySubst
+
+-- | Insert a let-binding for a parameter of a function that's been inlined
+caseInspectorBinding :: PatSM -> ExpSM -> (Subst -> LR (ExpM, AbsCode))
+                     -> LR (ExpM, AbsCode)
+caseInspectorBinding param initializer compute_body
+  | isDeadPattern (fromPatSM param) = compute_body emptySubst
+  | otherwise = rwLet defaultExpInfo param initializer compute_body
+  
+
 -------------------------------------------------------------------------------
 -- Local restructuring
     
@@ -831,10 +884,10 @@ flattenExp expression = flattenExp' expression =<< freshenHead expression
   
 flattenExp' orig_expression expression =
   case expression
-  of ConE inf con args -> flattenConExp inf con args
+  of ConE inf con sps ty_ob args -> flattenConExp inf con sps ty_ob args
      LetE inf pat rhs body -> flattenLetExp inf pat rhs body
      LetfunE inf defs body -> flattenLetfunExp inf defs body
-     CaseE inf scr alts -> flattenCaseExp inf scr alts
+     CaseE inf scr sps alts -> flattenCaseExp inf scr sps alts
      AppE inf op ty_args args -> flattenAppExp inf op ty_args args
      ExceptE _ ty -> return exceptingContext
      _ -> liftM unitContext $ applySubstitution orig_expression
@@ -918,11 +971,16 @@ flattenInsideLambda expression = do
 --
 --   If the kind is \"bare\", leave it where it is, but flatten inside the
 --   expression if it's a lambda expression.
-flattenConExp inf con args = do
+flattenConExp inf con sps ty_ob args = do
   (field_types, _) <- conType con
   field_kinds <- conFieldKinds con
+  sps' <- flattenExps sps
+  ty_ob' <- case ty_ob
+            of Nothing -> return $ unitContext Nothing
+               Just e  -> liftM (mapContext Just) $ flattenExp e
   args' <- flattenConFieldExps $ zip3 args field_types field_kinds
-  return $ mapContext (\xs -> ExpM $ ConE inf con xs) args'
+  c <- merge ty_ob' =<< merge sps' args'
+  return $ mapContext (\(t, (sps, xs)) -> ExpM $ ConE inf con sps t xs) c
 
 flattenLetExp inf (PatSM pat) rhs body = do
   -- Flatten the RHS.  Since the body of the RHS will be the new RHS,
@@ -956,10 +1014,12 @@ flattenLetfunExp inf defs body = do
 
     freshen_defs = mapM (mapMDefiniens applySubstitutionFun) defs
 
-flattenCaseExp inf scr alts = do
-  -- Perform floating in the scrutinee
+flattenCaseExp inf scr sps alts = do
+  -- Perform floating in the scrutinee and size parameters
   ctx_scr <- recFlattenExp scr
-  joinInContext ctx_scr $ \flattened_scr -> do
+  ctx_sps <- mergeList =<< mapM recFlattenExp sps
+  ctx_scr_sps <- merge ctx_scr ctx_sps
+  joinInContext ctx_scr_sps $ \(flattened_scr, flattened_sps) -> do
     -- If the scrutinee is 
     --
     -- a trivial expression, then floating it outward won't make
@@ -991,7 +1051,7 @@ flattenCaseExp inf scr alts = do
 
     joinInContext ctx_floated_scr $ \floated_scr -> do
       subst_alts <- mapM applySubstitutionAlt alts
-      let simplified_case = ExpM $ CaseE inf floated_scr subst_alts
+      let simplified_case = ExpM $ CaseE inf floated_scr flattened_sps subst_alts
 
       -- Is this case binding suitable for floating?
       case asCaseContext True simplified_case of
@@ -1094,7 +1154,7 @@ eliminateUselessCopying expression = do
           consumeFuel >> return rhs
         _ -> can't_eliminate
 
-    CaseE inf scrutinee alts -> do
+    CaseE inf scrutinee sps alts -> do
       -- Eliminate reconstruction of bare or val data in each alternative.
       -- If scrutinee is a complex expression, don't eliminate, as it may
       -- produce code duplication.
@@ -1142,8 +1202,9 @@ eliminateUselessCopying expression = do
             Nothing -> do -- can't_eliminate
               -- Reconstruct the case expression
               scrutinee' <- applySubstitution scrutinee
+              sps' <- mapM applySubstitution sps
               alts1' <- mapM applySubstitutionAlt alts1
-              return $ deferEmptySubstitution $ ExpM (CaseE inf scrutinee' alts1')
+              return $ deferEmptySubstitution $ ExpM (CaseE inf scrutinee' sps' alts1')
             Just new_exp -> consumeFuel >> return new_exp
 
     _ -> can't_eliminate
@@ -1162,10 +1223,10 @@ eliminateUselessCopying expression = do
     eliminate_unbox_and_copy scrutinee alts = do
       scrutinee' <- freshenHead scrutinee
       case scrutinee' of
-        ConE _ (VarCon op [ty_arg] []) [initializer]
+        ConE _ (VarCon op [ty_arg] []) _ _ [initializer]
           | op `isCoreBuiltin` The_boxed ->
              case alts
-             of [AltSM (Alt _ [field] body)] -> do
+             of [AltSM (Alt _ _ [field] body)] -> do
                   let pattern_var = patMVar $ fromPatSM field
                   -- Check whether body is @copy _ _ x@
                   -- where @x@ is the bound variable
@@ -1195,10 +1256,10 @@ eliminateUselessCopying expression = do
     -- Return @Nothing@ if not useless.
     -- Return @Just Nothing@ if useless and there's no return parameter.
     -- Return @Just (Just p)@ if useless and the return parameter is @p@.
-    useless_alt (AltSM (Alt decon alt_fields body)) = do
+    useless_alt (AltSM (Alt decon _ alt_fields body)) = do
       body' <- freshenHead body
       case body' of
-        ConE inf con fields ->
+        ConE inf con _ _ fields ->
           compare_pattern_to_expression decon alt_fields con fields
 
         -- TODO: Also detect case where body is applied to a return parameter
@@ -1296,7 +1357,8 @@ data ReconstructorTemplate =
 --   reconstruction with a copy of the original value.
 --
 --   FIXME: Do this in a separate pass to avoid redundant traversals!
-eliminateReconstructor debug_expr scrutinee alt@(AltSM (Alt decon params body)) = do
+eliminateReconstructor debug_expr scrutinee
+    alt@(AltSM (Alt decon ty_ob params body)) = do
 
   -- Determine the kind of the scrutinee and the object fields
   -- and the type parameters
@@ -1318,7 +1380,7 @@ eliminateReconstructor debug_expr scrutinee alt@(AltSM (Alt decon params body)) 
   if data_kind /= BareK
     then do
       body' <- eliminateReconstructorTemplate scrutinee template body
-      return $ AltSM (Alt decon params (deferEmptySubstitution body'))
+      return $ AltSM (Alt decon ty_ob params (deferEmptySubstitution body'))
     else return alt
 
 eliminateReconstructorTemplate scrutinee template body 
@@ -1329,7 +1391,7 @@ eliminateReconstructorTemplate scrutinee template body
     case body' of
       VarE inf v ->
         return $ ExpM $ VarE inf v
-      ConE inf op args -> do
+      ConE inf op _ _ args -> do
         -- Decide whether to eliminate this term
         con_match <- matchConPattern (tmplDeCon template) op
         if con_match
@@ -1362,6 +1424,10 @@ eliminateReconstructorTemplate scrutinee template body
 -- | Apply a substitution, then rewrite an expression.
 substAndRwExp :: Bool -> ExpSM -> Subst -> LR (ExpM, AbsCode)
 substAndRwExp is_stream_arg e s = rwExp is_stream_arg =<< substitute s e
+
+rwMaybeExp _             Nothing  = return (Nothing, Nothing) 
+rwMaybeExp is_stream_arg (Just e) = do (e, c) <- rwExp is_stream_arg e
+                                       return (Just e, Just c)
 
 -- | Rewrite an expression.
 --
@@ -1404,13 +1470,13 @@ rwExp is_stream_arg expression =
       case ex3 of
         VarE inf v -> rwVar inf v
         LitE inf l -> rwExpReturn (ExpM (LitE inf l), valueCode $ LitAV l)
-        ConE inf con args -> rwCon inf con args
+        ConE inf con sps ty_ob args -> rwCon inf con sps ty_ob args
         AppE inf op ty_args args -> rwApp is_stream_arg ex3 inf op ty_args args
         LamE inf fun -> rwLam inf fun
         LetE inf bind val body ->
           rwLet inf bind val (substAndRwExp is_stream_arg body)
         LetfunE inf defs body -> rwLetrec is_stream_arg inf defs body
-        CaseE inf scrut alts -> rwCase is_stream_arg inf scrut alts
+        CaseE inf scrut sps alts -> rwCase is_stream_arg inf scrut sps alts
         ExceptE _ _ -> propagateException
         CoerceE inf from_t to_t body ->
           rwCoerce is_stream_arg inf from_t to_t body
@@ -1424,9 +1490,9 @@ rwExp is_stream_arg expression =
       shadowing <- traceShow (text "R" <+> pprExp e') $ checkForShadowingExpHere e'
       shadowing `seq` return ret -}
 
-    {-debug l e m = do
+    {- debug l e m = do
       e' <- applySubstitution e
-      traceShow (text l <+> pprExp e') m-}
+      traceShow (text l <+> pprExp e') m -}
 
     -- Print abstract values
     {-debug l e m = do
@@ -1513,14 +1579,19 @@ restructureLamExp inf fun@(FunSM (Fun fun_inf ty_params params ret body))
   | otherwise = return Nothing
 
 
-rwCon :: ExpInfo -> ConInst -> [ExpSM] -> LR (ExpM, AbsCode)
-rwCon inf con args = do
+rwCon :: ExpInfo -> ConInst -> [ExpSM] -> Maybe ExpSM -> [ExpSM]
+      -> LR (ExpM, AbsCode)
+rwCon inf con sps ty_ob args = do
   -- Simplify fields
+  (sps', sps_values) <- clearCurrentReturnParameter $ rwExps False sps
+  (ty_ob', ty_ob_value) <-
+    clearCurrentReturnParameter $ rwMaybeExp False ty_ob
   (args', arg_values) <- clearCurrentReturnParameter $ rwExps False args
 
   -- Interpret the constructor's value
-  new_val <- interpretComputation' $ interpretCon con arg_values
-  let new_exp = ExpM $ ConE inf con args'
+  new_val <- interpretComputation' $
+             interpretCon con ty_ob_value sps_values arg_values
+  let new_exp = ExpM $ ConE inf con sps' ty_ob' args'
   return (new_exp, new_val)
 
 rwApp :: Bool -> BaseExp SM -> ExpInfo -> ExpSM -> [Type] -> [ExpSM]
@@ -1530,8 +1601,8 @@ rwApp is_stream_arg original_expression inf op ty_args args = do
   case op' of
     Left op_exp ->
       rwAppOperator is_stream_arg inf op_exp ty_args' args'
-    Right (case_inf, scr, alts) ->
-      rwAppOfCase is_stream_arg inf case_inf scr alts ty_args' args'
+    Right (case_inf, scr, sps, alts) ->
+      rwAppOfCase is_stream_arg inf case_inf scr sps alts ty_args' args'
 
 -- Try to uncurry this application.  The operator and arguments have not been
 -- rewritten.
@@ -1539,7 +1610,7 @@ rwApp is_stream_arg original_expression inf op ty_args args = do
 -- If the operator is a case expression, then deconstruct the case expression;
 -- there is a special code path to handle case statements.
 preUncurryApp :: ExpInfo -> ExpSM -> [Type] -> [ExpSM]
-              -> LR (Either ExpSM (ExpInfo, ExpSM, [AltSM]), [Type], [ExpSM])
+              -> LR (Either ExpSM (ExpInfo, ExpSM, [ExpSM], [AltSM]), [Type], [ExpSM])
 preUncurryApp inf op ty_args args = do
   op' <- freshenHead op
   case op' of
@@ -1548,8 +1619,8 @@ preUncurryApp inf op ty_args args = do
           continue inner_op inner_ty_args (inner_args ++ args)
       | null inner_args ->
           continue inner_op (inner_ty_args ++ ty_args) args
-    CaseE case_inf scr alts ->
-      return (Right (case_inf, scr, alts), ty_args, args)
+    CaseE case_inf scr sps alts ->
+      return (Right (case_inf, scr, sps, alts), ty_args, args)
     _ -> return (Left op, ty_args, args)
   where
     continue op ty_args args =
@@ -1564,14 +1635,15 @@ preUncurryApp inf op ty_args args = do
 -- becomes
 --
 -- > let z = e2 in case x of C. e1 z
-rwAppOfCase :: Bool -> ExpInfo -> ExpInfo -> ExpSM -> [AltSM] -> [Type]
+rwAppOfCase :: Bool -> ExpInfo -> ExpInfo -> ExpSM -> [ExpSM] -> [AltSM] -> [Type]
             -> [ExpSM]
             -> LR (ExpM, AbsCode)
-rwAppOfCase is_stream_arg inf case_inf scr alts ty_args args = do
+rwAppOfCase is_stream_arg inf case_inf scr sps alts ty_args args = do
   scr' <- applySubstitution scr
+  sps' <- mapM applySubstitution sps
   restructured_exp <- withMany bind_argument args $ \args' -> do
     alts' <- mapM (insert_app inf ty_args args') alts
-    return $ ExpM $ CaseE case_inf scr' alts'
+    return $ ExpM $ CaseE case_inf scr' sps' alts'
 
   -- Rewrite the new expression
   rwExp is_stream_arg $ deferEmptySubstitution restructured_exp
@@ -1589,8 +1661,8 @@ rwAppOfCase is_stream_arg inf case_inf scr alts ty_args args = do
 
     -- Put a function application term inside a case alternative
     insert_app inf ty_args args altm = do
-      AltM (Alt decon params body) <- applySubstitutionAlt altm
-      return $ AltM $ Alt decon params (appE inf body ty_args args)
+      AltM (Alt decon ty_ob params body) <- applySubstitutionAlt altm
+      return $ AltM $ Alt decon ty_ob params (appE inf body ty_args args)
 
 rwAppOperator is_stream_arg inf op ty_args args =
   clearCurrentReturnParameter $ do
@@ -1694,7 +1766,7 @@ rwAppWithOperator' is_stream_arg inf op op_val ty_args args =
 
     -- True if the application expression is a fully applied stream operator
     -- (except that output parameters may be missing)
-    is_stream_app = isStreamAppExp op ty_args args
+    is_stream_app = False -- isStreamAppExp op ty_args args
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
@@ -1732,7 +1804,7 @@ rwCopyApp inf copy_op ty [repr] = do
   return (appE inf copy_op [ty] [repr'], topCode) -}
 
 rwCopyApp inf [ty] args = debug $
-  -- Rewrite @copy _ _ (reify _ _ E)@ to @E@
+  -- Rewrite @copy _ _ (reify _ E)@ to @E@
   case args
   of (dict_arg : src : rest) -> do
        let maybe_dst = case rest
@@ -1741,7 +1813,7 @@ rwCopyApp inf [ty] args = debug $
                           _ -> wrong_number_of_arguments
        src' <- freshenHead src
        case src' of
-         AppE _ src_op _ [_, src_arg] -> do
+         AppE _ src_op _ [src_arg] -> do
            src_op' <- freshenHead src_op
            case src_op' of
              VarE _ src_op_var
@@ -1777,8 +1849,8 @@ rwCopyApp inf [ty] args = debug $
 rwCopyApp1 inf ty repr src m_dst = do
   whnf_type <- reduceToWhnf ty
   case fromVarApp whnf_type of
-    Just (op, [val_type]) | op `isCoreBuiltin` The_Stored ->
-      copyStoredValue inf val_type repr src m_dst
+    {- Just (op, [val_type]) | op `isCoreBuiltin` The_Stored ->
+      copyStoredValue inf val_type repr src m_dst -}
     _ -> do
       (repr', repr_value) <- rwExp False repr
       (src', src_value) <- rwExp False src
@@ -1823,6 +1895,7 @@ rwCopyApp1 inf ty repr src m_dst = do
   where
     copy_op = varE inf (coreBuiltin The_copy)
 
+{-
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
 --
 --   Eventually, we should be able to inline the 'copy' method to avoid this
@@ -1848,7 +1921,7 @@ copyStoredValue inf val_type repr arg m_dst = do
       new_expr = ExpM $ CaseE inf arg' [alt]
   
   -- Try to simplify the new expression further
-  rwExp False $ deferEmptySubstitution new_expr
+  rwExp False $ deferEmptySubstitution new_expr -}
 
 rwIntEqApp inf [] [arg1, arg2] = do
   -- Evaluate arguments
@@ -1873,13 +1946,11 @@ rwIntEqApp inf [] [arg1, arg2] = do
 
     return_true =
       -- Simplified to the constant value 'True'
-      let constructor = VarCon (coreBuiltin The_True) [] []
-      in return (conE inf constructor [], trueCode)
+      return (trueE inf, trueCode)
 
     return_false =
       -- Simplified to the constant value 'False'
-      let constructor = VarCon (coreBuiltin The_False) [] []
-      in return (conE inf constructor [], falseCode)
+      return (falseE inf, falseCode)
 
   -- Try to compute value information for this expression
   case codeTrivialExp val1 of
@@ -2017,16 +2088,17 @@ rwLetrec is_stream_arg inf defs body = do
         (body', _) <- rwExp is_stream_arg substituted_body
         rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
 
-rwCase :: Bool -> ExpInfo -> ExpSM -> [AltSM] -> LR (ExpM, AbsCode)
-rwCase is_stream_arg inf scrut alts = do
-  rwCase1 is_stream_arg inf scrut alts
+rwCase :: Bool -> ExpInfo -> ExpSM -> [ExpSM] -> [AltSM] -> LR (ExpM, AbsCode)
+rwCase is_stream_arg inf scrut sps alts = do
+  rwCase1 is_stream_arg inf scrut sps alts
   where
     -- For debugging, print the case expression that will be rewritten
     debug_print_case :: LR (ExpM, AbsCode) -> LR (ExpM, AbsCode)
     debug_print_case m = do
       scrut' <- applySubstitution scrut
+      sps' <- mapM applySubstitution sps
       alts' <- mapM applySubstitutionAlt alts
-      let expr = ExpM $ CaseE inf scrut' alts'
+      let expr = ExpM $ CaseE inf scrut' sps' alts'
       traceShow (text "rwCase" <+> pprExp expr) m
 
 -- | First stages of rewriting a case expression.  Try to simplify the case
@@ -2039,11 +2111,12 @@ rwCase is_stream_arg inf scrut alts = do
 -- statement becomes dead code.
 --
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
-rwCase1 is_stream_arg inf scrut alts
+rwCase1 is_stream_arg inf scrut sps alts
   | [alt@(AltSM (Alt {altCon = VarDeCon op _ _}))] <- alts,
     op `isCoreBuiltin` The_boxed = do
-      let AltSM (Alt _ [binder] body) = alt
-      rwLetViaBoxed inf scrut binder (substAndRwExp is_stream_arg body)
+      let [sp] = sps
+      let AltSM (Alt _ (Just ty_ob) [binder] body) = alt
+      rwLetViaBoxed inf scrut sp ty_ob binder (substAndRwExp is_stream_arg body)
 
 -- If this is a case of data constructor, we can unpack the case expression
 -- before processing the scrutinee.
@@ -2052,14 +2125,14 @@ rwCase1 is_stream_arg inf scrut alts
 -- a constructor application.
 --
 -- Unpacking consumes fuel
-rwCase1 is_stream_arg inf scrut alts
+rwCase1 is_stream_arg inf scrut sps alts
   | ExpM (ConE {}) <- discardSubstitution scrut = eliminate_case scrut
   | otherwise = do
-      -- Check for an application of "reify _ _ E".
+      -- Check for an application of "reify _ E".
       -- If present, the argument E must be a data constructor application.
       scrut' <- freshenHead scrut
       case scrut' of
-        AppE _ op _ [_, arg] -> do
+        AppE _ op _ [arg] -> do
           op' <- freshenHead op
           case op' of
             VarE _ v | v `isCoreBuiltin` The_reify ->
@@ -2072,7 +2145,7 @@ rwCase1 is_stream_arg inf scrut alts
             _ -> not_case_of_constructor
         _ -> not_case_of_constructor
   where
-    not_case_of_constructor = rwCaseScrutinee is_stream_arg inf scrut alts
+    not_case_of_constructor = rwCaseScrutinee is_stream_arg inf scrut sps alts
 
     -- This is a case of data constructor expression.  The case
     -- expression and data constructor cancel out.
@@ -2080,22 +2153,71 @@ rwCase1 is_stream_arg inf scrut alts
       consumeFuel
 
       -- Rename the scrutinee and get constructor fields
-      ConE _ scrut_con scrut_args <- freshenHead data_con_expr
+      ConE _ scrut_con _ ty_ob scrut_args <- freshenHead data_con_expr
 
       let alt = findAlternative alts scrut_con
           ex_types = conExTypes scrut_con
       field_kinds <- conFieldKinds scrut_con
 
-      -- Eliminate this case statement
-      eliminateCaseWithExp is_stream_arg field_kinds ex_types scrut_args alt
+      -- Compute dictionaries for bare fields
+      m_field_dicts <- conFieldDicts' scrut_con
+      case m_field_dicts of
+        Nothing -> not_case_of_constructor -- Cannot simplify
+        Just field_dicts ->
+          -- Eliminate this case statement
+          eliminateCaseWithExp is_stream_arg field_dicts ex_types
+          ty_ob scrut_args alt
+
+-- | Create field dictionary expressions for all bare fields of a data type.
+--   Return 'Nothing' if unable to generate suitable expressions.
+--
+--   Each returned tuple is @(BareK, Just e)@, @(BoxK, Nothing)@,
+--   or @(ValK, Nothing)@.
+conFieldDicts :: ConInst -> LR (Maybe [(BaseKind, Maybe ExpM)])
+conFieldDicts con@(VarCon op ty_args ex_types) = do
+  Just dcon_type <- lookupDataCon op
+  let field_kinds = dataConFieldKinds dcon_type
+      ty_args = conTyArgs con
+      ex_types = conExTypes con
+  (field_types, _) <-
+    instantiateDataConTypeWithExistentials dcon_type (ty_args ++ ex_types)
+
+  field_assocs <- zipWithM field_dict field_kinds field_types
+  return $ sequence field_assocs
+  where
+    field_dict :: BaseKind -> Type -> LR (Maybe (BaseKind, Maybe ExpM))
+    field_dict BareK ty = liftTypeEvalM $
+      condM (deconVarAppType ty)
+      [ do Just (op, args) <- it
+           Just data_type <- lift $ lookupDataType op
+           lift $ do (m_dict_exp, context) <-
+                       execGen $ callConstantUnboxedInfoFunction data_type args
+                     return $ do dict_exp <- m_dict_exp
+                                 return (BareK, Just $ context dict_exp)
+      , return Nothing
+      ]
+
+    field_dict k ty = return (Just (k, Nothing))
+
+conFieldDicts con@(TupleCon ts) = do
+  -- Tuples have no bare fields
+  field_kinds <- conFieldKinds con
+  return $ Just [(k, Nothing) | k <- field_kinds]
+
+conFieldDicts' con = do
+  x <- conFieldDicts con
+  return $ fmap (fmap (\ (k, m_e) -> (k, fmap deferEmptySubstitution m_e))) x
 
 -- Simplify the scrutinee, then try to simplify the case statement.
-rwCaseScrutinee is_stream_arg inf scrut alts = do
-  -- Simplify scrutinee
+rwCaseScrutinee :: Bool -> ExpInfo -> ExpSM -> [ExpSM] -> [AltSM]
+                -> LR (ExpM, AbsCode)
+rwCaseScrutinee is_stream_arg inf scrut sps alts = do
+  -- Simplify scrutinee and size parameters
   (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp False scrut
+  (sps', _) <- clearCurrentReturnParameter $ rwExps False sps
 
   -- Try to deconstruct the new scrutinee expression
-  ifElseFuel (can't_deconstruct scrut' scrut_val) $ do
+  ifElseFuel (can't_deconstruct scrut' scrut_val sps') $ do
     let maybe_exp = makeDataExpWithAbsValue scrut' scrut_val
     case maybe_exp of
       Just app_with_value -> do
@@ -2105,21 +2227,21 @@ rwCaseScrutinee is_stream_arg inf scrut alts = do
       _ ->
         -- Can't deconstruct.  Propagate values and rebuild the case
         -- statement.
-        can't_deconstruct scrut' scrut_val
+        can't_deconstruct scrut' scrut_val sps'
   where
-    can't_deconstruct scrut' scrut_val =
-      rwCase2 is_stream_arg inf alts scrut' scrut_val
+    can't_deconstruct scrut' scrut_val sps' =
+      rwCase2 is_stream_arg inf alts scrut' scrut_val sps'
 
 -- | Rewrite a case statement that stands for a let-expression.
 --   This code is similar to 'rwLet'.
-rwLetViaBoxed :: ExpInfo -> ExpSM -> PatSM 
+rwLetViaBoxed :: ExpInfo -> ExpSM -> ExpSM -> PatSM -> PatSM
               -> (Subst -> LR (ExpM, AbsCode))
                  -- ^ Computation that rewrites the body after
                  --   applying a substitution.  The substitution holds
                  --   inlining decisions that were made while
                  --   processing the binder part of the let expression.
               -> LR (ExpM, AbsCode)
-rwLetViaBoxed inf scrut (PatSM pat) compute_body =
+rwLetViaBoxed inf scrut size_param (PatSM ty_ob) (PatSM pat) compute_body =
   ifElseFuel rw_recursive_let try_pre_inline
   where
     -- Check if we should inline the constructed value _before_ rewriting it.
@@ -2131,7 +2253,7 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body =
     --
     -- * The bound value is copied.
     --
-    -- The inlined expression will be @reify t repr_t E@.
+    -- The inlined expression will be @reify t E@.
     try_pre_inline
       -- The scrutinee must be used safely so that inlining 
       -- doesn't duplicate work
@@ -2141,7 +2263,7 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body =
           -- We only need to check for a data constructor application; it's
           -- already known that the data constructor is 'boxed'.
           case subst_scr of
-            ExpM (ConE _ (VarCon _ [val_type] []) [subst_val]) 
+            ExpM (ConE _ (VarCon _ [val_type] []) _ _ [subst_val]) 
               --  It's only worth inlining if we can eliminate the inlined
               --  code afterwards.  Either the specificity is
               --  * 'Copied' (so we can eliminate 'copy'); or
@@ -2153,10 +2275,9 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body =
                   -- Inline this value since it's used exactly once
                   consumeFuel
 
-                  -- Create the expression @reify t repr_t $(subst_val)@
-                  subst_val' <- withReprDict val_type $ \val_repr ->
-                    return $ appE inf (varE' (coreBuiltin The_reify))
-                             [val_type] [val_repr, subst_val]
+                  -- Create the expression @reify t $(subst_val)@
+                  let subst_val' = varAppE inf (coreBuiltin The_reify)
+                                   [val_type] [subst_val]
 
                   -- Simplify the body of the case statement
                   compute_body (preinlineSubst1 (patMVar pat) subst_val')
@@ -2178,18 +2299,21 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body =
         is_con_app (ExpM (ConE {})) = True
         is_con_app _ = False
 
-    rw_recursive_let = rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body
+    rw_recursive_let = rwLetViaBoxedNormal inf scrut size_param (PatSM ty_ob) (PatSM pat) compute_body
 
-rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
+rwLetViaBoxedNormal inf scrut size_param (PatSM ty_ob_pat) (PatSM pat) compute_body = do
   -- Rewrite the scrutinee
   (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp False scrut
+  (size_param', _) <- clearCurrentReturnParameter $ rwExp False size_param
       
+  checkSize size_param'
+
   -- If scrutinee is 'boxed' applied to a case statement,
   -- apply case-of-case transformation to move the 'boxed' constructor
   -- inwards
   m_deconstructed_scrutinee <- ifFuel Nothing $ decon_scrutinee_case scrut'
   case m_deconstructed_scrutinee of
-    Just (scrut_type, inner_scrutinee, inner_alts) -> do
+    Just (scrut_type, scrut_ty_ob, scrut_sp, inner_scrutinee, inner_sps, inner_alts) -> do
       consumeFuel
       
       -- Simplify the alternative.
@@ -2198,22 +2322,23 @@ rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
       -- processed once.
       alt <- case_alternative scrut_val
       subst_alt <- freshenAlt emptySubst alt
-      rwCaseOfCase inf (Just scrut_type) inner_scrutinee inner_alts [subst_alt]
+      rwCaseOfCase inf (Just (scrut_type, scrut_ty_ob, scrut_sp))
+        inner_scrutinee inner_sps inner_alts [size_param'] [subst_alt]
     _ ->
-      rewrite_body scrut' scrut_val
+      rewrite_body scrut' scrut_val [size_param']
   where
     -- Attempt to deconstruct an expression of the form
     -- @boxed (t) (case e of ...)@ where the case statement has multiple
     -- branches.
-    decon_scrutinee_case expr@(ExpM (ConE _ con [arg]))
+    decon_scrutinee_case expr@(ExpM (ConE _ con [sp] (Just ty_ob) [arg]))
       | is_boxed_con,
-        Just (scr, alts) <- from_deconstructable_case arg =
-          return $ Just (ty_arg, scr, alts)
+        Just (scr, sps, alts) <- from_deconstructable_case arg =
+          return $ Just (ty_arg, ty_ob, sp, scr, sps, alts)
 
         -- Also detect the variant @boxed (t) (lambda r. case e of ...)@
       | is_boxed_con,
         ExpM (LamE lam_inf (FunM (Fun f_inf [] [f_arg] f_rtype f_body))) <- arg,
-        Just (scr, alts) <- from_deconstructable_case f_body = do
+        Just (scr, sps, alts) <- from_deconstructable_case f_body = do
           -- Rename the function argument to avoid name shadowing
           fun_var <- newClonedVar (patMVar f_arg)
           let f_arg' = patM (fun_var ::: patMType f_arg)
@@ -2227,7 +2352,7 @@ rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
                            FunM (Fun f_inf [] [f_arg'] f_rtype (altBody alt))
                          new_exp = ExpM $ LamE lam_inf new_fun
                      in AltM (alt {altBody = new_exp})
-          return $ Just (ty_arg, scr, map mk_fun alts)
+          return $ Just (ty_arg, ty_ob, sp, scr, sps, map mk_fun alts)
       where
         -- True if the data constructor is 'boxed'
         is_boxed_con =
@@ -2241,8 +2366,8 @@ rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
 
         from_deconstructable_case expression =
           case expression
-          of ExpM (CaseE _ scr alts) | isUnfloatableCase expression ->
-               Just (scr, alts)
+          of ExpM (CaseE _ scr sps alts) | isUnfloatableCase expression ->
+               Just (scr, sps, alts)
              _ -> Nothing
 
     decon_scrutinee_case _ = return Nothing
@@ -2255,31 +2380,36 @@ rwLetViaBoxedNormal inf scrut (PatSM pat) compute_body = do
       -- Propagate abstract value
       let field_val =
             case codeValue scrut_val
-            of DataAV (AbsData _ [val]) -> val
+            of DataAV (AbsData _ _ _ [val]) -> val
                _ -> topCode
 
       -- Simplify body
-      (body', _) <- assumePattern pat $
+      (body', _) <- assumePattern ty_ob_pat $
+                    assumePattern pat $
                     withKnownValue (patMVar pat) field_val $
                     compute_body emptySubst
 
       -- Construct a new case alternative
       let decon = VarDeCon (coreBuiltin The_boxed) [patMType pat] []
-      return $ AltM $ Alt decon [pat] body'
+      return $ AltM $ Alt decon (Just ty_ob_pat) [pat] body'
       
     -- The scrutinee has been simplified.  Propagate its value into the case 
     -- statement.
-    rewrite_body scrut' scrut_val = do
+    rewrite_body scrut' scrut_val sps' = do
       -- Rewrite the case alternative
       alt' <- case_alternative scrut_val
 
       -- Rebuild a new case expression
-      return (ExpM $ CaseE inf scrut' [alt'], topCode)
+      return (ExpM $ CaseE inf scrut' sps' [alt'], topCode)
 
 -- | A data constructor expression 
 data DataExpAndValue =
     -- | A data or tuple constructor application with arguments
-    ConAppAndValue !ConInst ![(ExpM, AbsCode)]
+    ConAppAndValue !ConInst !(Maybe FieldExpAndValue) ![FieldExpAndValue]
+
+-- | A field of a data constructor consists of an expression,
+--   a representation (for bare types only), and an abstract value
+type FieldExpAndValue = (ExpM, Maybe ExpM, AbsCode)
 
 -- | Given an expression and its abstract value, deconstruct the
 --   expression as if it were a data constructor application.
@@ -2290,26 +2420,35 @@ makeDataExpWithAbsValue :: ExpM -> AbsCode
                         -> Maybe DataExpAndValue
 makeDataExpWithAbsValue expression expression_value =
   case expression
-  of ExpM (ConE inf con args) ->
+  of ExpM (ConE inf con sps m_ty_ob args) ->
        case codeValue expression_value
-       of DataAV (AbsData dcon field_values) ->
+       of DataAV (AbsData dcon d_sps d_ty_ob field_values) ->
             -- 'con' and 'dcon' should be equal
-            Just $ ConAppAndValue dcon (zip args field_values)
+            trace "Warning: makeDataExpWithAbsValue not implemented" Nothing {-
+            Just $ ConAppAndValue dcon
+                   (liftM2 (,) m_ty_ob d_ty_ob)
+                   (zip args field_values) -}
           _ ->
             -- Unknown values
-            Just $ ConAppAndValue con [(arg, topCode) | arg <- args]
+            trace "Warning: makeDataExpWithAbsValue not implemented" Nothing {-
+            Just $ ConAppAndValue con
+                   (fmap unknown_value m_ty_ob)
+                   (map unknown_value args) -}
      _ ->
        Nothing
+  where
+    -- Attach an unknown value to expression 'x'
+    unknown_value e = (e, topCode)
 
 -- | Eliminate a case statement whose scrutinee was determined to be a
 --   data constructor application.
 eliminateCaseWithAppAndValue
-  is_stream_arg is_inspector (ConAppAndValue con args_and_values) alts = do
+  is_stream_arg is_inspector (ConAppAndValue con ty_ob args_and_values) alts = do
   field_kinds <- conFieldKinds con
   let ex_args = conExTypes con
       alt = findAlternative alts con
   eliminateCaseWithSimplifiedExp
-     is_stream_arg is_inspector field_kinds ex_args args_and_values alt
+     is_stream_arg is_inspector field_kinds ex_args ty_ob args_and_values alt
 
 -- | Rewrite a case statement after rewriting the scrutinee.
 --   The case statement cannot be eliminated by deconstructing the scrutinee
@@ -2317,34 +2456,36 @@ eliminateCaseWithAppAndValue
 --   application.
 --   If the scrutinee has a known value, it may still be possible to eliminate
 --   the case statement.
-rwCase2 :: Bool -> ExpInfo -> [AltSM] -> ExpM -> AbsCode -> LR (ExpM, AbsCode)
-rwCase2 is_stream_arg inf alts scrut' scrut_val = do
+rwCase2 :: Bool -> ExpInfo -> [AltSM] -> ExpM -> AbsCode -> [ExpM]
+        -> LR (ExpM, AbsCode)
+rwCase2 is_stream_arg inf alts scrut' scrut_val sps = do
   have_fuel <- checkFuel
   case codeValue scrut_val of
-    DataAV (AbsData dcon field_values) ->
-      case sequence $ map codeTrivialExp field_values of
-        Just field_exps | have_fuel -> do
-          -- All fields can be represented as expressions. 
-          -- The case statement can be eliminated.
-          consumeFuel
-          let data_value = ConAppAndValue dcon (zip field_exps field_values)
-          eliminateCaseWithAppAndValue is_stream_arg True data_value alts
-        _ -> do
-          -- Cannot eliminate the case statement. 
-          -- However, we may have eliminated some case alternatives. 
-          let known_values =
-                -- The case alternative will bind existential types
-                -- to fresh variables.  If there are existential
-                -- types, then field values cannot be propagated
-                -- because they'll have their original types, not
-                -- the fresh type names.
-                if null $ conExTypes dcon
-                then Just ([], field_values)
-                else Nothing
-          let alt = findAlternative alts dcon
 
-          rwCaseAlternatives
-            inf scrut' is_stream_arg scrut_var known_values [alt]
+    -- Can all fields be represented as expressions?
+    DataAV (AbsData dcon _ data_ty_ob field_values) ->
+      case (do ty_ob_exp <- mapM codeTrivialExp data_ty_ob
+               field_exps <- mapM codeTrivialExp field_values 
+               return (ty_ob_exp, field_exps)) of
+        Just (ty_ob_exp, field_exps) | have_fuel -> do
+          -- Eliminate the case statement by substituting field values into 
+          -- all uses of the fields
+          consumeFuel
+
+          -- Create sizes of fields
+          field_dicts <- conFieldDicts dcon
+          case field_dicts of
+            Nothing -> cannot_eliminate_data dcon field_values
+            Just ds ->
+              let tyob_v = do e <- ty_ob_exp 
+                              v <- data_ty_ob
+                              return (e, Nothing, v)
+                  field_vs = [(e, d, v) | (e, (_, d), v) <-
+                                 zip3 field_exps ds field_values]
+                  data_value = ConAppAndValue dcon tyob_v field_vs
+              in eliminateCaseWithAppAndValue is_stream_arg True data_value alts
+
+        _ -> cannot_eliminate_data dcon field_values
 
     BoolAV prop -> do
       -- This is a boolean case statement.
@@ -2352,11 +2493,27 @@ rwCase2 is_stream_arg inf alts scrut' scrut_val = do
       -- some variables by their values in a branch of the case statement. 
       let (true_subst, false_subst) = absPropSubstitutions prop
       alts' <- substitute_in_case_branches true_subst false_subst alts
-      rwCaseAlternatives inf scrut' is_stream_arg scrut_var Nothing alts'
+      rwCaseAlternatives inf scrut' is_stream_arg scrut_var Nothing sps alts'
     _ ->
       -- Cannot eliminate; simplify the case alternatives
-      rwCaseAlternatives inf scrut' is_stream_arg scrut_var Nothing alts
+      rwCaseAlternatives inf scrut' is_stream_arg scrut_var Nothing sps alts
   where
+    cannot_eliminate_data dcon field_values = do
+      -- Cannot eliminate the case statement. 
+      -- However, we may have eliminated some case alternatives. 
+      let known_values =
+            -- The case alternative will bind existential types
+            -- to fresh variables.  If there are existential
+            -- types, then field values cannot be propagated
+            -- because they'll have their original types, not
+            -- the fresh type names.
+            if null $ conExTypes dcon
+            then Just ([], field_values)
+            else Nothing
+      let alt = findAlternative alts dcon
+
+      rwCaseAlternatives
+        inf scrut' is_stream_arg scrut_var known_values sps [alt]
     {-
     is_product_case tenv =
       case alts
@@ -2390,7 +2547,7 @@ rwCase2 is_stream_arg inf alts scrut' scrut_val = do
 
 -- | Rewrite the alternatives of a case statement.  The scrutinee has already
 --   been processed, and the case statement could not be eliminated.
-rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values alts = do
+rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values sps alts = do
   -- If scrutinee is a multi-branch case statement and the outer case
   -- statement's scrutinee is not a product type, then use the
   -- case-of-case transformation.
@@ -2401,7 +2558,7 @@ rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values alts = do
   tenv <- getTypeEnv
   phase <- getPhase
   cond scrut
-    [ do ExpM (CaseE _ inner_scrut inner_alts) <- it
+    [ do ExpM (CaseE _ inner_scrut inner_sps inner_alts) <- it
          aguard have_fuel
          -- Before 'PostFinal', only transform when the outer case inspects
          -- a sum type
@@ -2410,13 +2567,13 @@ rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values alts = do
          
          lift $ do
            -- Apply the case-of-case transformation
-           rwCaseOfCase inf Nothing inner_scrut inner_alts alts
+           rwCaseOfCase inf Nothing inner_scrut inner_sps inner_alts sps alts
 
     , -- Continue rewriting in the body of each case alternative
       lift $ do
         let one_alt = length alts == 1
-        alts' <- mapM (rwAlt is_stream_arg one_alt scrut_var known_values) alts
-        rwExpReturn (ExpM $ CaseE inf scrut alts', topCode)
+        alts' <- mapM (rwAlt is_stream_arg one_alt scrut_var known_values sps) alts
+        rwExpReturn (ExpM $ CaseE inf scrut sps alts', topCode)
     ]
   where
     -- Check whether the outer case statement is inspecting a type with
@@ -2444,7 +2601,7 @@ findAlternative alts con =
 -- | Eliminate the existential type part of a case alternative.
 eliminateCaseExTypes :: [Type]  -- ^ Existential type arguments
                      -> AltSM   -- ^ Alternative to eliminate
-                     -> ([PatM] -> ExpSM -> LR a)
+                     -> (Maybe PatM -> [PatM] -> ExpSM -> LR a)
                         -- ^ Eliminator for the rest of the alternative
                      -> LR a
 eliminateCaseExTypes ex_args (AltSM alt) k
@@ -2453,10 +2610,12 @@ eliminateCaseExTypes ex_args (AltSM alt) k
   | otherwise = do
       -- Substitute known types for the existential type variables
       let subst = Subst ex_type_subst emptyV
+          ty_ob_param = fmap fromPatSM $ altTyObject alt
           params = map fromPatSM $ altParams alt
-      substitutePatMs subst params $ \subst' params' -> do
-        subst_body <- substitute subst' (altBody alt)
-        k params' subst_body
+      substituteMaybePatM subst ty_ob_param $ \subst' ty_ob_param' -> do
+        substitutePatMs subst' params $ \subst'' params' -> do
+          subst_body <- substitute subst'' (altBody alt)
+          k ty_ob_param' params' subst_body
   where
     ex_types = deConExTypes $ altCon alt
     ex_type_subst =
@@ -2470,18 +2629,26 @@ eliminateCaseExTypes ex_args (AltSM alt) k
 --
 --   Fuel should be consumed prior to calling this function.
 eliminateCaseWithExp :: Bool
-                     -> [BaseKind]
+                     -> [(BaseKind, Maybe ExpSM)]
                      -> [Type]
+                     -> Maybe ExpSM
                      -> [ExpSM]
                      -> AltSM
                      -> LR (ExpM, AbsCode)
-eliminateCaseWithExp is_stream_arg field_kinds ex_args initializers alt =
-  eliminateCaseExTypes ex_args alt $ \params body ->
-  if length params /= length initializers
-  then internalError "rwCase: Wrong number of fields"
-  else do
-    -- Bind the values to variables
-    caseInitializerBindings (zip3 field_kinds params initializers) $ do
+eliminateCaseWithExp is_stream_arg field_kinds ex_args ty_ob initializers alt =
+  eliminateCaseExTypes ex_args alt $ \ty_ob_param params body ->
+  
+  let -- Bind the values to variables
+      field_bindings =
+        if length params /= length initializers
+        then internalError "rwCase: Wrong number of fields"
+        else [(k, s, p, i) | ((k, s), p, i) <- zip3 field_kinds params initializers]
+      ty_ob_binding =
+        case (ty_ob_param, ty_ob)
+        of (Just pat, Just exp) -> [(BoxK, Nothing, pat, exp)]
+           (Nothing,  Nothing)  -> []
+
+  in caseInitializerBindings (ty_ob_binding ++ field_bindings) $ do
       -- Continue simplifying the new expression
       substAndRwExp is_stream_arg body
 
@@ -2498,20 +2665,28 @@ eliminateCaseWithSimplifiedExp :: Bool
                                -> Bool -- ^ Whether fields are given as field values or initializers
                                -> [BaseKind] -- ^ Field kinds
                                -> [Type]     -- ^ Existential type parameters
-                               -> [(ExpM, AbsCode)] -- ^ Initializers or field values, together with their abstract value
+                               -> Maybe FieldExpAndValue -- ^ Boxed scrutinee's type object
+                               -> [FieldExpAndValue] -- ^ Initializers or field values, together with their abstract value
                                -> AltSM                -- ^ Case alternative to eliminate
                                -> LR (ExpM, AbsCode) -- ^ Simplified case alternative and its abstract value
 eliminateCaseWithSimplifiedExp
-  is_stream_arg is_inspector field_kinds ex_args initializers alt =
-  eliminateCaseExTypes ex_args alt $ \params body ->
+  is_stream_arg is_inspector field_kinds ex_args ty_ob initializers alt =
+  eliminateCaseExTypes ex_args alt $ \ty_ob_param params body ->
   if length params /= length initializers
   then internalError "rwCase: Wrong number of fields"
   else do
     -- Bind the values to variables
-    let (initializer_exps, initializer_values) = unzip initializers 
+    let ty_ob_initializer = fmap (\(e, Nothing, _) -> (e, Nothing)) ty_ob
+        ty_ob_abstract_value = fmap (\(_, _, x) -> x) ty_ob
+    let initializer_exps = [(e, d) | (e, d, _) <- initializers]
+        initializer_values = [v | (_, _, v) <- initializers]
 
     -- Assign abstract values to the new bound variables
-    let values = [(patMVar p, v) | (p, v) <- zip params initializer_values]
+    let ty_ob_value = do p <- ty_ob_param
+                         v <- ty_ob_abstract_value
+                         return (patMVar p, v)
+    let values = maybeToList ty_ob_value ++
+                 [(patMVar p, v) | (p, v) <- zip params initializer_values]
 
     -- Add known values to the environment.  Simplify the body
     -- expression.
@@ -2521,9 +2696,11 @@ eliminateCaseWithSimplifiedExp
     -- Bind local variables
     let new_body = 
           if is_inspector
-          then foldr postCaseInspectorBinding body' $
+          then postCaseInspectorBindingMaybe (liftM2 (,) ty_ob_param ty_ob_initializer) $
+               foldr postCaseInspectorBinding body' $
                zip params initializer_exps
-          else foldr postCaseInitializerBinding body' $
+          else postCaseInspectorBindingMaybe (liftM2 (,) ty_ob_param ty_ob_initializer) $
+               foldr postCaseInitializerBinding body' $
                zip3 field_kinds params initializer_exps
     return (new_body, topCode)
   where
@@ -2536,31 +2713,49 @@ eliminateCaseWithSimplifiedExp
 --   * Value and boxed fields are assigned using a let-expression.
 --
 --   * Bare fields are assigned by creating and unpacking a boxed object.
-caseInitializerBinding :: BaseKind -> PatM -> ExpSM
+caseInitializerBinding :: BaseKind -> PatM -> Maybe ExpSM -> ExpSM
                        -> (Subst -> LR (ExpM, AbsCode))
                        -> LR (ExpM, AbsCode)
-caseInitializerBinding kind param initializer compute_body =
+caseInitializerBinding kind param m_repr initializer compute_body =
   case kind of
     BareK -> do
       -- Box the initializer
       -- TODO: Simplify the RHS now, so we don't have to apply the substitution
       -- and traverse the expression again
       initializer_exp <- applySubstitution initializer
+      let Just repr = m_repr
+      repr_exp <- freshenFullyExp repr
+      checkRepr repr_exp
+
+      -- Create a type object for this boxed object
+      Just boxed_data_type <- lookupDataType (coreBuiltin The_Boxed)
+      let ty_ob = varAppE' (dataTypeBoxedInfoVar boxed_data_type (coreBuiltin The_boxed))
+                  [param_type] [repr_exp]
+      ty_ob_param <- newAnonymousVar ObjectLevel
+      let ty_ob_pat = PatSM $ patM (ty_ob_param ::: pat_type)
+            where
+              pat_type =
+                boxInfoV `varApp`
+                [coreBuiltin The_Boxed `varApp` [param_type]]
+      let size_exp = varAppE' (coreBuiltin The_reprSizeAlign) [param_type] [repr_exp]
+
       let boxed_initializer =
             deferEmptySubstitution $
-            conE defaultExpInfo constructor [initializer_exp]
-      rwLetViaBoxed defaultExpInfo boxed_initializer param' compute_body
+            conE' constructor [size_exp] (Just ty_ob) [initializer_exp]
+      rwLetViaBoxed defaultExpInfo boxed_initializer
+        (deferEmptySubstitution size_exp) ty_ob_pat param' compute_body
     _ ->
       rwLet defaultExpInfo param' initializer compute_body
   where
-    constructor = VarCon (coreBuiltin The_boxed) [patMType param] []
+    param_type = patMType param
+    constructor = VarCon (coreBuiltin The_boxed) [param_type] []
     param' = PatSM $ setPatMDmd unknownDmd param
 
-caseInitializerBindings :: [(BaseKind, PatM, ExpSM)]
+caseInitializerBindings :: [(BaseKind, Maybe ExpSM, PatM, ExpSM)]
                         -> (Subst -> LR (ExpM, AbsCode))
                         -> LR (ExpM, AbsCode)
-caseInitializerBindings ((kind, param, initializer):fs) compute_body =
-  caseInitializerBinding kind param initializer $ \subst ->
+caseInitializerBindings ((kind, m_size, param, initializer):fs) compute_body =
+  caseInitializerBinding kind param m_size initializer $ \subst ->
   caseInitializerBindings fs (apply subst)
   where
     apply subst subst' = compute_body =<< (subst' `composeSubst` subst)
@@ -2570,35 +2765,22 @@ caseInitializerBindings [] compute_body = compute_body emptySubst
 -- | Bind the value constructed by a parameter of a data constructor term
 --   to a variable.  The generated code is equivalent to
 --   'caseInitializerBinding', except that it is not fed into the simplifier.
-postCaseInitializerBinding :: (BaseKind, PatM, ExpM) -> ExpM -> ExpM
-postCaseInitializerBinding (kind, param, initializer) body =
-  case kind of
-    BareK -> letViaBoxed (patMBinder param) initializer body
-    _ -> letE (setPatMDmd unknownDmd param) initializer body
-
-caseInspectorBinding :: PatSM -> ExpSM -> (Subst -> LR (ExpM, AbsCode))
-                     -> LR (ExpM, AbsCode)
-caseInspectorBinding param initializer compute_body
-  | isDeadPattern (fromPatSM param) = compute_body emptySubst
-  | otherwise = rwLet defaultExpInfo param initializer compute_body
-  
-caseInspectorBindings :: [(PatSM, ExpSM)] -> (Subst -> LR (ExpM, AbsCode))
-                      -> LR (ExpM, AbsCode)
-caseInspectorBindings ((param, initializer):fs) compute_body =
-  caseInspectorBinding param initializer $ \subst ->
-  caseInspectorBindings fs (apply subst)
-  where
-    apply subst subst' = compute_body =<< (subst' `composeSubst` subst)
-
-caseInspectorBindings [] compute_body = compute_body emptySubst
+postCaseInitializerBinding :: (BaseKind, PatM, (ExpM, Maybe ExpM)) -> ExpM -> ExpM
+postCaseInitializerBinding (kind, param, (initializer, m_rep)) body =
+  case (kind, m_rep) of
+    (BareK, Just rep) -> letViaBoxed (patMBinder param) rep initializer body
+    (_, Nothing) -> letE (setPatMDmd unknownDmd param) initializer body
 
 -- | Given an expression that represents a field of a data constructor,
 --   bind the field value to a variable.  This is similar to
 --   'makeCaseInitializerBinding', except the binding is always a let-binding.
-postCaseInspectorBinding :: (PatM, ExpM) -> ExpM -> ExpM
-postCaseInspectorBinding (param, initializer) body =
+postCaseInspectorBinding :: (PatM, (ExpM, Maybe ExpM)) -> ExpM -> ExpM
+postCaseInspectorBinding (param, (initializer, _)) body =
   letE (setPatMDmd unknownDmd param) initializer body
 
+postCaseInspectorBindingMaybe :: Maybe (PatM, (ExpM, Maybe ExpM)) -> ExpM -> ExpM
+postCaseInspectorBindingMaybe Nothing  e = e
+postCaseInspectorBindingMaybe (Just b) e = postCaseInspectorBinding b e
 
 rwAlt :: Bool                   -- ^ Whether the case statement is an argument
                                 --   to a stream expression
@@ -2608,15 +2790,19 @@ rwAlt :: Bool                   -- ^ Whether the case statement is an argument
                                 --   propagates to the entire case statement.
       -> Maybe Var              -- ^ Scrutinee, if it's just a variable
       -> Maybe ([Type], [AbsCode]) -- ^ Deconstruted scrutinee value
+      -> [ExpM]                    -- ^ Size parameters
       -> AltSM                        -- ^ Alternative to rewrite
       -> LR AltM
-rwAlt is_stream_arg propagate_exceptions scr m_values (AltSM alt) = do
+rwAlt is_stream_arg propagate_exceptions scr m_values sps (AltSM alt) = do
   let decon = altCon alt
       -- Clear demand information because number of uses
       -- may increase or decrease after simplifying
       params = map (setPatMDmd unknownDmd . fromPatSM) $ altParams alt
+      ty_ob = fmap (setPatMDmd unknownDmd . fromPatSM) $ altTyObject alt
   let arg_values = zipWith mk_arg values params
-  data_value <- liftTypeEvalM $ scrutineeDataValue decon params
+      sp_values = [labelCode e topCode | e <- sps]
+  data_value <- liftTypeEvalM $
+                scrutineeDataValue decon sp_values ty_ob params
   let assume_scrutinee m =
         case scr
         of Just scrutinee_var -> withKnownValue scrutinee_var data_value m
@@ -2624,9 +2810,9 @@ rwAlt is_stream_arg propagate_exceptions scr m_values (AltSM alt) = do
 
   -- If scrutinee is a variable, add its known value to the environment
   assume_scrutinee $
-    assume_params (deConExTypes decon) (zip values params) $ do
+    assume_params (deConExTypes decon) ty_ob (zip values params) $ do
     (body', _) <- rewrite_expression (altBody alt)
-    return $ AltM $ Alt decon params body'
+    return $ AltM $ Alt decon ty_ob params body'
   
   where
     -- Rewrite the body expression.  If it will raise an exception,
@@ -2658,9 +2844,12 @@ rwAlt is_stream_arg propagate_exceptions scr m_values (AltSM alt) = do
          _ -> repeat topCode
 
     -- Add existential types, paramters, and known values to the environment
-    assume_params ex_types params_and_values m = do
+    assume_params ex_types tyob_param params_and_values m = do
       let with_params = assume_parameters params_and_values m
-          with_ty_params = foldr assumeBinder with_params ex_types
+          with_tyob_param = case tyob_param
+                            of Nothing -> with_params
+                               Just p  -> assume_param (topCode, p) with_params
+          with_ty_params = foldr assumeBinder with_tyob_param ex_types
       with_ty_params
       
     assume_parameters labeled_params m = foldr assume_param m labeled_params
@@ -2678,15 +2867,21 @@ rwAlt is_stream_arg propagate_exceptions scr m_values (AltSM alt) = do
 --   have not been simplified.  They will be simplified during this
 --   transformation. 
 rwCaseOfCase :: ExpInfo
-             -> Maybe Type      -- ^ If a 'boxed' constructor was
+             -> Maybe (Type, ExpM, ExpM)
+                                -- ^ If a 'boxed' constructor was
                                 --   applied to the inner case statement,
-                                --   this is the constructor's type argument.
+                                --   this is the constructor's type argument,
+                                --   type object, and size parameter.
                                 --   Otherwise this is Nothing.
              -> ExpM            -- ^ Inner case statement's scrutinee
+             -> [ExpM]          -- ^ Inner case statement's size parameters
              -> [AltM]          -- ^ Inner case statement's branches
+             -> [ExpM]          -- ^ Outer case statement's size parameters
              -> [AltSM]         -- ^ Outer case statement's branches
              -> LR (ExpM, AbsCode)
-rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
+rwCaseOfCase inf result_is_boxed scrutinee
+  inner_sps inner_branches outer_sps outer_branches = do
+
   m_return_param <- getCurrentReturnParameter
 
   -- For each of the outer case statement's alternatives, create a function
@@ -2698,7 +2893,7 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
   new_branches <- mapM (invert_branch moveable_alts) inner_branches
 
   -- Insert function definitions before the new case statement
-  let new_case = ExpM $ CaseE inf scrutinee new_branches
+  let new_case = ExpM $ CaseE inf scrutinee inner_sps new_branches
       new_expr = foldr bind_outer_def new_case outer_defs
         where
           bind_outer_def def e = ExpM $ LetfunE inf (NonRec def) e
@@ -2708,9 +2903,10 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
       let boxed_body =
             case result_is_boxed
             of Nothing -> altBody branch
-               Just t -> let con = VarCon (coreBuiltin The_boxed) [t] []
-                         in ExpM $ ConE inf con [altBody branch]
-          body' = ExpM $ CaseE inf boxed_body moveable_alts
+               Just (t, ty_ob, sp) ->
+                 let con = VarCon (coreBuiltin The_boxed) [t] []
+                 in ExpM $ ConE inf con [sp] (Just ty_ob) [altBody branch]
+          body' = ExpM $ CaseE inf boxed_body outer_sps moveable_alts
       in return $ AltM (branch {altBody = body'})
 
 -- | Convert a case alternative's body expression into a function, and
@@ -2802,7 +2998,7 @@ constructBranchContinuationFunction
 --   with a function call.
 constructBranchContinuationAlt
   inf m_return_param m_return_arg m_dummy_param
-  (AltSM (Alt decon params _)) callee = do
+  (AltSM (Alt decon tyob_param params _)) callee = do
 
   unless (isJust m_return_param && isJust m_return_arg ||
           isNothing m_return_param && isNothing m_return_arg) $
@@ -2813,16 +3009,17 @@ constructBranchContinuationAlt
   -- to be renamed.
   (decon', decon_rn) <- freshenDeConInst decon
   params' <- mapM (rename_param decon_rn) params
+  tyob_param' <- mapM (rename_param decon_rn) tyob_param
 
   -- Construct the new case alternative
   let call_ty_args = map (VarT . binderVar) $ deConExTypes decon'
       decon_args = [ExpM $ VarE inf (patMVar p) | p <- params']
       dummy_arg = case m_dummy_param
                   of Nothing -> []
-                     Just _ -> [conE inf (VarCon (coreBuiltin The_None) [] []) []]
+                     Just _ -> [noneE inf]
       call_args = dummy_arg ++ decon_args ++ maybeToList m_return_arg
       call = ExpM $ AppE inf (ExpM $ VarE inf callee) call_ty_args call_args
-  return $ AltM $ Alt decon' params' call
+  return $ AltM $ Alt decon' tyob_param' params' call
   where
     -- Apply the given renaming to the pattern, and rename the pattern
     -- variable.
@@ -2975,7 +3172,7 @@ rewriteLocalExpr phase ruleset mod =
     fuel <- readInitGlobalVarIO the_fuel
     i_tenv <- readInitGlobalVarIO the_memTypes
     tenv <- thawTypeEnv i_tenv
-    denv <- runFreshVarM var_supply createDictEnv
+    -- denv <- runFreshVarM var_supply createDictEnv
 
     -- Initialize the global substitution with the variable rewrite rules.
     known_value_list <-
@@ -2997,7 +3194,7 @@ rewriteLocalExpr phase ruleset mod =
                 , lrKnownValues = emptyAbsEnv
                 , lrReturnParameter = Nothing
                 , lrTypeEnv = tenv
-                , lrDictEnv = denv
+--                , lrDictEnv = denv
                 }
     Just result <- runLR (rwModule initial_subst mod) env
     return result

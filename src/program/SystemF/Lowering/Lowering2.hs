@@ -176,7 +176,7 @@ lowerConstantExp m_name expression =
   of VarE _ v -> do val <- lowerNonIntrinsicVar v
                     return (val, [], True)
      LitE _ l -> return (lowerLit l, [], True)
-     ConE _ con args -> do
+     ConE _ con _ _ args -> do
        -- Compute the constructed value's type
        result_type <- getConType con
        layout <- getAlgLayout result_type
@@ -200,14 +200,14 @@ lowerExp expression =
   case fromExpM expression
   of VarE _ v -> lowerVar v
      LitE _ l -> return $ RetVal $ lowerLit l
-     ConE _ con args -> lowerCon con args
+     ConE _ con _ _ args -> lowerCon con args
      AppE _ op ty_args args -> do
        ty <- lift $ inferExpType expression
        lowerApp ty op ty_args args
      LamE _ f -> lowerLam f
      LetE _ binder rhs body -> lowerLet binder rhs body
      LetfunE _ defs body -> lowerLetrec defs body
-     CaseE _ scr alts -> do 
+     CaseE _ scr _ alts -> do 
        ty <- lift $ inferExpType expression
        lowerCase ty scr alts
      ExceptE _ ty -> lowerExcept ty

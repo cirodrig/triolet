@@ -8,6 +8,7 @@ module Common.Identifier
     )
 where
 
+import Control.DeepSeq
 import Data.Ix
 
 import qualified Language.Haskell.TH as TH
@@ -19,6 +20,8 @@ import Common.Supply
 -- object of type @a@.
 newtype Ident a = Ident Int
     deriving (Eq, Ord)
+
+instance NFData (Ident a) where rnf (Ident n) = rnf n
 
 type Idents a = [Ident a]
 type IdentSupply a = Supply (Ident a)

@@ -47,7 +47,6 @@ convertKind (k1 :-> k2) = convertKind k1 `SF.FunT` convertKind k2
 mkType :: HMType -> TIType
 mkType ty = DelayedType $ convertHMType ty
 
-
 -- | Make the type of an uncurried function from @domain@ to @range@.
 --
 -- Depending on the calling convention indicated by the range, a stream
@@ -146,16 +145,16 @@ mkVarE :: SourcePos -> TIRepr -> SF.Var -> TIExp
 mkVarE pos repr v = VarTE (tiInfo pos repr) v
 
 mkConE :: SourcePos -> TIRepr -> SF.Var -> [TIType] -> [TIType]
-       -> [TIRepr] -> [TIExp] -> TIExp
-mkConE pos repr c ty_args ex_types size_params fields =
+       -> [TISize] -> Maybe SF.Var -> [TIExp] -> TIExp
+mkConE pos repr c ty_args ex_types size_params m_tyob_con fields =
   let con = TIConInst c ty_args ex_types
-  in ConTE (tiInfo pos repr) con size_params fields
+  in ConTE (tiInfo pos repr) con size_params m_tyob_con fields
 
-mkTupleE :: SourcePos -> TIRepr -> [TIType] -> [TIRepr] -> [TIExp] -> TIExp
+mkTupleE :: SourcePos -> TIRepr -> [TIType] -> [TISize] -> [TIExp] -> TIExp
 mkTupleE pos repr elt_types size_params fields =
   let n_elts = length fields
       con = TIConInst (SF.tupleCon n_elts) elt_types []
-  in ConTE (tiInfo pos repr) con size_params fields
+  in ConTE (tiInfo pos repr) con size_params Nothing fields
 
 -- | Create the expression
 --   list @n @t (fiInt @n n) (stuckBox @(arr n t) (array @t e1 e2 ...))
@@ -173,22 +172,23 @@ mkListE pos elt_type elt_repr elts =
 
       -- Indexed integer 
       fiint_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_FIInt) [size] []
-      integer = mkConE pos fiint_repr fiint_con [size] [] []
+      integer = mkConE pos fiint_repr fiint_con [size] [] [] Nothing
                 [mkIntLitE pos n]
 
       -- Array expression
       array_repr = TICoreRepr (SF.coreBuiltin SF.The_frontend_repr_arr) 
                    [size, elt_type] [Left (mkIntLitE pos n), Right elt_repr]
+      array_size = TISize array_type array_repr
       array = ArrayTE (tiInfo pos array_repr) elt_type elts
       array_box = mkConE pos TIBoxed
                   (SF.coreBuiltin SF.The_stuckBox)
-                  [array_type] [] [array_repr] [array]
+                  [array_type] [] [array_size] Nothing [array]
 
       -- List object
-      list_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_list) [elt_type] []
+      list_repr = TICoreRepr (SF.coreBuiltin SF.The_frontend_repr_list) [elt_type] []
   in mkConE pos list_repr
      (SF.coreBuiltin SF.The_make_list) [elt_type] [size]
-     [] [integer, array_box]
+     [] Nothing [integer, array_box]
   where
     sf_int_type = SF.intT
     fiint_con = SF.coreBuiltin SF.The_fiInt
@@ -216,7 +216,7 @@ mkLitE pos l =
      Untyped.NoneL       -> sf_constructor n_repr SF.The_None
   where
     sf_constructor repr c =
-      mkConE pos repr (SF.coreBuiltin c) [] [] [] []
+      mkConE pos repr (SF.coreBuiltin c) [] [] [] Nothing []
 
     b_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_bool) [] []
     n_repr = TICoreRepr (SF.coreBuiltin SF.The_repr_NoneType) [] []
@@ -243,12 +243,10 @@ mkCoerceE pos repr from_ty to_ty e =
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
-  let true_decon =
-        TIDeConInst (SF.coreBuiltin SF.The_True) [] []
-      false_decon =
-        TIDeConInst (SF.coreBuiltin SF.The_False) [] []
-      true_alt = TIAlt true_decon [] tr
-      false_alt = TIAlt false_decon [] fa
+  let true_decon = TIDeConInst (SF.coreBuiltin SF.The_True) [] []
+      false_decon = TIDeConInst (SF.coreBuiltin SF.The_False) [] []
+      true_alt = TIAlt true_decon Nothing [] tr
+      false_alt = TIAlt false_decon Nothing [] fa
   in CaseTE pos cond [] [true_alt, false_alt]
 
 -- | Create a call of a polymorphic function with no constraint arguments.
@@ -266,16 +264,16 @@ mkLetrecE :: SourcePos -> SF.DefGroup TIDef -> TIExp -> TIExp
 mkLetrecE pos defs body =
   LetfunTE pos defs body
 
-mkCaseTE :: SourcePos -> TIExp -> [TIRepr] -> [TIAlt] -> TIExp
+mkCaseTE :: SourcePos -> TIExp -> [TISize] -> [TIAlt] -> TIExp
 mkCaseTE pos scrutinee size_params alts =
   CaseTE pos scrutinee size_params alts
 
-mkTupleCaseE :: SourcePos -> TIExp -> [TIRepr] -> [TIPat] -> TIExp -> TIExp
+mkTupleCaseE :: SourcePos -> TIExp -> [TISize] -> [TIPat] -> TIExp -> TIExp
 mkTupleCaseE pos scrutinee size_params patterns body =
   let pattern_types = [t | ~(TIVarP _ t) <- patterns]
       decon = TIDeConInst (SF.tupleCon $ length patterns) pattern_types []
   in mkCaseTE pos scrutinee size_params
-     [TIAlt decon patterns body]
+     [TIAlt decon Nothing patterns body]
 
 -- | Create a case expression to deconstruct a class dictionary
 mkCaseOfDict :: (MonadIO m, Supplies m SF.VarID) =>
@@ -288,6 +286,8 @@ mkCaseOfDict pos cls ty constraint methods dict
   | otherwise = do
       let dict_con = clsSFDictCon cls
           ty_arg = mkType ty
+          dict_type = DelayedType $ do t <- case ty_arg of DelayedType m -> m
+                                       return $ SF.varApp dict_con [t]
           superclass_types = map mkPredicate constraint
           method_types = map (mkTyScheme . clmSignature) methods
 
@@ -299,17 +299,19 @@ mkCaseOfDict pos cls ty constraint methods dict
       let method_patterns = zipWith TIVarP method_vars method_types
       let field_patterns = dict_patterns ++ method_patterns
 
-      let mk_expr body =
+      let decon = (TIDeConInst dict_con [ty_arg] [])
+          mk_expr body =
             mkCaseTE pos dict []
-            [TIAlt (TIDeConInst dict_con [ty_arg] []) field_patterns body]
+            [TIAlt decon (Just dict_type) field_patterns body]
 
       return (mk_expr, dict_vars, method_vars)
 
-mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
-mkDictE pos cls inst_type scs methods =
+mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> SF.Var -> [TIExp]
+        -> TIExp
+mkDictE pos cls inst_type scs tyob_con methods =
   -- Apply the dictionary constructor to the instance type and all arguments
   -- Dictionary type must not have size parameters
-  mkConE pos TIBoxed (clsSFDictCon cls) [inst_type] [] []
+  mkConE pos TIBoxed (clsSFDictCon cls) [inst_type] [] [] (Just tyob_con)
   (scs ++ methods)
 
 -- | Create a mixed System F and type-inferred expression. 
@@ -322,5 +324,20 @@ mkMkExpE pos repr f ty_args args =
 
 mkAnnotation :: FunctionAnn -> SF.DefAnn
 mkAnnotation (FunctionAnn _ inline) =
-  let insert_inline_ann d = d {SF.defAnnInlineRequest = inline}
+  let insert_inline_ann d = d {SF.defAnnInlineRequest = if inline
+                                                        then SF.InlAggressively
+                                                        else SF.InlConservatively}
   in insert_inline_ann SF.defaultDefAnn
+
+{-
+-- | Create an abstract class instance from a variable
+varAbstractClassInstance :: SF.Var -> ClassInstance
+varAbstractClassInstance v = AbstractClassInstance instantiate
+  where
+    instantiate ty_args args =
+      let fun_repr = polyThingRepr TIBoxed ty_args args
+          fun = mkVarE noSourcePos fun_repr v
+      in mkPolyCallE noSourcePos TIBoxed fun ty_args args
+-}
+
+  

@@ -41,6 +41,7 @@ pyonType TrioletIntET = intT
 pyonType TrioletFloatET = floatT
 pyonType TrioletBoolET = VarT (coreBuiltin The_bool)
 
+{-
 -- | Construct a representation dictionary for a marshalable type.
 --   For types with an unknown head, 'lookupReprDict' is called.  Known types
 --   are handled by case.
@@ -81,6 +82,7 @@ computeReprDict ty =
         internalError "computeReprDict: Wrong number of type parameters"
       dicts <- mapM computeReprDict args
       emitAtom1 owned_type $ LL.closureCallA (LL.VarV dict_op) dicts
+-}
 
 -------------------------------------------------------------------------------
 -- Parameter marshaling

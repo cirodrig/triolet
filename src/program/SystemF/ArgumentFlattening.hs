@@ -11,11 +11,13 @@ possible to eliminate argument packing in callers, and perform case elimination
 to eliminate repacking inside workers.
 -}
 
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, ConstraintKinds #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 module SystemF.ArgumentFlattening(flattenArguments)
 where
 
+{- Temporarily disabled
+  
 import Prelude hiding (mapM, sequence)
 
 import Control.Applicative
@@ -55,6 +57,9 @@ import Type.Type
 import Globals
 import GlobalVar
 
+-- TODO: remove this from the file
+type ReprDictMonad m = ()
+
 -- * Utility functions
 
 -- | If the parameter is a type constructor that has a single data constructor,
@@ -89,12 +94,13 @@ bindVariable :: EvalMonad m => Binder -> ExpM -> m (ExpM -> ExpM)
 bindVariable binder rhs = do
   k <- typeBaseKind $ binderType binder
   return $! case k of
-    BareK -> \body -> letViaBoxed binder rhs body
+    BareK -> \body -> -- TODO: Restrict to types with known representation
+                      internalError "bindVariable: Not implemented for bare types" --letViaBoxed binder rhs body
     ValK  -> \body -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
     BoxK  -> \body -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
 
 noneValue :: ExpM
-noneValue = conE defaultExpInfo (VarCon (coreBuiltin The_None) [] []) []
+noneValue = valConE defaultExpInfo (VarCon (coreBuiltin The_None) [] []) []
 
 -------------------------------------------------------------------------------
 -- * The argument flattening monad
@@ -164,9 +170,9 @@ mapOverTailExps f expression =
      LetfunE inf defs body -> do
        ((), body') <- assumeFDefGroup defs (return ()) $ mapOverTailExps f body
        return $ ExpM $ LetfunE inf defs body'
-     CaseE inf scr alts -> do
+     CaseE inf scr sps alts -> do
        alts' <- mapM map_alt alts
-       return $ ExpM $ CaseE inf scr alts'
+       return $ ExpM $ CaseE inf scr sps alts'
      _ -> f expression
   where
     map_alt (AltM alt) =
@@ -480,7 +486,7 @@ flattenedReturnValue flat_ret =
   case flattenReturnDecomp var_exp $ frDecomp flat_ret
   of Just [e] -> fst e
      Just es  -> let (values, types) = unzip es
-                 in ExpM $ ConE defaultExpInfo (TupleCon types) values
+                 in valConE' (TupleCon types) values
      Nothing  -> internalError "flattenedReturnValue"
   where
     var_exp pat = (ExpM $ VarE defaultExpInfo (patMVar pat), patMType pat)
@@ -497,8 +503,10 @@ bindFlattenedReturn inf patterns source_exp body =
   -- expression result with a case statement, then repack.
   let pattern_types = map patMType patterns
       decon = TupleDeCon pattern_types
-  in ExpM $ CaseE defaultExpInfo source_exp
-     [AltM $ Alt decon patterns body]
+  in internalError "bindFlattenedReturn: Not implemented"
+     -- TODO: construct size parameters
+     -- ExpM $ CaseE defaultExpInfo source_exp
+     -- [AltM $ Alt decon patterns body]
 
 -------------------------------------------------------------------------------
 -- * Value packing and unpacking transformations
@@ -514,8 +522,10 @@ flattenParameter (FlatArg pat decomp) body =
      DeconDecomp decon fields ->
        let pattern_exp = ExpM $ VarE defaultExpInfo (patMVar pat)
            body' = flattenParameters fields body
-           alt = AltM $ Alt decon (map faPattern fields) body'
-       in ExpM $ CaseE defaultExpInfo pattern_exp [alt]
+           -- alt = AltM $ Alt decon (map faPattern fields) body'
+       in -- TODO: construct size parameters
+          internalError "flattenParameter: Not implemented" 
+          -- ExpM $ CaseE defaultExpInfo pattern_exp [alt]
      DeadDecomp _ -> body
 
 flattenParameter (DummyArg _) body = body
@@ -553,7 +563,9 @@ packParameterWrite' pat flat_arg =
          
          -- Construct/initialize a value
          let con = VarCon con_var types [VarT a | a ::: _ <- ex_types]
-         return $ conE defaultExpInfo con exps
+         internalError "packParameterWrite: Not implemented"
+         -- TODO: Generate size parameters
+         -- return $ conE' con exps
 
      DeadDecomp e -> return e
   where
@@ -597,7 +609,9 @@ packParameterRead (FlatArg pat flat_arg) =
        assumeBinders ex_types $ do
          exps <- packParametersWrite fields
          let con = VarCon con_var types [VarT a | a ::: _ <- ex_types]
-         let packed = conE defaultExpInfo con exps
+         let packed = internalError "packParameterRead: Not implemented"
+                      -- TODO: Generate size parameters
+                      -- conE' con exps
          
          -- If this is a bare type, define a local variable with the
          -- packed parameter.  Otherwise, just assign a local variable.
@@ -692,7 +706,7 @@ deconReturn decon dc_fields decon_initializers decon_patterns expression =
 
       -- Attempt to deconstruct the tail expression
       case tail_exp of
-        ExpM (ConE inf con fields)
+        ExpM (ConE inf con _ _ fields)
           | summarizeDeconstructor decon /= summarizeConstructor con ->
             internalError "deconReturn: Unexpected data constructor"
           | otherwise ->
@@ -708,8 +722,9 @@ deconReturn decon dc_fields decon_initializers decon_patterns expression =
       consumer_exp <- decon_patterns
 
       -- Deconstruct the expression result
-      let match = AltM $ Alt decon (map faPattern dc_fields) consumer_exp
-          case_of scrutinee = ExpM $ CaseE defaultExpInfo scrutinee [match]
+      let match = AltM $ Alt decon (internalError "deconReturn: Not implemented") (map faPattern dc_fields) consumer_exp
+      let case_of scrutinee = internalError "deconReturn: Unexpected data constructor"
+                              -- ExpM $ CaseE defaultExpInfo scrutinee [match]
 
       -- Bind the expression result
       (_, data_type) <-
@@ -731,7 +746,9 @@ deconReturn decon dc_fields decon_initializers decon_patterns expression =
       -- Run the write and bind its result to a new variable
       local_var <- newAnonymousVar ObjectLevel
       let var_exp = ExpM $ VarE defaultExpInfo local_var
-      return $ letViaBoxed (local_var ::: data_type) tail_exp (case_of var_exp)
+      -- TODO: size parameters
+      internalError "deconReturn: Not implemented"
+      --return $ letViaBoxed (local_var ::: data_type) tail_exp (case_of var_exp)
     
     -- Deconstruct a value.
     deconstruct_value tail_exp case_of = return $ case_of tail_exp
@@ -817,7 +834,7 @@ packReturn flat_ret orig_exp =
           DeconDecomp _ _ ->
             -- This can occur when returning something isomorphic to the
             -- unit value.  In this case, we should return a zero-tuple.
-            return $ ExpM $ ConE defaultExpInfo (TupleCon []) []
+            return $ valConE' (TupleCon []) []
 
      Just patterns -> do
        -- Return value was deconstructed (DeconDecomp).
@@ -908,8 +925,7 @@ planParameter mode pat = do
 --   Return the data type and its decomposition.  The data type is the
 --   parameter @ty@ reduced to HNF form.
 --
---   This function does the real work of 'planParameter', 'planReturn', and 
---   'planLocal'.
+--   This function does the real work of 'planParameter' and 'planReturn'.
 planFlattening :: (ReprDictMonad m, EvalMonad m,
                    EvalBoxingMode m ~ UnboxedMode) =>
                   PlanMode -> Type -> Specificity -> m (Type, Decomp)
@@ -1082,7 +1098,7 @@ deadValue t = do
            | con `isCoreBuiltin` The_LinearMap -> do
                n <- deadValue (VarT intV)
                let con = VarCon (coreBuiltin The_LinearMap) [] []
-               return $ ExpM $ ConE defaultExpInfo con [n, n]
+               return $ valConE' con [n, n]
          (VarT con, [p])
            | con `isCoreBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor
@@ -1094,7 +1110,7 @@ deadValue t = do
 
                -- Create arguments to data constructor
                args <- mapM deadValue dom
-               let expr = ExpM $ ConE defaultExpInfo (dead_finindint_op p) args
+               let expr = valConE' (dead_finindint_op p) args
                return expr
            | con `isCoreBuiltin` The_IInt -> do
                -- Use 'iInt' as the data constructor
@@ -1105,18 +1121,18 @@ deadValue t = do
 
                -- Create arguments to data constructor
                args <- mapM deadValue dom
-               let expr = ExpM $ ConE defaultExpInfo (dead_indint_op p) args
+               let expr = valConE' (dead_indint_op p) args
                return expr
            | con `isCoreBuiltin` The_MaybeVal -> do
                -- Create a 'nothing' value
                let op = VarCon (coreBuiltin The_nothingVal) [t] []
-                   expr = ExpM $ ConE defaultExpInfo op []
+                   expr = valConE' op []
                return expr
          (CoT (VarT k), [t1, t2])
            | k == boxV ->
-               return $ ExpM $ AppE defaultExpInfo make_x_coercion_op [t1, t2] []
+               return $ appE' make_x_coercion_op [t1, t2] []
            | k == bareV ->
-               return $ ExpM $ AppE defaultExpInfo make_b_coercion_op [t1, t2] []
+               return $ appE' make_b_coercion_op [t1, t2] []
          _ -> internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
@@ -1195,33 +1211,6 @@ flattenBoxedValue boxed_var (FlatLocal arg) =
       boxed_decomp = DeconDecomp boxed_mono_con [arg]
 
   in FlatLocal (FlatArg boxed_param boxed_decomp)
-
--- | Create the original form of the local variable, using the flattened
---   variables
-packLocal :: (ReprDictMonad m, EvalMonad m,
-              EvalBoxingMode m ~ UnboxedMode) => FlatLocal -> ExpM -> m ExpM
-packLocal (FlatLocal flat_arg) consumer = do
-  packing_context <- packParameterRead flat_arg
-  return $ packing_context consumer
-
--- | Determine how to decompose a let-bound value based on its type.
---
---   The decomposition strategy is the same as for decomposing a return value.
-planLocal :: (ReprDictMonad m, EvalMonad m,
-              EvalBoxingMode m ~ UnboxedMode) => PatM -> m FlatLocal
-planLocal pat = do
-  flat_arg@(FlatArg pat' decomp) <- planParameter mode pat
-  
-  cond decomp
-    [ -- Don't decompose if some fields are bare references
-      do DeconDecomp {} <- it
-         False <- lift $ unpacksToAValue $ flatArgReturn flat_arg
-         return $ FlatLocal (FlatArg pat' IdDecomp)
-
-    , return $ FlatLocal flat_arg
-    ]
-  where
-    mode = PlanMode Parsimonious UnpackExistentials
 
 -------------------------------------------------------------------------------
 -- * The argument flattening transformation on a function
@@ -1547,9 +1536,11 @@ flattenInExp expression =
   case fromExpM expression
   of VarE {} -> return expression
      LitE {} -> return expression
-     ConE inf con args -> do
+     ConE inf con ty_ob sps args -> do
+       ty_ob' <- mapM flattenInExp ty_ob
+       sps' <- mapM flattenInExp sps
        args' <- mapM flattenInExp args
-       return $ ExpM $ ConE inf con args'
+       return $ ExpM $ ConE inf con ty_ob' sps' args'
      AppE inf op ty_args args -> do
        op' <- flattenInExp op
        args' <- mapM flattenInExp args
@@ -1566,10 +1557,11 @@ flattenInExp expression =
        body' <- flattenInExp body
        let mk_letfun d e = ExpM (LetfunE inf d e)
        return $ foldr mk_letfun body' new_defs
-     CaseE inf scr alts -> do
+     CaseE inf scr sps alts -> do
        scr' <- flattenInExp scr
+       sps' <- mapM flattenInExp sps
        alts' <- mapM flattenInAlt alts
-       return $ ExpM $ CaseE inf scr' alts'
+       return $ ExpM $ CaseE inf scr' sps' alts'
      ExceptE {} -> return expression
      CoerceE inf from_type to_type body -> do
        body' <- flattenInExp body
@@ -1604,3 +1596,7 @@ flattenArguments mod =
     type_env <- thawTypeEnv i_type_env
     let env = AFLVEnv id_supply type_env dict_env ()
     runReaderT (unAF $ flattenModuleContents mod) env
+
+-}
+
+flattenArguments x = return x

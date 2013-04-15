@@ -24,7 +24,9 @@ import Data.Maybe
 import Common.Error
 import Common.Identifier
 import SystemF.Syntax
+import {-# SOURCE #-} SystemF.Rename
 import Type.Environment
+import qualified Type.Rename as Rename
 import Type.Type
 import Type.Eval
 
@@ -159,7 +161,7 @@ mismatchedSpecificityDeconstructors =
 showSpecificity :: Specificity -> String
 showSpecificity Unused = "0"
 showSpecificity (Decond mono_con spcs) =
-  "D{" ++ showmv ++ concatMap showSpecificity spcs ++ "}"
+  "D{" ++ showmv ++ concatMap showDmd spcs ++ "}"
   where
     showmv =
       case mono_con
@@ -178,6 +180,32 @@ type Dmds = IntMap.IntMap Dmd
 lookupDmd :: Var -> Dmds -> Dmd
 lookupDmd v m = fromMaybe bottom $ IntMap.lookup (fromIdent $ varID v) m
 
+-- | Augment a demand's multiplicity by the given multiplicity.
+--
+--   This transformation merges two sources of uncertainty about how 
+--   often a data structure field is used.  A data structure may be
+--   used once or many times, and after being deconstructed, its field
+--   may be deconstructed once or many times.
+--   If the data structure is used many times /or/ the field is used
+--   many times, then the multiplicity should be @Unsafe@.
+multiplyDmd :: Multiplicity -> Dmd -> Dmd
+multiplyDmd m1 (Dmd m2 s) = Dmd (multiplyMultiplicity m1 m2) s
+
+multiplyMultiplicity Dead _ = Dead
+
+-- The following rule isn't used because, even though the value's not used, 
+-- we may be unable to remove it syntactically from the program.
+-- multiplyMultiplicity _ Dead = Dead
+
+multiplyMultiplicity m1 m2 
+  | safe && single = OnceSafe
+  | safe           = ManySafe
+  | single         = OnceUnsafe
+  | otherwise      = ManyUnsafe
+  where 
+    safe = safeMultiplicity m1 && safeMultiplicity m2
+    single = singleMultiplicity m1 && singleMultiplicity m2
+
 -- | Transform the demand information of values that appear under a lambda.
 --
 --   Safe multiplicity becomes unsafe, beca
@@ -191,6 +219,13 @@ lambdaAbstracted = IntMap.map lambda_abstract
     weaken ManySafe   = ManyUnsafe
     weaken OnceUnsafe = OnceUnsafe
     weaken ManyUnsafe = ManyUnsafe
+
+-- | Transform the demand information on a coerced value.
+--   After coercion, the value's contents no longer match its type, so we
+--   force the value to be either 'Used' or 'Unused'.
+coerced :: Dmd -> Dmd
+coerced (Dmd m Unused) = Dmd m Unused
+coerced (Dmd m _)      = Dmd m Used
 
 -- | Transform the demand information of values that appear in code that will be
 --   replicated.
@@ -213,6 +248,7 @@ useVariable v dmd = IntMap.singleton (fromIdent $ varID v) dmd
 useVariables :: [Var] -> Dmd -> Dmds
 useVariables vs dmd = IntMap.fromList [(fromIdent $ varID v, dmd) | v <- vs]
 
+{-
 -- | Decide whether the arguments are equal, given that they describe
 --   values of the same type.  This function is undefined for
 --   specificity arguments of different types.
@@ -221,7 +257,7 @@ sameSpecificity Used Used = True
 sameSpecificity Inspected Inspected = True
 sameSpecificity (Decond _ spcs1) (Decond _ spcs2) =
   and $ zipWith sameSpecificity spcs1 spcs2
-sameSpecificity (Written s1) (Written s2) = sameSpecificity s1 s2
+sameSpecificity (Written x s1) (Written y s2) = sameSpecificity s1 s2
 sameSpecificity Copied Copied = True
 
 sameSpecificity (Read m1) (Read m2) = 
@@ -233,42 +269,55 @@ sameSpecificity (Read m1) (Read m2) =
   
 sameSpecificity Unused Unused = True
 sameSpecificity _ _ = False
+-}
 
+-- | Given the specificity of a piece of data, create the
+--   specificity of the initializer that created that data.
+initializerSpecificity :: EvalMonad m => Specificity -> m Specificity
+initializerSpecificity spc = do
+  v <- newAnonymousVar ObjectLevel
+  return $ Written v (HeapMap [(v, spc)])
 
--- | Given the specificity of a data constructor application, get the
---   specificity of its individual fields as they appear in a constructor
---   application
-deconstructSpecificity :: EvalMonad m => Int -> Specificity -> m [Specificity]
-deconstructSpecificity n_fields spc =
+dataFieldDmd m1 BareK (Dmd m2 s) = do s' <- initializerSpecificity s
+                                      return $ multiplyDmd m1 $ Dmd m2 s'
+dataFieldDmd m1 _     d          = return $ multiplyDmd m1 d
+
+-- | Given the demand on a data constructor application, get the demands on
+--   its individual fields.
+--
+-- Multiplicity: If the expression were inlined into all its use sites,
+-- by how much would the field be replicated?
+--
+-- Specificity: How will the field be used?
+deconstructSpecificity :: EvalMonad m => Int -> Dmd -> m [Dmd]
+deconstructSpecificity n_fields (Dmd m spc) =
   case spc
   of Decond mono_con spcs
        | length spcs /= n_fields ->
-         internalError "deconstructSpecficity: Wrong number of fields"
-       | otherwise ->
-           case mono_con
-           of VarDeCon con _ _ -> do
-                field_kinds <- deConFieldKinds mono_con
-                let from_field BareK spc = Written spc
-                    from_field _     spc = spc
-                return $ zipWith from_field field_kinds spcs
-              TupleDeCon _ ->
-                -- Unboxed tuples have no bare fields
-                return spcs
+           internalError "deconstructSpecficity: Wrong number of fields"
+       | otherwise -> do
+           -- Convert specificity info attached to initializers
+           field_kinds <- deConFieldKinds mono_con
+           zipWithM (dataFieldDmd m) field_kinds spcs
 
-     -- If the aggregate value is unused, all fields are unused
-     Unused -> return $ replicate n_fields Unused
+     -- If the aggregate value is unused, all fields are unused.
+     -- However, don't mark the fields as dead because they're still used
+     -- in the expression.
+     Unused -> let m' = case m of {Dead -> OnceSafe; _ -> m}
+               in return $ replicate n_fields (Dmd m' Unused)
 
      -- All other usages produce an unknown effect on fields 
-     _ -> return $ replicate n_fields Used
+     _ -> return $ replicate n_fields unknownDmd
 
-fromWrittenSpecificity spc =
+initializerResultSpecificity target_var spc =
   case spc
-  of Written s -> s
+  of Written target_binder s ->
+       Rename.rename (Rename.singleton target_binder target_var) $ Read s
      Unused -> Unused
      _ -> Used
 
-fromReadSpecificity spc i =
+heapItemSpecificity index spc =
   case spc
-  of Read (HeapMap xs) -> fromMaybe Unused $ lookup i xs
+  of Read (HeapMap xs) -> fromMaybe Unused $ lookup index xs
      Unused -> Unused
      _ -> Used

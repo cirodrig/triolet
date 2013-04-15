@@ -38,6 +38,22 @@ import CParser2.GenCode.Util
 import CParser2.GenCode.Kind
 import CParser2.GenCode.Type
 
+-- | Partition a list into sub-lists of the given lengths.
+--   If the list is too short, return 'Nothing'.
+--   If the list is too long, return the remaining items as another list.
+segment :: [Int] -> [a] -> Maybe ([[a]], [a])
+segment (n:ns) xs = do (xs1, xs') <- span_exact n xs
+                       (xss, xs'') <- segment ns xs'
+                       return (xs1 : xss, xs'')
+  where
+    span_exact n xs = go id n xs
+      where
+        go hd 0 xs     = return (hd [], xs)
+        go hd n (x:xs) = go (hd . (x:)) (n-1) xs
+        go _  _ []     = Nothing
+
+segment [] xs = Just ([], xs)
+
 -- | Partition a module into expression declarations and type declarations.
 partitionModule :: Module Resolved
                 -> ([LDecl Resolved], [LDecl Resolved])
@@ -64,17 +80,26 @@ defAttributes attrs ann =
     -- Verify that the attribute list doesn't contain conflicting
     -- attributes; throw an exception on error.
     -- Invalid attributes are checked when inserting.
-    check_attrs = check_inlining_attrs
+    check_attrs = check_inlining_phase `seq` check_inlining_eagerness
 
     -- There should be at most one inlining phase attribute
-    check_inlining_attrs =
+    check_inlining_phase =
       case filter (`elem` [InlineSequentialAttr, InlineDimensionalityAttr, InlineFinalAttr, InlinePostfinalAttr]) attrs
       of []  -> ()
          [_] -> ()
          _   -> internalError "Functions may not have more than one inlining phase attribute"
 
+    check_inlining_eagerness =
+      case filter (`elem` [InlineAttr, InlineNeverAttr]) attrs
+      of []  -> ()
+         [_] -> ()
+         _   -> internalError  "Functions may not have more than one inlining eagerness attribute"
+
     insert_attribute InlineAttr ann =
-      ann {SystemF.defAnnInlineRequest = True}
+      ann {SystemF.defAnnInlineRequest = SystemF.InlAggressively}
+
+    insert_attribute InlineNeverAttr ann =
+      ann {SystemF.defAnnInlineRequest = SystemF.InlNever}
 
     -- TODO: This attribute is specified in two places: the type declaration, 
     -- and here.  Eliminate this one and take the attribute from the type.
@@ -220,7 +245,7 @@ expr (L pos expression) =
        kinds <- mapM (toBaseKind pos <=< Type.Eval.typeKind) types
        let con = SystemF.TupleCon types
            tuple_type = Type.UTupleT kinds `Type.typeApp` types
-       return (SystemF.ExpM $ SystemF.ConE inf con es', tuple_type)
+       return (SystemF.ExpM $ SystemF.ConE inf con [] Nothing es', tuple_type)
      TAppE op arg ->
        let (op', args) = uncurryTypeApp op [arg]
        in translateApp inf op' args []
@@ -230,13 +255,14 @@ expr (L pos expression) =
      LamE f -> do
        f' <- translateFun pos f
        return (SystemF.ExpM $ SystemF.LamE inf f', SystemF.functionType f')
-     CaseE s alts -> do
+     CaseE s sps alts -> do
        (s', scrutinee_type) <- expr s
+       (sps', sps_types) <- exprs sps
 
        -- Infer alternatives
        (alts', alt_types) <- mapAndUnzipM (translateLAlt scrutinee_type) alts
        let ty = case alt_types of t:_ -> t
-       return (SystemF.ExpM $ SystemF.CaseE inf s' alts', ty)
+       return (SystemF.ExpM $ SystemF.CaseE inf s' sps' alts', ty)
      LetE binder rhs body -> do
        (rhs', rhs_type) <- expr rhs
        -- Use the inferred type of the RHS as the bound variable's type
@@ -274,14 +300,14 @@ expr (L pos expression) =
        m_datatype <- lookupDataConWithType con
        data_type <- case m_datatype
                     of Just (data_type, _) -> return data_type
-                       Nothing -> error $ "No info for data constructor " ++ show con
-       variable_with_type $ boxedLayoutInfo (dataTypeLayout' data_type) con
+                       Nothing -> error $ "Not a data constructor: " ++ show con
+       variable_with_type $ dataTypeBoxedInfoVar data_type con
      UnboxedInfoE type_con -> do
        m_datatype <- lookupDataType (toVar type_con)
        data_type <- case m_datatype
                     of Just data_type -> return data_type
-                       Nothing -> error $ "No info for type constructor" ++ show (toVar type_con)
-       variable_with_type $ unboxedLayoutInfo (dataTypeLayout' data_type)
+                       Nothing -> error $ "Not a type constructor: " ++ show (toVar type_con)
+       variable_with_type $ dataTypeUnboxedInfoVar data_type
   where
     int_type = Type.intT
     uint_type = Type.uintT
@@ -326,7 +352,7 @@ translateCon :: SystemF.ExpInfo -> DataType -> DataConType
 translateCon inf type_con data_con op ty_args args
   | length ty_args /= n_ty_args + n_ex_types =
     error $ show pos ++ ": Wrong number of type arguments to data constructor"
-  | length args < n_args =
+  | length args < n_total_args =
     -- Instead of producing an error, the constructor could be eta-expanded.
     error $ show pos ++ ": Too few arguments to data constructor"
   | otherwise = do
@@ -341,16 +367,22 @@ translateCon inf type_con data_con op ty_args args
       sequence_ $ zipWith3 check_kind
                   [n_ty_args + 1..] (map binderType $ dataConExTypes data_con) e_kinds
 
-      -- Convert constructor arguments
-      let con_args = take n_args args
-          other_args = drop n_args args
+      -- Convert size parameters, type object, and constructor arguments
+      let Just ([size_params, ty_ob, con_args], other_args) =
+            segment [n_size_params, n_ty_objects, n_fields] args
+
+      (size_params', size_param_tys) <- exprs size_params
+      (ty_ob', ty_ob_ty) <- case ty_ob
+                            of [] -> return (Nothing, Nothing)
+                               [x] -> do (e, t) <- expr x
+                                         return (Just e, Just t)
       (con_args', con_arg_tys) <- exprs con_args
       let con = SystemF.VarCon op u_ty_args' e_ty_args'
-          con_exp = SystemF.ExpM $ SystemF.ConE inf con con_args'
+          con_exp = SystemF.ExpM $ SystemF.ConE inf con size_params' ty_ob' con_args'
 
       -- Compute type
       con_type <- liftTypeEvalM $
-                  SystemF.TypecheckMem.tcCon pos con con_arg_tys
+                  SystemF.TypecheckMem.tcCon pos con size_param_tys ty_ob_ty con_arg_tys
 
       -- If any arguments remain, apply them
       if null other_args
@@ -361,7 +393,10 @@ translateCon inf type_con data_con op ty_args args
     pos = getSourcePos inf
     n_ty_args = length $ dataConTyParams data_con
     n_ex_types = length $ dataConExTypes data_con
-    n_args = length $ dataConFields data_con
+    n_size_params = length $ layoutSizeParamTypes $ dataTypeLayout' type_con
+    n_ty_objects = case dataTypeKind type_con of {Type.BoxK -> 1; _ -> 0}
+    n_fields = length $ dataConFields data_con
+    n_total_args = n_size_params + n_ty_objects + n_fields
 
     -- Check the kind of a type parameter of the constructor
     check_kind i expected given = do
@@ -383,56 +418,106 @@ uncurryApp e args =
 
 -- | Translate a case alternative.  The scrutinee has type
 --   @typeApp s_ty_op s_ty_args@.
+--   The pattern must not have size arguments
 translateLAlt :: Type.Type -> Located (Alt Resolved)
              -> TransE (SystemF.AltM, Type.Type)
-translateLAlt s_ty (L pos (Alt pattern body)) =
-  withPattern pos s_ty pattern $ expr body
+translateLAlt s_ty (L pos (Alt pattern body))
+  | null $ altSizeArgs pattern =
+      withPattern pos s_ty pattern $ expr body
+  | otherwise =
+      error $ show pos ++ ": Size arguments not allowed in top-level patterns"
 
-buildAlt new_con val_binders body =
+buildAlt pos new_con tyob_binder val_binders body =
   SystemF.AltM $
   SystemF.Alt { SystemF.altCon = new_con
+              , SystemF.altTyObject = tyob_binder
               , SystemF.altParams = val_binders
               , SystemF.altBody = body}
 
-withPattern :: SourcePos -> Type.Type -> Pattern Resolved
-            -> TransE (SystemF.ExpM, a)
-            -> TransE (SystemF.AltM, a)
-withPattern pos scrutinee_type (ConPattern con ex_types fields) do_body = do
+-- | Instantiate a data constructor to match the given type.
+--   Similar to 'instantiateDataConType', but reports detailed errors 
+--   to users.
+instantiateCon :: SourcePos
+               -> Type.Var            -- ^ Data constructor
+               -> Type.Type           -- ^ Type to instantiate to
+               -> [Type.Var]          -- ^ Existentially bound variables
+               -> Int                 -- ^ Number of given fields
+               -> TransE (DataType, DataConType, [Type.Type],
+                          [Type.Binder], Maybe Type.Type, [Type.Type])
+instantiateCon pos con inst_type ex_vars n_binders = do
   -- Type must be a data constructor application
-  Just (tycon, ty_args) <-
-    liftTypeEvalM $ Type.Eval.deconVarAppType scrutinee_type
-  
+  Just (tycon, ty_args) <- liftTypeEvalM $ Type.Eval.deconVarAppType inst_type
+
   -- 'con' must be a data constructor
   dcon_type <- do
-    x <- lookupDataCon (toVar con)
+    x <- lookupDataCon con
     case x of
       Nothing -> error $ show pos ++ ": Expecting a data constructor"
       Just c  -> return c
+  let data_type = dataConType dcon_type
+      is_boxed = dataTypeKind data_type == Type.BoxK
 
   -- Check that the operator is this data constructor's type constructor
   unless (tycon == dataConTyCon dcon_type) $
     error $ show pos ++ ": Case alternative's data constructor does not match scrutinee type"
 
-  -- Infer types of other fields
-  when (length (dataConExTypes dcon_type) /= length ex_types) $
-    error $ show pos ++ ": Wrong number of existential variables in pattern"
+  -- Check parameter list lengths
+  let n_expected_type_binders = length (dataConExTypes dcon_type)
+      n_fields = length $ dataConFields dcon_type
+      n_expected_binders = n_fields + if is_boxed then 1 else 0
+
+  when (n_expected_type_binders /= length ex_vars) $
+    error $ show pos ++ ": Expecting " ++ show n_expected_type_binders ++ " Wrong number of existential variables in pattern"
+
+  when (n_expected_binders /= n_binders) $
+    error $ show pos ++ ": Expecting " ++ show n_expected_binders ++ " value binders"
+  
+  -- Infer types
   (ty_binders, field_types, _) <-
-    Type.Eval.instantiateDataConType
-    dcon_type ty_args [toVar $ boundVar d | d <- ex_types]
+    Type.Eval.instantiateDataConType dcon_type ty_args ex_vars
+  tyob_type <-
+    if is_boxed
+    then liftM Just $ Type.Eval.instantiateInfoType data_type ty_args
+    else return Nothing
+
+  return (data_type, dcon_type, ty_args, ty_binders, tyob_type, field_types)
+
+withPattern :: SourcePos -> Type.Type -> Pattern Resolved
+            -> TransE (SystemF.ExpM, a)
+            -> TransE (SystemF.AltM, a)
+withPattern pos scrutinee_type (ConPattern _ con ex_types binders) do_body = do
+
+  -- Instantiate the constructor at the scrutinee type;
+  -- verify length of given parameter lists
+  (data_type, dcon_type, ty_args, ty_binders, tyob_type, field_types) <-
+    instantiateCon pos (toVar con) scrutinee_type
+    [toVar $ boundVar d | d <- ex_types] (length binders)
+
+  let is_boxed = dataTypeKind data_type == Type.BoxK
+  let inferred_ex_kinds = map binderType ty_binders
+      inferred_ex_types = map (Type.VarT . binderVar) ty_binders
+
+  -- Associate the given binders with the inferred types
+  let tyob_type_binder :: Maybe (Type.Type, Pattern Resolved)
+      other_binders :: [(Type.Type, Pattern Resolved)]
+      (tyob_type_binder, other_binders) =
+        case tyob_type
+        of Nothing -> (Nothing, zip field_types binders)
+           Just t  ->
+             case binders
+             of (b:bs) -> (Just (t, b), zip field_types bs)
+                [] -> error $ show pos ++ ": Missing a type object binder"
 
   -- Compare with the annotated kinds
-  let inferred_ex_kinds = map binderType ty_binders
   optDomainsInExp pos inferred_ex_kinds ex_types $ \ty_binders -> do
 
-    when (length field_types /= length fields) $
-      error $ show pos ++ ": Wrong number of fields in pattern"
-
-    (body', (patterns, x)) <-
-      bindPatternList pos (zip field_types fields) do_body
+    (body', (tyob_pattern, (patterns, x))) <-
+      bindPatternMaybe pos tyob_type_binder $
+      bindPatternList pos other_binders do_body
 
     -- Construct case alternative
     let new_con = SystemF.VarDeCon (toVar con) ty_args ty_binders
-    return (buildAlt new_con patterns body', x)
+    return (buildAlt pos new_con tyob_pattern patterns body', x)
 
 withPattern pos scrutinee_type (TuplePattern fields) do_body = do
   -- Compute the type being scrutinized for local type inference
@@ -443,7 +528,7 @@ withPattern pos scrutinee_type (TuplePattern fields) do_body = do
     bindPatternList pos (zip field_types fields) do_body
 
   let new_con = SystemF.TupleDeCon $ map SystemF.patMType patterns
-  return (buildAlt new_con patterns body', x)
+  return (buildAlt pos new_con Nothing patterns body', x)
 
 -- | Bind multiple patterns over the scope of an expression.
 --   Return the translated expression and the patterns' variable bindings.
@@ -460,6 +545,18 @@ bindPatternList pos ps m = go ps
     go [] = do
       (e, t) <- m
       return (e, ([], t))
+
+bindPatternMaybe :: SourcePos
+                 -> Maybe (Type.Type, Pattern Resolved)
+                 -> TransE (SystemF.ExpM, a)
+                 -> TransE (SystemF.ExpM, (Maybe SystemF.PatM, a))
+bindPatternMaybe pos Nothing m = do
+  (e, x) <- m
+  return (e, (Nothing, x))
+  
+bindPatternMaybe pos (Just (ty, pat)) m = do
+  (p', (e, x)) <- bindPattern pos ty pat m
+  return (e, (Just p', x))
 
 bindPattern :: SourcePos -> Type.Type -> Pattern Resolved
             -> TransE (SystemF.ExpM, a)
@@ -479,6 +576,10 @@ bindPattern pos ty pat m =
        -- Create a case alternative to deconstruct this complex pattern
        (alt, x) <- withPattern pos ty pat m
 
+       -- Get the size arguments from the pattern, and put them into the
+       -- case expression
+       (sps, _) <- exprs $ altSizeArgs pat
+
        -- Create a temporary variable to hold the scrutinee
        pattern_var <- newAnonymousVar ObjectLevel
 
@@ -486,7 +587,7 @@ bindPattern pos ty pat m =
            scrutinee = SystemF.ExpM $
                        SystemF.VarE (SystemF.mkExpInfo pos) pattern_var
            expr = SystemF.ExpM $
-                  SystemF.CaseE (SystemF.mkExpInfo pos) scrutinee [alt]
+                  SystemF.CaseE (SystemF.mkExpInfo pos) scrutinee sps [alt]
        return (pattern, (expr, x))
 
 translateFun pos f =

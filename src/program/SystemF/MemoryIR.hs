@@ -23,9 +23,13 @@ module SystemF.MemoryIR
         Alt(..),
         Fun(..),
         PatM, ExpM, AltM, FunM,
-        varE, litE, appE, conE, varAppE,
-        varE', litE', appE', conE', varAppE',
+        varE, litE, appE, conE, boxedConE, unboxedConE, valConE, varAppE,
+        varE', litE', appE', conE', boxedConE', unboxedConE', valConE', varAppE',
+        trueE, falseE, noneE,
+        boxedDataInfo,
+        staticValTypeInfo,
         unpackVarAppM, unpackDataConAppM, isDataConAppM,
+        assumeMaybePatM,
         assumePatM, assumePatMs,
         assumeTyPat, assumeTyPats,
         assumeFDef,
@@ -45,6 +49,7 @@ import Control.Monad
 import Data.Maybe
   
 import Common.Error
+import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.Demand
 import SystemF.DeadCode(Mentions(..))
@@ -125,8 +130,25 @@ appE :: ExpInfo -> ExpM -> [Type] -> [ExpM] -> ExpM
 appE _ op [] [] = op
 appE inf op type_args args = ExpM (AppE inf op type_args args)
 
-conE :: ExpInfo -> ConInst -> [ExpM] -> ExpM
-conE inf op args = ExpM (ConE inf op args)
+conE :: ExpInfo -> ConInst -> [ExpM] -> Maybe ExpM -> [ExpM] -> ExpM
+conE inf op size_params ty_obj args =
+  ExpM (ConE inf op size_params ty_obj args)
+
+boxedConE :: ExpInfo -> ConInst -> [ExpM] -> ExpM -> [ExpM] -> ExpM
+boxedConE inf op size_params ty_obj args =
+  conE inf op size_params (Just ty_obj) args
+
+unboxedConE :: ExpInfo -> ConInst -> [ExpM] -> [ExpM] -> ExpM
+unboxedConE inf op size_params args =
+  conE inf op size_params Nothing args
+
+-- | Create a value constructor.  No type object or size parameters are passed.
+valConE :: ExpInfo -> ConInst -> [ExpM] -> ExpM
+valConE inf op args = conE inf op [] Nothing args
+
+trueE inf = valConE inf (VarCon (coreBuiltin The_True) [] []) []
+falseE inf = valConE inf (VarCon (coreBuiltin The_False) [] []) []
+noneE inf = valConE inf (VarCon (coreBuiltin The_None) [] []) []
 
 varAppE inf op ty_args args = appE inf (varE' op) ty_args args
 
@@ -134,26 +156,27 @@ varE' = varE defaultExpInfo
 litE' = litE defaultExpInfo
 appE' = appE defaultExpInfo
 conE' = conE defaultExpInfo
+boxedConE' = boxedConE defaultExpInfo
+unboxedConE' = unboxedConE defaultExpInfo
+valConE' = valConE defaultExpInfo
 varAppE' = varAppE defaultExpInfo
 
-{- Obsolete; 'BaseAlt' is isomorphic to this tuple type now
--- | Construct a case alternative given a 'MonoCon' and the other required 
---   fields
-altFromMonoCon :: DeConInst -> [PatM] -> ExpM -> AltM
-altFromMonoCon (VarDeCon con ty_args ex_types) fields body =
-  let ex_patterns = map TyPatM ex_types
-  in AltM $ DeCon con (map TypM ty_args) ex_patterns fields body
+-- | Construct run-time type information for a boxed data constructor,
+--   given type arguments and size parameters
+boxedDataInfo :: TypeEnvMonad m => ExpInfo -> Var -> [Type] -> [ExpM] -> m ExpM
+boxedDataInfo info con ty_args params = do
+  Just dcon_type <- lookupDataCon con
+  let info_var = dataTypeBoxedInfoVar (dataConType dcon_type) con
+  return $ varAppE info info_var ty_args params
 
-altFromMonoCon (TupleDeCon _) fields body =
-  AltM $ DeTuple fields body
-
-altToMonoCon :: AltM -> (DeConInst, [PatM], ExpM)
-altToMonoCon (AltM (VarDeCon con ty_args ex_types fields body)) =
-  (TupleDeCon con (map fromTypM ty_args) [b | TyPatM b <- ex_types], fields, body)
-
-altToMonoCon (AltM (DeTuple fields body)) =
-  (MonoTuple (map patMType fields), fields, body)
--}
+-- | Look up type information for a value type.
+--   This only succeeds for value types supported by the frontend.
+staticValTypeInfo :: EvalMonad m => Type -> m ExpM
+staticValTypeInfo ty = do
+  ty' <- reduceToWhnf ty
+  return $! case ty'
+            of VarT v | v == intV -> varE' valInfo_intV
+                      | v == floatV -> varE' valInfo_floatV
 
 unpackVarAppM :: ExpM -> Maybe (Var, [Type], [ExpM])
 unpackVarAppM (ExpM (AppE { expOper = ExpM (VarE _ op)
@@ -168,14 +191,14 @@ unpackVarAppM _ = Nothing
 
 -- | If the expression is a data constructor (other than a tuple),
 --   return the data constructor, type arguments, existential types,
---   and field arguments
+--   type object, size parameters, and field arguments
 unpackDataConAppM :: EvalMonad m => ExpM
-                  -> m (Maybe (DataConType, [Type], [Type], [ExpM]))
-unpackDataConAppM (ExpM (ConE inf con args)) =
+                  -> m (Maybe (DataConType, [Type], [Type], Maybe ExpM, [ExpM], [ExpM]))
+unpackDataConAppM (ExpM (ConE inf con sps ty_obj args)) =
   case con of
     VarCon op ty_args ex_types -> do
       Just dcon <- lookupDataCon op
-      return $ Just (dcon, ty_args, ex_types, args)
+      return $ Just (dcon, ty_args, ex_types, ty_obj, sps, args)
     TupleCon types ->
       return Nothing
 
@@ -188,6 +211,8 @@ unpackDataConAppM _ = return Nothing
 --   constructors.
 isDataConAppM :: EvalMonad m => ExpM -> m Bool
 isDataConAppM e = liftM isJust $ unpackDataConAppM e
+
+assumeMaybePatM = maybe id assumePatM
 
 assumePatM :: TypeEnvMonad m => PatM -> m a -> m a
 assumePatM pat m = assumeBinder (patMBinder pat) m
@@ -288,8 +313,8 @@ mapExpTypes do_kind do_type expression =
   case fromExpM expression
   of VarE {} -> expression
      LitE {} -> expression
-     ConE inf con args ->
-       ExpM $ ConE inf (do_constructor con) (continues args)
+     ConE inf con sps ty_obj args ->
+       ExpM $ ConE inf (do_constructor con) (continues sps) (fmap continue ty_obj) (continues args)
      AppE inf op ty_args args ->
        ExpM $ AppE inf (continue op) (map do_type ty_args) (continues args)
      LamE inf f ->
@@ -298,8 +323,8 @@ mapExpTypes do_kind do_type expression =
        ExpM $ LetE inf (mapParamTypes do_type b) (continue rhs) (continue body)
      LetfunE inf defs body ->
        ExpM $ LetfunE inf (fmap do_def defs) (continue body)
-     CaseE inf scr alts ->
-       ExpM $ CaseE inf (continue scr) (map do_alt alts)
+     CaseE inf scr sps alts ->
+       ExpM $ CaseE inf (continue scr) (continues sps) (map do_alt alts)
      ExceptE inf ty ->
        ExpM $ ExceptE inf (do_type ty)
      CoerceE inf from_t to_t b ->
@@ -319,9 +344,10 @@ mapExpTypes do_kind do_type expression =
          TupleCon ty_args ->
            TupleCon (map do_type ty_args)
 
-    do_alt (AltM (Alt decon params body)) =
+    do_alt (AltM (Alt decon ty_ob_param params body)) =
       AltM $
-      Alt (do_decon decon) (map (mapParamTypes do_type) params) (continue body)
+      Alt (do_decon decon) (fmap (mapParamTypes do_type) ty_ob_param) 
+          (map (mapParamTypes do_type) params) (continue body)
 
     do_decon (VarDeCon v ts bs) =
       VarDeCon v (map do_type ts) [v ::: do_kind k | v ::: k <- bs]

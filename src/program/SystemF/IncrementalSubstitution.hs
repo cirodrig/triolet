@@ -67,6 +67,10 @@ substitutePatSMs :: EvalMonad m =>
                     Subst -> [PatSM] -> (Subst -> [PatSM] -> m a) -> m a
 substitutePatSMs = renameMany substitutePatSM
 
+substituteMaybePatSM s Nothing k = k s Nothing
+substituteMaybePatSM s (Just p) k = substitutePatSM s p $ \s' p' -> k s (Just p')
+
+
 instance Substitutable (Exp SM) where
   type Substitution (Exp SM) = Subst
   substituteWorker = addDeferredSubstitution
@@ -88,12 +92,13 @@ instance Substitutable (Fun SM) where
 
 instance Substitutable (Alt SM) where
   type Substitution (Alt SM) = Subst
-  substituteWorker s (AltSM (Alt decon params body)) =
+  substituteWorker s (AltSM (Alt decon ty_ob params body)) =
     substituteDeConInst (typeSubst s) decon $ \type_subst decon' ->
     let s' = setTypeSubst type_subst s
-    in substitutePatSMs s' params $ \s'' params' -> do
-      body' <- substitute s'' body
-      return $ AltSM $ Alt decon' params' body'
+    in substituteMaybePatSM s' ty_ob $ \s'' ty_ob' ->
+       substitutePatSMs s'' params $ \s''' params' -> do
+         body' <- substitute s''' body
+         return $ AltSM $ Alt decon' ty_ob' params' body'
 
 -- | Apply a substitution to an 'ExpM'.  The actual substitution is
 --   performed later.
@@ -116,8 +121,8 @@ deferFun (FunM (Fun inf ty_args args ret body)) =
   FunSM $ Fun inf ty_args (castPats args) ret (deferExp body)
 
 deferAlt :: AltM -> AltSM
-deferAlt (AltM (Alt decon params body)) =
-  AltSM $ Alt decon (castPats params) (deferExp body)
+deferAlt (AltM (Alt decon ty_ob params body)) =
+  AltSM $ Alt decon (fmap castPat ty_ob) (castPats params) (deferExp body)
 
 -- | Apply a substitution to an 'ExpSM'.  The actual substitution is
 --   performed later.
@@ -138,8 +143,8 @@ deferInnerTerms (ExpM expression) =
   case expression
   of VarE inf v -> VarE inf v
      LitE inf l -> LitE inf l
-     ConE inf con args ->
-       ConE inf con (map deferExp args)
+     ConE inf con sps ty_ob args ->
+       ConE inf con (map deferExp sps) (fmap deferExp ty_ob) (map deferExp args)
      AppE inf op ts es ->
        AppE inf (deferExp op) ts (map deferExp es)
      LamE inf f ->
@@ -148,8 +153,8 @@ deferInnerTerms (ExpM expression) =
        LetE inf (castPat p) (deferExp val) (deferExp body)
      LetfunE inf defs body ->
        LetfunE inf (fmap (mapDefiniens deferFun) defs) (deferExp body)
-     CaseE inf scr alts ->
-       CaseE inf (deferExp scr) (map deferAlt alts)
+     CaseE inf scr sps alts ->
+       CaseE inf (deferExp scr) (map deferExp sps) (map deferAlt alts)
      ExceptE inf ty ->
        ExceptE inf ty
      CoerceE inf t1 t2 e ->
@@ -169,10 +174,12 @@ freshenHead (ExpSM s (ExpM expression)) = liftTypeEvalM $
             Just (SubstitutedVar e) -> freshenAndDeferInnerTerms e
             Nothing                 -> freshenAndDeferInnerTerms (ExpM expression)
        LitE inf l -> return $ LitE inf l
-       ConE inf con args -> do
+       ConE inf con ty_ob sps args -> do
          con' <- substitute (typeSubst s) con
+         let ty_ob' = fmap (deferSubstitution s) ty_ob
+         let sps' = fmap (deferSubstitution s) sps
          let args' = map (deferSubstitution s) args
-         return $ ConE inf con' args'
+         return $ ConE inf con' ty_ob' sps' args'
        AppE inf op ts es -> do
          ts' <- substitute (typeSubst s) ts
          let op' = deferSubstitution s op
@@ -190,10 +197,11 @@ freshenHead (ExpSM s (ExpM expression)) = liftTypeEvalM $
          substituteDefGroup freshenFun s defs $ \s' defs' -> do
            let body' = deferSubstitution s' body
            return $ LetfunE inf defs' body'
-       CaseE inf scr alts -> do
+       CaseE inf scr sps alts -> do
          let scr' = deferSubstitution s scr
+         let sps' = map (deferSubstitution s) sps
          alts' <- mapM (freshenAlt s) alts
-         return $ CaseE inf scr' alts'
+         return $ CaseE inf scr' sps' alts'
        ExceptE inf ty -> do
          ty' <- substitute (typeSubst s) ty
          return $ ExceptE inf ty'
@@ -219,12 +227,14 @@ freshenFun s (FunM fun) = liftTypeEvalM $
                          , funBody = deferSubstitution s'' $ funBody fun}
 
 freshenAlt :: EvalMonad m => Subst -> AltM -> m AltSM
-freshenAlt s (AltM (Alt decon params body)) =
+freshenAlt s (AltM (Alt decon ty_ob params body)) =
   substituteDeConInst (typeSubst s) decon $ \ts' decon' ->
-  substitutePatMs (setTypeSubst ts' s) params $ \s' params' ->
+  substituteMaybePatM (setTypeSubst ts' s) ty_ob $ \s' ty_ob' ->
+  substitutePatMs s' params $ \s'' params' ->
   return $ AltSM $ Alt { altCon = decon'
+                       , altTyObject = fmap castPat ty_ob'
                        , altParams = castPats params'
-                       , altBody = deferSubstitution s' body}
+                       , altBody = deferSubstitution s'' body}
 
 freshenConstant :: EvalMonad m => Subst -> Constant Mem -> m (Constant SM)
 freshenConstant s (Constant inf ty e) = do
@@ -259,9 +269,9 @@ applySubstitutionFun (FunSM (Fun inf ty_params params ret body)) = do
   return $ FunM $ Fun inf ty_params (map fromPatSM params) ret body'
 
 applySubstitutionAlt :: EvalMonad m => AltSM -> m AltM
-applySubstitutionAlt (AltSM (Alt decon params body)) = do
+applySubstitutionAlt (AltSM (Alt decon ty_ob params body)) = do
   body' <- applySubstitution body
-  return $ AltM $ Alt decon (map fromPatSM params) body'
+  return $ AltM $ Alt decon (fmap fromPatSM ty_ob) (map fromPatSM params) body'
   
 -- | Eliminate name shadowing in an expression.  The expression is traversed, 
 --   and any shadowed names are renamed.
@@ -277,8 +287,8 @@ freshenFullyExp' expression = do
   case expression' of
     VarE inf v -> return $ ExpM $ VarE inf v
     LitE inf l -> return $ ExpM $ LitE inf l
-    ConE inf con args ->
-      ExpM <$> (ConE inf con <$> mapM recurse args)
+    ConE inf con ty_ob sps args ->
+      ExpM <$> (ConE inf con <$> mapM recurse ty_ob <*> mapM recurse sps <*> mapM recurse args)
     AppE inf op ts es ->
       ExpM <$> (AppE inf <$> recurse op <*> pure ts <*> mapM recurse es)
     LamE inf f ->
@@ -303,8 +313,8 @@ freshenFullyExp' expression = do
                   Rec _    -> assume_defs freshen_defs
       body' <- assume_defs freshen_body
       return $ ExpM $ LetfunE inf defs' body'
-    CaseE inf scr alts ->
-      ExpM <$> (CaseE inf <$> freshenFullyExp' scr <*> mapM freshenFullyAlt' alts)
+    CaseE inf scr sps alts ->
+      ExpM <$> (CaseE inf <$> recurse scr <*> mapM recurse sps <*> mapM freshenFullyAlt' alts)
     ExceptE inf ty -> return $ ExpM $ ExceptE inf ty
     CoerceE inf t1 t2 e ->
       ExpM <$> (CoerceE inf t1 t2 <$> freshenFullyExp' e)
@@ -328,8 +338,10 @@ freshenFullyFun' (FunSM f) =
 freshenFullyAlt' :: forall b. BoxingMode b => AltSM -> TypeEvalM b AltM
 freshenFullyAlt' (AltSM alt) =
   assumeBinders (deConExTypes $ altCon alt) $
+  assumeMaybePatM (fmap fromPatSM $ altTyObject alt) $ do
   assumePatMs (map fromPatSM $ altParams alt) $ do
     body <- freshenFullyExp' $ altBody alt
     return $ AltM $ Alt { altCon = altCon alt
+                        , altTyObject = fmap fromPatSM $ altTyObject alt
                         , altParams = map fromPatSM $ altParams alt
                         , altBody = body}

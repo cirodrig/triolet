@@ -93,7 +93,8 @@ typeInferExp (ExpSF expression) =
     case expression
     of VarE {expInfo = inf, expVar = v} ->
          typeInferVarE inf v
-       ConE inf op args ->
+       ConE inf op _ _ args ->
+         -- Ignore type object and size parameters
          typeInferConE inf op args
        LitE {expInfo = inf, expLit = l} ->
          typeInferLitE inf l
@@ -105,7 +106,8 @@ typeInferExp (ExpSF expression) =
          typeInferLetE inf pat e body
        LetfunE {expInfo = inf, expDefs = defs, expBody = body} ->
          typeInferLetfunE inf defs body
-       CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
+       CaseE inf scr _ alts ->
+         -- Ignore size parameters
          typeInferCaseE inf scr alts
        ExceptE {expType = ty} -> do
          typeCheckType ty
@@ -261,7 +263,7 @@ typeInferCaseE inf scr alts = do
   return first_type
 
 typeCheckAlternative :: SourcePos -> Type -> Alt SF -> TCSF Type
-typeCheckAlternative pos scr_type (AltSF (Alt con fields body)) = do
+typeCheckAlternative pos scr_type (AltSF (Alt con Nothing fields body)) = do
   -- Data constructors are always constructor variables
   let VarDeCon con_var types ex_fields = con
       existential_vars = [v | v ::: _ <- ex_fields]
@@ -409,7 +411,7 @@ inferExpType id_supply tenv expression =
            assumePat pat $ infer_exp body
          LetfunE _ defs body ->
            assumeDefs defs $ infer_exp body
-         CaseE _ _ (alt : _) ->
+         CaseE _ _ _ (alt : _) ->
            infer_alt alt
          ExceptE _ rt ->
            return rt

@@ -352,7 +352,7 @@ instanceTerm prd@(IsInst tycon inst_type) inst c_ty_args c_premises
       let inst_methods = map (instantiate i_ty_args) methods
           c_premise_exps = map (uncurry proofExp) c_premises
       in return $ mkDictE noSourcePos cls (mkType inst_type)
-                  c_premise_exps inst_methods
+                  c_premise_exps (clsTyObjectCon cls) inst_methods
   where
     -- Instantiate a function or class method.
     -- For class methods, the type arguments are given by the instance's

@@ -190,26 +190,35 @@ instantiateRecVar pos v ty_var ph = do
 instantiateDataCon :: SourcePos -> Variable -> DataCon -> TI (HMType, TIExp)
 instantiateDataCon pos v con = do
   -- Instantiate the data constructor
-  InstanceValue inst_types dicts repr (field_tys, FOConstructor tc) <-
-    let mk_type inst_types (field_tys, FOConstructor tc) =
-          constructor_type tc inst_types field_tys
-    in instantiate mk_type $ dcSignature con
+  InstanceType inst_types dict_cst (field_tys, FOConstructor tc) <-
+    instantiateType $ dcSignature con
+
+  -- Data type is @tc as@ for constructor 'tc' and types 'as'
+  let data_type = ConTy tc `appTys` inst_types
+  -- Data type constructor's type is @field_tys -> tc as@
+  let constructor_type = field_tys `functionTy` data_type
+
+  -- Generate constraints
+  dicts <- requireConstraint dict_cst
+  repr <- requireRepr $ ConTy tc `appTys` inst_types
+
+  -- Get the type arguments of all 'Repr' predicates
+  let dict_types = map unrepr dict_cst
+        where
+          -- Only representation predicates may appear on data constructors
+          unrepr (IsInst cls t) | cls == builtinTyCon TheTC_Repr = t
 
   -- Create the data expression or function
   let mk_expr fields =
         let Just sf_con = varSystemFVariable v
+            tyob_con = dcTyObjectConstructor con
             sf_types = map mkType inst_types
-        in return $ mkConE pos repr sf_con sf_types [] (map TIInferredRepr dicts) fields
+            sizes = [ TISize (mkType ty) (TIInferredRepr d)
+                    | (d, ty) <- zip dicts dict_types]
+        in return $ mkConE pos repr sf_con sf_types [] sizes tyob_con fields
 
-  exp <- mkLambda pos field_tys (data_type tc inst_types) mk_expr
-  return (constructor_type tc inst_types field_tys, exp)
-  where
-    -- Data type is @tc as@ for constructor 'tc' and types 'as'
-    data_type tc inst_types = ConTy tc `appTys` inst_types
-
-    -- Data type constructor's type is @field_tys -> tc as@
-    constructor_type tc inst_types field_tys =
-      field_tys `functionTy` data_type tc inst_types
+  exp <- mkLambda pos field_tys data_type mk_expr
+  return (constructor_type, exp)
 
 instantiateMethod :: SourcePos -> TyCon -> Int -> TI (HMType, TIExp)
 instantiateMethod pos cls_tycon method_index = do

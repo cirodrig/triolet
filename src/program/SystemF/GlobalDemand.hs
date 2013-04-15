@@ -9,6 +9,9 @@ Local demand analysis computes the consequences of that demand on the
 body of the function.
 
 -}
+
+
+{-
 {-# LANGUAGE GeneralizedNewtypeDeriving, TypeSynonymInstances, DoRec #-}
 module SystemF.GlobalDemand (performGlobalDemandAnalysis)
 where
@@ -574,3 +577,5 @@ performGlobalDemandAnalysis mod =
     runAnalysis global_tenv export_functions
     showResults htab
     return mod
+
+-}

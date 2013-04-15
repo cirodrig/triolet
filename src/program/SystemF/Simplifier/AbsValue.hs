@@ -58,13 +58,15 @@ module SystemF.Simplifier.AbsValue
         )
 where
 
-import Control.Applicative
-import Control.Monad
+import Prelude hiding(mapM, sequence)
+import Control.Applicative hiding(empty)
+import Control.Monad hiding(mapM, sequence)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Data.Monoid(Monoid(..))
+import Data.Traversable
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -184,9 +186,9 @@ litCode l = valueCode $ LitAV l
 
 trueCode, falseCode :: AbsCode
 trueCode =
-  valueCode $ DataAV $ AbsData (VarCon (coreBuiltin The_True) [] []) []
+  valueCode $ DataAV $ valAbsData (VarCon (coreBuiltin The_True) [] []) []
 falseCode =
-  valueCode $ DataAV $ AbsData (VarCon (coreBuiltin The_False) [] []) []
+  valueCode $ DataAV $ valAbsData (VarCon (coreBuiltin The_False) [] []) []
 
 -- | Create abstract code of the boolean expression @v == L@ for some variable
 --   @v@ and literal @L@.
@@ -258,11 +260,18 @@ data AbsFun =
   , afunBody     :: AbsComputation
   }
 
+-- | An abstract data value.  Fields correspond to the fields of 'ConE'.
 data AbsData =
   AbsData
-  { dataCon    :: !ConInst
-  , dataFields :: [AbsCode]
+  { dataCon        :: !ConInst
+  , dataSizeParams :: [AbsCode]
+  , dataTyObject   :: !(Maybe AbsCode)
+  , dataFields     :: [AbsCode]
   }
+
+-- | Construct an 'AbsData' for a value type
+valAbsData :: ConInst -> [AbsCode] -> AbsData
+valAbsData con fs = AbsData con [] Nothing fs
 
 -- | A heap fragment.  The domain of the heap fragment indicates exactly
 --   the contents of the heap fragment.
@@ -316,14 +325,18 @@ pprAbsFun (AbsFun ty_params params body) =
   in hang (text "lambda" <+> sep (ty_params_doc ++ params_doc) <> text ".") 4 $
      pprAbsComputation body
 
-pprAbsData (AbsData (VarCon op ty_args ex_types) fs) =
+pprAbsData (AbsData (VarCon op ty_args ex_types) sps ty_ob fs) =
   let op_doc = text "<" <> pprVar op <> text ">"
       ty_args_doc = [text "@" <> pprType t | t <- ty_args]
+      sps_doc = if null sps
+                then empty
+                else brackets $ sep $ punctuate comma $ map pprAbsCode sps
       ex_types_doc = [text "&" <> pprType t | t <- ex_types]
+      ty_ob_doc = maybe empty (brackets . pprAbsCode) ty_ob
       args_doc = map pprAbsCode fs
-  in parens $ hang op_doc 6 (sep $ ty_args_doc ++ ex_types_doc ++ args_doc)
+  in parens $ hang op_doc 6 (sep $ ty_args_doc ++ [sps_doc] ++ ex_types_doc ++ [ty_ob_doc] ++ args_doc)
 
-pprAbsData (AbsData (TupleCon _) fs) =
+pprAbsData (AbsData (TupleCon _) [] Nothing fs) =
   parens $ sep $ punctuate comma $ map pprAbsCode fs
 
 pprAbsHeap (AbsHeap (HeapMap xs)) =
@@ -355,6 +368,10 @@ excludeA v s = IntMap.delete (fromIdent $ varID v) s
 extendV v mval s = IntMap.insert (fromIdent $ varID v) mval s
 
 extendA v aval s = IntMap.insert (fromIdent $ varID v) aval s
+
+partialValueSubst :: VSubst -> SFRename.ValPartialSubst
+-- For now, don't preserve substitutions
+partialValueSubst _ = SFRename.emptyPV
 
 -- | A substitution on abstract values.
 --
@@ -428,8 +445,13 @@ substituteDeConInst s (TupleDeCon ty_args) k = do
 substitutePatM :: EvalMonad m =>
                   AbsSubst -> PatM -> (AbsSubst -> PatM -> m a) -> m a
 substitutePatM s (PatM binder uses) k = do
-  uses' <- substitute (typeSubst s) uses
+  let value_subst =
+        SFRename.PartialSubst (typeSubst s) (partialValueSubst $ valueSubst s)
+  uses' <- substitute value_subst uses
   substituteValueBinder s binder $ \s' binder' -> k s' (PatM binder' uses')
+
+substituteMaybePatM s Nothing  k = k s Nothing
+substituteMaybePatM s (Just p) k = substitutePatM s p $ \s' p' -> k s (Just p')
 
 substitutePatMs :: EvalMonad m =>
                    AbsSubst -> [PatM] -> (AbsSubst -> [PatM] -> m a) -> m a
@@ -495,10 +517,12 @@ substituteExp s expression = (MaybeT . liftTypeEvalM . runMaybeT) $
           Just Nothing  -> mzero -- This expression is unrepresentable
           Just (Just e) -> return e
      LitE {} -> return expression
-     ConE inf con args ->
+     ConE inf con ty_ob sps args ->
        ExpM <$>
        (ConE inf <$>
         substituteType s con <*>
+        mapM (substituteExp s) ty_ob <*>
+        mapM (substituteExp s) sps <*>
         mapM (substituteExp s) args)
      AppE inf op ty_args args ->
        ExpM <$>
@@ -517,9 +541,12 @@ substituteExp s expression = (MaybeT . liftTypeEvalM . runMaybeT) $
        substituteDefGroup s defs $ \s' defs' -> do
          body' <- substituteExp s body
          return $ ExpM $ LetfunE inf defs' body'
-     CaseE inf scr alts ->
+     CaseE inf scr sps alts ->
        ExpM <$>
-       (CaseE inf <$> substituteExp s scr <*> mapM (substituteAlt s) alts)
+       (CaseE inf <$>
+        substituteExp s scr <*>
+        mapM (substituteExp s) sps <*>
+        mapM (substituteAlt s) alts)
      ExceptE inf t ->
        ExpM . ExceptE inf <$> substituteType s t
      CoerceE inf t1 t2 body ->
@@ -540,11 +567,13 @@ substituteFun s (FunM f) = (MaybeT . liftTypeEvalM . runMaybeT) $
 
 substituteAlt :: EvalMonad m =>
                  AbsSubst -> AltM -> MaybeT m AltM
-substituteAlt s (AltM (Alt decon params body)) = (MaybeT . liftTypeEvalM . runMaybeT) $
+substituteAlt s (AltM (Alt decon ty_ob params body)) =
+  (MaybeT . liftTypeEvalM . runMaybeT) $
   substituteDeConInst s decon $ \s' decon' ->
-  substitutePatMs s' params $ \s'' params' -> do
-    body' <- substituteExp s body
-    return $ AltM (Alt decon' params' body')
+  substituteMaybePatM s' ty_ob $ \s'' ty_ob' -> do
+  substitutePatMs s'' params $ \s''' params' -> do
+    body' <- substituteExp s''' body
+    return $ AltM (Alt decon' ty_ob' params' body')
 
 substituteAbsValue s value =
   case value
@@ -615,10 +644,12 @@ instance Substitutable AbsFun where
 instance Substitutable AbsData where
   type Substitution AbsData = AbsSubst
   
-  substituteWorker s (AbsData con fields) = do
+  substituteWorker s (AbsData con sps ty_ob fields) = do
     con' <- substitute (typeSubst s) con
+    sps' <- mapM (substitute s) sps
+    ty_ob' <- mapM (substitute s) ty_ob
     fields' <- substitute s fields
-    return $ AbsData con' fields'
+    return $ AbsData con' sps' ty_ob' fields'
     
 substituteAbsProp :: AbsSubst -> AbsProp -> Maybe AbsProp
 substituteAbsProp s prop =
@@ -804,8 +835,12 @@ initializerValueHelper data_comp ty = do
 --   the field values, the functions are each applied to a nonce
 --   parameter representing the address of the constructor field.
 --   For other fields, the argument value is exactly the field value.
-interpretCon :: ConInst -> [AbsCode] -> UnboxedTypeEvalM AbsComputation
-interpretCon con fields =
+interpretCon :: ConInst         -- ^ Instantiated constructor
+             -> Maybe AbsCode   -- ^ Type object
+             -> [AbsCode]       -- ^ Size parameters
+             -> [AbsCode]       -- ^ Fields
+             -> UnboxedTypeEvalM AbsComputation
+interpretCon con ty_ob sps fields =
   case con
   of VarCon op _ _ -> do
        -- Look up field kinds
@@ -840,7 +875,7 @@ interpretCon con fields =
     type_error :: UnboxedTypeEvalM a
     type_error = internalError "constructorDataValue: Type error detected"
     
-    datacon_value field_values = DataAV (AbsData con field_values)
+    datacon_value field_values = DataAV (AbsData con sps ty_ob field_values)
 
     compute_initializer_value BareK f = interpretInitializer f
     compute_initializer_value BoxK f  = return (ReturnAC f)
@@ -850,9 +885,13 @@ interpretCon con fields =
 
 -- | Interpret a data constructor application that is certain not to raise
 --   an exception.
-interpretConAsValue :: ConInst -> [AbsCode] -> UnboxedTypeEvalM AbsCode
-interpretConAsValue cinst fields = do
-  comp <- interpretCon cinst fields
+interpretConAsValue :: ConInst
+                    -> Maybe AbsCode
+                    -> [AbsCode]
+                    -> [AbsCode]
+                    -> UnboxedTypeEvalM AbsCode
+interpretConAsValue cinst ty_ob sps fields = do
+  comp <- interpretCon cinst ty_ob sps fields
   case comp of
     TopAC -> return topCode
     ReturnAC c -> return c
@@ -886,9 +925,11 @@ interpretConstant c = interpret_exp $ constExp c
       case fromExpM expression
       of VarE _ v -> valueCode $ VarAV v
          LitE _ l -> valueCode $ LitAV l
-         ConE _ con args ->
-           let args_values = map interpret_exp args
-           in valueCode $ DataAV $ AbsData con args_values
+         ConE _ con sps ty_ob args ->
+           let sps_values = map interpret_exp sps
+               ty_value = fmap interpret_exp ty_ob
+               args_values = map interpret_exp args
+           in valueCode $ DataAV $ AbsData con sps_values ty_value args_values
          AppE _ _ _ _ ->
            -- This must be a value or boxed expression.
            -- Allow this expression to be inlined.
@@ -899,14 +940,19 @@ interpretConstant c = interpret_exp $ constExp c
 
 -- | Compute the value of a case scrutinee, given that it matched a pattern
 --   in a case alternative.
-scrutineeDataValue :: DeConInst -> [PatM] -> UnboxedTypeEvalM AbsCode
-scrutineeDataValue decon params = do
+scrutineeDataValue :: DeConInst -- ^ Deconstructor
+                   -> [AbsCode] -- ^ Size parameters
+                   -> Maybe PatM -- ^ Type object
+                   -> [PatM]
+                   -> UnboxedTypeEvalM AbsCode
+scrutineeDataValue decon sps ty_ob params = do
   let con = case decon
             of TupleDeCon ts -> TupleCon ts
                VarDeCon op ty_args ex_types ->
                  VarCon op ty_args [VarT v | v ::: _ <- ex_types]
+      ty_ob_value = fmap pattern_field ty_ob
       field_values = map pattern_field params
-  return $ valueCode $ DataAV (AbsData con field_values)
+  return $ valueCode $ DataAV (AbsData con sps ty_ob_value field_values)
   where
     pattern_field pat = valueCode $ VarAV (patMVar pat)
 
@@ -932,7 +978,7 @@ concretize' ty e
 --   application or \'copy\' function call.  For each other field, use the
 --   field's value.
 concretizeData :: AbsData -> MaybeT UnboxedTypeEvalM ExpM
-concretizeData data_value@(AbsData con fs) = do
+concretizeData data_value@(AbsData con sps ty_ob fs) = do
   -- Ensure that the data value is not a bare data value.
   -- It's an error to attempt to concretize a bare value.
   whenM (bad_data_kind con) $
@@ -948,14 +994,20 @@ concretizeData data_value@(AbsData con fs) = do
 
 -- | Concretize a data constructor application.
 --   The result is either a data value or an initializer function.
-concretizeDataConApp (AbsData con fs) = do
+concretizeDataConApp (AbsData con sps ty_ob fs) = do
   -- Determine field kinds and types
-  (field_types, _) <- conType con
+  (ty_ob_type, sp_types, field_types, _) <- conInstType con
   field_kinds <- conFieldKinds con
+
+  -- Type objects and size parameters are never bare
+  ty_ob_exp <- case (ty_ob, ty_ob_type)
+               of (Just x, Just t)   -> liftM Just $ concretize' t x
+                  (Nothing, Nothing) -> return Nothing
+  sp_exps <- sequence $ zipWith concretize' sp_types sps
 
   -- Concretize each field and create a constructor application
   field_exps <- sequence $ zipWith3 concretize_field field_kinds field_types fs
-  return $ conE defaultExpInfo con field_exps
+  return $ conE' con sp_exps ty_ob_exp field_exps
   where
     concretize_field BareK ty f = do
       -- Create and concretize an initializer value

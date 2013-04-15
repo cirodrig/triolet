@@ -184,8 +184,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_makeComplex) |]) -}
   --, (CoreName module_list "list_len",
   --   Right [| coreBuiltin SystemF.The_len |])
-  , (CoreName module_list "array1_build",
-     Right [| coreBuiltin SystemF.The_Sequence_array1_build |])
+  --, (CoreName module_list "array1_build",
+  --   Right [| coreBuiltin SystemF.The_Sequence_array1_build |])
   -- , (CoreName module_list "list_traverse",
   --   Right [| coreBuiltin SystemF.The_TraversableDict_list_traverse |])
   {- , (CoreName module_list "safeSubscript",
@@ -246,8 +246,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_histogram) |])-}
   , (CoreName module_inplace "append_build_list",
      Right [| coreBuiltin SystemF.The_append_build_list |])
-  , (CoreName module_inplace "repr_append_list",
-     Right [| coreBuiltin SystemF.The_repr_append_list |])
+  {-, (CoreName module_inplace "repr_append_list",
+     Right [| coreBuiltin SystemF.The_repr_append_list |])-}
   , (CoreName module_inplace "intSumScatter_make_init",
      Right [| coreBuiltin (SystemF.The_intSumScatter_make_init) |])
   , (CoreName module_inplace "countingScatter_make_init",
@@ -289,7 +289,7 @@ builtinFunctions =
      Right [| SystemF.coreBuiltin SystemF.The_repr_arr |])
   --, (CoreName module_structures "repr_Referenced",
     --Right [| SystemF.coreBuiltin SystemF.The_repr_Referenced |])
-  , (CoreName module_structures "repr_Maybe",
+  {-, (CoreName module_structures "repr_Maybe",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Maybe |])
   , (CoreName module_structures "repr_Tuple1",
      Right [| SystemF.coreBuiltin SystemF.The_repr_Tuple1 |])
@@ -304,7 +304,7 @@ builtinFunctions =
   , (CoreName module_structures "sizealign_Tuple3",
      Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple3 |])
   , (CoreName module_structures "sizealign_Tuple4",
-     Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple4 |])
+     Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple4 |])-}
   , (CoreName module_structures "sizealign_arr",
      Right [| SystemF.coreBuiltin SystemF.The_sizealign_arr |])
   
@@ -423,7 +423,7 @@ builtinGlobals =
      Left $ PrimType PointerType)
 
     -- Physical representations of data types
-  , (CoreName module_list "repr_list",
+  {-, (CoreName module_list "repr_list",
      Right [| coreBuiltin SystemF.The_repr_list |])
   , (CoreName module_list "repr_array0",
      Right [| coreBuiltin SystemF.The_repr_array0 |])
@@ -462,10 +462,7 @@ builtinGlobals =
   , (CoreName module_structures "repr_bool",
      Right [| coreBuiltin (SystemF.The_repr_bool) |] )
   , (CoreName module_structures "repr_NoneType",
-     Right [| coreBuiltin (SystemF.The_repr_NoneType) |] )
-    -- Streams
-  , (CoreName module_stream "Stream_count",
-     Right [| coreBuiltin (SystemF.The_count) |])
+     Right [| coreBuiltin (SystemF.The_repr_NoneType) |] )-}
   ]
 
 builtinVarPrimName nm = "the_biprim_" ++ builtinVarUnqualifiedName nm

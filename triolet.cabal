@@ -36,6 +36,7 @@ Executable triolet
     hoopl == 3.8.7.4,
     template-haskell,
     directory,
+    deepseq,
     filepath,
     process,
     random,
@@ -136,11 +137,10 @@ Executable triolet
     SystemF.Build
     SystemF.Context
     SystemF.ConSpecialization
+    SystemF.Datatypes.Code
     SystemF.Datatypes.Driver
-    --SystemF.Datatypes.TypeLayout
-    --SystemF.Datatypes.ComputeLayout
-    --SystemF.Datatypes.RuntimeLayout
     SystemF.Datatypes.DynamicTypeInfo
+    SystemF.Datatypes.InfoCall
     SystemF.Datatypes.Layout
     SystemF.Datatypes.Size
     SystemF.Datatypes.Structure

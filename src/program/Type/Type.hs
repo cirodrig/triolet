@@ -31,6 +31,7 @@ module Type.Type(module Type.Var,
                  pprType, pprTypePrec)
 where
 
+import Control.DeepSeq
 import Text.PrettyPrint.HughesPJ
 
 import Common.PrecDoc
@@ -40,6 +41,21 @@ import Common.Label
 import Type.Var
 import Type.Level
 import Type.BuiltinVar
+
+instance NFData Type where
+  rnf (VarT v)     = rnf v
+  rnf (AppT s t)   = rnf s `seq` rnf t
+  rnf (LamT b t)   = rnf b `seq` rnf t
+  rnf (FunT s t)   = rnf s `seq` rnf t
+  rnf (AllT b t)   = rnf b `seq` rnf t
+  rnf (AnyT k)     = rnf k
+  rnf (IntT n)     = rnf n
+  rnf (CoT k)      = rnf k
+  rnf (UTupleT ks) = rnf ks
+
+instance NFData Binder where rnf (v ::: k) = rnf v `seq` rnf k
+
+instance NFData BaseKind where rnf k = k `seq` ()
 
 -- | Create a type application
 typeApp :: Type -> [Type] -> Type
@@ -86,6 +102,8 @@ fromForallFunType t =
 
 -- | A type annotated with its base kind
 data KindedType = KindedType !BaseKind Type
+
+instance NFData KindedType where rnf (KindedType _ t) = rnf t
 
 getBaseKind :: KindedType -> BaseKind
 getBaseKind (KindedType k _) = k

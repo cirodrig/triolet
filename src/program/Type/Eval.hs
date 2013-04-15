@@ -21,6 +21,9 @@ module Type.Eval
         -- * Other functions
         unboxedTupleTyCon,
         unboxedTupleType,
+        instantiateInfoType,
+        instantiateSizeParams,
+        instantiateStaticTypes,
         instantiateDataConType,
         instantiateDataConTypeWithFreshVariables,
         instantiateDataConTypeWithExistentials)
@@ -285,12 +288,47 @@ unboxedTupleType ts = do
   con <- unboxedTupleTyCon ts
   return $ typeApp con ts
 
+-- | Get the type of the run-time type information for a given data type
+instantiateInfoType :: EvalMonad m => DataType -> [Type] -> m Type
+instantiateInfoType data_type ty_args
+  | length (dataTypeParams data_type) /= length ty_args =
+      internalError "instantiateInfoType: Wrong number of type parameters"
+  | otherwise =
+      let applied_data_type = dataTypeCon data_type `varApp` ty_args
+      in return $ infoTycon (dataTypeKind data_type) `varApp` [applied_data_type]
+
+-- | Given a data type and its type arguments, instantiate its size parameters
+instantiateSizeParams :: EvalMonad m =>
+                         DataType -- ^ Type to instantiate
+                      -> [Type]      -- ^ Type arguments
+                      -> m [KindedType] -- ^ Instantiated size parameters 
+instantiateSizeParams data_type ty_args
+  | length (dataTypeParams data_type) /= length ty_args =
+      internalError "instantiateSizeParams: Wrong number of type parameters"
+  | otherwise = do
+      let subst = Substitute.fromBinderList $ zip (dataTypeParams data_type) ty_args
+      substitute subst $ layoutSizeParamTypes $ dataTypeLayout' data_type
+
+-- | Given a data type and its type arguments, instantiate its static types
+instantiateStaticTypes :: EvalMonad m =>
+                          DataType -- ^ Type to instantiate
+                       -> [Type]      -- ^ Type arguments
+                       -> m [KindedType] -- ^ Instantiated static types
+instantiateStaticTypes data_type ty_args
+  | length (dataTypeParams data_type) /= length ty_args =
+      internalError "instantiateSizeParams: Wrong number of type parameters"
+  | otherwise = do
+      let subst = Substitute.fromBinderList $ zip (dataTypeParams data_type) ty_args
+      substitute subst $ layoutStaticTypes $ dataTypeLayout' data_type
+
 -- | Given a data constructor type and the type arguments at which it's used,
 --   get the instantiated type.
 --
 --   Returns the existential type parameters, the data constructor fields'
 --   types as they appear in a pattern match, and the constructed value's type.
--- The types are not typechecked.
+--
+--   This code doesn't use layout information, and may be executed before
+--   layouts are computed.  The types are not typechecked.
 instantiateDataConType :: EvalMonad m =>
                           DataConType -- ^ Type to instantiate
                        -> [Type]      -- ^ Type parameters
@@ -304,11 +342,10 @@ instantiateDataConType con_ty arg_vals ex_vars
       internalError "instantiateDataConType: Wrong number of existential variables"
   | otherwise = do
       let -- Assign parameters
-          subst1 = instantiate_arguments $
-                   zip (dataConTyParams con_ty) arg_vals
+          subst1 = Substitute.fromBinderList $ zip (dataConTyParams con_ty) arg_vals
 
-          -- Rename existential types, if new variables are given
-          (subst2, ex_params) = instantiate_exvars subst1 $
+      -- Rename existential types, if new variables are given
+      let (subst2, ex_params) = instantiate_exvars subst1 $
                                 zip (dataConExTypes con_ty) ex_vars
 
       -- Apply substitution to range type.  Use subst1 because existential
@@ -319,12 +356,6 @@ instantiateDataConType con_ty arg_vals ex_vars
       fields <- mapM (substitute subst2) $ dataConFieldTypes con_ty
       return (ex_params, fields, range)
   where
-    -- Instantiate the type by substituing arguments for the constructor's
-    -- type parameters
-    instantiate_arguments :: [(Binder, Type)] -> TypeSubst
-    instantiate_arguments assocs = 
-      Substitute.fromList [(v, ty) | (v ::: _, ty) <- assocs]
-
     -- Instantiate existential types.  Rename each existential variable.
     instantiate_exvars :: TypeSubst -> [(Binder, Var)]
                        -> (TypeSubst, [Binder])
@@ -367,16 +398,10 @@ instantiateDataConTypeWithExistentials con_ty arg_vals
       let -- Assign parameters and existential types
           type_params =
             dataConTyParams con_ty ++ dataConExTypes con_ty
-          subst = instantiate_arguments $ zip type_params arg_vals
+          subst = Substitute.fromBinderList $ zip type_params arg_vals
 
       -- Apply the substitution to field and range types
-      fields <- mapM (substitute subst) $ dataConFieldTypes con_ty
+      fields <- substitute subst $ dataConFieldTypes con_ty
       range <- substitute subst $ dataConPatternRange con_ty
       return (fields, range)
-  where
-    -- Instantiate the type by substituing arguments for the constructor's
-    -- type parameters
-    instantiate_arguments :: [(Binder, Type)] -> TypeSubst
-    instantiate_arguments assocs = 
-      Substitute.fromList [(v, ty) | (v ::: _, ty) <- assocs]
 

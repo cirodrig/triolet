@@ -8,6 +8,8 @@ where
 
 import Data.Maybe
 import Text.PrettyPrint.HughesPJ
+
+import Common.Error
 import Common.Identifier
 import Common.Label
 import Export
@@ -55,6 +57,9 @@ defaultPrintFlags =
 tuple :: [Doc] -> Doc
 tuple xs = parens $ sep $ punctuate comma xs
 
+list :: [Doc] -> Doc
+list xs = brackets $ sep $ punctuate comma xs
+
 pprExportSpec :: ExportSpec -> Doc
 pprExportSpec (ExportSpec lang name) =
   text (foreignLanguageName lang) <+> text (show name)
@@ -97,14 +102,21 @@ pprExpFlagsPrec :: PrintFlags -> Int -> ExpSF -> Doc
 pprExpFlagsPrec flags prec (ExpSF expression) =
   case expression
   of VarE {expVar = v} ->
-         pprVarFlags flags v
+       pprVarFlags flags v
      LitE {expLit = l} -> pprLit l
-     ConE _ (VarCon op ty_args ex_types) args ->
+     ConE _ (VarCon op ty_args ex_types) size_params ty_obj args ->
        let op_doc = pprVar op
            tDoc = [text "@" <> pprType t | t <- ty_args]
+           spDoc
+             | null size_params = empty
+             | otherwise = list $ map (pprExpFlagsPrec flags precOuter) size_params
            eDoc = [text "&" <> pprType t | t <- ex_types]
+           tobDoc =
+             case ty_obj
+             of Nothing -> empty
+                Just e  -> brackets $ pprExpFlagsPrec flags precOuter e
            aDoc = map (pprExpFlagsPrec flags precOuter) args
-       in hang op_doc 4 (tuple (tDoc ++ eDoc ++ aDoc))
+       in hang op_doc 4 (tuple (tDoc ++ [spDoc] ++ eDoc ++ [tobDoc] ++ aDoc))
      AppE {expOper = e, expTyArgs = ts, expArgs = es} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
              tDoc = [text "@" <> pprType t | t <- ts]
@@ -121,7 +133,7 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
          let defsText = vcat $ map (pprFDefFlags flags) $ defGroupMembers ds
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
-     CaseE {expScrutinee = e, expAlternatives = [AltSF alt1, AltSF alt2]} 
+     CaseE {expScrutinee = e, expAlternatives = [AltSF alt1, AltSF alt2]}
          | is_true (altCon alt1) && is_false (altCon alt2) ->
              pprIf flags e (altBody alt1) (altBody alt2)
          | is_true (altCon alt2) && is_false (altCon alt1) ->
@@ -153,13 +165,17 @@ pprIf flags cond tr fa =
 
 
 pprAltFlags :: PrintFlags -> AltSF -> Doc
-pprAltFlags flags (AltSF (Alt con params body)) = 
+pprAltFlags flags (AltSF (Alt con ty_ob_param params body)) = 
   let pattern =
         case con
         of VarDeCon op ty_args ex_types ->
              let ty_args_doc = map (text "@" <>) $ map pprType ty_args
+                 ty_ob_doc = maybe empty (brackets . pprPatFlags flags) ty_ob_param
                  params_doc = [parens $ pprPatFlags flags p | p <- params]
-             in pprVar op <+> sep (ty_args_doc ++ params_doc)
+             in pprVar op <+> sep (ty_args_doc ++ [ty_ob_doc] ++ params_doc)
+           TupleDeCon _
+             | isJust ty_ob_param ->
+                 internalError "pprAltFlags: Unexpected parameter"
            TupleDeCon _ ->
              parens $ sep $ punctuate (text ",") $
              map (pprPatFlags flags) params

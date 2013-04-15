@@ -21,7 +21,8 @@ import Control.Monad.Trans.Maybe
 import qualified Data.Map as Map
 import Data.Maybe
 import Debug.Trace
-  
+import Text.PrettyPrint.HughesPJ
+
 import Common.Error
 import Common.Identifier
 import Common.Label
@@ -172,6 +173,16 @@ frontendType tc_map sf_type = do
     SF.UTupleT _ -> mzero
   where
     -- mzero = trace ("frontendType failed " ++ show (SF.pprType sf_type)) global_mzero
+
+-- | Convert a size parameter type to a size parameter.
+--   Size parameters are converted to the corresponding info types.
+frontendSizeParameter tc_map (unboxed_kind, sf_type)
+  | unboxed_kind == SF.BareK = do
+      t <- frontendType tc_map sf_type
+      return $ IsInst (builtinTyCon TheTC_Repr) t
+
+    -- Only size parameters for bare types are supported
+  | otherwise = mzero
 
 -- | Convert a fully boxed System F type to a frontend predicate.
 --   Return 'Nothing' if it can't be converted.
@@ -356,7 +367,7 @@ reprClassInstance tenv tcm tc = do
     -- Get the info variable for type constructor 'Stored'
     lookup_stored_info = do
       Just dtype <- SF.lookupDataType SF.storedV
-      return $ SF.unboxedLayoutInfo $ SF.dataTypeLayout' dtype
+      return $ SF.dataTypeUnboxedInfoVar dtype
 
 boxedReprClassInstance tcm tc = do
   Just dtype <- SF.lookupDataType (tyConSFVar tc)
@@ -376,7 +387,7 @@ buildBareReprInstance :: SF.Var -> SF.DataTypeLayout -> [SF.Type] -> [SF.ExpSF] 
 buildBareReprInstance tycon layout ty_args args =
   let info = SF.mkExpInfoWithRepresentation
              noSourcePos SF.BoxedRepresentation
-      op = SF.ExpSF $ SF.VarE info (SF.unboxedLayoutInfo layout)
+      op = SF.ExpSF $ SF.VarE info (SF.layoutUnboxedInfoVar layout)
   in if null ty_args && null args
      then op 
      else SF.ExpSF $ SF.AppE info op ty_args args
@@ -386,7 +397,7 @@ buildValReprInstance :: SF.Var -> SF.Var -> SF.DataTypeLayout -> [SF.Type] -> [S
 buildValReprInstance stored_info tycon layout ty_args args =
   let info = SF.mkExpInfoWithRepresentation
              noSourcePos SF.BoxedRepresentation
-      op = SF.ExpSF $ SF.VarE info (SF.unboxedLayoutInfo layout)
+      op = SF.ExpSF $ SF.VarE info (SF.layoutUnboxedInfoVar layout)
 
       -- Has type @ValInfo (T as)@
       ty = tycon `SF.varApp` ty_args
@@ -1129,8 +1140,12 @@ mkTypeClassBinding :: TyConMap
                    -> InitM TypeBinding
 mkTypeClassBinding tc_map tycon abstract mk_instances = do
   let sf_var = tyConSFVar tycon
+
+  -- Look up the type class type constructor, dictionary constructor,
+  -- and type object constructor
   Just data_type <- SF.lookupDataType sf_var
   let [dict_var] = SF.dataTypeDataConstructors data_type
+  let tyobj_var = SF.dataTypeBoxedInfoVar data_type dict_var
             
   signature <-
     if abstract
@@ -1138,7 +1153,7 @@ mkTypeClassBinding tc_map tycon abstract mk_instances = do
     else do Just dcon_type <- SF.lookupDataCon dict_var
             frontendClassSignature tc_map dcon_type
   instances <- mk_instances
-  return $ TyClsAss $ Class sf_var dict_var abstract signature instances
+  return $ TyClsAss $ Class sf_var dict_var tyobj_var abstract signature instances
 
 -------------------------------------------------------------------------------
 -- Variable initialization
@@ -1198,6 +1213,7 @@ varInitializers =
       , (TheV_displaceView, The_displaceView)
       , (TheV_multiplyView, The_multiplyView)
       , (TheV_divideView, The_divideView)
+      {- Temporarily commented out while porting the library
       , (TheV_permute1D, The_permute1D)
       , (TheV_boxedPermute1D, The_boxedPermute1D)
       , (TheV_stencil2D, The_stencil2D)
@@ -1207,8 +1223,9 @@ varInitializers =
       , (TheV_boxedStencil3D, The_boxedStencil3D)
       , (TheV_extend3D, The_extend3D)
       , (TheV_unionView3D, The_unionView3D)
-      , (TheV_histogram, The_histogram)
+      , (TheV_histogram, The_histogram)-}
       , (TheV_floor, The_floor)
+      {- Temporarily commented out while porting the library
       , (TheV_intScatter, The_intScatter)
       , (TheV_floatScatter, The_floatScatter)
       , (TheV_boolScatter, The_boolScatter)
@@ -1228,7 +1245,7 @@ varInitializers =
       , (TheV_scatter, The_fun_scatter)
       , (TheV_intset, The_build_intset)
       , (TheV_intsetLookup, The_intsetLookup)
-      , (TheV_intsetElements, The_intsetElements)
+      , (TheV_intsetElements, The_intsetElements)-}
       , (TheV___undefined__, The_fun_undefined)
       , (TheV___and__, The_oper_BITWISEAND)
       , (TheV___or__, The_oper_BITWISEOR)
@@ -1309,10 +1326,11 @@ varInitializers =
 
 -- | Create all variables and their value bindings
 createVars :: TyConMap
+           -> SF.TypeEnv    -- ^ Core type environment
            -> Map.Map TyCon TypeBinding
            -> SF.BoxedTypeEvalM ([(BuiltinVar, Variable)],
                                  Map.Map Variable ValueBinding)
-createVars tc_map t_bindings = do
+createVars tc_map core_type_env t_bindings = do
   results <- mapM (runMaybeT . createVar) varInitializers
   let m = Map.fromList [(v, binding) | (_, v, binding) <- catMaybes results]
       assocs = [(frontend_var, var) | (frontend_var, var, _) <- catMaybes results]
@@ -1321,7 +1339,7 @@ createVars tc_map t_bindings = do
     createVar (frontend_thing, init) =
       case init
       of FromSF core_thing ->
-           translateVariable tc_map frontend_thing core_thing
+           translateVariable tc_map core_type_env frontend_thing core_thing
          MethodInitializer name cls_tycon index ->
            createMethod tc_map t_bindings frontend_thing name cls_tycon index
 
@@ -1347,9 +1365,9 @@ createMethod tc_map t_bindings frontend_thing name cls_tycon index = do
               constraint = [instancePredicate cls_tycon (ConTy cls_typaram)]
           in Qualified [cls_typaram] constraint method_signature
 
-translateVariable :: TyConMap -> BuiltinVar -> BuiltinThing
+translateVariable :: TyConMap -> SF.TypeEnv -> BuiltinVar -> BuiltinThing
                   -> InitM (BuiltinVar, Variable, ValueBinding)
-translateVariable tc_map frontend_thing core_thing = do
+translateVariable tc_map core_type_env frontend_thing core_thing = do
   -- Look up the System F variable
   let v = coreBuiltin core_thing
   unless (SF.getLevel v == SF.ObjectLevel) $
@@ -1361,7 +1379,7 @@ translateVariable tc_map frontend_thing core_thing = do
   -- Create a binding
   binding <- cond ()
              [ do Just dcon_type <- lift $ SF.lookupDataCon v
-                  lift $ translateDataCon tc_map v dcon_type
+                  lift $ translateDataCon tc_map core_type_env v dcon_type
 
              , do Just ty <- lift $ SF.lookupType v
                   lift $ translateGlobalVar tc_map v ty
@@ -1370,22 +1388,47 @@ translateVariable tc_map frontend_thing core_thing = do
              ]
   return (frontend_thing, frontend_var, binding)
 
-translateDataCon tc_map v dcon_type = SF.assumeBinders ty_params $ do
-  (ty_params', tc_map') <- translateTyVars tc_map $ map SF.binderVar ty_params
+translateDataCon tc_map core_type_env v dcon_type =
+  SF.assumeBinders ty_params $ do
+    (ty_params', tc_map') <-
+      translateTyVars tc_map $ map SF.binderVar ty_params
 
-  -- Existential types aren't supported
-  guard (null ex_types)
+    -- In the unboxed data type, look up the kinds of size parameters and 
+    -- the data type itself
+    Just unboxed_dcon <- withCoreTypeEnv core_type_env $ SF.lookupDataCon v
+    let result_kind = SF.dataTypeKind $ SF.dataConType unboxed_dcon
+    let size_param_kinds = map SF.getBaseKind $ SF.dataConSizeParams unboxed_dcon
 
-  -- Translate field types
-  field_types' <- mapM (frontendType tc_map') field_types
+    -- Existential types aren't supported
+    guard (null ex_types)
 
-  let signature =
-        Qualified ty_params' [] (field_types', FOConstructor data_type_con)
-  return $ DataConAss $ DataCon signature
+    -- Translate field types
+    field_types' <- mapM (frontendType tc_map') field_types
+
+    -- Translate size parameters
+    size_params' <-
+      let kinds_and_types =
+            -- Take kind information from the unboxed type.  Translate the
+            -- fully boxed type into a frontend type.
+            zip size_param_kinds (map SF.discardBaseKind size_params)
+      in mapM (frontendSizeParameter tc_map') kinds_and_types
+
+    -- Get the type object constructor for boxed data constructors
+    let tyob_con =
+          case result_kind
+          of SF.BoxK  -> Just $ SF.dataTypeBoxedInfoVar data_type (SF.dataConCon dcon_type)
+             SF.BareK -> Nothing
+             SF.ValK  -> Nothing
+
+    let signature =
+          Qualified ty_params' size_params' (field_types', FOConstructor data_type_con)
+    return $ DataConAss $ DataCon signature tyob_con
   where
+    data_type = SF.dataConType dcon_type
     ty_params = SF.dataTypeParams $ SF.dataConType dcon_type
     ex_types = SF.dataConExTypes dcon_type
     field_types = SF.dataConFieldTypes dcon_type
+    size_params = SF.dataConSizeParams dcon_type
     Just data_type_con = Map.lookup (SF.dataConTyCon dcon_type) tc_map
 
 translateGlobalVar tc_map v ty = do
@@ -1414,7 +1457,7 @@ setupTypeEnvironment id_supply sf_type_env core_type_env = do
   tc_bindings <- run_type_action $ mkTypeBindings tc_map env_core
 
   -- Create variables
-  (v_list, v_bindings) <- run_type_action $ createVars tc_map tc_bindings
+  (v_list, v_bindings) <- run_type_action $ createVars tc_map env_core tc_bindings
   initializeFrontendBuiltinVars v_list
   
   return $ Environment tc_bindings v_bindings id_supply
