@@ -184,7 +184,7 @@ fieldDetails type_info k t =
 
     -- Compute info from a structure
     structure_info s
-      | k == BareK = fmap BareDetails $ structureRepr type_info Nothing t s
+      | k == BareK = fmap BareDetails $ structureRepr type_info t s
       | k == ValK  = fmap ValDetails $ computeValInfo type_info s
 
 -- | Information about the size of a field of an object.
@@ -276,32 +276,26 @@ disjunctSizes type_info ty (Data tag djs) con =
 
 -- | Compute dynamic type information of a bare data structure
 structureRepr :: CoreDynTypeInfo
-              -> Maybe ExpM     -- ^ An expression that evaluates to
-                                --   the representation of this type.
-                                --   'Nothing' if not an algebraic data
-                                --   structure.  This expression can only
-                                --   be used lazily, under a lambda.
               -> Type
               -> Structure
               -> Gen BareInfo
-structureRepr type_info m_rec_exp ty layout =
+structureRepr type_info ty layout =
   case layout
-  of DataStruct (Data tag fs) -> let Just rec_exp = m_rec_exp  
-                                 in sumRepr type_info rec_exp ty tag fs
+  of DataStruct (Data tag fs) -> sumRepr type_info ty tag fs
      ForallStruct fa          -> forall_layout fa
      VarStruct v              -> var_layout v
      ArrStruct t ts           -> arrRepr type_info t ts
      PrimStruct pt            -> internalError "structureRepr: Unexpected type"
      UninhabitedStruct        -> internalError "structureRepr: Uninhabited"
   where
-    continue t l = structureRepr type_info Nothing t l
+    continue t l = structureRepr type_info t l
 
     var_layout v = lift $ lookupBareTypeInfo' type_info v
 
     forall_layout (Forall b t) =
       assumeBinder b $ continue t =<< lift (computeStructure t)
 
-sumRepr type_info rec_exp ty tag alts = do
+sumRepr type_info ty tag alts = do
   let header_layout = headerSize tag (length alts)
 
   -- Compute representation info for all data constructors
@@ -313,18 +307,11 @@ sumRepr type_info rec_exp ty tag alts = do
   -- Compute properties of data constructors
   constructor_info <- zipWithM (alt_repr header_layout) field_info alts
 
-  -- A recursive call that constructs this info object; needed for
-  -- converting to boxed
-  lazy_rec_exp <- lazyExp (bareInfoT `AppT` ty) rec_exp
-
   -- Combine info
   sum_size <- overlays $ map fst constructor_info
   pointer_free <- allPointerFree $ map snd constructor_info
-  copy_fun <- sumCopyFunction type_info ty (zip field_info alts)
-  let as_box = varAppE' defaultAsBoxV [ty] [lazy_rec_exp]
-  let as_bare = varAppE' defaultAsBareV [ty]
-                [packSizeAlign ty sum_size, copy_fun]
-  return $ BareInfo sum_size copy_fun as_box as_bare pointer_free
+  is_ref <- createNonRefEvidence ty
+  return $ BareInfo sum_size pointer_free is_ref
   where
     -- Compute repr information for one constructor.
     -- The returned tuple contains values for the size, copy, and pointerless 
@@ -342,6 +329,18 @@ sumRepr type_info rec_exp ty tag alts = do
 
         return (size, bytes)
         
+-- | Create evidence that the given type is not 'Ref'
+createNonRefEvidence :: Type -> Gen IsRef
+createNonRefEvidence ty = do
+  Just (op, args) <- lift $ deconVarAppType ty
+  when (op == refV) $ internalError "createNonRefEvidence"
+
+  -- Create an expression:
+  -- > notAReference @ty (unsafeMakeCoercion @(AsBox ty) @(Boxed ty))
+  let co = varAppE' idCoercionV [asBoxT `AppT` ty] []
+  return $ IsRef $ conE' (VarCon notAReferenceV [ty] []) [] Nothing [co]
+
+{-
 sumCopyFunction :: CoreDynTypeInfo
                 -> Type
                 -> [([FieldInfo], Alternative)]
@@ -394,22 +393,24 @@ sumCopyFunction type_info ty disjuncts = do
 
 -- | Construct a bare object from the given fields.  Convert bare fields to
 --   initializers.
-copyConstructor :: CoreDynTypeInfo -> Var -> [Type] -> [ExpM]
+copyConstructor :: CoreDynTypeInfo -> [Type] -> Var -> [Type] -> [ExpM]
                 -> [Type] -> [(FieldInfo, ExpM)] -> ExpM
-copyConstructor type_info con ty_args size_params ex_types fields =
+copyConstructor type_info data_type con ty_args size_params ex_types fields =
   unboxedConE' (VarCon con ty_args ex_types) size_params (map field_expr fields)
   where
     field_expr (FieldInfo ty details, e) =
       case details
       of ValDetails _  -> e
          BoxDetails    -> e
-         BareDetails d -> appE' (bare_info_copy d) [] [e]
+         BareDetails d -> varAppE' blockcopyV [data_type]
+                          [packSizeAlign $ bare_info_size d, e]
+-}
 
 arrRepr :: CoreDynTypeInfo -> Type -> Type -> Gen BareInfo
 arrRepr type_info size elem = do
   let array_type = varApp arrV [size, elem]
   size_val <- lift $ lookupIntTypeInfo' type_info size
-  elem_repr <- structureRepr type_info Nothing elem =<< lift (computeStructure elem)
+  elem_repr <- structureRepr type_info elem =<< lift (computeStructure elem)
 
   -- Call 'repr_arr' to compute the array's representation
   let expr = varAppE' bareInfo_arrV [size, elem]
@@ -622,12 +623,13 @@ definePrimitiveValInfo dtype
 valInfoDefinition :: DataType -> UnboxedTypeEvalM [GDef Mem]
 valInfoDefinition dtype = do
   ent <- typeInfoDefinition dtype build_info
-  let info_def = mkDef (dataTypeUnboxedInfoVar dtype) ent
+  let info_def = addInlineAttribute $ mkDef info_var ent
   size_defs <- sizeInfoDefinitions dtype
   return (info_def : size_defs)
   where
     ty_args = [VarT v | v ::: _ <- dataTypeParams dtype] 
     ty = dataTypeCon dtype `varApp` ty_args
+    info_var = dataTypeUnboxedInfoVar dtype
 
     -- Create the info object for this data type constructor
     build_info dyn_info = do
@@ -637,7 +639,7 @@ valInfoDefinition dtype = do
 bareInfoDefinition :: DataType -> UnboxedTypeEvalM [GDef Mem]
 bareInfoDefinition dtype = do
   ent <- typeInfoDefinition dtype build_info
-  let info_def = add_attributes $ mkDef info_var ent
+  let info_def = addInlineAttribute $ mkDef info_var ent
   size_defs <- sizeInfoDefinitions dtype
   return (info_def : size_defs)
   where
@@ -648,16 +650,21 @@ bareInfoDefinition dtype = do
     -- Create the info object for this data type constructor
     build_info dyn_info = do
       -- Create a recursive call to the info object for this type constructor
-      info_e <- callKnownUnboxedInfoFunction dyn_info dtype ty_args
-      rep <- structureRepr dyn_info (Just info_e) ty =<< lift (computeStructure ty)
+      rep <- structureRepr dyn_info ty =<< lift (computeStructure ty)
       return $ packRepr ty rep
 
-    -- Temporarily mark type object constructors as "inline_never".
-    -- These objects may be recursive, and the simplifier doesn't terminate
-    -- correctly for this form of recursion. 
-    -- This needs a better fix, because inlining these objects is important.
-    add_attributes def =
-      modifyDefAnnotation (\d -> d {defAnnInlineRequest = InlNever}) def
+-- Add an \"inline-postfinal\" attribute to functions.
+-- We inline unboxed info.  It's a good idea because it gets rid
+-- of type objects.
+addInlineAttribute d
+  -- Is this a function?
+  | FunEnt (FunM f) <- definiens d, not (null $ funParams f) =
+      modifyDefAnnotation make_inlined d
+  | otherwise = d
+  where
+    make_inlined d = d { defAnnInlineRequest = InlAggressively
+                       , defAnnInlinePhase = InlPostfinal
+                       }
 
 boxInfoDefinitions :: DataType -> UnboxedTypeEvalM [GDef Mem]
 boxInfoDefinitions dtype = do 

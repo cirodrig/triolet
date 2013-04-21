@@ -16,6 +16,7 @@ information about how a value is demanded.
 module SystemF.Demand where
 
 import Control.Monad
+import Data.Function
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 import Data.List
@@ -150,7 +151,22 @@ instance Dataflow Specificity where
   joinPar Copied (Decond {}) = Inspected
   joinPar (Decond {}) Copied = Inspected
 
-  -- TODO: Written(..), Read(..)
+  joinPar (Written v1 h1) (Written v2 h2) =
+    -- Unify variables by renaming v2 to v1
+    let h2' = renameHeapMap (Rename.singleton v2 v1) h2
+        -- Join both maps; absent entries are 'Unused'
+        h' = outerJoinHeapMap (joinPar `on` fromMaybe Unused) h1 h2'
+    in Written v1 h'
+  joinPar (Written {}) _ = Inspected
+  joinPar _ (Written {}) = Inspected
+
+  joinPar (Read h1) (Read h2) =
+    -- Join both maps; absent entries are 'Unused'
+    Read $ outerJoinHeapMap (joinPar `on` fromMaybe Unused) h1 h2
+
+  joinPar (Read _) _ = Inspected
+  joinPar _ (Read _) = Inspected
+
   joinPar _ _ = internalError "Specificity.join: Not implemented for these values"
   
   joinSeq = joinPar

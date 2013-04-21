@@ -40,7 +40,6 @@ module LowLevel.Builtins
         the_fun_copy1F,
         the_fun_copy2F,
         the_fun_copy4F,
-        the_fun_copy,
         {- the_fun_makeComplex,
         the_fun_load_int,
         the_fun_load_float,

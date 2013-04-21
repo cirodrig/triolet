@@ -849,6 +849,7 @@ builtinVariableNames =
     
     -- Inserted by representation inference
   , "copy"
+  , "blockcopy"
   , "asbox"
   , "asbare"
   , "reprSizeAlign"

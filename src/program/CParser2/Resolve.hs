@@ -466,9 +466,10 @@ resolveEntity pos _ (VarEnt ty attrs) = do
   attrs' <- resolveAttrs pos attrs
   return $ VarEnt ty' attrs'
 
-resolveEntity _ (GlobalName r_name) (TypeEnt ty) = do
+resolveEntity pos (GlobalName r_name) (TypeEnt ty attrs) = do
   ty' <- resolveLType KindLevel ty
-  return $ TypeEnt ty'
+  attrs' <- resolveAttrs pos attrs
+  return $ TypeEnt ty' attrs'
 
 resolveEntity _ (GlobalName r_name) (TypeSynEnt ty) = do
   ty' <- resolveLType TypeLevel ty
@@ -569,7 +570,7 @@ constructorNames (Module decls) =
            of DataEnt _ _ con_decls _ ->
                 let con_names = map data_con_name con_decls
                 in name : con_names
-              TypeEnt _ ->
+              TypeEnt _ _ ->
                 [name]
               _ ->
                 []

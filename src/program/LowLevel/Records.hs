@@ -95,7 +95,11 @@ sizeAlignRecord = constStaticRecord
 --
 -- Pointerless data does not need to be scanned during GC.
 passConvRecord :: StaticRecord
-passConvRecord = constStaticRecord
+passConvRecord = -- Error because the "repr" data structure was changed.
+                 -- This definition hasn't been updated to reflect the new
+                 -- data structure definition.
+                 internalError "passConvRecord" $
+                 constStaticRecord
                  [ RecordField objectHeaderRecord
                  , RecordField sizeAlignRecord 
                  , PrimField OwnedType      -- Copy function

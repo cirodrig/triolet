@@ -7,7 +7,9 @@ module SystemF.Datatypes.InfoCall
         constructConstantSizeParameter,
         callUnboxedInfoFunction,
         callKnownUnboxedInfoFunction,
-        callConstantUnboxedInfoFunction)
+        callConstantUnboxedInfoFunction,
+        callBoxedInfoFunction,
+        callConstantBoxedInfoFunction)
 where
 
 import Prelude hiding(catch)
@@ -61,6 +63,11 @@ callKnownUnboxedInfoFunction type_info data_type ty_args = do
 callConstantUnboxedInfoFunction :: DataType -> [Type] -> Gen (Maybe ExpM)
 callConstantUnboxedInfoFunction data_type ty_args =
   callUnboxedInfoFunction emptyTypeInfo data_type ty_args
+
+callConstantBoxedInfoFunction :: DataConType -> [Type] -> [Type]
+                              -> Gen (Maybe ExpM)
+callConstantBoxedInfoFunction dcon_type ty_args ex_types =
+  callBoxedInfoFunction emptyTypeInfo dcon_type ty_args ex_types
 
 -------------------------------------------------------------------------------
 -- Recursively constructing structures
@@ -169,4 +176,21 @@ callUnboxedInfoFunction type_info data_type ty_args = do
   return $ do
     args <- sequence m_args
     return $ varAppE' (dataTypeUnboxedInfoVar data_type) ty_args args
+
+-- | Generate a call to a boxed type constructor's info function
+callBoxedInfoFunction :: CoreDynTypeInfo -> DataConType -> [Type] -> [Type]
+                      -> Gen (Maybe ExpM)
+callBoxedInfoFunction type_info dcon_type ty_args ex_types = do
+  let data_type = dataConType dcon_type
+      con = dataConCon dcon_type
+
+  -- Get size parameters and static types for this constructor
+  size_param_types <- lift $ instantiateSizeParams data_type ty_args
+  static_types <- lift $ instantiateStaticTypes data_type ty_args
+  m_args <- mapM (constructInfo type_info) $ size_param_types ++ static_types
+
+  -- Create a constructor call
+  return $ do
+    args <- sequence m_args
+    return $ varAppE' (dataTypeBoxedInfoVar data_type con) (ty_args ++ ex_types) args
 

@@ -1238,7 +1238,7 @@ eliminateUselessCopying expression = do
                     case body' of
                       AppE _ op [_] [_, copy_src, copy_dst] -> do
                         is_copy <-
-                          checkForVariableExpr (coreBuiltin The_copy) op >&&>
+                          checkForVariableExpr blockcopyV op >&&>
                           checkForVariableExpr pattern_var copy_src
 
                         if is_copy
@@ -1328,14 +1328,14 @@ checkForCopyExpr v e = checkForCopyExpr' v =<< freshenHead e
 checkForCopyExpr' v e =
   case e
   of AppE _ op [_] [_, copy_src] ->
-       checkForVariableExpr (coreBuiltin The_copy) op >&&>
+       checkForVariableExpr blockcopyV op >&&>
        checkForVariableExpr v copy_src
      LamE _ (FunSM (Fun _ [] [rparam] _ body)) -> do
        let rparam_var = patMVar (fromPatSM rparam)
        subst_body <- freshenHead body
        case subst_body of
          AppE _ op [_] [_, copy_src, copy_dst] ->
-           checkForVariableExpr (coreBuiltin The_copy) op >&&>
+           checkForVariableExpr blockcopyV op >&&>
            checkForVariableExpr v copy_src >&&>
            checkForVariableExpr rparam_var copy_dst
          _ -> return False
@@ -1598,11 +1598,15 @@ rwApp :: Bool -> BaseExp SM -> ExpInfo -> ExpSM -> [Type] -> [ExpSM]
       -> LR (ExpM, AbsCode)
 rwApp is_stream_arg original_expression inf op ty_args args = do
   (op', ty_args', args') <- preUncurryApp inf op ty_args args
+
+  -- Simplify type arguments
+  ty_args'' <- mapM reduceToWhnf ty_args'
+
   case op' of
     Left op_exp ->
-      rwAppOperator is_stream_arg inf op_exp ty_args' args'
+      rwAppOperator is_stream_arg inf op_exp ty_args'' args'
     Right (case_inf, scr, sps, alts) ->
-      rwAppOfCase is_stream_arg inf case_inf scr sps alts ty_args' args'
+      rwAppOfCase is_stream_arg inf case_inf scr sps alts ty_args'' args'
 
 -- Try to uncurry this application.  The operator and arguments have not been
 -- rewritten.
@@ -1784,7 +1788,7 @@ builtinFunctionSimplifiers =
   IntMap.fromList [(fromIdent $ varID v, (a, b, c)) | (v, a, b, c) <- entries]
   where
     entries =
-      [ (coreBuiltin The_copy, 1, 2, rwCopyApp)
+      [ (blockcopyV, 1, 2, rwCopyApp)
       , (coreBuiltin The_eqI, 0, 2, rwIntEqApp)
       , (coreBuiltin The_and, 0, 2, rwAndApp)
       ]
@@ -1804,9 +1808,9 @@ rwCopyApp inf copy_op ty [repr] = do
   return (appE inf copy_op [ty] [repr'], topCode) -}
 
 rwCopyApp inf [ty] args = debug $
-  -- Rewrite @copy _ _ (reify _ E)@ to @E@
+  -- Rewrite @blockcopy _ _ (reify _ E)@ to @E@
   case args
-  of (dict_arg : src : rest) -> do
+  of (size_arg : src : rest) -> do
        let maybe_dst = case rest
                        of []  -> Nothing
                           [e] -> Just e
@@ -1827,8 +1831,8 @@ rwCopyApp inf [ty] args = debug $
                         e' <- applySubstitution e
                         rwExp False $ deferEmptySubstitution $
                                       appE' src_arg' [] [e']
-             _ -> rwCopyApp1 inf ty dict_arg src maybe_dst
-         _ -> rwCopyApp1 inf ty dict_arg src maybe_dst
+             _ -> rwCopyApp1 inf ty size_arg src maybe_dst
+         _ -> rwCopyApp1 inf ty size_arg src maybe_dst
      _ -> wrong_number_of_arguments
   where
     debug m = m
@@ -1840,19 +1844,19 @@ rwCopyApp inf [ty] args = debug $
              pprExp (appE inf copy_op [ty] args') $$ text "----" $$ pprExp e) $ return x
     -}
 
-    copy_op = varE inf (coreBuiltin The_copy)
+    copy_op = varE inf blockcopyV
 
     wrong_number_of_arguments :: a
     wrong_number_of_arguments =
       internalError "rwCopyApp: Unexpected number of arguments"
 
-rwCopyApp1 inf ty repr src m_dst = do
+rwCopyApp1 inf ty size src m_dst = do
   whnf_type <- reduceToWhnf ty
   case fromVarApp whnf_type of
     {- Just (op, [val_type]) | op `isCoreBuiltin` The_Stored ->
       copyStoredValue inf val_type repr src m_dst -}
     _ -> do
-      (repr', repr_value) <- rwExp False repr
+      (size', size_value) <- rwExp False size
       (src', src_value) <- rwExp False src
       maybe_dst_result <- mapM (rwExp False) m_dst
   
@@ -1872,7 +1876,7 @@ rwCopyApp1 inf ty repr src m_dst = do
       let rebuild_copy_expr =
             -- Rebuild the copy expression with simplified arguments
             let rebuilt_args =
-                  repr' : src' : fmap fst (maybeToList maybe_dst_result)
+                  size' : src' : fmap fst (maybeToList maybe_dst_result)
                 new_exp = appE inf copy_op [ty] rebuilt_args
             in return (new_exp, new_value)
 
@@ -1893,7 +1897,7 @@ rwCopyApp1 inf ty repr src m_dst = do
 
       ifElseFuel rebuild_copy_expr create_initializer
   where
-    copy_op = varE inf (coreBuiltin The_copy)
+    copy_op = varE inf blockcopyV
 
 {-
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
@@ -2155,8 +2159,8 @@ rwCase1 is_stream_arg inf scrut sps alts
       -- Rename the scrutinee and get constructor fields
       ConE _ scrut_con _ ty_ob scrut_args <- freshenHead data_con_expr
 
-      let alt = findAlternative alts scrut_con
-          ex_types = conExTypes scrut_con
+      alt <- findAlternative alts scrut_con
+      let ex_types = conExTypes scrut_con
       field_kinds <- conFieldKinds scrut_con
 
       -- Compute dictionaries for bare fields
@@ -2446,7 +2450,7 @@ eliminateCaseWithAppAndValue
   is_stream_arg is_inspector (ConAppAndValue con ty_ob args_and_values) alts = do
   field_kinds <- conFieldKinds con
   let ex_args = conExTypes con
-      alt = findAlternative alts con
+  alt <- findAlternative alts con
   eliminateCaseWithSimplifiedExp
      is_stream_arg is_inspector field_kinds ex_args ty_ob args_and_values alt
 
@@ -2510,7 +2514,7 @@ rwCase2 is_stream_arg inf alts scrut' scrut_val sps = do
             if null $ conExTypes dcon
             then Just ([], field_values)
             else Nothing
-      let alt = findAlternative alts dcon
+      alt <- findAlternative alts dcon
 
       rwCaseAlternatives
         inf scrut' is_stream_arg scrut_var known_values sps [alt]
@@ -2587,11 +2591,13 @@ rwCaseAlternatives inf scrut is_stream_arg scrut_var known_values sps alts = do
            return $ length (dataTypeDataConstructors data_type) /= 1
 
 -- | Find the alternative matching constructor @con@
-findAlternative :: [AltSM] -> ConInst -> AltSM
+findAlternative :: [AltSM] -> ConInst -> LR AltSM
 findAlternative alts con =
   case find match_con alts
-  of Just alt -> alt
-     Nothing -> internalError "rwCase: Missing alternative"
+  of Just alt -> return alt
+     Nothing -> do -- DEBUG: print alternatives
+                   rn_alts <- mapM applySubstitutionAlt alts 
+                   traceShow (vcat $ map pprAlt rn_alts) $ traceShow con_summary $ return $! internalError "rwCase: Missing alternative"
   where
     con_summary = summarizeConstructor con
 

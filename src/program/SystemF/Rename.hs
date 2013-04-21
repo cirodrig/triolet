@@ -38,6 +38,7 @@ module SystemF.Rename
         renameTyPat,
         renameTyPats,
         renameDeConInst,
+        renameHeapMap,
         freshenDeConInst,
         renameDefGroup,
         deConFreeVariables,
@@ -562,6 +563,7 @@ instance Renameable Specificity where
        Written v spc     -> Set.delete v $ fvHeapMap spc
        Unused            -> Set.empty
 
+renameHeapMap :: Renameable a => Renaming -> HeapMap a -> HeapMap a
 renameHeapMap rn (HeapMap xs) = HeapMap $ map rename_assoc xs
   where rename_assoc (addr, val) =
           (fromMaybe addr $ Rename.lookup addr rn, rename rn val)

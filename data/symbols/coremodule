@@ -29,7 +29,7 @@ data StuckRef (a : box) : bare
   stuckRef (a);
 };
 
-data Boxed (a : bare) : box
+data Boxed (a : bare) : box attribute(builtin)
 {
   boxed (a);
 };
@@ -55,8 +55,8 @@ data Any : box
 };
 
 -- Type functions to convert between representations
-type AsBox : bare -> box;
-type AsBare : box -> bare;
+type AsBox : bare -> box attribute(builtin);
+type AsBare : box -> bare attribute(builtin);
 
 -- Normal data types
 
@@ -194,18 +194,70 @@ data SizeAlignVal (a : val) : val
   sizeAlignVal (uint, uint) attribute(builtin);
 };
 
+-- Evidence that a bare type is or is not of the form 'Ref t'.
+data IsRef (a : bare) : val attribute(builtin)
+{
+  notAReference (coerce @box (AsBox a) (Boxed a)) attribute(builtin);
+  isAReference @(b : box) (coerce @bare a (Ref b)) attribute(builtin);
+};
+
 data Repr (a : bare) : box
   attribute(abstract, builtin)
 {
   repr
   (SizeAlign a,       -- Size and alignment
-   a -> Init a,	      -- Copy
-   Init a -> AsBox a, -- Convert to boxed
-   AsBox a -> Init a, -- Convert to bare
-   bool)              -- Pointerlessness
+   bool,              -- Pointerlessness
                       -- (True if an 'a' definitely doesn't contain pointers)
+   IsRef a)
   attribute(builtin);
 };
+
+
+copy @(a : bare) (r : Repr a) (x : a) (y : OutPtr a) -> Store attribute(inline) =
+  case r of repr tyob sa pl isref.
+  blockcopy @a sa x y;
+
+
+-- Convert from boxed to bare
+asbox @(a : bare) (r : Repr a) (x : Init a) -> AsBox a attribute(inline) =
+  case r of repr tyob sa pl isref.
+  case isref of {
+    notAReference co.
+      -- Write into a new 'boxed' container
+      let tyob = boxedinfo boxed @a r in
+      coerce @(Boxed a) @(AsBox a) (boxed @a sa tyob x)
+
+  ; isAReference @b co.
+      -- Write to a temporary object, then read the temporary object
+      let tyob = boxedinfo stuckBox @a r in
+      case stuckBox @a sa tyob x of [sa] stuckBox tyob y.
+      case coerce @a @(Ref b) y of ref z.
+      coerce @b @(AsBox a) z
+  };
+  
+
+-- Convert from bare to boxed
+asbare @(a : bare) (r : Repr a) (x : AsBox a) (ret : OutPtr a) -> Store
+  attribute(inline) =
+
+  case r of repr tyob sa pl isref.
+  case isref of {
+    notAReference co.
+      -- Copy contents of boxed object
+      case coerce @(AsBox a) @(Boxed a) x of [sa] boxed tyob y.
+      blockcopy @a sa y ret
+
+  ; isAReference @b co.
+      -- Write into a new reference
+      let ret2 : OutPtr (Ref b) = coerce @(OutPtr a) @(OutPtr (Ref b)) ret in
+      ref @b (coerce @(AsBox a) @b x) ret2
+  };
+
+
+-- Primitive copy operation
+blockcopy : forall a : bare. SizeAlign a -> a -> OutPtr a -> Store
+  attribute(conlike, builtin);
+
 
 data ReprVal (a : val) : box
   attribute(builtin)
@@ -1840,7 +1892,7 @@ PBTree_flatten @(a : bare)
           let rep_array_m : Repr (arr m a) = repr_arr @m @a tree_list_dim rep in
           case list_sb of [reprSizeAlign @(arr m a) rep_array_m]
             stuckBox tyob (tree_list_array : (arr m a)).
-          case rep of repr tyob sa copy_a to_boxed_a to_bare_a pointerless_a.
+          let sa = reprSizeAlign @a rep in
 
           doall @m tree_list_dim
           (\ (i : int) -> Store.
@@ -2127,17 +2179,6 @@ shapeSliceRepr : forall sh : box. ShapeDict sh -> Repr (slice sh);
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
-copy @(a : bare) (rep : Repr a) (src : a) (dst : OutPtr a) -> Store
-  attribute(conlike, inline, inline_postfinal) =
-
-  case rep of repr tyob sa copy_a to_boxed_a to_bare_a pointerless_a.
-
-  copy_a src dst;
-
-asbox : forall a : bare. Repr a -> Init a -> AsBox a;
-asbare : forall a : bare. Repr a -> AsBox a -> Init a;
-
-
 bareToBox @(a : bare) (rep : Repr a) (x : a) -> AsBox a attribute(inline) =
   asbox @a rep (copy @a rep x);
 
@@ -2156,7 +2197,7 @@ initToBare @(a : bare) (rep : Repr a) (x : Init a) -> a attribute(inline) =
 reprSizeAlign @(a : bare) (rep : Repr a) -> SizeAlign a
   attribute(inline) =
 
-  case rep of repr tyob sa copy_a to_boxed_a to_bare_a pointerless_a.
+  case rep of repr tyob sa pointerless isref.
 
   sa;
 
@@ -2165,12 +2206,16 @@ dynamicCopyError @(a : bare) (x : a) (ret : OutPtr a) -> Store
   attribute(inline) =
   except @Store;
 
+{-
 -- Copy an array.  Use a loop to copy individual array elements.
 copyArray @(N : intindex) @(a : bare)
   (rep : Repr a) (size : IInt N) (src : arr N a) (ret : OutPtr (arr N a))
   -> Store
   attribute(inline) =
-  case rep of repr tyob sa copy_a to_boxed_a to_bare_a pointerless_a.
+  case rep of repr tyob sa pointerless is_ref.
+
+  if pointerless
+  then blockcopy @(arr N a) 
 
   case size of {
     iInt (fsize : FIInt N).
@@ -2183,6 +2228,7 @@ copyArray @(N : intindex) @(a : bare)
   ; iPosInfty. except @Store
   ; iNegInfty. except @Store
   };
+-}
 
 -- Convert an initializer to a value.  This function is not executable,
 -- and is only used during the simplifier.
@@ -2202,12 +2248,8 @@ defaultAsBare @(a : bare)
 repr_Ref @(a : box) -> Repr (Ref a)
   attribute(inline, inline_postfinal, builtin) =
 
-  repr @(Ref a) (boxedinfo repr @(Ref a)) (sizealign_Ref @a)
-  (\ (x : Ref a) (r : OutPtr (Ref a)) -> Store.
-    case x of ref bx. ref @a bx r)
-  (unboxRefInit @a)
-  (\ (x : a) (r : OutPtr (Ref a)) -> Store. ref @a x r)
-  False;
+  repr @(Ref a) (boxedinfo repr @(Ref a)) (sizealign_Ref @a) False
+  (isAReference @(Ref a) @a (idBareCoercion @(Ref a)));
 
 sizealign_int : SizeAlign (Stored int);
 sizealign_uint : SizeAlign (Stored uint);
@@ -2222,26 +2264,13 @@ repr_arr @(n : intindex) @(e : bare)
   (size : FIInt n) (repr_e : Repr e) -> Repr (arr n e)
   attribute(inline, inline_postfinal, builtin) =
 
-  case repr_e of repr tyob sa copy_e to_boxed_e to_bare_e pointerless_e.
-
-  letfun
-    copy_arr (a : arr n e) (ret : OutPtr (arr n e)) -> Store =
-
-    doall @n size
-    (\ (i : int) -> Store.
-       copy @e repr_e (subscript @n @e sa a i) (subscript_out @n @e sa ret i))
-  in
-
-  let sa = sizealign_arr @n @e size sa in
+  case repr_e of repr tyob sa_e pointerless is_ref_e.
 
   repr @(arr n e)
   (boxedinfo repr @(arr n e))
-  sa
-  copy_arr
-  (defaultAsBox @(arr n e)
-   (\ (dummy : NoneType) -> Repr (arr n e). repr_arr @n @e size repr_e))
-  (defaultAsBare @(arr n e) sa copy_arr)
-  pointerless_e;
+  (sizealign_arr @n @e size sa_e)
+  pointerless
+  (notAReference @(arr n e) (idCoercion @(Boxed (arr n e))));
 
 repr_int : Repr (Stored int) attribute(inline, inline_final) =
   unboxedinfo Stored @int (unboxedinfo int);
@@ -2879,7 +2908,7 @@ TraversableDict_list_traverse @(a : box)
 
   let shp = con_list_dim (justVal @int size_i) in
 
-  case rep of repr tyob sa copy_a to_boxed_a to_bare_a pointerless_a.
+  case rep of repr tyob sa pointerless_a is_ref_a.
 
   con_viewStream @a
   (view_generate @list_dim
@@ -2935,7 +2964,7 @@ TraversableDict_array1_traverse
   
   let linear_map = linearMap stride lo in
 
-  case rep of repr tyob sa copy_a to_boxed_a to_bare_a pointerless_a.
+  case rep of repr tyob sa pointerless_a is_ref_a.
 
   view_generate @dim1 ShapeDict_dim1 @a rep
   (arrayDescToDim1 @N lo stride size)
@@ -6523,7 +6552,7 @@ internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
 -- Coercions
 
 -- Construct an identity coercion.  This function is safe.
-idCoercion : forall a : box. coerce @box a a;
+idCoercion : forall a : box. coerce @box a a attribute(builtin);
 idBareCoercion : forall a : bare. coerce @bare a a;
 
 -- The type functions 'index' and 'cartesianDomain' are inverses where

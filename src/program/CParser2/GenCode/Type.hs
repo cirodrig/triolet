@@ -55,6 +55,16 @@ fromVarAttrs attrs =
     interpret st _ =
       error "Unexpected attribute on type declaration"
 
+-- | Ensure that only permitted attributes appear on a type declaration
+checkTypeAttrs :: [Attribute Resolved] -> ()
+checkTypeAttrs attrs =
+  foldl' seq () $ map check attrs
+  where
+    -- Ignore builtin attribute
+    check BuiltinAttr = ()
+    check _ =
+      error "Unexpected attribute on type declaration"
+
 -- | Convert to a base kind, with error checking
 toBaseKind :: SourcePos -> Type.Kind -> TransT Type.BaseKind
 toBaseKind pos k = do
@@ -171,7 +181,7 @@ varEnt ident ty attrs = do
   let update1 = UpdateTypeEnv (\env -> insertGlobalTypeWithProperties env ident ty' conlike)
   return update1
 
-typeEnt ident kind = do
+typeEnt ident kind attrs = do
   kind' <- genKind kind
 
   -- Look up the type function by its name
@@ -196,7 +206,7 @@ dataEnt pos core_name dom kind data_cons attrs = do
     return $ UpdateTypeEnv (\env -> insertDataType env descr)
 
 entity core_name _ (VarEnt ty attrs) = varEnt core_name ty attrs
-entity core_name _ (TypeEnt ty) = typeEnt core_name ty
+entity core_name _ (TypeEnt ty attrs) = typeEnt core_name ty attrs
 entity core_name pos (DataEnt dom ty data_cons attrs) =
   dataEnt pos core_name dom ty data_cons attrs
 

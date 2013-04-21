@@ -341,21 +341,27 @@ dmdConE dmd inf con sps ty_obj args = do
 --   multiple uses so that they don't get inlined.
 dmdAppE inf op ty_args args = do
   op' <- dmdExp unknownDmd op
-  args' <- mapM (dmdExp unknownDmd) args
+  args' <- sequence [ dmdExp use_mode arg
+                    | (use_mode, arg) <- zip use_modes args]
   --args' <- sequence $ zipWith3 dmdExpWorker call_modes use_modes args
   return $ ExpM $ AppE inf op' ty_args args'
-{-  where
-    -- How the function arguments are used.
+  where
+    -- This is a hack to ensure that arguments of 'blockcopy' are hoisted
+    -- into a separate definition.  This hack should be fixed by hoisting 
+    -- /all/ function arguments, but this requires further optimizer
+    -- adjustments.
     use_modes =
       case op
       of ExpM (VarE _ op_var)
-           | op_var `isCoreBuiltin` The_copy && length args == 2 ->
-               [Used, Copied]
-           | op_var `isCoreBuiltin` The_copy && length args == 3 ->
-               [Used, Copied, Used]
-         _ -> repeat Used
+           | op_var == blockcopyV && n_args == 2 -> [u, c]
+           | op_var == blockcopyV && n_args == 3 -> [u, c, u]
+         _ -> repeat u
+      where
+        n_args = length args
+        u = Dmd ManyUnsafe Used
+        c = Dmd ManyUnsafe Copied
 
-    -- This is a hack to allow inlining beneath the function argument
+{-    -- This is a hack to allow inlining beneath the function argument
     -- of 'append_build_list'.  This is important to inline stream 
     -- expressions and enable stream rewriting.
     -- We really should generalize this to all 'called-at-most-once'

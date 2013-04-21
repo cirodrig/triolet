@@ -174,8 +174,8 @@ builtinFunctions =
      closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
 
     -- Functions translated from Core
-  , (CoreName module_memory_py "copy",
-     Right [| coreBuiltin (SystemF.The_copy) |])
+  , (CoreName module_memory_py "blockcopy",
+     Right [| coreBuiltin SystemF.The_blockcopy |])
   , (CoreName module_prim "convertToBoxed",
      Right [| coreBuiltin (SystemF.The_asbox) |])
   , (CoreName module_prim "convertToBare",

@@ -356,6 +356,8 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (coreBuiltin The_gcd, rwGcd)
             
             , (coreBuiltin The_negI, rwNegateInt)
+            , (coreBuiltin The_intToUint, rwIntToUint)
+            , (coreBuiltin The_uintToInt, rwUintToInt)
             , (coreBuiltin The_addI, rwAddInt)
             , (coreBuiltin The_subI, rwSubInt)
             , (coreBuiltin The_mulI, rwMulInt)
@@ -1267,6 +1269,20 @@ rwNegateInt inf [] [ExpM (LitE _ lit)] =
   in return $! Just $! ExpM (LitE inf (IntL (negate m) t))
 
 rwNegateInt _ _ _ = return Nothing
+
+rwIntToUint :: RewriteRule
+rwIntToUint inf [] [ExpM (LitE _ lit)] =
+  let IntL m _ = lit
+  in return $! Just $! ExpM (LitE inf (IntL m uintT))
+
+rwIntToUint _ _ _ = return Nothing
+
+rwUintToInt :: RewriteRule
+rwUintToInt inf [] [ExpM (LitE _ lit)] =
+  let IntL m _ = lit
+  in return $! Just $! ExpM (LitE inf (IntL m intT))
+
+rwUintToInt _ _ _ = return Nothing
 
 rwAddInt :: RewriteRule
 rwAddInt inf [] [e1, e2]

@@ -36,7 +36,9 @@ function inline copy8F (pointer src, pointer dst) -> unit {
   nil;
 };
 
-// Copy some bytes according to a Repr object
-function inline copy (owned repr, pointer src, pointer dst) -> unit {
-  unit call (repr @! Repr.copy) (src, dst);
+// Copy some bytes
+function inline blockcopy (SA sa, pointer src, pointer dst) -> unit {
+  SA {sz, al} = sa;
+  _ = pointer primcall memcpy (dst, src, sz as word);
+  nil;
 };

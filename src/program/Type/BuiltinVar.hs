@@ -108,7 +108,9 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("int", "int", TypeLevel, False)
         , ("uint", "uint", TypeLevel, False)
         , ("float", "float", TypeLevel, False)
-
+        
+        , ("asBox", "AsBox", TypeLevel, True)
+        , ("asBare", "AsBare", TypeLevel, True)
         , ("bool", "bool", TypeLevel, True)
         , ("noneType", "NoneType", TypeLevel, True)
         , ("valInfo", "ReprVal", TypeLevel, True)
@@ -117,8 +119,10 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("sizeAlign", "SizeAlign", TypeLevel, True)
         , ("sizeAlignVal", "SizeAlignVal", TypeLevel, True)
         , ("fiInt", "FIInt", TypeLevel, True)
+        , ("isRef", "IsRef", TypeLevel, True)
         , ("ref", "Ref", TypeLevel, False) -- Has special boxing rules
         , ("stored", "Stored", TypeLevel, True)
+        , ("boxed", "Boxed", TypeLevel, True)
 
           -- Type variables
         , ("arrTypeParameter1", "n", TypeLevel, False)
@@ -134,6 +138,8 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("fiInt_con", "fiInt", ObjectLevel, True)
         , ("true_con", "True", ObjectLevel, True)
         , ("false_con", "False", ObjectLevel, True)
+        , ("isAReference", "isAReference", ObjectLevel, True)
+        , ("notAReference", "notAReference", ObjectLevel, True)
         , ("ref_con", "ref", ObjectLevel, False) -- Has special boxing rules
         , ("stored_con", "stored", ObjectLevel, True)
 
@@ -171,6 +177,8 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
 
         , ("defaultAsBox", "defaultAsBox", ObjectLevel, True)
         , ("defaultAsBare", "defaultAsBare", ObjectLevel, True)
+        , ("blockcopy", "blockcopy", ObjectLevel, True)
+        , ("idCoercion", "idCoercion", ObjectLevel, True)
         ]
 
       num_variables = length variables

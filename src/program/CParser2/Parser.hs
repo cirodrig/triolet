@@ -575,7 +575,8 @@ pTypeDecl = located $ PS.try $ do
   tycon <- identifier
   match ColonTok
   kind <- pType
-  return $ Decl tycon $ TypeEnt kind
+  attrs <- attributeList
+  return $ Decl tycon $ TypeEnt kind attrs
 
 -- | A global type synonym
 pTypeSynDecl :: P PLDecl

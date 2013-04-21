@@ -13,5 +13,6 @@ extern function core.internal.memory_py.copy4F "copy4F"
   (pointer, pointer) -> unit;
 extern function core.internal.memory_py.copy8F "copy8F"
   (pointer, pointer) -> unit;
-extern function core.internal.memory_py.copy
-  (owned, pointer, pointer) -> unit;
+extern function core.internal.memory_py.blockcopy
+  (SA, pointer, pointer) -> unit;
+

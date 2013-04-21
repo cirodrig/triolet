@@ -48,7 +48,7 @@ data SizeAlign = SizeAlign {objectSize :: !Sz, objectAlign :: !Al}
 -- | A length value, holding an 'int'
 newtype Length = Length ExpM
 
--- | A boolean vaule, indicating whether a data structure doesn't
+-- | A boolean value, indicating whether a data structure doesn't
 --   contain pointers to heap objects.
 --   'True' means the structure has no pointers.
 newtype PointerFree = PointerFree ExpM
@@ -56,6 +56,9 @@ newtype PointerFree = PointerFree ExpM
 isPointerFree, notPointerFree :: PointerFree
 isPointerFree = PointerFree (valConE' (VarCon true_conV [] []) [])
 notPointerFree = PointerFree (valConE' (VarCon false_conV [] []) [])
+
+-- | A GADT indicating whether a data type is of the form 'Ref t'.
+newtype IsRef = IsRef ExpM
 
 -- | The unpacked fields of a 'TypeObject' object
 data BoxInfo =
@@ -66,11 +69,9 @@ data BoxInfo =
 -- | The unpacked fields of a 'Repr' object
 data BareInfo =
   BareInfo 
-  { bare_info_size    :: !SizeAlign 
-  , bare_info_copy    :: !ExpM
-  , bare_info_asbox   :: !ExpM
-  , bare_info_asbare  :: !ExpM
+  { bare_info_size     :: !SizeAlign 
   , bare_info_pointers :: !PointerFree
+  , bare_info_isref    :: !IsRef
   }
 
 -- | The unpacked fields of a 'ReprVal' object
@@ -83,6 +84,13 @@ data ValInfo =
 runGen :: Gen ExpM -> UnboxedTypeEvalM ExpM
 runGen m = do (x, MkExp f) <- runWriterT m
               return $ f x
+
+-- | Run a @Gen (Maybe ExpM)@; raise an exception if it returns 'Nothing'
+runMaybeGen :: Gen (Maybe ExpM) -> UnboxedTypeEvalM ExpM
+runMaybeGen m = do (mx, MkExp f) <- runWriterT m
+                   case mx of
+                     Nothing -> internalError "runMaybeGen"
+                     Just x -> return $ f x
 
 execGen :: Gen a -> UnboxedTypeEvalM (a, ExpM -> ExpM)
 execGen m = do (x, MkExp f) <- runWriterT m
@@ -232,18 +240,18 @@ packSizeAlign ty (SizeAlign s a) =
 -- | Extract the fields of a @Repr a@ term.
 unpackRepr :: Type -> ExpM -> Gen BareInfo
 unpackRepr ty e = do
-  ([], [size_align, copy, asbox, asbare, just_bytes]) <-
+  ([], [size_align, just_bytes, is_ref]) <-
     decon (bareInfoV `varApp` [ty]) e
   sa <- unpackSizeAlign ty size_align
-  return $ BareInfo sa copy asbox asbare (PointerFree just_bytes)
+  return $ BareInfo sa (PointerFree just_bytes) (IsRef is_ref)
 
 -- | Rebuild a @Repr a@ term.
 packRepr :: Type -> BareInfo -> ExpM
-packRepr ty (BareInfo sa copy asbox asbare (PointerFree just_bytes)) =
+packRepr ty (BareInfo sa (PointerFree just_bytes) (IsRef is_ref)) =
   let con = VarCon bareInfo_conV [ty] []
       ty_obj = varAppE' boxInfo_bareInfoV [ty] []
   in conE' con [] (Just ty_obj)
-     [packSizeAlign ty sa, copy, asbox, asbare, just_bytes]
+     [packSizeAlign ty sa, just_bytes, is_ref]
 
 unpackTypeObject :: Type -> ExpM -> Gen BoxInfo
 unpackTypeObject ty e = do
@@ -378,10 +386,13 @@ instance DefaultValue Length where dummy = Length (intL 0)
 instance DefaultValue PointerFree where
   dummy = PointerFree (falseE defaultExpInfo)
 
+instance DefaultValue IsRef where
+  dummy = IsRef (falseE defaultExpInfo) -- Not well-typed
+
 instance DefaultValue ValInfo where dummy = ValInfo dummy dummy
 
 instance DefaultValue BareInfo where
-  dummy = BareInfo dummy z z z dummy
+  dummy = BareInfo dummy dummy dummy
     where
       z = intL 0
 

@@ -284,7 +284,7 @@ data Entity ix =
     -- | A variable declaration
     VarEnt (LType ix) (Attributes ix)
     -- | A type declaration
-  | TypeEnt (LType ix)
+  | TypeEnt (LType ix) (Attributes ix)
     -- | A type synonym declaration
   | TypeSynEnt (LType ix)
     -- | A data type definition
@@ -296,7 +296,7 @@ data Entity ix =
 
 entityAttributes :: Entity ix -> Attributes ix
 entityAttributes (VarEnt _ xs)      = xs
-entityAttributes (TypeEnt _)        = []
+entityAttributes (TypeEnt _ xs)     = xs
 entityAttributes (TypeSynEnt _)     = []
 entityAttributes (DataEnt _ _ _ xs) = xs
 entityAttributes (ConstEnt _ _ xs)  = xs

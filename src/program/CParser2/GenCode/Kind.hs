@@ -39,7 +39,7 @@ declKind (L loc (Decl ident ent)) = do
   let make_update kind =
         return $ UpdateTypeEnv $ \env -> insertGlobalType env (toVar ident) kind
   case ent of
-    TypeEnt k             -> genKind k >>= make_update
+    TypeEnt k _           -> genKind k >>= make_update
     DataEnt binders k _ _ -> genKind (fun_kind binders k) >>= make_update
     _                     -> return mempty
   where

@@ -6,6 +6,7 @@ module core.internal.effects;
 #include "apply_py.h"
 #include "memory_py.h"
 #include "effects.h"
+#include "new_pyasm_records.h"
 
 // Effect tokens are dummy objects.  We do not actually read or write them,
 // but we need functions that pretend to read and write them to resepct
