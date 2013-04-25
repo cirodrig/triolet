@@ -59,6 +59,7 @@ extern procedure core.internal.list.triolet_Array3_get_bounds "triolet_Array3_ge
                       Tuple3(int, int, int));
 
 
+/*
 extern procedure core.internal.list.triolet_List_Int_FromArray "triolet_List_Int_FromArray"
   (int, pointer) -> pointer;
 
@@ -74,12 +75,8 @@ extern procedure core.internal.list.triolet_List_Int_Free "triolet_List_Int_Free
 extern procedure core.internal.list.triolet_List_Float_FromArray "triolet_List_Float_FromArray"
   (int, pointer) -> pointer;
 
-extern procedure core.internal.list.triolet_List_Float_ToArray "triolet_List_Float_ToArray"
-  (pointer, pointer) -> ();
 extern procedure core.internal.list.triolet_List_Float_Length "triolet_List_Float_Length"
   (pointer) -> int;
-extern procedure core.internal.list.triolet_List_Float_Copy "triolet_List_Float_Copy"
-  (pointer) -> pointer;
 extern procedure core.internal.list.triolet_List_Float_Free "triolet_List_Float_Free"
   (pointer) -> ();
 
@@ -108,4 +105,4 @@ extern procedure core.internal.list.triolet_Matrix_Float_Copy "triolet_Matrix_Fl
   (pointer) -> pointer;
 extern procedure core.internal.list.triolet_Matrix_Float_Free "triolet_Matrix_Float_Free"
   (pointer) -> ();
-
+*/

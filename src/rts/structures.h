@@ -5,6 +5,7 @@ extern function core.internal.structures.copy_Tuple2
 extern function core.internal.structures.makeComplex
   (float, float, pointer) -> unit;
 
+#if 0
 extern function core.internal.structures.repr_Referenced
   (owned) -> owned;
 
@@ -48,6 +49,10 @@ extern data owned core.internal.structures.repr_bool;
 extern data owned core.internal.structures.repr_NoneType;
 extern data owned core.internal.structures.repr_MaybeVal_int;
 extern data owned core.internal.structures.repr_MaybeVal_MaybeVal_int;
+#endif
+
+extern data owned core.internal.structures.typeObject_typeObject;
+
 extern data owned core.internal.structures.OpaqueTraversableDict_list;
 
 extern data pointer core.internal.structures.int_info;

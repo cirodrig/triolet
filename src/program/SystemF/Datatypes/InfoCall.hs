@@ -35,7 +35,6 @@ import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Datatypes.DynamicTypeInfo
 import SystemF.Datatypes.Structure
-import SystemF.Datatypes.Util(tagType)
 import SystemF.Datatypes.Layout
 import SystemF.Datatypes.Code
 import Type.Type

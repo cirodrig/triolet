@@ -674,7 +674,8 @@ mkWiredInTypeEnv = do
                (uintV, TyConTypeAssignment uint_data_type),
                (floatV, TyConTypeAssignment float_data_type),
                (refV, TyConTypeAssignment ref_data_type),
-               (ref_conV, DataConTypeAssignment ref_datacon_type)]
+               (ref_conV, DataConTypeAssignment ref_datacon_type),
+               (store_conV, DataConTypeAssignment store_datacon_type)]
 
     store_data_type =
       DataType { dataTypeCon = storeV
@@ -682,10 +683,16 @@ mkWiredInTypeEnv = do
                , dataTypeLayout = Just layout
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
-               , dataTypeIsAlgebraic = False
-               , dataTypeDataConstructors = []}
+               , dataTypeIsAlgebraic = True
+               , dataTypeDataConstructors = [store_conV]}
       where
         layout = unboxedDataTypeLayout [] [] valInfo_storeV []
+
+    store_datacon_type =
+      DataConType { dataConCon = store_conV
+                  , dataConExTypes = []
+                  , dataConFields = []
+                  , dataConType = store_data_type}
 
     arr_data_type =
       DataType { dataTypeCon = arrV

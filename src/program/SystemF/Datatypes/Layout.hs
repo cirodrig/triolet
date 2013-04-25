@@ -26,7 +26,8 @@ module SystemF.Datatypes.Layout
         mapMAlgData,
         algDataNumConstructors,
         algDataBoxing,
-        algDataTagType,
+        algDataVarTagType,
+        algDataMemTagType,
         algDataHeaderType,
         isEnumeration,
         disjunct,
@@ -35,7 +36,6 @@ module SystemF.Datatypes.Layout
         mapDisjuncts, mapMDisjuncts,
         checkDisjunct,
         algebraicData,
-        disjunctsTag,
         IntroP, IntroS, IntroE, ElimP, ElimS, ElimE,
         AlgValueType,
         AlgObjectType,
@@ -50,11 +50,13 @@ module SystemF.Datatypes.Layout
         disjunctLayout,
         disjunctLayout1,
         writeHeader,
-        readHeaderTag)
+        readHeaderValue,
+        castTagToWord)
 where
 
 import Control.Monad
 import Data.Maybe
+import Debug.Trace
 
 import Common.Error
 import SystemF.Datatypes.DynamicTypeInfo
@@ -65,6 +67,14 @@ import Type.Type
 import LowLevel.Build
 import LowLevel.CodeTypes
 import qualified LowLevel.Syntax as L
+
+-- | The type of a reference to a type object
+typeObjectReferenceType :: ValueType
+typeObjectReferenceType = PrimType OwnedType
+
+-- | The type of an unboxed object tag held in a variable
+variableTagType :: ValueType
+variableTagType = PrimType nativeIntType
 
 -- | A 'Layout' contains information about how a data type is stored in
 --   local variables and/or in memory.  Layouts are used for computing the
@@ -94,13 +104,8 @@ type LayoutField = (BaseKind, Layout)
 -- | Information about an algebraic data type's header.  A header
 --   consists of everything in one disjunct except the data type's fields.
 class HasAlgHeader a where
-  type AlgBoxInfo a
   type AlgTagInfo a
 
-  -- | Extract the object header description.
-  --   Returns 'Nothing' if there is no object header.
-  boxInfo :: a -> Maybe (AlgBoxInfo a)
-  
   -- | Extract the description of a constructor tag held in a local variable.
   --   Returns 'Nothing' if there is no tag.
   varTagInfo :: a -> Maybe (AlgTagInfo a)
@@ -116,39 +121,58 @@ class HasAlgHeader a where
 --   memory and in local variables.
 data TagPair a = TagPair {varTag :: a, memTag :: a}
 
--- | Representation of an algebraic data type's header fields.
+uniformTagPair x = TagPair x x
+
+-- | Representation of an algebraic data type's header field.
 --
---   A header may have a boxed object header and may have a constructor tag.
-data HeaderType = HeaderType !Boxing !(Maybe (TagPair ValueType))
+--   For boxed data, the header is a type object reference.
+--
+--   For unboxed data, the header type depends on whether it is an
+--   enumerative type, how many data constructors the type has,
+--   and whether the header is in registers or in memory.
+data HeaderType =
+    BoxedHeaderType 
+  | UnboxedHeaderType !Bool {-#UNPACK#-}!Int
+
+isBoxedHeaderType BoxedHeaderType = True
+isBoxedHeaderType (UnboxedHeaderType _ _) = False
 
 instance HasAlgHeader HeaderType where
-  type AlgBoxInfo HeaderType = ()
   type AlgTagInfo HeaderType = ValueType
-  boxInfo (HeaderType b _) = ifBoxed b ()
-  varTagInfo (HeaderType _ t) = fmap varTag t
-  memTagInfo (HeaderType _ t) = fmap memTag t
+  varTagInfo BoxedHeaderType             = Just typeObjectReferenceType
+  varTagInfo (UnboxedHeaderType True  n) = Just $ PrimType $ unboxedEnumVarTagType n
+  varTagInfo (UnboxedHeaderType False n) = fmap PrimType $ unboxedVarTagType n
+  memTagInfo BoxedHeaderType             = Just typeObjectReferenceType
+  memTagInfo (UnboxedHeaderType True n)  = Just $ PrimType $ unboxedEnumMemTagType n
+  memTagInfo (UnboxedHeaderType False n) = fmap PrimType $ unboxedMemTagType n
 
--- | Representation of an algebraic data type's header value.
-data HeaderData = HeaderData !HeaderType !Int
+-- | Data that identifies one disjunct of an algebraic data type.
+data HeaderData =
+    BoxedHeaderData
+    { headerConIndex :: {-# UNPACK #-} !Int -- ^ Which data constructor
+    , _headerValue   :: !L.Val              -- ^ The header tag value
+    }
+  | UnboxedHeaderData 
+    { _headerType    :: !HeaderType
+    , headerConIndex :: {-# UNPACK #-} !Int -- ^ Which data constructor
+    }
 
 instance HasAlgHeader HeaderData where
-  type AlgBoxInfo HeaderData = ()
   type AlgTagInfo HeaderData = L.Val
-  boxInfo (HeaderData ty _) = boxInfo ty
-  varTagInfo (HeaderData ty n) = fmap (\t -> tagValue t n) $ varTagInfo ty
-  memTagInfo (HeaderData ty n) = fmap (\t -> tagValue t n) $ memTagInfo ty
+  varTagInfo (BoxedHeaderData _ v) = Just v
+  varTagInfo (UnboxedHeaderData ty n) = fmap (\t -> unboxedTagValue t n) $ varTagInfo ty
+  memTagInfo (BoxedHeaderData _ v) = Just v
+  memTagInfo (UnboxedHeaderData ty n) = fmap (\t -> unboxedTagValue t n) $ memTagInfo ty
 
 headerType :: HeaderData -> HeaderType
-headerType (HeaderData ty _) = ty
-
-headerConIndex :: HeaderData -> Int
-headerConIndex (HeaderData _ n) = n
+headerType (BoxedHeaderData _ _) = BoxedHeaderType
+headerType (UnboxedHeaderData ty _) = ty
 
 -- | Field offsets for an algebraic data type's header.
---
---   The object header, if present, is always at offset 0.
---   The tag is at the given offset.
-data HeaderOffsets = HeaderOffsets !Boxing !(Maybe (TagPair Off))
+--   The Boolean is True if there is a header, False if there is none.
+--   The header is always at offset 0.
+--   (This data structure is left over from when headers were more complex.)
+data HeaderOffsets = HeaderOffsets Bool
 
 headerOffsetPair :: Maybe Off -> Maybe (TagPair Off)
 headerOffsetPair Nothing  = Nothing
@@ -158,16 +182,14 @@ headerOffsetPair (Just t) = Just (TagPair e t)
     e = internalError "headerOffsetPair: No local variable offset"
 
 instance HasAlgHeader HeaderOffsets where
-  type AlgBoxInfo HeaderOffsets = ()
-  type AlgTagInfo HeaderOffsets = Off
-  boxInfo (HeaderOffsets b _) = ifBoxed b ()
+  type AlgTagInfo HeaderOffsets = Bool
 
   -- This function should not be called.
   -- Local variables are not addressible.
-  varTagInfo (HeaderOffsets _ t) =
+  varTagInfo (HeaderOffsets _) =
     internalError "HeaderOffsets.varTagInfo: Unexpected use of this function"
 
-  memTagInfo (HeaderOffsets _ t) = fmap memTag t
+  memTagInfo (HeaderOffsets b) = Just b
 
 -- | One member of an algebraic data type.  Consists of a header
 --   and possibly a list of fields.  A list of fields is not given for
@@ -178,9 +200,7 @@ instance Functor AlgDisjunct where
   fmap f (AlgDisjunct header fs) = AlgDisjunct header (fmap f fs)
 
 instance HasAlgHeader (AlgDisjunct a) where
-  type AlgBoxInfo (AlgDisjunct a) = AlgBoxInfo HeaderData
   type AlgTagInfo (AlgDisjunct a) = AlgTagInfo HeaderData
-  boxInfo (AlgDisjunct header _) = boxInfo header  
   varTagInfo (AlgDisjunct header _) = varTagInfo header
   memTagInfo (AlgDisjunct header _) = memTagInfo header
 
@@ -192,15 +212,15 @@ algDisjunctHeader (AlgDisjunct h _) = h
 algDisjunctFields (AlgDisjunct _ fs) = fs
 
 -- | Representation of an algebraic data type.
+--
+--   This has all the information needed to construct and deconstruct objects,
+--   _except_ that it doesn't say how to create the header of a boxed object.
 data AlgData a =
     -- | An enumeration
     TagD 
     { adBoxing    :: !Boxing 
-    , adTagType   :: !ValueType 
     , adSize      :: !Int
     }
-    -- | The boolean type, a special case of an enumeration
-  | BoolD
     -- | A product type
   | ProductD
     { adBoxing    :: !Boxing 
@@ -209,79 +229,104 @@ data AlgData a =
     -- | A tagged sum type
   | SumD
     { adBoxing    :: !Boxing
-    , adTagType   :: !ValueType
     , adDisjuncts :: [[a]]
     }
 
 instance Functor AlgData where
-  fmap f (TagD b t s) = TagD b t s
-  fmap f BoolD        = BoolD
+  fmap f (TagD b s)      = TagD b s
   fmap f (ProductD b fs) = ProductD b (map f fs)
-  fmap f (SumD b t ds) = SumD b t (map (map f) ds)
+  fmap f (SumD b ds)     = SumD b (map (map f) ds)
 
 mapMAlgData :: Monad m => (a -> m b) -> AlgData a -> m (AlgData b)
-mapMAlgData f (TagD b t s)    = return $ TagD b t s
-mapMAlgData f BoolD           = return BoolD
+mapMAlgData f (TagD b s)      = return $ TagD b s
 mapMAlgData f (ProductD b fs) = ProductD b `liftM` mapM f fs
-mapMAlgData f (SumD b t ds)   = SumD b t `liftM` mapM (mapM f) ds
+mapMAlgData f (SumD b ds)     = SumD b `liftM` mapM (mapM f) ds
 
 -- | Number of data constructors of this algebraic data type
 algDataNumConstructors :: AlgData a -> Int
 algDataNumConstructors (TagD {adSize = n})       = n
-algDataNumConstructors BoolD                     = 2
 algDataNumConstructors (ProductD {})             = 1
 algDataNumConstructors (SumD {adDisjuncts = ds}) = length ds
 
+-- | Number of fields in a disjunct of this algebraic data type
+algDataNumFields :: AlgData a -> Int -> Int
+algDataNumFields adt i
+  | i < 0 || i >= algDataNumConstructors adt =
+      internalError "algDataNumFields: Out of range"
+  | otherwise =
+      case adt
+      of TagD {}                  -> 0
+         ProductD {adFields = fs} -> length fs
+         SumD {adDisjuncts = ds}  -> length $ ds !! i
+
 algDataBoxing :: AlgData a -> Boxing
-algDataBoxing BoolD = NotBoxed 
 algDataBoxing d     = adBoxing d
 
--- | Get the tag type used to represent this data type in a local variable.
---   For all data types except the boolean type, this is also the tag type
---   used to represent this data type in memory.
-algDataTagType :: AlgData a -> Maybe ValueType
-algDataTagType (TagD {adTagType = t}) = Just t
-algDataTagType BoolD                  = Just $ PrimType nativeIntType
-algDataTagType (ProductD {})          = Nothing
-algDataTagType (SumD {adTagType = t}) = Just t
+-- | Get the tag types used to represent this data type.
+--
+--   When in a variable, unboxed types are always tagged with a word
+--   and boxed types are always tagged with an owned pointer.
+--   When in memory, boxed types are always tagged with an owned pointer.
+--   Unboxed types in memory have an unsigned int tag, where the number of
+--   disjuncts may vary.
+algDataTagType :: AlgData a -> Maybe (TagPair ValueType)
+algDataTagType ad = 
+  case ad
+  of TagD {} -> let t_var = unboxedEnumVarTagType nc
+                    t_mem = unboxedEnumMemTagType nc
+                in Just $ TagPair (PrimType t_var) (PrimType t_mem)
+     ProductD {} -> Nothing
+     SumD {} -> do t_var <- unboxedVarTagType nc
+                   t_mem <- unboxedMemTagType nc
+                   Just $ TagPair (PrimType t_var) (PrimType t_mem)
+  where
+    nc = algDataNumConstructors ad
+
+algDataVarTagType :: AlgData a -> Maybe ValueType
+algDataVarTagType ad = fmap varTag $ algDataTagType ad
+
+algDataMemTagType :: AlgData a -> Maybe ValueType
+algDataMemTagType ad = fmap memTag $ algDataTagType ad
 
 algDataHeaderType :: AlgData a -> HeaderType
-algDataHeaderType BoolD =
-  let var_tag = PrimType nativeIntType
-      mem_tag = PrimType (case tagType 2 of Just t -> t)
-  in HeaderType NotBoxed (Just $ TagPair var_tag mem_tag)
-
-algDataHeaderType d =
-  let tag = do t <- algDataTagType d
-               return $ TagPair t t
-  in HeaderType (algDataBoxing d) tag
+algDataHeaderType d = 
+  case adBoxing d
+  of IsBoxed  -> BoxedHeaderType
+     NotBoxed -> UnboxedHeaderType (isEnumeration d) (algDataNumConstructors d)
 
 isEnumeration :: AlgData a -> Bool
 isEnumeration (TagD {}) = True
-isEnumeration BoolD     = True
 isEnumeration _         = False
 
-disjunct :: Int -> AlgData a -> AlgDisjunct a
-disjunct n d
+disjunct :: Int -> Maybe L.Val -> AlgData a -> AlgDisjunct a
+disjunct n m_tyob d
   | n < 0 || n >= algDataNumConstructors d =
       internalError "disjunct: Out of bounds"
-
-disjunct n d =
-  let h_type = algDataHeaderType d
-      fields = case d
-               of TagD {}                  -> []
-                  BoolD {}                 -> []
-                  ProductD {adFields = fs} -> fs
-                  SumD {adDisjuncts = fss} -> fss !! n
-  in AlgDisjunct (HeaderData h_type n) fields                  
+  | otherwise =
+      let fields = case d
+                   of TagD {}                  -> []
+                      ProductD {adFields = fs} -> fs
+                      SumD {adDisjuncts = fss} -> fss !! n
+          h_type = algDataHeaderType d
+          header = case (adBoxing d, m_tyob)
+                   of (IsBoxed, Just tyob) -> BoxedHeaderData n tyob
+                      (NotBoxed, Nothing)  -> UnboxedHeaderData h_type n
+      in AlgDisjunct header fields
 
 disjuncts :: AlgData a -> [AlgDisjunct a]
-disjuncts adt = [disjunct i adt | i <- [0 .. algDataNumConstructors adt - 1]]
+disjuncts adt 
+  | adBoxing adt == IsBoxed =
+      internalError "disjuncts: Cannot construct disjuncts of boxed type"
+  | otherwise =
+      [disjunct i Nothing adt | i <- [0 .. algDataNumConstructors adt - 1]]
 
 disjunctData :: Int -> [L.Val] -> AlgData a -> AlgDisjunct L.Val
-disjunctData n fs d =
-  let header = HeaderData (algDataHeaderType d) n
-  in AlgDisjunct header fs
+disjunctData n fs d
+  | adBoxing d == IsBoxed =
+      internalError "disjunctData: Cannot create boxed disjunct"
+  | otherwise =
+      let header = UnboxedHeaderData (algDataHeaderType d) n
+      in AlgDisjunct header fs
 
 mapDisjuncts :: (AlgDisjunct a -> b) -> AlgData a -> [b]
 mapDisjuncts t d = map t $ disjuncts d
@@ -300,7 +345,7 @@ checkDisjunct :: AlgData b -> AlgDisjunct a -> c -> c
 checkDisjunct adt dj x
   | i < 0 || i >= algDataNumConstructors adt =
       internalError "checkDisjunct: Constructor index out of range"
-  | n_fields /= length (algDisjunctFields $ disjunct i adt) =
+  | n_fields /= algDataNumFields adt i =
       internalError "checkDisjunct: Wrong number of fields"
   | otherwise = x
   where
@@ -312,20 +357,13 @@ algebraicData :: Boxing -> [[a]] -> AlgData a
 algebraicData boxing disjuncts
   -- An enumeration type: has a tag, but no fields
   -- A unit type also counts as an enumeration type.
-  | all null disjuncts = TagD boxing tag_type n_disjuncts
+  | all null disjuncts = TagD boxing (length disjuncts)
 
   -- A product type
   | [fields] <- disjuncts = ProductD boxing fields
 
   -- General case, a sum of products type
-  | otherwise = SumD boxing tag_type disjuncts
-  where
-    n_disjuncts = length disjuncts
-    tag_type = case disjunctsTag n_disjuncts
-               of Just t  -> PrimType t
-                  Nothing -> PrimType UnitType
-
-disjunctsTag = tagType
+  | otherwise = SumD boxing disjuncts
 
 -------------------------------------------------------------------------------
 -- Algebraic data introduction and elimination
@@ -398,17 +436,28 @@ computeLayout :: LLDynTypeInfo  -- ^ Dynamic type information
               -> BaseKind       -- ^ Kind of the data structure
               -> Structure
               -> GenM Layout
-computeLayout type_info kind layout =
-  case layout
+computeLayout type_info kind structure =
+  case structure
   of PrimStruct pt            -> return $ PrimLayout pt
-     BoolStruct               -> return $ DataLayout BoolD
      ArrStruct t ts           -> arr_layout t ts
      DataStruct (Data tag fs) -> sum_layout tag fs
      ForallStruct fa          -> forall_layout fa
      VarStruct v              -> var_layout v
      UninhabitedStruct        -> internalError "computeLayout: Uninhabited"
   where
-    continue k l = computeLayout type_info k l
+    -- Compute the layout of a component of the structure. 
+    -- Look up dynamic type info first; if not found, proceed structurally.
+    continue k component_type 
+      | k == ValK  = dyn =<< lookupValTypeInfo type_info component_type
+      | k == BareK = dyn =<< lookupBareTypeInfo type_info component_type
+      | otherwise     = traceShow k $ internalError "computeLayout: Unexpected kind"
+      where
+        -- If dynamic size information is available, use that
+        dyn (Just sa) = return $ BlockLayout sa
+        dyn Nothing   = static
+
+        -- Otherwise, compute the structure statically
+        static = computeLayout type_info k =<< computeStructure component_type
 
     var_layout v
       | kind == ValK =
@@ -416,7 +465,7 @@ computeLayout type_info kind layout =
       | kind == BareK =
           BlockLayout `liftM` lookupBareTypeInfo' type_info v
       | otherwise =
-          internalError "computeLayout: Unexpected kind"
+          traceShow kind $ internalError "computeLayout: Unexpected kind"
 
     sum_layout _ [] =
       internalError "computeLayout: Uninhabited type"
@@ -437,16 +486,16 @@ computeLayout type_info kind layout =
 
     field_layout (k, t)
       | k == BoxK = return (BoxK, PrimLayout OwnedType)
-      | otherwise = do l <- continue k =<< computeStructure t
+      | otherwise = do l <- continue k t
                        return (k, l)
 
     forall_layout (Forall b t) =
-      assumeBinder b $ continue kind =<< computeStructure t
+      assumeBinder b $ continue kind t
 
     arr_layout size elem = do
       size_val <- lookupIntTypeInfo' type_info size
       -- Array elements are bare objects
-      elem_size <- memorySize =<< continue BareK =<< computeStructure elem
+      elem_size <- memorySize =<< continue BareK elem
       liftM BlockLayout $ arraySize size_val elem_size
 
 -- | Get the size and alignment of an unboxed object
@@ -464,17 +513,12 @@ memorySize (DataLayout adt) = do
 
 -- | Compute the size and field offsets of an object header
 headerLayout :: HeaderType -> GenM (HeaderOffsets, OffAlign)
-headerLayout (HeaderType boxing m_tag) = do
-  -- Object header, if boxed
-  (_, off1) <-
-    padOffMaybe emptyOffAlign $
-    ifBoxed boxing $ valueSizeAlign (PrimType OwnedType)
+headerLayout ht = do
+  -- Object header
+  (_, off) <-
+    padOffMaybe emptyOffAlign $ fmap valueSizeAlign $ memTagInfo ht
 
-  -- Tag, if tagged
-  (tag_off, off2) <-
-    padOffMaybe off1 $ fmap (valueSizeAlign . memTag) m_tag
-
-  return (HeaderOffsets boxing (headerOffsetPair tag_off), off2)
+  return (HeaderOffsets $ isBoxedHeaderType ht, off)
 
 -- | Compute the size and field offsets of all disjuncts of an unboxed
 --   algebraic data type.
@@ -532,25 +576,38 @@ disjunctFieldLayout start_off fields = do
 -- Header operations
 
 -- | Write an object header to memory
-writeHeader :: HeaderData -> HeaderOffsets -> L.Val -> GenM ()
-writeHeader hdata hoff ptr = do
-  -- TODO: Write object header if present
-  write_tag (memTagInfo hdata) (memTagInfo hoff)
+writeHeader :: HeaderData       -- ^ Header of object to write
+            -> HeaderOffsets
+            -> L.Val            -- ^ Address of object to write
+            -> GenM ()
+writeHeader hdata hoff ptr = write_tag (memTagInfo hdata)
   where
-    write_tag Nothing Nothing = return ()
-    write_tag (Just tag_val) (Just (Off tag_off)) =
-      primStoreOffConst (L.valType tag_val) ptr tag_off tag_val
+    write_tag Nothing = return ()
+    write_tag (Just tag_val) =
+      primStoreConst (L.valType tag_val) ptr tag_val
 
--- | Read an object header's tag from memory
-readHeaderTag :: HeaderType -> HeaderOffsets -> L.Val -> GenM (Maybe L.Val)
-readHeaderTag htype hoff ptr =
-  case (memTagInfo htype, varTagInfo htype, memTagInfo hoff)
-  of (Nothing, Nothing, Nothing) ->
-       return Nothing
-     (Just mem_ty, Just val_ty, Just (Off off)) -> do
-       loaded_tag <- primLoadOffConst mem_ty ptr off
-       tag <- castTag mem_ty val_ty loaded_tag
-       return $ Just tag
+-- | Read an object header from memory.
+readHeaderValue :: HeaderType -> HeaderOffsets -> L.Val -> GenM (Maybe L.Val)
+readHeaderValue htype hoff ptr =
+  case (memTagInfo htype, varTagInfo htype)
+  of (Nothing, Nothing)         -> return Nothing
+     (Just mem_ty, Just val_ty) -> liftM Just $ primLoadConst mem_ty ptr
+
+-- | Extract a constructor index from an object header value.  The result
+--   is a word whose value is in the range from 0 up to
+--   the number of constructors minus 1.
+--   If no tag value is given, the index is zero.
+castTagToWord :: HeaderType -> Maybe L.Val -> GenM L.Val
+castTagToWord _ Nothing = return $ nativeWordV 0
+
+castTagToWord BoxedHeaderType (Just t) =
+  -- Read constructor index from the type object
+  selectTypeObjectConIndex t
+
+castTagToWord htype@(UnboxedHeaderType {}) (Just t) =
+  -- Cast tag to a word
+  let Just mem_ty = memTagInfo htype
+  in castTag mem_ty (PrimType nativeWordType) t
 
 -- | Cast a tag value from one primitive type to another
 castTag :: ValueType -> ValueType -> L.Val -> GenM L.Val
@@ -560,5 +617,4 @@ castTag from_ty to_ty val
       return val
 
   | PrimType (IntType {}) <- from_ty, PrimType (IntType {}) <- to_ty =
-      primCastZ to_ty val
-                      
+      primExtendZ to_ty val

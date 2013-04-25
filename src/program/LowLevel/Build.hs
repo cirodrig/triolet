@@ -264,6 +264,14 @@ genLambdaOrCall param_types return_types mk_code args
     n_args = length args
     n_params = length param_types
 
+genLambdaOrCall1 :: (Monad m, Supplies m (Ident Var)) =>
+                    [ValueType] -> ValueType -> ([Val] -> Gen m Val)
+                 -> [Val] -> Gen m Val
+genLambdaOrCall1 parameter_types return_type mk_body args = do
+  [x] <- genLambdaOrCall parameter_types [return_type]
+         (\x -> liftM return $ mk_body x) args
+  return x
+
 genLambda :: (Monad m, Supplies m (Ident Var)) =>
              [ValueType] -> [ValueType] -> ([Val] -> Gen m [Val]) -> Gen m Val
 genLambda parameter_types return_types mk_body = do
@@ -906,6 +914,8 @@ selectPassConvCopy           = loadField (passConvRecord' !!: 2)
 selectPassConvConvertToBoxed = loadField (passConvRecord' !!: 3)
 selectPassConvConvertToBare  = loadField (passConvRecord' !!: 4)
 selectPassConvIsPointerless  = loadField (passConvRecord' !!: 5)
+
+selectTypeObjectConIndex = loadField (toDynamicRecord typeObjectRecord !!: 1)
 
 -------------------------------------------------------------------------------
 -- Dictionaries

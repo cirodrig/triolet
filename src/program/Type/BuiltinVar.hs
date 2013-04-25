@@ -135,6 +135,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("boxInfo_con", "typeObject", ObjectLevel, True)
         , ("sizeAlign_con", "sizeAlign", ObjectLevel, True)
         , ("sizeAlignVal_con", "sizeAlignVal", ObjectLevel, True)
+        , ("store_con", "store", ObjectLevel, False)
         , ("fiInt_con", "fiInt", ObjectLevel, True)
         , ("true_con", "True", ObjectLevel, True)
         , ("false_con", "False", ObjectLevel, True)

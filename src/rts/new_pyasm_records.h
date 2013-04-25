@@ -21,26 +21,38 @@ record SA {
   const uint align;
 };
 
-// Object layout information
-record Repr {
-  const ObjectHeader header;
+#define NOT_A_REFERENCE uint8 0
+#define IS_A_REFERENCE  uint8 1
+
+// An 'IsRef' stored in memory
+record IsRef_mem {
+  uint8 tag;
+};
+
+// Object layout information stored in memory
+record Repr_mem {
+  const owned header;
   const SA sizealign;          // Size and alignment in bytes
-  const owned copy;                   // Duplicate a value
-  const owned convert_to_boxed;	      // Convert a value to boxed type
-  const owned convert_to_bare;	      // Convert a value to bare type
-  const bool is_pointerless;	      // Is pointerless?
+  const bool pointerless;      // True if object contains no pointers
+  const IsRef_mem is_ref;      // Whether this 'Repr' describes a reference
+};
+
+// Type object information stored in memory
+record TypeObject_mem {
+  const owned header;
+  const uint con_index;         // Data constructor index
 };
 
 record FinIndInt {
   const int n;			// Finite value
 };
 
-#define FINITE uint8 0
-#define POSINFTY uint8 1
-#define NEGINFTY uint8 2
+#define FINITE uint 0
+#define POSINFTY uint 1
+#define NEGINFTY uint 2
 
 record IndInt {
-  const uint8 tag;		// {FINITE, POSINFTY, NEGINFTY}
+  const uint tag;		// {FINITE, POSINFTY, NEGINFTY}
   const IndIntData val;		// if FINITE
 };
 
@@ -66,35 +78,35 @@ record FunInfo(n_args) {
 };
 
 // Additive dictionary
-record AdditiveDict(a) {
-  const ObjectHeader header;
-  const owned add;			// Add two values
-  const owned subtract;			// A value minus another
-  const owned negate;			// Negate a value
-  const a zero;				// The zero value
-};
+// record AdditiveDict(a) {
+//   const ObjectHeader header;
+//   const owned add;			// Add two values
+//   const owned subtract;			// A value minus another
+//   const owned negate;			// Negate a value
+//   const a zero;				// The zero value
+// };
 
 // Multiplicative dictionary
-record MultiplicativeDict(a) {
-  const ObjectHeader header;
-  const owned additive;			// Additive dictionary
-  const owned mul;			// Multiply two values
-  const owned fromInt;			// Create from an integer
-  const a one;				// The one value
-};
+// record MultiplicativeDict(a) {
+//   const ObjectHeader header;
+//   const owned additive;			// Additive dictionary
+//   const owned mul;			// Multiply two values
+//   const owned fromInt;			// Create from an integer
+//   const a one;				// The one value
+// };
 
 // Traversable dictionary
-record TraversableDict {
-  const ObjectHeader header;
-  const owned traverse;               // Traverse an object
-  const owned build;                  // Build an object
-};
+// record TraversableDict {
+//   const ObjectHeader header;
+//   const owned traverse;               // Traverse an object
+//   const owned build;                  // Build an object
+// };
 
 // Complex numbers
-record complex(a) {
-  const a real;
-  const a imag;
-};
+// record complex(a) {
+//   const a real;
+//   const a imag;
+// };
 
 // Unboxed 1-tuples
 record U1Tuple(a) {
@@ -169,27 +181,27 @@ record Tuple6(a, b, c, d, e, f) {
 
 // A Maybe object
 record Maybe(a) {
-  uint8 isjust;			// 0 = Nothing; 1 = Just
+  uint isjust;			// 0 = Nothing; 1 = Just
   a member;			// Valid if isjust
 };
 
 // A boxed object
 record Boxed(a) {
-  const ObjectHeader header;
+  const owned header;
   const a member;
 };
 
 // Pairs of mutable objects
-record Pair(a) {
-  a fst;
-  a snd;
-};
+//record Pair(a) {
+//  a fst;
+//  a snd;
+//};
 
-record SliceObject {
-  Maybe(int) lo_bound;
-  Maybe(int) hi_bound;
-  Maybe(Maybe(int)) stride;
-};
+//record SliceObject {
+//  Maybe(int) lo_bound;
+//  Maybe(int) hi_bound;
+//  Maybe(Maybe(int)) stride;
+//};
 
 /* A hash table, consisting of a keys array and an indirections array
  */

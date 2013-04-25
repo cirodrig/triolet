@@ -41,6 +41,7 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   };
 };
 
+#if 0
 function inline convertToBoxed (owned repr, owned writer) -> owned {
   owned call (repr @! Repr.convert_to_boxed) (writer);
 };
@@ -120,6 +121,7 @@ function inline storeBox (owned arg, pointer dst) -> unit {
 function inline loadBox (pointer src) -> owned {
   owned load src;
 };
+#endif
 
 function inline ptrToBox (pointer ptr) -> owned {
   ptr as owned;
@@ -129,52 +131,52 @@ function inline boxToPtr (owned box) -> pointer {
   box as pointer;
 };
 
-function eq_int (int x, int y) -> bool {
-  x == y;
+function eq_int (int x, int y) -> uint {
+  (x == y) as uint;
 };
 
-function ne_int (int x, int y) -> bool {
-  x != y;
+function ne_int (int x, int y) -> uint {
+  (x != y) as uint;
 };
 
-function lt_int (int x, int y) -> bool {
-  x < y;
+function lt_int (int x, int y) -> uint {
+  (x < y) as uint;
 };
 
-function le_int (int x, int y) -> bool {
-  x <= y;
+function le_int (int x, int y) -> uint {
+  (x <= y) as uint;
 };
 
-function gt_int (int x, int y) -> bool {
-  x > y;
+function gt_int (int x, int y) -> uint {
+  (x > y) as uint;
 };
 
-function ge_int (int x, int y) -> bool {
-  x >= y;
+function ge_int (int x, int y) -> uint {
+  (x >= y) as uint;
 };
 
-function eq_float (float x, float y) -> bool {
-  x == y;
+function eq_float (float x, float y) -> uint {
+  (x == y) as uint;
 };
 
-function ne_float (float x, float y) -> bool {
-  x != y;
+function ne_float (float x, float y) -> uint {
+  (x != y) as uint;
 };
 
-function lt_float (float x, float y) -> bool {
-  x < y;
+function lt_float (float x, float y) -> uint {
+  (x < y) as uint;
 };
 
-function le_float (float x, float y) -> bool {
-  x <= y;
+function le_float (float x, float y) -> uint {
+  (x <= y) as uint;
 };
 
-function gt_float (float x, float y) -> bool {
-  x > y;
+function gt_float (float x, float y) -> uint {
+  (x > y) as uint;
 };
 
-function ge_float (float x, float y) -> bool {
-  x >= y;
+function ge_float (float x, float y) -> uint {
+  (x >= y) as uint;
 };
 
 function negate_int (int x) -> int {
@@ -278,8 +280,8 @@ procedure inline minus_fii (FinIndInt x, FinIndInt y) -> FinIndInt {
   FinIndInt {x_data - y_data};
 };
 
-function inline not (bool b) -> bool {
-  ~b;
+function inline not (uint b) -> uint {
+  (~(b as bool)) as uint;
 };
 
 // Compute the GCD of two positive or negative numbers

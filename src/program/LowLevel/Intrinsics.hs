@@ -21,7 +21,7 @@ import LowLevel.Records
 import qualified Type.Var
 
 lowerIntrinsicOp :: (Monad m, Supplies m (Ident Var)) =>
-                    Type.Var.Var -> Maybe ([Val] -> Gen m [Val])
+                    Type.Var.Var -> Maybe ([Val] -> Gen m Val)
 lowerIntrinsicOp v 
     -- Check size assumptions
   | trioletFloatSize /= S32 =
@@ -34,8 +34,8 @@ lowerIntrinsicOp v
       IntMap.fromList [(fromIdent $ Type.Var.varID v, f) | (v, f) <- assocs]
 
     assocs =
-      [ (coreBuiltin The_or, binary_bool PrimOr)
-      , (coreBuiltin The_and, binary_bool PrimAnd)
+      [ (coreBuiltin The_or, bool_operation PrimOr)
+      , (coreBuiltin The_and, bool_operation PrimAnd)
       , (coreBuiltin The_oper_BITWISEAND,
          binary_int (PrimAndZ Signed S32))
       , (coreBuiltin The_oper_BITWISEOR,
@@ -62,6 +62,16 @@ lowerIntrinsicOp v
          binary_int (PrimMinZ Signed S32))
       , (coreBuiltin The_maxI,
          binary_int (PrimMaxZ Signed S32))
+      , (coreBuiltin The_addU,
+         binary_uint (PrimAddZ Unsigned S32))
+      , (coreBuiltin The_subU,
+         binary_uint (PrimSubZ Unsigned S32))
+      , (coreBuiltin The_mulU,
+         binary_uint (PrimMulZ Unsigned S32))
+      , (coreBuiltin The_minU,
+         binary_uint (PrimMinZ Unsigned S32))
+      , (coreBuiltin The_maxU,
+         binary_uint (PrimMaxZ Unsigned S32))
       , (coreBuiltin The_addF,
          binary_float (PrimAddF S32))
       , (coreBuiltin The_subF,
@@ -147,94 +157,104 @@ lowerIntrinsicOp v
 -- | Create a unary float operation.  Return it as a lambda function, so we
 -- can use it as a value.
 unary_float op =
-  genLambdaOrCall [float_type] [float_type] $ \params -> do
-    emitAtom [float_type] $ PrimA op params
+  genLambdaOrCall1 [float_type] float_type $ \params -> do
+    emitAtom1 float_type $ PrimA op params
   where
     float_type = PrimType (FloatType S32)
 
 binary_float op =
-  genLambdaOrCall [float_type, float_type] [float_type] $ \params -> do
-    emitAtom [float_type] $ PrimA op params
+  genLambdaOrCall1 [float_type, float_type] float_type $ \params -> do
+    emitAtom1 float_type $ PrimA op params
   where
     float_type = PrimType (FloatType S32)
 
 binary_int op =
-  genLambdaOrCall [int_type, int_type] [int_type] $ \params -> do
-    emitAtom [int_type] $ PrimA op params  
+  genLambdaOrCall1 [int_type, int_type] int_type $ \params -> do
+    emitAtom1 int_type $ PrimA op params  
   where
     int_type = PrimType (IntType Signed S32)
 
-
-binary_bool op =
-  genLambdaOrCall [bool_type, bool_type] [bool_type] $ \params -> do
-    emitAtom [bool_type] $ PrimA op params
+binary_uint op =
+  genLambdaOrCall1 [uint_type, uint_type] uint_type $ \params -> do
+    emitAtom1 uint_type $ PrimA op params  
   where
+    uint_type = PrimType (IntType Unsigned S32)
+
+-- | Perform a boolean operation.  Convert arguments to/from words.
+bool_operation op =
+  genLambdaOrCall1 [uint_type, uint_type] uint_type $ \ [x, y] -> do
+    b1 <- emitAtom1 bool_type $ PrimA (PrimCmpZ Unsigned S32 CmpNE) [x, zero]
+    b2 <- emitAtom1 bool_type $ PrimA (PrimCmpZ Unsigned S32 CmpNE) [y, zero]
+    emitAtom1 bool_type $ PrimA op [b1, b2]
+    emitAtom1 uint_type $ PrimA (PrimSelect uint_type) [one, zero]
+  where
+    one = LitV (IntL Unsigned S32 1)
+    zero = LitV (IntL Unsigned S32 0)
+    uint_type = PrimType (IntType Unsigned S32)
     bool_type = PrimType BoolType
 
 -- | Round a FP number
 float_to_int round_mode =
-  genLambdaOrCall [float_type] [int_type] $ \params -> do
-    emitAtom [int_type] $ PrimA (PrimRoundF round_mode S32 Signed S32) params
+  genLambdaOrCall1 [float_type] int_type $ \params -> do
+    emitAtom1 int_type $ PrimA (PrimRoundF round_mode S32 Signed S32) params
   where
     int_type = PrimType (IntType Signed S32)
     float_type = PrimType (FloatType S32)
   
 -- | Cast unsigned to signed int
 uint_to_int =
-  genLambdaOrCall [uint_type] [int_type] $ \params -> do
-    emitAtom [int_type] $ PrimA (PrimCastZ Unsigned Signed S32) params
+  genLambdaOrCall1 [uint_type] int_type $ \params -> do
+    emitAtom1 int_type $ PrimA (PrimCastZ Unsigned Signed S32) params
   where
     int_type = PrimType (IntType Signed S32)
     uint_type = PrimType (IntType Unsigned S32)
 
 -- | Cast signed to unsigned int
 int_to_uint =
-  genLambdaOrCall [int_type] [uint_type] $ \params -> do
-    emitAtom [uint_type] $ PrimA (PrimCastZ Signed Unsigned S32) params
+  genLambdaOrCall1 [int_type] uint_type $ \params -> do
+    emitAtom1 uint_type $ PrimA (PrimCastZ Signed Unsigned S32) params
   where
     int_type = PrimType (IntType Signed S32)
     uint_type = PrimType (IntType Unsigned S32)
 
 id_float, id_int, empty_eff_tok, dead_reference, dead_box, proof_object ::
-  (Monad m, Supplies m (Ident Var)) => [Val] -> Gen m [Val]
+  (Monad m, Supplies m (Ident Var)) => [Val] -> Gen m Val
 
 -- | This is the identity function on floats.
 id_float =
-  genLambdaOrCall [float_type] [float_type] return
+  genLambdaOrCall1 [float_type] float_type (\ [x] -> return x)
   where
     float_type = PrimType (FloatType S32)
 
 -- | This is the identity function on ints.
 id_int =
-  genLambdaOrCall [int_type] [int_type] return
+  genLambdaOrCall1 [int_type] int_type (\ [x] -> return x)
   where
     int_type = PrimType (IntType Signed S32)
 
 indexedIntType = RecordType indexedIntRecord
 
 indexed_int_constant n [] =
-  return [RecV indexedIntRecord [uint8V 0,
-                                 RecV indexedIntDataRecord [RecV finIndexedIntRecord [nativeIntV n]]]]
+  return (RecV indexedIntRecord [uint8V 0,
+                                 RecV indexedIntDataRecord [RecV finIndexedIntRecord [nativeIntV n]]])
 
 fin_indexed_int_constant n [] =
-  return [RecV finIndexedIntRecord [nativeIntV n]]
+  return (RecV finIndexedIntRecord [nativeIntV n])
 
 -- | Create an effect token.
-empty_eff_tok [] = return [LitV UnitL]
+empty_eff_tok [] = return (LitV UnitL)
 
 -- | Initialize an object that's dead.  Since it's dead, we don't have to  
 --   initialize it.
 dead_reference =
-  genLambdaOrCall [PrimType PointerType] [] $ \_ -> do
-    emitAtom [] $ ValA []
+  genLambdaOrCall1 [PrimType PointerType] (PrimType UnitType) $ \_ -> return $ LitV UnitL
 
 -- | Create a dead boxed object.
 dead_box = do
-  genLambdaOrCall [PrimType PointerType] [] $ \_ -> do
-    emitAtom [] $ ValA []
+  genLambdaOrCall1 [PrimType PointerType] (PrimType UnitType) $ \_ -> return $ LitV UnitL
 
 -- | Create a proof object or coercion value.
-proof_object [] = return [LitV UnitL]
+proof_object [] = return (LitV UnitL)
 
 sizeAlignValue t = RecV sizeAlignRecord [nativeWordV (sizeOf t), nativeWordV (alignOf t)]
 

@@ -79,7 +79,7 @@ data Data = Data !Boxing Alternatives
 --   A boxed type's tag is always stored in a word, while an unboxed type's
 --   tag size varies.  Unboxed sum types have a fixed size, but boxed sums
 --   can have a different size depending on constructor.
-data Boxing = IsBoxed | NotBoxed
+data Boxing = IsBoxed | NotBoxed deriving(Eq)
 
 ifBoxed :: Boxing -> a -> Maybe a
 ifBoxed IsBoxed  x = Just x

@@ -29,7 +29,8 @@ import qualified Type.Eval
 import qualified Type.Var
 
 -- This module helps us translate System F types into low-level types
-import {-# SOURCE #-} SystemF.Lowering.Datatypes2
+import SystemF.Datatypes.Size(lowerGlobalFunctionType)
+-- import {-# SOURCE #-} SystemF.Lowering.Datatypes2
 import SystemF.Lowering.LowerMonad(LowerEnv, initializeLowerEnv)
 
 fromBuiltinVarName :: BuiltinVarName -> (ModuleName, String, Maybe String)
@@ -83,24 +84,23 @@ initializeGlobalField supply nm ty
     typeOk (PrimType OwnedType) = True
     typeOk _ = False-}
 
-lowerBuiltinFunType :: LowerEnv
+lowerBuiltinFunType :: IdentSupply Var
+                    -> IdentSupply Type.Var.Var
                     -> Type.Environment.TypeEnv
                     -> Type.Var.Var
                     -> IO FunctionType
-lowerBuiltinFunType lowering_env type_env con = do
-  m_type <-  Type.Environment.runTypeEnvM type_env $
-             Type.Environment.lookupType con
-  case m_type of
-    Just ty ->
-      lowerFunctionType lowering_env ty `catch`
-      \(exc :: SomeException) -> do
-        putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
-        throwIO exc
-
-    Just _ -> internalError $
-              "lowerBuiltinFunType: Incompatible representation for " ++ show con
-    Nothing -> internalError $
-               "lowerBuiltinFunType: Missing type for " ++ show con
+lowerBuiltinFunType var_supply type_var_supply type_env con =
+  Type.Environment.runTypeEvalM lower type_var_supply type_env `catch`
+  \(exc :: SomeException) -> do
+    putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
+    throwIO exc
+  where
+    lower = do
+      m_type <- Type.Environment.lookupType con
+      case m_type of
+        Just ty -> lowerGlobalFunctionType var_supply ty
+        Nothing -> internalError $
+                   "lowerBuiltinFunType: Missing type for " ++ show con
 
 lowerBuiltinObjType :: IdentSupply Type.Var.Var
                     -> Type.Environment.TypeEnv
@@ -132,7 +132,6 @@ initializeLowLevelBuiltins :: IdentSupply Type.Var.Var
 initializeLowLevelBuiltins type_var_ids v_ids i_mem_type_env = do
   -- Create the environment needed for lowering
   mem_type_env <- Type.Environment.thawTypeEnv i_mem_type_env
-  lowering_env <- initializeLowerEnv type_var_ids v_ids mem_type_env Map.empty
 
   -- Create the record
   builtins_record <-
@@ -141,7 +140,7 @@ initializeLowLevelBuiltins type_var_ids v_ids i_mem_type_env = do
           -- Returns a quoted (IO FunctionType)
           closure_type (Left t) = [| return t |]
           closure_type (Right conQ) =
-            [| lowerBuiltinFunType lowering_env mem_type_env $conQ |]
+            [| lowerBuiltinFunType v_ids type_var_ids mem_type_env $conQ |]
 
           init_primitives =
             [("the_biprim_" ++ builtinVarUnqualifiedName nm,

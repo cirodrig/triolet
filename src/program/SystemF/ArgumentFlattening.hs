@@ -523,20 +523,19 @@ flattenedReturnValue flat_ret =
 
 -- | Given the variable bindings returned by 'flattenedReturnParameters', 
 --   and a flattened return value, bind the flattened return variables.
-bindFlattenedReturn :: ExpInfo -> [PatM] -> ExpM -> ExpM -> ExpM
+bindFlattenedReturn :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
+                       ExpInfo -> [PatM] -> ExpM -> ExpM -> m ExpM
 bindFlattenedReturn inf [p] source_exp body =
   -- Single value.  Assign the expression result to the pattern variable.
-  ExpM $ LetE inf p source_exp body
+  return $ ExpM $ LetE inf p source_exp body
 
 bindFlattenedReturn inf patterns source_exp body =
   -- Multiple or zero return values.  Deconstruct the
   -- expression result with a case statement, then repack.
   let pattern_types = map patMType patterns
       decon = TupleDeCon pattern_types
-  in internalError "bindFlattenedReturn: Not implemented"
-     -- TODO: construct size parameters
-     -- ExpM $ CaseE defaultExpInfo source_exp
-     -- [AltM $ Alt decon patterns body]
+  in return $ ExpM $ CaseE defaultExpInfo source_exp []
+     [AltM $ Alt decon Nothing patterns body]
 
 -------------------------------------------------------------------------------
 -- * Value packing and unpacking transformations
@@ -941,7 +940,7 @@ packReturn flat_ret orig_exp =
          packParameterWrite' (internalError "packReturn") (frDecomp flat_ret)
        
        let inf = case orig_exp of ExpM e -> expInfo e
-       return $! bindFlattenedReturn inf patterns orig_exp repack_exp
+       bindFlattenedReturn inf patterns orig_exp repack_exp
 
 -- | Lambda-abstract the expression over the given parameter. 
 --

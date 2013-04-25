@@ -108,6 +108,14 @@ passConvRecord = -- Error because the "repr" data structure was changed.
                  , PrimField BoolType       -- Is pointerless?
                  ]
 
+-- | A type object for boxed objects.  The fields are:
+--
+-- 0. The type object's type object
+-- 1. Constructor index
+typeObjectRecord = constStaticRecord [ PrimField OwnedType
+                                     , PrimField nativeIntType
+                                     ]
+
 -- | A closure created in C and passed to triolet code. 
 --   The closure is a struct with two fields.  The first
 --   is a function pointer, the second is a pointer to data.

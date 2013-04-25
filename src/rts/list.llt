@@ -14,28 +14,11 @@ import procedure exit "exit" (int) -> ();
 
 #include "new_pyasm_records.h"
 
-/*
-function inline repr_list (owned elem_repr) -> owned {
-  repr = pointer primcall triolet_alloc (sizeof Repr);
-
-  // FIXME: Initialize repr header
-  repr @! Repr.sizealign = SA {sizeof List, alignof List};
-  repr @! Repr.is_pointerless = NOT_POINTERLESS;
-  copy_function = owned call list_copy (elem_repr);
-  repr @! Repr.copy = copy_function;
-  repr @! Repr.convert_to_boxed =
-    owned call make_Boxed (sizeof List, alignof List);
-  repr @! Repr.convert_to_bare =
-    owned call from_Boxed (sizeof List, alignof List, copy_function);
-  repr as owned;
-};
-*/
-
-function list_copy (owned elem_repr, pointer src, pointer dst) -> unit {
+/* function list_copy (owned elem_repr, pointer src, pointer dst) -> unit {
   dst @! List.nelems = src @! List.nelems;
   dst @! List.contents = src @! List.contents;
   nil;
-};
+}; */
 
 // Get the length of a list
 function inline list_len (pointer p) -> int {
@@ -53,6 +36,7 @@ procedure triolet_list_from_array (int n_elems,
   l;
 };
 
+/*
 // Copy the contents of a plain-old-data list into an array.
 // The list is not modified.
 procedure triolet_list_to_array_POD (owned elem_repr,
@@ -68,7 +52,7 @@ procedure triolet_list_to_array_POD (owned elem_repr,
      (list @! List.contents) @ Boxed(array_type).member,
      sizeof array_type);
   ();
-};
+}; */
 
 procedure triolet_list_length (pointer list) -> int {
   FinIndInt {n} = list @! List.nelems;
@@ -99,7 +83,6 @@ function repr_array2 (owned elem_repr) -> owned {
     owned call from_Boxed (sizeof Array2, alignof Array2, copy_function);
   repr as owned;
 };
-*/
 
 function matrix_copy (owned elem_repr, pointer src, pointer dst) -> unit {
   first_y = src @! Array2.first_y;
@@ -162,6 +145,7 @@ procedure triolet_matrix_free_POD (pointer mat) -> () {
   () = () primcall triolet_dealloc(mat @! Array2.contents);
   () primcall triolet_dealloc(mat);
 };
+*/
 
 ///////////////////////////////////////////////////////////////////////////////
 // Exported to C for the C++ interface
@@ -332,6 +316,7 @@ procedure triolet_Array3_get_bounds (pointer arr)
 };
 
 
+/*
 ///////////////////////////////////////////////////////////////////////////////
 // Exported to C for the C interface
 
@@ -383,7 +368,7 @@ procedure triolet_List_Float_Length (pointer list) -> int {
   l as int;
 };
 
-procedure triolet_List_Float_Copy (pointer list) -> pointer {
+ procedure triolet_List_Float_Copy (pointer list) -> pointer {
   pointer call list_copy (repr_float, list);
 };
 
@@ -458,3 +443,4 @@ procedure triolet_Matrix_Float_Copy (pointer mat) -> pointer {
 procedure triolet_Matrix_Float_Free (pointer mat) -> () {
   pointer primcall triolet_matrix_free_POD (mat);
 };
+*/

@@ -14,7 +14,7 @@ import procedure exit (int) -> ();
 
 // Allocate a list's contents array
 procedure inline allocate_list_contents (owned rep, int nelems) -> owned {
-  SA {elem_size, elem_align} = rep @! Repr.sizealign;
+  SA {elem_size, elem_align} = rep @! Repr_mem.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef array_type = array(value nelems, elem_type);
 
@@ -27,7 +27,7 @@ procedure inline allocate_list_contents (owned rep, int nelems) -> owned {
 // The old list contents are
 // copied to the new list; the new contents are uninitialized.
 procedure list_grow (owned rep, owned old_contents, int old_size) -> (int, owned) {
-  SA {elem_size, elem_align} = rep @! Repr.sizealign;
+  SA {elem_size, elem_align} = rep @! Repr_mem.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
 
   typedef old_array_type = array(value old_size, elem_type);
@@ -55,7 +55,7 @@ procedure list_grow (owned rep, owned old_contents, int old_size) -> (int, owned
 // the state.
 function inline append_build_list (owned rep, owned f, pointer ret) -> unit
 {
-  SA {elem_size, elem_align} = rep @! Repr.sizealign;
+  SA {elem_size, elem_align} = rep @! Repr_mem.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
 
   letrec {
@@ -95,6 +95,7 @@ function inline append_build_list (owned rep, owned f, pointer ret) -> unit
   nil;
 };
 
+#if 0
 function repr_append_list (owned rep) -> owned
 {
   alist_rep = pointer primcall triolet_alloc (sizeof Repr);
@@ -115,6 +116,7 @@ function copy_append_list (pointer src, pointer dst) -> unit {
   dst @! AppendList.contents = src @! AppendList.contents;
   nil;
 };
+#endif
 
 function inline intSumScatter_make_init (unit dummy) -> int
 {

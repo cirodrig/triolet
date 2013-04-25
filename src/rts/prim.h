@@ -5,6 +5,7 @@ extern function core.internal.prim.traceInt_box (int, owned) -> owned;
 extern procedure core.internal.prim.finite_IndInt (int) -> IndInt;
 extern procedure core.internal.prim.from_finite_IndInt (IndInt) -> int;
 
+#if 0
 extern function core.internal.prim.convertToBoxed
   (owned, owned) -> owned;
 
@@ -24,23 +25,24 @@ extern function core.internal.prim.from_Boxed_4 (owned, pointer) -> unit;
 
 extern function core.internal.prim.storeBox (owned, pointer) -> unit;
 extern function core.internal.prim.loadBox (pointer) -> owned;
+#endif
 
 extern function core.internal.prim.ptrToBox (pointer) -> owned;
 extern function core.internal.prim.boxToPtr (owned) -> pointer;
 
-extern function core.internal.prim.eq_int (int, int) -> bool;
-extern function core.internal.prim.ne_int (int, int) -> bool;
-extern function core.internal.prim.lt_int (int, int) -> bool;
-extern function core.internal.prim.le_int (int, int) -> bool;
-extern function core.internal.prim.gt_int (int, int) -> bool;
-extern function core.internal.prim.ge_int (int, int) -> bool;
+extern function core.internal.prim.eq_int (int, int) -> uint;
+extern function core.internal.prim.ne_int (int, int) -> uint;
+extern function core.internal.prim.lt_int (int, int) -> uint;
+extern function core.internal.prim.le_int (int, int) -> uint;
+extern function core.internal.prim.gt_int (int, int) -> uint;
+extern function core.internal.prim.ge_int (int, int) -> uint;
 
-extern function core.internal.prim.eq_float (float, float) -> bool;
-extern function core.internal.prim.ne_float (float, float) -> bool;
-extern function core.internal.prim.lt_float (float, float) -> bool;
-extern function core.internal.prim.le_float (float, float) -> bool;
-extern function core.internal.prim.gt_float (float, float) -> bool;
-extern function core.internal.prim.ge_float (float, float) -> bool;
+extern function core.internal.prim.eq_float (float, float) -> uint;
+extern function core.internal.prim.ne_float (float, float) -> uint;
+extern function core.internal.prim.lt_float (float, float) -> uint;
+extern function core.internal.prim.le_float (float, float) -> uint;
+extern function core.internal.prim.gt_float (float, float) -> uint;
+extern function core.internal.prim.ge_float (float, float) -> uint;
 
 extern function core.internal.prim.negate_int (int) -> int;
 extern function core.internal.prim.floordiv_int (int, int) -> int;
@@ -72,7 +74,7 @@ extern procedure core.internal.prim.min_fii
 extern procedure core.internal.prim.minus_fii
   (FinIndInt, FinIndInt) -> FinIndInt;
 
-extern function core.internal.prim.not (bool) -> bool;
+extern function core.internal.prim.not (uint) -> uint;
 
 extern function core.internal.prim.gcd (int, int) -> int;
 

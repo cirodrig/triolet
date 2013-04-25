@@ -10,6 +10,7 @@ import Common.Error
 import Common.Label
 import Common.THRecord
 import qualified Builtins.Builtins as SystemF
+import qualified Type.Type as SystemF
 import Builtins.Builtins(coreBuiltin)
 import LowLevel.Types
 import LowLevel.Record
@@ -285,8 +286,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_toEffTok) |])
   , (CoreName module_effects "fromEffTok",
      Right [| coreBuiltin (SystemF.The_fromEffTok) |])
-  , (CoreName module_structures "repr_arr",
-     Right [| SystemF.coreBuiltin SystemF.The_repr_arr |])
+  {-, (CoreName module_structures "repr_arr",
+     Right [| SystemF.coreBuiltin SystemF.The_repr_arr |])-}
   --, (CoreName module_structures "repr_Referenced",
     --Right [| SystemF.coreBuiltin SystemF.The_repr_Referenced |])
   {-, (CoreName module_structures "repr_Maybe",
@@ -305,8 +306,8 @@ builtinFunctions =
      Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple3 |])
   , (CoreName module_structures "sizealign_Tuple4",
      Right [| SystemF.coreBuiltin SystemF.The_sizealign_Tuple4 |])-}
-  , (CoreName module_structures "sizealign_arr",
-     Right [| SystemF.coreBuiltin SystemF.The_sizealign_arr |])
+  {-, (CoreName module_structures "sizealign_arr",
+     Right [| SystemF.coreBuiltin SystemF.The_sizealign_arr |])-}
   
   , (CoreName module_prim "traceInt_int",
      Right [| coreBuiltin (SystemF.The_traceInt_int) |])
@@ -423,6 +424,8 @@ builtinGlobals =
      Left $ PrimType PointerType)
 
     -- Physical representations of data types
+  , (CoreName module_structures "typeObject_typeObject",
+     Right [| SystemF.boxInfo_boxInfoV |])
   {-, (CoreName module_list "repr_list",
      Right [| coreBuiltin SystemF.The_repr_list |])
   , (CoreName module_list "repr_array0",

@@ -23,10 +23,12 @@ import SystemF.Datatypes.DynamicTypeInfo
 import SystemF.Datatypes.Structure
 import SystemF.Datatypes.Util
 import SystemF.Datatypes.Layout
+import Type.Eval
 import Type.Type
 import Type.Environment
 import LowLevel.CodeTypes
 import LowLevel.Build
+import qualified LowLevel.Records as L
 import qualified LowLevel.Syntax as L
 import qualified LowLevel.Print as L
 
@@ -51,11 +53,11 @@ testMemoryLayout var_supply ll_var_supply i_type_env = do
           kind = dataTypeKind dcon
           n_data_cons = length $ dataTypeDataConstructors dcon
       liftIO $ print $ dataTypeCon dcon
-      layout <- computeStructure ty
+      {-layout <- computeStructure ty
       runSC ll_var_supply $ do
         testPhysicalLayout kind layout
         testDeconstructorCode dcon
-        mapM_ (testConstructorCode dcon) [0..n_data_cons-1]
+        mapM_ (testConstructorCode dcon) [0..n_data_cons-1]-}
 
 testPhysicalLayout kind layout = do
   stm <- execBuild return_type $ do
@@ -66,6 +68,7 @@ testPhysicalLayout kind layout = do
   where
     return_type = [PrimType trioletIntType, PrimType trioletIntType]
 
+{-
 -- | Test the new code generation.  Discard the result.
 --
 --   This testing code cuts corners when setting up the dynamic layout
@@ -131,19 +134,40 @@ dummyLayoutInfo xs =
          _ -> id
 
     one_val = L.LitV $ nativeIntL 1 
+-}
 
 -------------------------------------------------------------------------------
 
+unpackSizeAlign e = do
+  [s, a] <- unpackRecord2 L.sizeAlignRecord e
+  return $ SizeAlign s a
+
+setupDynTypeInfo :: DataType -> [Type] -> [L.Val] -> GenM LLDynTypeInfo
+setupDynTypeInfo dtype ty_args size_params = do
+  sp_types <- instantiateSizeParams dtype ty_args
+  when (length sp_types /= length size_params) $
+    internalError "setupDynTypeInfo: Wrong number of size parameters"
+
+  foldM insert emptyTypeInfo $ zip sp_types size_params
+  where
+    insert (!type_info) (KindedType k t, e) = 
+      case k
+      of ValK      -> do sa <- unpackSizeAlign e
+                         return $ insertValTypeInfo t sa type_info
+         BareK     -> do sa <- unpackSizeAlign e
+                         return $ insertBareTypeInfo t sa type_info
+         IntIndexK -> return $ insertIntTypeInfo t e type_info
+
 genCase :: DataType             -- ^ Data type to deconstruct
-        -> [Var]                -- ^ Type parameters
-        -> LLDynTypeInfo        -- ^ Layout info for each unknown type
-        -> [ValueType]          -- ^ Return type of case expression
+        -> [Type]               -- ^ Type parameters
+        -> [L.Val]              -- ^ Size arguments
+        -> ValueType            -- ^ Return type of case expression
         -> L.Val                            -- ^ Scrutinee
-        -> (Int -> [L.Val] -> GenM [L.Val]) -- ^ Branch code generators
-        -> GenM [L.Val]                     -- ^ Case code generator
-genCase dtype ty_params v_layouts result_types scrutinee handlers = do
+        -> (Int -> Maybe L.Val -> [L.Val] -> GenM L.Val) -- ^ Branch code generators
+        -> GenM L.Val           -- ^ Case code generator
+genCase dtype ty_params sps result_type scrutinee handlers = do
   -- Compute algebraic data type layout
-  DataLayout adt <- algebraicDataLayout dtype ty_params v_layouts
+  DataLayout adt <- algebraicDataLayout dtype ty_params sps
 
   -- Handle value and reference types differently 
   case dataTypeKind dtype of
@@ -152,21 +176,23 @@ genCase dtype ty_params v_layouts result_types scrutinee handlers = do
     BoxK  -> memory_case adt
   where
     value_case adt =
-      valueElim (valueLayout adt) result_types handlers scrutinee
+      valueElim (valueLayout adt) result_type handlers scrutinee
 
     memory_case adt = do
       mem_adt <- memoryLayout adt
-      memoryElim mem_adt result_types handlers scrutinee
+      memoryElim mem_adt result_type handlers scrutinee
 
--- | Create a constructor function for an algebraic data type
+-- | Create a constructor term for an algebraic data type.
 genConstructor :: DataType             -- ^ Data type to deconstruct
-               -> [Var]                -- ^ Type parameters
-               -> LLDynTypeInfo -- ^ Layout info for each unknown type
+               -> [Type]               -- ^ Type arguments
                -> Int                  -- ^ Constructor index
+               -> [L.Val]              -- ^ Size arguments
+               -> Maybe L.Val          -- ^ Type object
+               -> [L.Val]              -- ^ Fields
                -> GenM L.Val           -- ^ Constructor code generator
-genConstructor dtype ty_params v_layouts con_index = do
+genConstructor dtype ty_params con_index sps m_tyob fields = do
   -- Compute algebraic data type layout
-  DataLayout adt <- algebraicDataLayout dtype ty_params v_layouts
+  DataLayout adt <- algebraicDataLayout dtype ty_params sps
 
   -- Handle value and reference types differently 
   case dataTypeKind dtype of
@@ -175,17 +201,24 @@ genConstructor dtype ty_params v_layouts con_index = do
     BoxK  -> memory_case adt
   where
     value_case adt =
-      valueConstructor (valueLayout adt) con_index
+      no_type_object $
+      valueConstructor (valueLayout adt) con_index fields
+
+    no_type_object x = if isNothing m_tyob then x
+                       else internalError "genConstructor"
 
     memory_case adt = do
       mem_adt <- memoryLayout adt
-      memoryConstructor mem_adt con_index
+      memoryConstructor mem_adt con_index m_tyob fields
 
-algebraicDataLayout :: DataType -> [Var] -> LLDynTypeInfo -> GenM Layout
-algebraicDataLayout dtype params v_layouts =
-  let t = dataTypeCon dtype `varApp` map VarT params
+algebraicDataLayout :: DataType -> [Type] -> [L.Val] -> GenM Layout
+algebraicDataLayout dtype params size_args = do
+  -- Create dynamic type information
+  v_layouts <- setupDynTypeInfo dtype params size_args
+
+  let t = dataTypeCon dtype `varApp` params
       k = dataTypeKind dtype
-  in computeLayout v_layouts k =<< computeStructure t
+  computeLayout v_layouts k =<< computeStructure t
 
 -- | Get the appropriate pointer type for the given algebraic data type
 objectPointerType :: AlgObjectType -> ValueType
@@ -203,19 +236,24 @@ constructedObjectType adt =
   -- If bare, reuslt is an initializer (which is a boxed object)
   PrimType OwnedType
 
+{-
 -- | Create a constructor function for a data type.  The constructor function
 --   takes the fields as parameters, or a dummy argument if there are no
---   fields.  The function should return an object or initializer.
+--   fields.  For boxed objects, it also takes the type object reference.
+--   The function should return an object or initializer.
 mkConstructorFunction :: ValueType
                       -> [ValueType]
-                      -> ([L.Val] -> GenM L.Val)
+                      -> (Maybe L.Val -> [L.Val] -> GenM L.Val)
                       -> GenM L.Val
 mkConstructorFunction adt_type field_types mk_body =
   let param_types = addDummyParameterType field_types
 
       -- If there's a dummy argument, get rid of it
-      get_real_args args = if null field_types then [] else args
-  in genLambda param_types [adt_type] (fmap return . mk_body . get_real_args)
+      mk_body' m_ty_arg args =
+        let real_args = if null field_types then [] else args
+        in mk_body m_ty_arg real_args
+  in genLambda param_types [adt_type] (fmap return . mk_body')
+-}
 
 -------------------------------------------------------------------------------
 -- Type, constructor, and deconstructor code generation for value types
@@ -253,7 +291,7 @@ disjunctTypes adt = catMaybes $ mapDisjuncts disjunctType adt
 productRecordType :: AlgValueType -> StaticRecord
 productRecordType adt 
   | algDataNumConstructors adt == 1 =
-      case disjunctRecordType $ disjunct 0 adt of Just t -> t
+      case disjunctRecordType $ disjunct 0 Nothing adt of Just t -> t
   | otherwise =
       internalError "productRecordType: Not a product type"
 
@@ -262,7 +300,7 @@ productValueType adt = RecordType $ productRecordType adt
 
 sumRecordType :: AlgValueType -> StaticRecord
 sumRecordType adt =
-  let Just tag_type = algDataTagType adt
+  let Just tag_type = algDataVarTagType adt
       dj_types = disjunctTypes adt
   in constStaticRecord $ map valueToFieldType (tag_type : dj_types)
 
@@ -286,7 +324,7 @@ algDataValueType :: AlgData LayoutField -> ValueType
 algDataValueType adt = algDataValueType' $ valueLayout adt
 
 algDataValueType' adt
-  | isEnumeration adt               = case algDataTagType adt of Just t -> t
+  | isEnumeration adt               = case algDataVarTagType adt of Just t -> t
   | algDataNumConstructors adt == 1 = productValueType adt
   | otherwise                       = sumValueType adt
 
@@ -319,9 +357,9 @@ enumerationConstructor adt dj =
 valueIntroE :: AlgValueType -> IntroE L.Val
 valueIntroE adt con_index = return tag_value
   where
-    Just tag_value = varTagInfo $ disjunct con_index adt
+    Just tag_value = varTagInfo $ disjunct con_index Nothing adt
 
-valueElimE :: AlgValueType -> [ValueType] -> ElimE [L.Val]
+valueElimE :: AlgValueType -> [ValueType] -> ElimE L.Val
 valueElimE adt return_types scrutinee k 
   | algDataNumConstructors adt == 1 =
       k 0
@@ -336,11 +374,11 @@ valueIntroP adt fields =
   check_fields $ packRecord (productRecordType adt) fields
   where
     check_fields x =
-      if length fields /= length (algDisjunctFields $ disjunct 0 adt)
+      if length fields /= length (algDisjunctFields $ disjunct 0 Nothing adt)
       then internalError "valueIntroP: Wrong number of fields"
       else x
 
-valueElimP :: AlgValueType -> ElimP [L.Val]
+valueElimP :: AlgValueType -> ElimP L.Val
 valueElimP adt scrutinee k =
   k =<< unpackRecord2 (productRecordType adt) scrutinee
 
@@ -366,19 +404,19 @@ valueIntroS adt dj =
       of Nothing -> Nothing
          Just rt -> Just $ L.RecV rt (algDisjunctFields dj)
 
-valueElimS :: AlgValueType -> [ValueType] -> ElimS [L.Val]
+valueElimS :: AlgValueType -> [ValueType] -> ElimS L.Val
 valueElimS adt return_types scrutinee k = do
   (tag_value : disjunct_values) <- unpackRecord2 (sumRecordType adt) scrutinee
   tagDispatch2 tag_type n tag_value return_types (call_cont disjunct_values)
   where
-    Just tag_type = algDataTagType adt
+    Just tag_type = algDataVarTagType adt
     n = algDataNumConstructors adt
     dj_indices = disjunctIndices adt
 
     -- Construct an AlgDisjunct and pass it to the continuation
     call_cont disjunct_values index = do
       values <-
-        case disjunctRecordType $ disjunct index adt
+        case disjunctRecordType $ disjunct index Nothing adt
         of Nothing -> return [] -- No fields
            Just rt ->
              -- Extract the field values of this disjunct
@@ -409,30 +447,31 @@ valueIntro adt con_index fields
 -- | Create a constructor function for the given data type.
 --   This function takes the field values (or, if there are no fields, a 
 --   unit value) and returns the constructed value.
-valueConstructor :: AlgValueType -> Int -> GenM L.Val
-valueConstructor adt con_index =
+valueConstructor :: AlgValueType -> Int -> [L.Val] -> GenM L.Val
+valueConstructor adt con_index fields =
   let adt_type = algDataValueType' adt
-      field_types = algDisjunctFields $ disjunct con_index adt
-  in mkConstructorFunction adt_type field_types $ valueIntro adt con_index
+      field_types = algDisjunctFields $ disjunct con_index Nothing adt
+  in valueIntro adt con_index fields
 
 -- | Inspect a value of the given algebraic data type
 valueElim :: AlgValueType                     -- ^ Algebraic data type
-          -> [ValueType]                      -- ^ Result types
-          -> (Int -> [L.Val] -> GenM [L.Val]) -- ^ Handlers for disjuncts
+          -> ValueType                        -- ^ Result type
+          -> (Int -> Maybe L.Val -> [L.Val] -> GenM L.Val) -- ^ Handlers for disjuncts
           -> L.Val                            -- ^ Scrutinee
-          -> GenM [L.Val]                     -- ^ Computes results
-valueElim adt result_types handler scrutinee
+          -> GenM L.Val                       -- ^ Computes results
+valueElim adt result_type handler scrutinee
   | isEnumeration adt =
-      valueElimE adt result_types scrutinee (\i -> handler i [])
+      valueElimE adt [result_type] scrutinee (\i -> handler i Nothing [])
   | algDataNumConstructors adt == 1 =
-      valueElimP adt scrutinee (\fs -> handler 0 fs)
+      valueElimP adt scrutinee (\fs -> handler 0 Nothing fs)
   | otherwise =
-      let h dj = handler (algDisjunctConIndex dj) (algDisjunctFields dj)
-      in valueElimS adt result_types scrutinee h
+      let h dj = handler (algDisjunctConIndex dj) Nothing (algDisjunctFields dj)
+      in valueElimS adt [result_type] scrutinee h
 
+{-
 -- | Extract fields of a single-constructor value of the
 --   given algebraic data type
-valueDeconstructor :: AlgValueType -> L.Val -> GenM [L.Val]
+valueDeconstructor :: AlgValueType -> L.Val -> GenM L.Val
 valueDeconstructor adt scrutinee
   | algDataNumConstructors adt /= 1 =
       internalError "valueDeconstructor: Type must have one constructor"
@@ -445,24 +484,23 @@ valueDeconstructor adt scrutinee
 
 -- | Create an eliminator function that applies fields of the
 --   given algebraic data type to continuation functions
-valueEliminator :: AlgValueType -> [ValueType] -> L.Val -> GenM L.Val
-valueEliminator adt return_types scrutinee
+valueEliminator :: AlgValueType -> ValueType -> L.Val -> GenM L.Val
+valueEliminator adt return_type scrutinee
   | n == 0 =
       internalError "valueEliminator: Uninhabited type"
   | otherwise =
       -- Create a function that takes continuation functions and returns
       -- their results
-      genLambda param_types return_types $ \handlers ->
-      let apply_handler i fs =
+      genLambda param_types [return_type] $ \handlers ->
+      let apply_handler i Nothing fs =
             let args = addDummyParameterValue fs
                 callee = handlers !! i
-            in emitAtom return_types $ continuationCall2 callee args
+            in emitAtom1 return_type $ continuationCall2 callee args
       in valueElim adt return_types apply_handler scrutinee
   where
     n = algDataNumConstructors adt
     param_types = replicate n (PrimType OwnedType)
 
-{-
 -- | Return an eliminator function for an enumeration value type with
 --   one constructor
 enumerationDeconstructor :: AlgValueType -> GenM L.Val
@@ -561,24 +599,23 @@ storeValueType (DataLayout adt) ptr val = storeAlgValue adt ptr val
 loadAlgValue :: AlgData LayoutField -> L.Val -> GenM L.Val
 loadAlgValue adt ptr = do
   mem_adt <- memoryLayout adt
-  [x] <- memoryElim mem_adt [adt_type] read_value ptr
-  return x
+  memoryElim mem_adt adt_type read_value ptr
   where
     adt_type = algDataValueType adt
     val_adt = valueLayout adt
-    read_value con_index fields = do
-      x <- valueIntro val_adt con_index fields
-      return [x]
+    read_value con_index Nothing fields = valueIntro val_adt con_index fields
 
--- | Store a local variable into a destination pointer
+-- | Store a local unboxed variable into a destination pointer
 storeAlgValue :: AlgData LayoutField -> L.Val -> L.Val -> GenM ()
-storeAlgValue adt ptr val = do
-  mem_adt <- memoryLayout adt
-  let write_value con_index fields = do
-        initializer <- memoryIntro mem_adt con_index fields
-        emitAtom [] $ L.closureCallA initializer [ptr]
-  valueElim val_adt [] write_value val
-  return ()
+storeAlgValue adt ptr val
+  | algDataBoxing adt == IsBoxed = internalError "storeAlgValue: Type is boxed"
+  | otherwise = do
+      mem_adt <- memoryLayout adt
+      let write_value con_index Nothing fields = do
+            initializer <- memoryIntro mem_adt con_index Nothing fields
+            emitAtom1 (PrimType UnitType) $ L.closureCallA initializer [ptr]
+      valueElim val_adt (PrimType UnitType) write_value val
+      return ()
   where
     val_adt = valueLayout adt
 
@@ -607,38 +644,45 @@ createBareObject size hoff hdata init_contents =
     return [L.LitV L.UnitL]
 
 -- | Create an object in memory
-memoryIntro :: AlgObjectType -> Int -> [L.Val] -> GenM L.Val
-memoryIntro adt con_index fields =
+memoryIntro :: AlgObjectType -> Int -> Maybe L.Val -> [L.Val] -> GenM L.Val
+memoryIntro adt con_index m_tyob fields =
   case algDataBoxing adt
   of IsBoxed -> do
+       let !(Just tyob) = m_tyob
        (h_offsets, offsets, size) <- disjunctLayout dj
        ptr <- createBoxedObject size h_offsets (algDisjunctHeader dj)
        write_fields offsets ptr
        return ptr
      NotBoxed -> do
+       let !Nothing = m_tyob
        (h_offsets, offsetss, size) <- algUnboxedLayout adt
        let offsets = offsetss !! con_index
        createBareObject size h_offsets (algDisjunctHeader dj) (write_fields offsets)
   where
-    dj = disjunct con_index adt
+    dj = disjunct con_index m_tyob adt
     write_fields offsets ptr =
       forM_ (zip3 (algDisjunctFields dj) offsets fields) $
       \(field, offset, value) -> writeMemoryField ptr field offset value
 
-memoryElim :: AlgObjectType -> [ValueType] -> (Int -> [L.Val] -> GenM [L.Val])
-           -> L.Val -> GenM [L.Val]
-memoryElim adt return_types handlers scrutinee = do
+memoryElim :: AlgObjectType -> ValueType
+           -> (Int -> Maybe L.Val -> [L.Val] -> GenM L.Val)
+           -> L.Val -> GenM L.Val
+memoryElim adt return_type handlers scrutinee = do
   -- Read the tag
   (h_offsets, off1) <- headerLayout header_type
-  m_tag_value <- readHeaderTag header_type h_offsets scrutinee
-  case m_tag_value of
+  m_tag_value <- readHeaderValue header_type h_offsets scrutinee
+  let m_tyob = case algDataBoxing adt
+               of IsBoxed -> m_tag_value
+                  NotBoxed -> Nothing
+  case n_constructors of
     -- No tag
-    Nothing -> elim_product h_offsets off1 (disjunct 0 adt)
+    1 -> elim_product h_offsets off1 (disjunct 0 m_tyob adt)
 
     -- Dispatch by tag
-    Just tag_value ->
-      tagDispatch2 tag_type n_constructors tag_value return_types $ \i ->
-        elim_product h_offsets off1 (disjunct i adt)
+    _ -> do
+      tag_word <- castTagToWord header_type m_tag_value
+      tagDispatch2 (PrimType nativeWordType) n_constructors tag_word [return_type] $ \i ->
+        elim_product h_offsets off1 (disjunct i m_tyob adt)
   where
     header_type = algDataHeaderType adt
     Just tag_type = memTagInfo header_type
@@ -647,21 +691,31 @@ memoryElim adt return_types handlers scrutinee = do
     -- Read fields of a particular disjunct and pass them to a handler
     elim_product h_offsets off1 dj = do
       (_, offsets, _) <- disjunctLayout1 h_offsets off1 (algDisjunctFields dj)
+
+      -- If boxed, then extract the tag
+      let boxed_tag = case algDataBoxing adt
+                      of IsBoxed -> varTagInfo dj
+                         NotBoxed -> Nothing
+
+      -- Read the fields
       let fields = algDisjunctFields dj
       values <- forM (zip fields offsets) $ \(field, offset) ->
         readMemoryField scrutinee field offset
-      handlers (algDisjunctConIndex dj) values
 
--- | Create a constructor function for the given data type.
---   This function takes the field values (or, if there are no fields,
---   a unit value) and returns a constructed object or an initializer.
-memoryConstructor :: AlgObjectType -> Int -> GenM L.Val
-memoryConstructor adt con_index =
+      handlers (algDisjunctConIndex dj) boxed_tag values
+
+-- | Construct an object of the given data type from the given
+--   type object and field values.
+--   Returns a constructed object or an initializer.
+memoryConstructor :: AlgObjectType -> Int -> Maybe L.Val -> [L.Val]
+                  -> GenM L.Val
+memoryConstructor adt con_index m_tyob fields =
   let adt_type = constructedObjectType adt
       field_types = map memoryFieldType $
-                    algDisjunctFields $ disjunct con_index adt
-  in mkConstructorFunction adt_type field_types $ memoryIntro adt con_index
+                    algDisjunctFields $ disjunct con_index m_tyob adt
+  in memoryIntro adt con_index m_tyob fields
 
+{-
 -- | Deconstruct an object of the given data type, which must
 --   have a single data constructor.
 --
@@ -671,9 +725,9 @@ memoryDeconstructor adt scrutinee
   | algDataNumConstructors adt /= 1 =
       internalError "memoryDeconstructor: Type must have one constructor"
   | otherwise =
-      memoryElim adt field_types (\_ fs -> return fs) scrutinee
+      memoryElim adt field_types (\_ _ fs -> return fs) scrutinee
   where
-    dj = disjunct 0 adt
+    dj = disjunct 0 undefined adt
     field_types = map memoryFieldType $ algDisjunctFields dj
 
 -- | Create an eliminator for an object of the given data type.
@@ -687,7 +741,7 @@ memoryEliminator adt return_types scrutinee
       -- Create a function that takes continuation functions and returns
       -- their results
       genLambda param_types return_types $ \handlers ->
-      let apply_handler i fs =
+      let apply_handler i _ fs =
             let args = addDummyParameterValue fs
                 callee = handlers !! i
             in emitAtom return_types $ continuationCall2 callee args
@@ -695,6 +749,7 @@ memoryEliminator adt return_types scrutinee
   where
     n = algDataNumConstructors adt
     param_types = replicate n (PrimType OwnedType)
+-}
 
 -------------------------------------------------------------------------------
 
@@ -726,3 +781,43 @@ writeMemoryField ptr fld (Off offset) val =
      -- Store primitive value from variable
      ValField l  -> do ptr <- primAddP ptr offset
                        storeValueType l ptr val
+
+-------------------------------------------------------------------------------
+
+-- | From the type of a global function in Core, compute the corresponding 
+--   low-level function type.
+lowerGlobalFunctionType :: IdentSupply L.Var
+                        -> Type
+                        -> UnboxedTypeEvalM FunctionType
+lowerGlobalFunctionType var_supply ty = do
+  (ty_params, params, ret) <- liftTypeEvalM $ deconForallFunType ty
+  when (null params) $ internalError "lowerGlobalFunctionType: Not a function type"
+
+  -- Add type parameters to type environment.  Type parameters must not
+  -- affect memory layout.
+  assumeBinders ty_params $ do
+    -- Create a function type
+    param_types <- lowerTypes var_supply params
+    ret_type <- lowerType var_supply ret
+    return $ closureFunctionType param_types [ret_type]
+
+lowerType' :: IdentSupply L.Var -> KindedType -> UnboxedTypeEvalM ValueType
+lowerType' var_supply (KindedType k ty) = 
+  case k
+  of BoxK  -> return $ PrimType OwnedType
+     BareK -> return $ PrimType PointerType
+     OutK  -> return $ PrimType PointerType
+     ValK  -> do
+       -- Layout must be computable without relying on dynamic type information
+       layout <- runGenMWithoutOutput var_supply $
+                 computeLayout emptyTypeInfo ValK =<< computeStructure ty
+       return $! layoutValueType layout
+
+lowerType :: IdentSupply L.Var -> Type -> UnboxedTypeEvalM ValueType
+lowerType var_supply ty = do
+  k <- typeBaseKind ty
+  lowerType' var_supply $ KindedType k ty
+
+lowerTypes :: IdentSupply L.Var -> [Type] -> UnboxedTypeEvalM [ValueType]
+lowerTypes var_supply tys = mapM (lowerType var_supply) tys
+

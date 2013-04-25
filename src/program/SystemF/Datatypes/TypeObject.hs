@@ -37,12 +37,12 @@ import Common.Error
 import Common.Identifier
 import Common.MonadLogic
 import Common.Supply
-import qualified LowLevel.Types as LL
+import qualified LowLevel.CodeTypes as LL
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Datatypes.DynamicTypeInfo
 import SystemF.Datatypes.Structure
-import SystemF.Datatypes.Util(tagType)
+import SystemF.Datatypes.Util(unboxedMemTagType)
 import SystemF.Datatypes.Layout
 import SystemF.Datatypes.InfoCall
 import SystemF.Datatypes.Code
@@ -61,21 +61,13 @@ import Type.Eval
 --   'SystemF.Datatypes.Layout.headerLayout'.
 headerSize :: Boxing -> Int -> SizeAlign
 headerSize boxing n_constructors =
-  SizeAlign (uintL header_size) (uintL header_align)
+  SizeAlign (uintL $ LL.sizeOf header_type) (uintL $ LL.alignOf header_type)
   where
-    -- Object header, if boxed
-    (oh_size, oh_align) =
+    -- Type of the object header
+    header_type =
       case boxing
-      of NotBoxed -> (0, 1) 
-         IsBoxed  -> (LL.sizeOf LL.OwnedType, LL.alignOf LL.OwnedType)
-
-    -- Add tag size, if tagged
-    (header_size, header_align) =
-      case tagType n_constructors
-      of Nothing -> (oh_size, oh_align)
-         Just ty -> let padding = negate oh_size `mod` LL.alignOf ty
-                        size2 = oh_size + padding + LL.sizeOf ty
-                    in (size2, oh_align `max` LL.alignOf ty)
+      of IsBoxed  -> LL.OwnedType
+         NotBoxed -> fromMaybe LL.UnitType $ unboxedMemTagType n_constructors
 
 -- | Compute the size and alignment of a type of kind 'val'
 computeValInfo :: CoreDynTypeInfo

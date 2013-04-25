@@ -21,7 +21,8 @@ import qualified LowLevel.Records as LL
 import qualified LowLevel.Builtins as LL
 import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
-import qualified SystemF.DictEnv as DictEnv
+import SystemF.Datatypes.Util
+import SystemF.Datatypes.Size
 import SystemF.Syntax
 import Type.Environment
 import Type.Eval
@@ -29,30 +30,16 @@ import Type.Type
 import Type.Substitute(TypeSubst)
 import qualified Type.Substitute as Substitute
 
-newtype Lower a = Lower (ReaderT LowerEnv IO a)
+newtype Lower a = Lower (ReaderT LowerEnv UnboxedTypeEvalM a)
                 deriving(Functor, Applicative, Monad, MonadIO)
 
-runLowering :: LowerEnv -> Lower a -> IO a
+runLowering :: LowerEnv -> Lower a -> UnboxedTypeEvalM a
 runLowering env (Lower m) = runReaderT m env
-
-liftFreshVarM :: FreshVarM a -> Lower a
-liftFreshVarM m = Lower $ ReaderT $ \env -> runFreshVarM (varSupply env) m
 
 type GenLower a = Gen Lower a
 
 data LowerEnv =
-  LowerEnv { varSupply :: {-# UNPACK #-}!(IdentSupply Var)
-           , llVarSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
-           , typeEnvironment :: !TypeEnv
-             
-             -- | The type-indexed integers in the environment.
-             --   Contains lowered 'FIInt' values.
-             --   Indexed by the type index.
-           , intEnvironment :: DictEnv.DictEnv (GenLower LL.Val)
-
-             -- | The 'Repr' dictionaries in the environment.  Indexed
-             --   by the dictionary's type parameter.
-           , reprDictEnvironment :: DictEnv.DictEnv (GenLower LL.Val)
+  LowerEnv { llVarSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
 
              -- | A low-level variable is associated to each variable that
              --   is in scope
@@ -62,18 +49,17 @@ data LowerEnv =
 getLLVarSupply :: Lower (IdentSupply LL.Var)
 getLLVarSupply = Lower $ asks llVarSupply
 
-initializeLowerEnv :: IdentSupply Var
-                   -> IdentSupply LL.Var
-                   -> TypeEnv
+initializeLowerEnv :: IdentSupply LL.Var
                    -> Map.Map Var LL.Var
                    -> IO LowerEnv
-initializeLowerEnv var_supply ll_var_supply type_env var_map = do
-  let repr_env = DictEnv.empty
-  int_env <- runFreshVarM var_supply mkGlobalIntEnv
-  let global_map = IntMap.fromList [(fromIdent $ varID v, v')
-                                   | (v, v') <- Map.toList var_map]
-  return $ LowerEnv var_supply ll_var_supply type_env int_env repr_env global_map
+initializeLowerEnv var_supply var_map =
+  return $ LowerEnv var_supply global_map
+  where
+    global_map = IntMap.fromList [(fromIdent $ varID v, v')
+                                 | (v, v') <- Map.toList var_map]
+  
 
+{-
 mkGlobalIntEnv = do
   minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (coreBuiltin The_min_i) [VarT arg1, VarT arg2],
@@ -99,7 +85,6 @@ mkGlobalIntEnv = do
 mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
 mkGlobalReprEnv = do
   internalError "mkGlobalReprEnv"
-  {-
   -- All boxed objects use the same representation
   box_dict <- DictEnv.pattern1 $ \arg ->
     (varApp refV [VarT arg], mk_boxed_dict arg)
@@ -160,13 +145,11 @@ mkGlobalReprEnv = do
 -}
 
 instance Supplies Lower (Ident Var) where
-  fresh = Lower $ ReaderT $ \env -> supplyValue $ varSupply env
-  supplyToST f = Lower $ ReaderT $ \env ->
-    let get_fresh = unsafeIOToST $ supplyValue (varSupply env)
-    in stToIO (f get_fresh)
+  fresh = Lower $ lift fresh
+  supplyToST f = Lower $ lift (supplyToST f)
 
 instance Supplies Lower (Ident LL.Var) where
-  fresh = Lower $ ReaderT $ \env -> supplyValue $ llVarSupply env
+  fresh = Lower $ ReaderT $ \env -> liftIO $ supplyValue $ llVarSupply env
 
 liftT :: (forall b. Lower b -> Lower b) -> GenLower a -> GenLower a
 liftT t m = do
@@ -185,15 +168,13 @@ liftT1 t k = do
 
 instance TypeEnvMonad Lower where
   type EvalBoxingMode Lower = UnboxedMode
-  getTypeEnv = Lower $ asks typeEnvironment
-  
-  liftTypeEnvM m = Lower $ ReaderT $ \env ->
-    runTypeEnvM (typeEnvironment env) m
+  getTypeEnv = Lower $ lift getTypeEnv
+  liftTypeEnvM m = Lower $ lift $ liftTypeEnvM m
 
 instance EvalMonad Lower where
-  liftTypeEvalM m = Lower $ ReaderT $ \env ->
-    runTypeEvalM m (varSupply env) (typeEnvironment env)
+  liftTypeEvalM m = Lower $ lift m
 
+{-
 -- | Find the Repr dictionary for the given type, which should be a type
 --   variable.  Fail if not found.
 lookupReprDict :: Type -> (LL.Val -> GenLower a) -> GenLower a
@@ -245,6 +226,7 @@ assumeIndexedInt ty val (Lower m) = Lower $ local update m
     update env = env {intEnvironment =
                          DictEnv.insert (DictEnv.monoPattern ty (return val)) $
                          intEnvironment env}
+-}
 
 lookupVar :: Var -> Lower LL.Var
 lookupVar v = Lower $ ReaderT $ \env ->
@@ -252,6 +234,7 @@ lookupVar v = Lower $ ReaderT $ \env ->
   of Just ll_var -> return ll_var
      Nothing -> internalError $
                 "Lowering: no translation for variable: " ++ show v
+
 
 assumeVariableWithType :: Bool                -- ^ Whether variable is exported
                        -> Var                 -- ^ System F variable
@@ -273,6 +256,31 @@ assumeVariableWithType is_exported v sf_ty ty k = do
       where
         update env =
           env {varMap = IntMap.insert (fromIdent $ varID v) new_v $ varMap env}
+
+-- | Perform some computation that also generates code; emit the code
+lowerAndGenerateCode :: GenM a -> GenLower a
+lowerAndGenerateCode g = Gen $ \return_types ->
+  Lower $ ReaderT $ \env -> do
+    (x, mk_stm) <- runGenM' (llVarSupply env) return_types g
+    return (x, mk_stm)
+
+-- | Perform some computation that must not generate code
+lowerAndGenerateNothing :: GenM a -> Lower a
+lowerAndGenerateNothing g = Lower $ ReaderT $ \env ->
+  runGenMWithoutOutput (llVarSupply env) g
+
+-- | Convert a @GenLower a@ to a @GenM a@.  The variable mapping is saved
+--   for later use.
+embedIntoGenM :: (a -> GenLower b) -> GenLower (a -> GenM b)
+embedIntoGenM f = do
+  var_map <- lift $ Lower (asks varMap) -- Get the current variable map
+  return $ \x -> Gen $ \rt -> SizeComputing $ ReaderT $ \var_supply ->
+    let lower_env = LowerEnv var_supply var_map
+    in runLowering lower_env (runGen (f x) rt)
+    
+lowerLowerType :: Type -> Lower LL.ValueType
+lowerLowerType ty = Lower $ ReaderT $ \env -> do
+  lowerType (llVarSupply env) ty
 
 {-
 -- | Add a type variable to the type environment

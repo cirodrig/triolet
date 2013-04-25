@@ -58,6 +58,24 @@ runGenM :: IdentSupply L.Var -> [ValueType] -> GenM (L.Stm, a)
 runGenM supply return_types m =
   runSC supply $ execBuild' return_types m
 
+runGenM' :: IdentSupply L.Var -> [ValueType] -> GenM a
+         -> TypeEvalM UnboxedMode (a, MkStm)
+runGenM' supply return_types m =
+  runSC supply $ runGen m return_types
+
+-- | Run a computation, but produce an error if it generates code.
+--   This is done in situations where it must be possible to statically
+--   compute a data type's size, alignment, or other properties.
+--   If code is generated, it represents dynamically computed information.
+runGenMWithoutOutput :: IdentSupply L.Var -> GenM a -> TypeEvalM UnboxedMode a
+runGenMWithoutOutput supply m = do
+  (x, MkStm f) <- runSC supply $ runGen m []
+
+  -- Verify that no code was generated
+  case f (L.ReturnE (L.ValA [])) of
+    L.ReturnE (L.ValA []) -> return x
+    _ -> internalError "runGenMWithoutOutput: Cannot generate code here"
+
 -------------------------------------------------------------------------------
 -- Building blocks for generating low-level code
 
@@ -166,6 +184,37 @@ maxAlignments xs = foldM nativeMaxUZ (nativeWordV 1) xs
 -------------------------------------------------------------------------------
 -- Code generation for tag operations
 
+-- | Determine the tag type to use for an enumerative type of @n@ constructors
+--   when the tag is held in a local variable
+unboxedEnumVarTagType :: Int -> PrimType
+unboxedEnumVarTagType n
+  | n == 0    = internalError "unboxedEnumVarTagType: Uninhabited type"
+  | n == 1    = UnitType
+  | otherwise = nativeWordType
+
+-- | Determine the tag type to use for an enumerative type of @n@ constructors
+--   when the tag is held in memory
+unboxedEnumMemTagType :: Int -> PrimType
+unboxedEnumMemTagType n
+  | n == 0     = internalError "unboxedEnumMemTagType: Uninhabited type"
+  | n == 1     = UnitType
+  | n <= 256   = IntType Unsigned S8
+  | n <= 65536 = IntType Unsigned S16
+  | otherwise  = nativeWordType
+
+-- | Determine the tag type to use for a product or sum type of @n@
+--   constructors when the tag is held in a local variable
+unboxedVarTagType :: Int -> Maybe PrimType
+unboxedVarTagType n
+  | n == 1    = Nothing
+  | otherwise = Just $! unboxedEnumVarTagType n
+
+unboxedMemTagType :: Int -> Maybe PrimType
+unboxedMemTagType n
+  | n == 1    = Nothing
+  | otherwise = Just $! unboxedEnumMemTagType n
+
+{-
 -- | Determine the tag type to use for a sum type of @n@ constructors.
 --   Note that the 'Bool' type is a special case not described by this
 --   function.
@@ -176,16 +225,25 @@ tagType n
   | n <= 256   = Just $ IntType Unsigned S8
   | n <= 65536 = Just $ IntType Unsigned S16
   | otherwise  = Just $ IntType Unsigned S32
+-}
 
+-- | Create the tag value an unboxed type, given its tag type
+unboxedTagLit :: ValueType -> Int -> L.Lit
+unboxedTagLit (PrimType (IntType sz al)) n = L.IntL sz al (fromIntegral n)
+unboxedTagLit (PrimType UnitType) 0 = L.UnitL
+unboxedTagLit _ _ = internalError "unboxedTagLit: Unexpected type"
+
+{-
 -- | Create the tag value for a value type, given its low-level tag type
 tagLit :: ValueType -> Int -> L.Lit
 tagLit (PrimType (IntType sz al)) n = L.IntL sz al (fromIntegral n)
 tagLit (PrimType UnitType)        0 = L.UnitL
 tagLit pt                          n = traceShow (L.pprValueType pt) $ traceShow n $ internalError "tagLit: Unexpected type"
+-}
 
 -- | Create the tag value for a value type, given its low-level tag type
-tagValue :: ValueType -> Int -> L.Val
-tagValue t n = L.LitV $ tagLit t n
+unboxedTagValue :: ValueType -> Int -> L.Val
+unboxedTagValue t n = L.LitV $ unboxedTagLit t n
 
 -- | Create an expression to inspect a tag and execute one of several 
 --   code branches depending on the tag value.
@@ -200,7 +258,7 @@ tagDispatch tag_type tag branches = do
   where
     mk_branch return_types (index, mk_body) = do
       body <- execBuild return_types mk_body
-      return (tagLit tag_type index, body)
+      return (unboxedTagLit tag_type index, body)
 
 -- | Create an expression to inspect a tag and execute one of several 
 --   code branches depending on the tag value.
@@ -210,11 +268,13 @@ tagDispatch2 :: ValueType        -- ^ Tag type
              -> Int              -- ^ Number of tags
              -> L.Val            -- ^ Tag value
              -> [ValueType]      -- ^ Return types of branches
-             -> (Int -> GenM [L.Val]) -- ^ Branches, indexed by constructor
-             -> GenM [L.Val]     -- ^ Emit code that produces return values
-tagDispatch2 tag_type num_tags tag branch_return_types branches =
-  genSwitch branch_return_types tag
-  [(tagLit tag_type i, branches i) | i <- [0..num_tags-1]]
+             -> (Int -> GenM L.Val) -- ^ Branches, indexed by constructor
+             -> GenM L.Val  -- ^ Emit code that produces return values
+tagDispatch2 tag_type num_tags tag branch_return_types branches = do
+  let branches' i = fmap return $ branches i -- Return a singleton list
+  [x] <- genSwitch branch_return_types tag
+         [(unboxedTagLit tag_type i, branches' i) | i <- [0..num_tags-1]]
+  return x
 
 -------------------------------------------------------------------------------
 -- Other utility functions

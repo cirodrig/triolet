@@ -107,4 +107,4 @@ lookupIntTypeInfo' :: (EvalMonad m, DefaultValue val, DefaultValue bare, Default
 lookupIntTypeInfo' layouts ty = lookupIntTypeInfo layouts ty >>= check
   where
     check (Just l) = return l
-    check Nothing  = internalError "lookupIntTypeInfo: Not found"
+    check Nothing  = internalError $ "lookupIntTypeInfo: Not found: " ++ show (pprType ty)

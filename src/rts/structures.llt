@@ -20,6 +20,7 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   };
 };
 
+#if 0
 data pointer repr_info = InfoTableHeader {
   TAG_CON
 };
@@ -491,4 +492,12 @@ function inline makeComplex(float re, float im, pointer ret) -> unit {
 
 data pointer int_info = InfoTableHeader {
   TAG_CON
+};
+#endif
+
+// The type object for a type object.
+// This _must_ be statically allocated because it points to itself.
+data owned typeObject_typeObject = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0
 };

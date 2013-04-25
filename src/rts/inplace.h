@@ -2,8 +2,8 @@
 extern function core.internal.inplace.append_build_list
     (owned, owned, pointer) -> unit;
 
-extern function core.internal.inplace.repr_append_list
-    (owned) -> owned;
+//extern function core.internal.inplace.repr_append_list
+//    (owned) -> owned;
 
 extern function core.internal.inplace.intSumScatter_make_init
     (unit) -> int;

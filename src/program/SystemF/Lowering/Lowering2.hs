@@ -5,17 +5,21 @@
 module SystemF.Lowering.Lowering2(lowerModule)
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+
+import Control.Monad hiding(forM, mapM)
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.List
 import Data.Maybe
+import Data.Traversable
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
 import Common.Label
+import Common.MonadLogic
 import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
@@ -25,7 +29,14 @@ import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
 import qualified LowLevel.Records as LL
 import qualified LowLevel.Print as LL
-import SystemF.Lowering.Datatypes2
+import SystemF.Datatypes.Code hiding(runGen, SizeAlign, arraySize, unpackSizeAlign, addRecordPadding)
+import SystemF.Datatypes.DynamicTypeInfo
+import SystemF.Datatypes.InfoCall
+import SystemF.Datatypes.Structure
+import SystemF.Datatypes.Size
+import SystemF.Datatypes.Layout
+import SystemF.Datatypes.Util
+--import SystemF.Lowering.Datatypes2
 import SystemF.Lowering.Marshaling
 import SystemF.Lowering.LowerMonad
 import qualified SystemF.DictEnv as DictEnv
@@ -41,12 +52,25 @@ import Globals
 import GlobalVar
 import Export
 
-withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
-withMany f xs k = go xs k
-  where
-    go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
-    go []     k = k []
+{-
+-- | Compute the low-level representation of a variable or temporary value
+--   that may be stored in a variable.  The type must be computable statically.
+lowerType :: KindedType -> Lower LL.ValueType
+lowerType (KindedType BoxK _)  = return $ LL.PrimType LL.OwnedType
+lowerType (KindedType BareK _) = return $ LL.PrimType LL.PointerType
+lowerType (KindedType ValK ty) = do
+  -- Layout must be computable without relying on dynamic type information
+  layout <- lowerAndGenerateNothing $
+            computeLayout emptyTypeInfo ValK =<< computeStructure ty
+  return $! layoutValueType layout
 
+lowerType' :: Type -> Lower LL.ValueType
+lowerType' ty = do
+  k <- typeBaseKind ty
+  lowerType $ KindedType k ty
+-}
+
+{-
 -- | Called by 'assumeVar' and related functions.  If the type is a
 --   Repr dictionary passed as a boxed pointer or an IndexedInt passed as
 --   a value, record the dictionary in the environment.
@@ -60,6 +84,7 @@ assumeSingletonValue ty bound_var m =
        | con `isCoreBuiltin` The_FIInt ->
            assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
+-}
 
 assumeVarG :: Bool -> Var -> Type -> (LL.Var -> GenLower a) -> GenLower a
 assumeVarG is_exported v ty k = liftT1 (assumeVar is_exported v ty) k
@@ -69,53 +94,18 @@ assumeVarG is_exported v ty k = liftT1 (assumeVar is_exported v ty) k
 --   If it's a Repr dictionary, add that to the environment also.
 assumeVar :: Bool -> Var -> Type -> (LL.Var -> Lower a) -> Lower a
 assumeVar is_exported v rt k = do
-  tenv <- getTypeEnv
-  rtype <- lowerType rt 
-  case rtype of
-    Just t -> assumeVariableWithType is_exported v rt t $ \ll_var ->
-      assumeSingletonValue rt ll_var (k ll_var)
-    Nothing -> internalError "assumeVar: Unexpected representation"
+  rtype <- lowerLowerType rt
+  assumeVariableWithType is_exported v rt rtype k
 
 assumeTyParam :: TypeEnvMonad m => TyPat -> m a -> m a
 assumeTyParam (TyPat b) m = assumeBinder b m
 
 assumeTyParams ps m = foldr assumeTyParam m ps
 
-{-
--- | Create a local, dynamically allocated variable for a let expression.
---   The variable points to some uninitialized memory of the correct type for
---   its size.
-assumeLocalVar :: Var           -- ^ The variable name
-               -> LL.Val        -- ^ The variable size (unsigned native int)
-               -> LL.Val        -- ^ The variable pointerlessness (bool)
-               -> (LL.Var -> GenLower a) -- ^ Code using the variable
-               -> GenLower a
-assumeLocalVar v v_size is_pointerless k =
-  liftT1 (assumeVariableWithType v (LL.PrimType LL.PointerType)) $ \ll_var -> do
-    allocateHeapMemAs v_size is_pointerless ll_var
-    x <- k ll_var
-    deallocateHeapMem (LL.VarV ll_var)
-    return x-}
-
--- | Code can return a value, or \"return\" by producing a side effect
---   TODO: eliminate 'NoVal' since everything returns a value now
-data RetVal = RetVal !LL.Val | NoVal
-
-fromRetVal (RetVal v) = v
-fromRetVal NoVal = internalError "fromRetVal"
-
-listToRetVal :: [LL.Val] -> RetVal
-listToRetVal [] = NoVal
-listToRetVal [val] = RetVal val
-listToRetVal _ = internalError "listToRetVal"
-
-retValToList :: RetVal -> [LL.Val]
-retValToList NoVal = []
-retValToList (RetVal val) = [val]
-
 -------------------------------------------------------------------------------
 -- Data types
 
+{-
 -- | Compile a data constructor.  If the data constructor takes no   
 --   arguments, the constructor value is returned; otherwise a function 
 --   is returned.  All type arguments must be provided.
@@ -154,6 +144,7 @@ compileCase result_type scrutinee_type scrutinee_val branches = do
 
           -- Execute the continuation
           return cont
+-}
 
 -------------------------------------------------------------------------------
 -- Lowering
@@ -161,24 +152,33 @@ compileCase result_type scrutinee_type scrutinee_val branches = do
 bindPatterns pats m = foldr (uncurry bindPattern) m pats
 
 -- | Bind a pattern-bound variable to the result of some code
-bindPattern :: PatM -> RetVal -> GenLower a -> GenLower a
-bindPattern _ NoVal _ = internalError "bindPattern: Nothing to bind"
-
-bindPattern (PatM (v ::: ty) _) (RetVal value) m = do
+bindPattern :: PatM -> LL.Val -> GenLower a -> GenLower a
+bindPattern (PatM (v ::: ty) _) value m = do
   assumeVarG False v ty $ \ll_var -> do
     bindAtom1 ll_var (LL.ValA [value])
     m
 
--- | Lower an expression to a constant value, without generating any code.
+bindPatternMaybe :: Maybe PatM -> Maybe LL.Val -> GenLower a -> GenLower a
+bindPatternMaybe Nothing Nothing m = m
+bindPatternMaybe (Just p) (Just v) m = bindPattern p v m
+
+-- | Lower an expression to a constant value.
+--   TODO: Generate a lazy term.
 lowerConstantExp :: Maybe Label -> ExpM -> Lower (LL.Val, [LL.GlobalDef], Bool)
 lowerConstantExp m_name expression =
+  internalError "lowerConstantExp: Not implemented"
+{-
   case fromExpM expression
   of VarE _ v -> do val <- lowerNonIntrinsicVar v
                     return (val, [], True)
      LitE _ l -> return (lowerLit l, [], True)
-     ConE _ con _ _ args -> do
-       -- Compute the constructed value's type
-       result_type <- getConType con
+     ConE _ con _ m_tyob args -> do
+       -- Compute the constructed value's type and layout
+       (_, result_type) <- conType con
+
+       dyn_info <- case con
+                   of VarCon op ty_args _ -> setupDynTypeInfo undefined
+       s <- computeStructure result_type
        layout <- getAlgLayout result_type
 
        -- Create a static value
@@ -188,28 +188,23 @@ lowerConstantExp m_name expression =
        (con_value, con_defs, is_value) <-
          staticObject m_name layout layout_con arg_vals
        return (con_value, concat arg_defss ++ con_defs, is_value)
+-}
 
-lowerExpToVal :: ExpM -> GenLower LL.Val
-lowerExpToVal expression = do
-  rv <- lowerExp expression
-  case rv of RetVal val -> return val
-             NoVal -> internalError "lowerExpToVal"
-
-lowerExp :: ExpM -> GenLower RetVal
+lowerExp :: ExpM -> GenLower LL.Val
 lowerExp expression =
   case fromExpM expression
   of VarE _ v -> lowerVar v
-     LitE _ l -> return $ RetVal $ lowerLit l
-     ConE _ con _ _ args -> lowerCon con args
+     LitE _ l -> return $ lowerLit l
+     ConE _ con sps ty_ob args -> lowerCon con sps ty_ob args
      AppE _ op ty_args args -> do
        ty <- lift $ inferExpType expression
        lowerApp ty op ty_args args
      LamE _ f -> lowerLam f
      LetE _ binder rhs body -> lowerLet binder rhs body
      LetfunE _ defs body -> lowerLetrec defs body
-     CaseE _ scr _ alts -> do 
-       ty <- lift $ inferExpType expression
-       lowerCase ty scr alts
+     CaseE _ scr sps alts -> do 
+       ty <- lift . lowerLowerType =<< inferExpType expression
+       lowerCase ty scr sps alts
      ExceptE _ ty -> lowerExcept ty
      -- Coercions are lowered to a no-op
      CoerceE _ _ _ e -> lowerExp e
@@ -217,13 +212,10 @@ lowerExp expression =
 
 lowerVar v =
   case LL.lowerIntrinsicOp v
-  of Just lower_var -> do xs <- lower_var []
-                          return $ listToRetVal xs
-     Nothing -> lift $ liftM RetVal $ lowerNonIntrinsicVar v
+  of Just lower_var -> lower_var []
+     Nothing -> lift $ lowerNonIntrinsicVar v
   
-lowerNonIntrinsicVar v = do
-  ll_v <- lookupVar v
-  return $ LL.VarV ll_v
+lowerNonIntrinsicVar v = liftM LL.VarV $ lookupVar v
 
 lowerLit :: Lit -> LL.Val
 lowerLit lit =
@@ -244,27 +236,25 @@ lowerLit lit =
 -- | Lower a data constructor application.  Generate code to construct a value.
 
 -- Lower arguments, then pack the result values into a record value
-lowerCon con args = do
-  result_type <- lift (getConType con)
-  arg_values <- mapM lowerExpToVal args
-  let layout_con = layoutCon $ summarizeConstructor con
-  compileConstructor layout_con result_type arg_values
+lowerCon (VarCon op ty_args ex_types) sps ty_ob args = do
+  -- Lower the arguments
+  sps' <- mapM lowerExp sps
+  ty_ob' <- mapM lowerExp ty_ob
+  args' <- mapM lowerExp args
 
-getConType (TupleCon ty_args) = do
-  arg_kinds <- mapM typeBaseKind ty_args
-  return $ typeApp (UTupleT arg_kinds) ty_args
-
-getConType (VarCon op ty_args ex_types) = do
+  -- Create a constructor term 
   Just op_data_con <- lookupDataCon op
-  (_, result_type) <-
-    instantiateDataConTypeWithExistentials
-    op_data_con (ty_args ++ ex_types)
-  return result_type
+  let data_type = dataConType op_data_con
+      con_index = dataConIndex op_data_con
+  return_type <- getReturnTypes
+  lowerAndGenerateCode $ genConstructor data_type ty_args con_index sps' ty_ob' args'
 
-{-  let record_type = LL.constStaticRecord $
-                    map (LL.valueToFieldType . LL.valType) arg_values
-  tuple_val <- emitAtom1 (LL.RecordType record_type) $
-               LL.PackA record_type arg_values-}
+lowerCon (TupleCon ty_args) [] Nothing args = do
+  args' <- mapM lowerExp args
+
+  -- Create a tuple value
+  field_types <- lift $ mapM lowerLowerType ty_args
+  packRecord (LL.constStaticRecord $ map LL.valueToFieldType field_types) args'
 
 -- | Lower an application term.
 --
@@ -273,13 +263,12 @@ getConType (VarCon op ty_args ex_types) = do
 --   are lowered to a function call.
 --
 --   Type applications are erased, so if there are  with no arguments are 
-lowerApp :: Type -> ExpM -> [Type] -> [ExpM] -> GenLower RetVal
+lowerApp :: Type -> ExpM -> [Type] -> [ExpM] -> GenLower LL.Val
 
 lowerApp rt (ExpM (VarE _ op_var)) ty_args args
   | Just mk_code <- LL.lowerIntrinsicOp op_var = do
       -- Lower the intrinsic operation
-      xs <- mk_code =<< mapM lowerExpToVal args
-      return $ listToRetVal xs
+      mk_code =<< mapM lowerExp args
 
 lowerApp rt op ty_args args = do
   -- Lower the operator expression
@@ -287,15 +276,13 @@ lowerApp rt op ty_args args = do
 
   -- If function arguments were given, then generate a function call
   if null args then return op' else do
-    args'   <- mapM lowerExpToVal args
-    returns <- lift $ lowerType rt
-    retvals <- emitAtom (maybeToList returns) $
-               LL.closureCallA (fromRetVal op') args'
-    return $ listToRetVal retvals
+    args'   <- mapM lowerExp args
+    returns <- lift $ lowerLowerType rt
+    emitAtom1 returns $ LL.closureCallA op' args'
 
 lowerLam f = do
   f' <- emitLambda =<< lift (lowerFun f)
-  return $ RetVal (LL.VarV f')
+  return $ LL.VarV f'
 
 lowerLet binder rhs body = do
   rhs_code <- lowerExp rhs
@@ -306,14 +293,43 @@ lowerLetrec defs body =
     emitLetrec defs'
     lowerExp body
 
-lowerCase return_type scr alts = do
-  scrutinee_type <- lift $ inferExpType scr
-  scr_val <- lowerExpToVal scr
-  compileCase return_type scrutinee_type scr_val (map lowerAlt alts)
+lowerCase return_type scr sps alts = do
+  scrutinee_type <- lift $ reduceToWhnf =<< inferExpType scr
+  scr_val <- lowerExp scr
+  sps' <- mapM lowerExp sps
+  case fromTypeApp scrutinee_type of
+    (VarT op_var, args) ->
+      lowerAlgDataCase return_type op_var args sps' scr_val alts
+    (UTupleT ks, args) ->
+      lowerTupleCase return_type args scr_val alts
 
-lowerAlt (AltM alt) =
-  let con = layoutCon $ summarizeDeconstructor $ altCon alt
-  in (con, lowerAltBody alt)
+lowerAlgDataCase return_type op_var args sps scr_val alts = do
+  Just data_type <- lookupDataType op_var
+  -- TODO: Clean up these two calls
+  lower_alt_wrapped <- embedIntoGenM (lower_alt data_type)
+  lowerAndGenerateCode $
+    genCase data_type args sps return_type scr_val (\ i ty_ob field_values -> lower_alt_wrapped (i, ty_ob, field_values))
+  where
+    lower_alt data_type (i, ty_ob, field_values) =
+      -- Find the alternative for index 'i'
+      let con = dataTypeDataConstructors data_type !! i
+          match_alt (AltM (Alt (VarDeCon op _ _) _ _ _)) = op == con
+          Just alt = find match_alt alts
+      in lowerAlt alt ty_ob field_values
+
+lowerTupleCase return_type args scr_val alts = do
+  let [AltM (Alt (TupleDeCon field_types) Nothing params body)] = alts
+  lowered_field_types <- lift $ mapM lowerLowerType field_types
+
+  -- Unpack a tuple
+  field_vals <- unpackRecord2 (LL.constStaticRecord $ map LL.valueToFieldType lowered_field_types) scr_val
+  bindPatterns (zip params field_vals) $ lowerExp body
+
+lowerAlt (AltM (Alt decon ty_ob_param params body)) ty_ob field_values =
+  assumeBinders (deConExTypes decon) $
+  bindPatternMaybe ty_ob_param ty_ob $
+  bindPatterns (zip params field_values) $
+  lowerExp body
 
 lowerAltBody alt field_values =
   -- Bind the field values and generate the body
@@ -322,16 +338,15 @@ lowerAltBody alt field_values =
      bindPatterns (zip params field_values) $
      lowerExp $ altBody alt
 
+lowerExcept :: Type -> GenLower LL.Val
 lowerExcept return_type = do
   -- Throw an exception
   emitThrow (nativeIntV (-1))
 
   -- Return a value.  The return value is dead code, but is expected by the
   -- lowering process.
-  lowered_type <- lift $ lowerType return_type
-  case lowered_type of
-    Nothing -> return NoVal
-    Just vt -> fmap RetVal $ return_ll_value vt
+  lowered_type <- lift $ lowerLowerType return_type
+  return_ll_value lowered_type
   where
     -- Return a value of the desired type.  The actual value is unimportant
     -- because we're generating dead code.
@@ -353,28 +368,30 @@ lowerExcept return_type = do
         to_value_type (LL.PrimField pt) = LL.PrimType pt
         to_value_type (LL.RecordField rt) = LL.RecordType rt
 
-lowerArray :: Type -> [ExpM] -> GenLower RetVal
+lowerArray :: Type -> [ExpM] -> GenLower LL.Val
 lowerArray ty es = do
   -- Create an initializer function
   val <- genLambda [LL.PrimType LL.PointerType] [LL.PrimType LL.UnitType] $ \[ret_param] -> do
     -- Compute the size of one array element, including padding
-    elt_layout <- lift $ getLayout ty
-    (elt_size, elt_alignment) <- layoutSize elt_layout
+    -- FIXME: Use a size parameter on array literals
+    elt_size_exp <- liftTypeEvalM $ runMaybeGen $
+                    constructConstantSizeParameter (KindedType BareK ty)
+    elt_size <- unpackSizeAlign =<< lowerExp elt_size_exp
     
-    -- Add padding to size of array elements
-    i_size <- primCastZ (LL.PrimType LL.nativeIntType) elt_size
-    i_padded_size <- addRecordPadding i_size elt_alignment
-    padded_size <- primCastZ (LL.PrimType LL.nativeWordType) i_padded_size
+    -- Add padding to size of array elements.
+    -- This is done by computing the size of a one-element array.
+    SizeAlign padded_size _ <-
+      lowerAndGenerateCode $ arraySize (nativeWordV 1) elt_size
 
     -- Write the array
     write_array_elements padded_size ret_param es
-  return $ RetVal val
+  return val
   where
     -- Write all array elements to the appropriate offsets
     write_array_elements size ptr (e:es) = do
-      -- Write e
-      RetVal f <- lowerExp e
-      emitAtom1 (LL.PrimType LL.PointerType) $ LL.closureCallA f [ptr]
+      -- Element is given as an initializer; write it
+      f <- lowerExp e
+      emitAtom1 (LL.PrimType LL.UnitType) $ LL.closureCallA f [ptr]
 
       -- Get pointer to next array element
       ptr' <- primAddP ptr size
@@ -386,14 +403,14 @@ lowerFun :: FunM -> Lower LL.Fun
 lowerFun (FunM fun) =
   assumeTyParams (funTyParams fun) $
   withMany lower_param (funParams fun) $ \params -> do
-    returns <- lowerType $ funReturn fun
-    genClosureFun params (maybeToList returns) $ lower_body (funBody fun)
+    return_type <- lowerLowerType $ funReturn fun
+    genClosureFun params [return_type] $ lower_body (funBody fun)
   where
     lower_param pat k = assumeVar False (patMVar pat) (patMType pat) k
     
     lower_body body = do
       ret_val <- lowerExp body
-      return (LL.ReturnE $ LL.ValA $ retValToList ret_val)
+      return (LL.ReturnE $ LL.ValA [ret_val])
 
 lowerDefGroupG :: DefGroup (FDef Mem)
                -> (LL.Group LL.FunDef -> GenLower a)
@@ -545,12 +562,13 @@ lowerModule (Module { modName = mod_name
       i_global_types <- readInitGlobalVarIO the_memTypes
       global_types <- thawTypeEnv i_global_types
       global_map <- readInitGlobalVarIO the_loweringMap
-      env <- initializeLowerEnv var_supply ll_var_supply global_types global_map
+      env <- initializeLowerEnv ll_var_supply global_map
       
       let all_defs = if False
                      then Rec imports : globals -- DEBUG: also lower imports
                      else globals
-      runLowering env $ lowerModuleCode mod_name all_defs exports
+      runTypeEvalM (runLowering env $ lowerModuleCode mod_name all_defs exports)
+        var_supply global_types
 
   ll_name_supply <- newLocalIDSupply  
 
