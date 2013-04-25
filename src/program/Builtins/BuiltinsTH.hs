@@ -252,7 +252,6 @@ builtinVariableNames =
   , "repr_Box"
   , "repr_Scatter"
   , "repr_view"
-  , "repr_Maybe"
   , "repr_EmptyReference"
   , "repr_Coercion"
   , "repr_EffTok"

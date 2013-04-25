@@ -63,8 +63,10 @@ type AsBare : box -> bare attribute(builtin);
 data bool : val
   attribute(builtin)
 {
-  True () attribute(builtin);
+  -- False becomes 0 after lowering
   False () attribute(builtin);
+  -- True becomes 1 after lowering
+  True () attribute(builtin);
 };
 
 data NoneType : val
@@ -2257,8 +2259,23 @@ sizealign_float : SizeAlign (Stored float);
 sizealign_bool : SizeAlign (Stored bool);
 sizealign_NoneType : SizeAlign (Stored NoneType);
 sizealign_Ref : forall a : box. SizeAlign (Ref a);
-sizealign_arr : forall n : intindex, e : bare.
-                FIInt n -> SizeAlign e -> SizeAlign (arr n e);
+
+sizealign_arr @(n : intindex) @(e : bare) (len : FIInt n) (sa : SizeAlign e)
+  -> SizeAlign (arr n e)
+  attribute(inline, inline_postfinal) =
+
+  case sa of sizeAlign elt_size elt_align.
+  case len of fiInt length_int.
+
+  -- Pad size to a multiple of alignment
+  let size2 = uintToInt elt_size in
+  let padded = size2 +# negI size2 %# uintToInt elt_align in
+
+  -- Multiply by number of array elements
+  let array_size = intToUint (length_int *# padded) in
+
+  sizeAlign @(arr n e) array_size elt_align;
+
 
 repr_arr @(n : intindex) @(e : bare)
   (size : FIInt n) (repr_e : Repr e) -> Repr (arr n e)
@@ -2315,8 +2332,6 @@ repr_StuckRef @(a : box) -> Repr (StuckRef a)
 
 -- Representation of any boxed object
 repr_Box : forall a : box. Repr (AsBare a);
-
-repr_Maybe : forall a : bare. Repr a -> Repr (Maybe a);
 
 -- Representation of a referenced object that contains nothing and will
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,
@@ -5090,7 +5105,7 @@ AdditiveDict_int_sub (x : Boxed (Stored int)) (y : Boxed (Stored int))
 AdditiveDict_int_negate (x : Boxed (Stored int)) -> Boxed (Stored int) =
   boxIntValue (negI (unboxIntValue x));
 
-AdditiveDict_int_zero : Boxed (Stored int) = boxIntValue 0;
+AdditiveDict_int_zero : Boxed (Stored int) attribute(inline) = boxIntValue 0;
 
 AdditiveDict_uint : AdditiveDict (Boxed (Stored uint));
 AdditiveDict_uint_add : Boxed (Stored uint) -> Boxed (Stored uint) -> Boxed (Stored uint);
@@ -5110,7 +5125,7 @@ AdditiveDict_float_sub (x : Boxed (Stored float)) (y : Boxed (Stored float))
 AdditiveDict_float_negate (x : Boxed (Stored float)) -> Boxed (Stored float) =
   boxFloatValue (negF (unboxFloatValue x));
 
-AdditiveDict_float_zero : Boxed (Stored float) = boxFloatValue 0.0;
+AdditiveDict_float_zero : Boxed (Stored float) attribute(inline) = boxFloatValue 0.0;
 
 AdditiveDict_Tuple2 : forall a b : box.
                       Repr (AsBare a) -> Repr (AsBare b)
@@ -8405,7 +8420,7 @@ parallel_list_dim_reduce1 @(a : bare)
   (ret : OutPtr a)
   -> Store =
 
-  let mrepr : Repr (Maybe a) = repr_Maybe @a rep in
+  let mrepr : Repr (Maybe a) = unboxedinfo Maybe @a rep in
   case dom of mk_list_dim tyob (list_size : MaybeVal int).
   case list_size of {
     justVal (size : int).
