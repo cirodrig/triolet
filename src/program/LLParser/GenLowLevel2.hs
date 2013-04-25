@@ -21,6 +21,7 @@ import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.CodeTypes hiding(Field)
+import LowLevel.Print
 import qualified LowLevel.Syntax as LL
 import Globals
 import Export
@@ -525,6 +526,17 @@ genCast ty e =
      (FloatType e_sz, IntType Signed g_sz) -> do
        val <- asVal e
        success $ LL.PrimA (LL.PrimCastZToF g_sz e_sz) [val]
+     (IntType sgn sz, BoolType) -> do
+       val <- asVal e
+       -- Select either zero or one, depending on the boolean's value
+       let zero = LL.LitV (LL.IntL sgn sz 0)
+       let one = LL.LitV (LL.IntL sgn sz 1)
+       success $ LL.PrimA (LL.PrimSelect $ PrimType expected_type) [val, one, zero]
+     (BoolType, IntType sgn sz) -> do
+       val <- asVal e
+       -- Compare the integer to zero.  True if not equal to zero.
+       let zero = LL.LitV (LL.IntL sgn sz 0)
+       success $ LL.PrimA (LL.PrimCmpZ sgn sz LL.CmpNE) [val, zero]
      _ -> cannot
   where
     given_type =
@@ -541,7 +553,10 @@ genCast ty e =
    
     success atom = return $ GenAtom [ty] atom
     
-    cannot = internalError "genCast: Unexpected type cast"
+    cannot =
+      internalError $ "genCast: Unexpected type cast from " ++
+      show (pprPrimType given_type) ++ " to " ++
+      show (pprPrimType expected_type)
 
 genAtom :: TypeEnv -> Atom Typed -> G LL.Atom
 -- If there's only one expression, make an atom
