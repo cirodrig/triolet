@@ -2331,7 +2331,10 @@ repr_StuckRef @(a : box) -> Repr (StuckRef a)
   unboxedinfo StuckRef @a;
 
 -- Representation of any boxed object
-repr_Box : forall a : box. Repr (AsBare a);
+-- TODO: Add equality constraint (AsBare a ~ Ref a)
+repr_Box @(a : box) -> Repr (AsBare a)
+  attribute(inline, inline_postfinal) =
+  coerce @(Repr (Ref a)) @(Repr (AsBare a)) (repr_Ref @a);
 
 -- Representation of a referenced object that contains nothing and will
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,
