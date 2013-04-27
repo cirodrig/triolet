@@ -43,7 +43,11 @@ builtinModuleName :: ModuleName
 builtinModuleName = ModuleName "Builtin"
 
 -- | A label tag, used to distinguish multiple variables that were created
--- from the same original variable.
+--   from the same original variable.
+--
+--   Label tags are purely cosmetic extensions of variable names.  They
+--   help to produce readable names in the generated code.  They have no
+--   semantic significance.
 data LabelTag =
     -- | A normal variable.  This tag is used on procedures, global data, and
     --   global function closures.
