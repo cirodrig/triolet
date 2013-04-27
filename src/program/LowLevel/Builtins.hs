@@ -7,10 +7,7 @@ lowered from System F, except for intrinsics which are in
 
 {-# LANGUAGE TemplateHaskell #-}
 module LowLevel.Builtins
-       (-- * Record types
-        passConvRecord,
-
-        -- * Built-in variables
+       (-- * Built-in variables
         LowLevelBuiltins(..),
         the_lowLevelBuiltins,
         lowerBuiltinCoreFunction,
@@ -31,8 +28,10 @@ module LowLevel.Builtins
         the_prim_apply_i32,
         the_prim_apply_f32_f,
         the_prim_apply_f32,
-        the_prim_apply_i64_f,
-        the_prim_apply_i64,
+        the_prim_apply_p_f,
+        the_prim_apply_p,
+        the_prim_apply_o_f,
+        the_prim_apply_o,
         the_fun_negate_int,
         the_fun_negate_float,
         the_fun_minus_ii,
@@ -40,6 +39,7 @@ module LowLevel.Builtins
         the_fun_copy1F,
         the_fun_copy2F,
         the_fun_copy4F,
+        the_bivar_triolet_typeObject_function,
         {- the_fun_makeComplex,
         the_fun_load_int,
         the_fun_load_float,

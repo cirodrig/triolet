@@ -104,7 +104,8 @@ data Prim =
   | PrimShiftL !Signedness !Size      -- ^ Shift left by a signed int value
   | PrimShiftR !Signedness !Size      -- ^ Shift right by a signed int value
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
-  | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
+  | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers or
+                                      --   owned references
   | PrimSelect !ValueType             -- ^ Boolean value select
   | PrimAnd                           -- ^ Boolean and
   | PrimOr                            -- ^ Boolean or

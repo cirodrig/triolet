@@ -13,25 +13,4 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
-// Allocate some memory.  Use the flag to determine what kind of allocation.
-procedure inline allocate (bool is_pointerless, uint size) -> pointer {
-  if (is_pointerless) {
-    pointer primcall triolet_alloc_nopointers (size);
-  } else {
-    pointer primcall triolet_alloc (size);
-  };
-};
-
-// The info table of a stream
-data pointer Stream_info = InfoTableHeader {
-  TAG_CON
-};
-
-procedure inline Stream_alloc () -> owned {
-  s = pointer primcall triolet_alloc (sizeof Obj(StreamData));
-  // FIXME: initialize header
-  s @! Obj(StreamData).header.info = Stream_info;
-  s as owned;
-};
-
 

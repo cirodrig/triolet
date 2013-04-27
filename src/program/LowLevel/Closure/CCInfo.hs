@@ -33,13 +33,11 @@ valPrimType val =
   of PrimType pt -> pt
      RecordType _ -> internalError "valPrimType"
 
--- | Create an immutable record that can hold the given vector of values.
-valuesRecord :: [Val] -> StaticRecord
-valuesRecord vals = constStaticRecord $ map (PrimField . valPrimType) vals
-
--- | Create an immutable record that can hold the given variables' values.
+-- | Create an immutable record to hold the given closure-captured variables.
+--   The variables' types are promoted.
 variablesRecord :: [Var] -> StaticRecord
-variablesRecord vals = constStaticRecord $ map (PrimField . varPrimType) vals
+variablesRecord vals =
+  constStaticRecord $ map (PrimField . promoteType . varPrimType) vals
 
 -- | Create a record that can hold values of the given types after type
 --   promotion.
@@ -73,7 +71,9 @@ papArgsRecord mut tys =
 --   whether it is a saturated call or not.  
 --
 --   * /closure-captured/ variables are added to a function closure
---   at the time the closure is created.
+--   at the time the closure is created.  The closure holds promoted 
+--   data types, so the types of the closure-captured variables may not 
+--   match the field types of the closure-captured record.
 data CCInfo =
     -- | A global function that can be used as a first-class value
     GlobalClosure
@@ -212,7 +212,7 @@ globalCCInfo (Def v f) =
   of ClosureCall -> do
        ep <- case varName v
              of Just name -> mkGlobalEntryPoints (funType f) name v
-                Nothing -> mkEntryPoints NeverDeallocate False (funType f) v
+                Nothing -> mkEntryPoints False (funType f) v
        return $ GlobalClosure ep
      PrimCall -> do
        return $ GlobalPrim (funType f)
@@ -305,12 +305,12 @@ groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
         let call_captured = Set.toList (captured_set Set.\\ shared_set)
         entry_points <-
           case call_conv
-          of ClosureCall -> mkEntryPoints NeverDeallocate False ftype v
+          of ClosureCall -> mkEntryPoints False ftype v
              JoinCall -> do
                -- This function has the wrong type, so create a new variable
                v' <- newVar (varName v) (PrimType OwnedType)
                let ftype' = closureFunctionType (ftParamTypes ftype) (ftReturnTypes ftype)
-               mkEntryPoints NeverDeallocate False ftype' v'
+               mkEntryPoints False ftype' v'
                
         return (v, LocalClosure entry_points closure_record call_captured
                    shared_list shared_record want_closure)

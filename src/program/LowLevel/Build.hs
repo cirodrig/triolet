@@ -433,6 +433,9 @@ primNegateZ prim_type@(PrimType (IntType sign size)) n =
 primCmpZ prim_type@(PrimType (IntType sign size)) comparison x y =
   emitAtom1 (PrimType BoolType) $ PrimA (PrimCmpZ sign size comparison) [x, y]
 
+primCmpP comparison x y =
+  emitAtom1 (PrimType BoolType) $ PrimA (PrimCmpP comparison) [x, y]
+
 primAnd x y =
   emitAtom1 (PrimType BoolType) $ PrimA PrimAnd [x, y]
 
@@ -479,6 +482,17 @@ primCastToOwned ptr =
 
 primCastFromOwned ptr =
   emitAtom1 (PrimType OwnedType) $ PrimA PrimCastFromOwned [ptr]
+
+-- | Convert any integral type to a boolean
+primIntToBool val =
+  let ty@(PrimType (IntType sgn sz)) = valType val
+  in primCmpZ ty CmpNE val (LitV $ IntL sgn sz 0)
+
+-- | Convert a boolean to any integral type
+primBoolToInt ty@(PrimType (IntType sgn sz)) val =
+  let zero = LitV $ IntL sgn sz 0
+      one = LitV $ IntL sgn sz 1
+  in emitAtom1 ty $ PrimA (PrimSelect ty) [val, zero, one]
 
 isZeroLit (LitV (IntL _ _ 0)) = True
 isZeroLit _ = False
@@ -529,6 +543,11 @@ uint16V n
   | not $ isRepresentableInt Unsigned S16 (fromIntegral n) =
       internalError "uint16V: Integer out of range"
   | otherwise = LitV $ IntL Unsigned S16 $ fromIntegral n
+
+funArityV :: Int -> Val
+funArityV n =
+  let IntType sgn sz = funArityType
+  in LitV $ IntL sgn sz $ fromIntegral n
 
 booleanV :: Bool -> Val
 booleanV b = LitV (BoolL b)
@@ -798,11 +817,14 @@ promoteVal v
     case original_type
     of BoolType ->
          -- Promote to native int
-         emitAtom1 (PrimType nativeIntType) $
-         PrimA (PrimSelect (PrimType nativeIntType))
-         [v, nativeIntV 0, nativeIntV 1]
-       IntType _ _ ->
+         primBoolToInt (PrimType nativeIntType) v
+       IntType Signed _ ->
          primExtendZ (PrimType promoted_type) v
+       IntType Unsigned sz ->
+         -- Zero-extend, then cast to signed int
+         let IntType Signed sz' = promoted_type
+         in primExtendZ (PrimType $ IntType Unsigned sz') v >>=
+            primCastZ (PrimType promoted_type)
        _ -> internalError "promoteVal: Not implemented for this type"
   where
     original_type =
@@ -822,9 +844,14 @@ demoteVal original_type v
     case original_type
     of BoolType ->
          -- Demote native int to boolean
-         primCmpZ (PrimType promoted_type) CmpNE v (nativeIntV 0)
-       IntType _ _ ->
+         primIntToBool v
+       IntType Signed _ ->
          primExtendZ (PrimType original_type) v
+       IntType Unsigned sz ->
+         -- Cast to unsigned int, then truncate
+         let IntType Signed sz' = promoted_type
+         in primCastZ (PrimType $ IntType Unsigned sz') v >>=
+            primExtendZ (PrimType original_type)
        _ -> internalError "demoteVal: Not implemented for this type"
   where
     promoted_type = promoteType original_type
@@ -882,84 +909,40 @@ deallocateHeapMem ptr =
 -------------------------------------------------------------------------------
 -- Manipulating objects
 
-objectHeaderRecord' :: DynamicRecord
-objectHeaderRecord' = toDynamicRecord objectHeaderRecord
+-- | Load an object header
+readObjectHeader ptr = primLoadConst (PrimType OwnedType) ptr
 
-objectHeaderData :: Val -> [Val]
-objectHeaderData info_ptr = [info_ptr]
+-- | Write an object header
+writeObjectHeader ptr val = primStoreConst (PrimType OwnedType) ptr val
 
-infoTableHeaderRecord' :: DynamicRecord
-infoTableHeaderRecord' = toDynamicRecord infoTableHeaderRecord
+-- | Read a function's info table reference.
+--   This can also be used on PAPs.  The returned value will contain
+--   NULL at run time if the argument is a PAP.
+readFunInfoTable = loadField (localClosureRecord0 !!: 1)
+refFunCapturedVars captured = referenceField (localClosureRecord captured !!: 2)
 
-passConvRecord' :: DynamicRecord
-passConvRecord' = toDynamicRecord passConvRecord
+writeFunInfoTable = storeField (localClosureRecord0 !!: 1)
 
--- | Generate code that initializes an object header.
-initializeObject :: (Monad m, Supplies m (Ident Var)) =>
-                    Val         -- ^ Pointer to object
-                 -> Val         -- ^ Info table pointer
-                 -> Gen m ()
-initializeObject ptr info_ptr = do
-  storeField (objectHeaderRecord' !!: 0) ptr info_ptr
+readInfoTableArity = loadField (infoTableRecord0 !!: 0)
+readInfoTableCaptureCount = loadField (infoTableRecord0 !!: 1)
+readInfoTableExact = loadField (infoTableRecord0 !!: 2)
+readInfoTableInexact = loadField (infoTableRecord0 !!: 3)
+refInfoTableTags captured = referenceField (infoTableRecord captured !!: 4)
 
-selectPassConvSizeAlign,
-  selectPassConvCopy,
-  selectPassConvConvertToBoxed,
-  selectPassConvConvertToBare,
-  selectPassConvIsPointerless :: (Monad m, Supplies m (Ident Var)) =>
-                                 Val -> Gen m Val
--- (Field 0 is the object header)
-selectPassConvSizeAlign      = loadField (passConvRecord' !!: 1)
-selectPassConvCopy           = loadField (passConvRecord' !!: 2)
-selectPassConvConvertToBoxed = loadField (passConvRecord' !!: 3)
-selectPassConvConvertToBare  = loadField (passConvRecord' !!: 4)
-selectPassConvIsPointerless  = loadField (passConvRecord' !!: 5)
+writeInfoTableArity = storeField (infoTableRecord0 !!: 0)
+writeInfoTableExact = storeField (infoTableRecord0 !!: 1)
+writeInfoTableInexact = storeField (infoTableRecord0 !!: 2)
+
+readPapOperator = loadField (papRecord0 !!: 2)
+readPapArity = loadField (papRecord0 !!: 3)
+readPapOperand t = loadField (papRecord t !!: 4)
+
+writePapPapTag ptr = storeField (papRecord0 !!: 0) ptr (LitV NullL)
 
 selectTypeObjectConIndex = loadField (toDynamicRecord typeObjectRecord !!: 1)
 
 -------------------------------------------------------------------------------
--- Dictionaries
-
--- | The record type of an additive class dictionary
-additiveDictRecord :: (Monad m, Supplies m (Ident Var)) =>
-                      DynamicFieldType -> Gen m DynamicRecord
-additiveDictRecord ftype =
-  createConstDynamicRecord [ RecordField passConvRecord'
-                           , PrimField OwnedType
-                           , PrimField OwnedType
-                           , PrimField OwnedType
-                           , ftype]
-
-suspendedAdditiveDictRecord ftype =
-  suspendedCreateConstDynamicRecord [ RecordField passConvRecord'
-                                    , PrimField OwnedType
-                                    , PrimField OwnedType
-                                    , PrimField OwnedType
-                                    , ftype]
-
-suspendedMultiplicativeDictRecord ftype = do
-  (additive_code, additive_record) <- suspendedAdditiveDictRecord ftype
-  (multiplicative_code, multiplicative_record) <-
-    suspendedCreateConstDynamicRecord [ RecordField additive_record
-                                      , PrimField OwnedType
-                                      , PrimField OwnedType
-                                      , ftype]
-  return (additive_code >> multiplicative_code, multiplicative_record)
-
-complexRecord' eltype = createConstDynamicRecord [eltype, eltype]
-
-suspendedComplexRecord' eltype =
-  suspendedCreateConstDynamicRecord [eltype, eltype]
-
--------------------------------------------------------------------------------
 -- Values
-
-data WantClosureDeallocator =
-    NeverDeallocate             -- ^ The closure is never deallocated
-  | DefaultDeallocator          -- ^ The closure has no captured variables and
-                                --   is not recursive; use the default
-                                --   deallocation function
-  | CustomDeallocator !Var      -- ^ Use the given deallocation function
 
 -- | Create an 'EntryPoints' data structure for an externally visible
 -- global function and populate it with new variables.
@@ -972,6 +955,10 @@ mkGlobalEntryPoints ftype label global_closure
   | not $ ftIsClosure ftype =
     internalError $
     "mkGlobalEntryPoints: Not a closure function: " ++ show global_closure
+  | Just name <- varName global_closure,
+    labelTag name /= NormalLabel =
+    internalError $
+    "mkGlobalEntryPoints: Invalid variable name"
   | otherwise = do
       inf <- newVar (Just label) (PrimType PointerType)
       dir <- make_entry_point DirectEntryLabel
@@ -991,65 +978,20 @@ mkGlobalEntryPoints ftype label global_closure
 -- | Create an 'EntryPoints' data structure for a non-externally-visible
 -- global function.
 mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
-                 WantClosureDeallocator
-              -> Bool           -- ^ If true, create a vector entry point
+                 Bool           -- ^ If true, create a vector entry point
               -> FunctionType   -- ^ Function type
               -> Var            -- ^ Global closure variable
               -> m EntryPoints  -- ^ Creates an EntryPoints structure
-mkEntryPoints NeverDeallocate False ftype global_closure
+mkEntryPoints False ftype global_closure
   | not $ ftIsClosure ftype =
     internalError "mkEntryPoints: Not a closure function"
+  | Just name <- varName global_closure,
+    labelTag name /= NormalLabel =
+    internalError $
+    "mkGlobalEntryPoints: Invalid variable name"
   | otherwise = do
       let label = varName global_closure
       [inf, dir, exa, ine] <-
         replicateM 4 $ newVar label (PrimType PointerType)
       let arity = length $ ftParamTypes ftype
       return $! EntryPoints ftype arity dir Nothing exa ine inf global_closure
-{-
-passConvValue :: Int -> Int -> Var -> Var -> Val
-passConvValue size align copy finalize =
-  RecV passConvRecord
-  [ LitV $ IntL Unsigned S32 (fromIntegral size)
-  , LitV $ IntL Unsigned S32 (fromIntegral align)
-  , VarV copy
-  , VarV finalize
-  ]
-
-intPassConvValue :: Val
-intPassConvValue =
-  let size = sizeOf pyonIntType
-      align = alignOf pyonIntType
-      copy = case size
-             of 4 -> llBuiltin the_fun_copy4F
-                _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dummy_finalizer)
-
-floatPassConvValue :: Val
-floatPassConvValue =
-  let size = sizeOf pyonFloatType
-      align = alignOf pyonFloatType
-      copy = case size
-             of 4 -> llBuiltin the_fun_copy4F
-                _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dummy_finalizer)
-
-boolPassConvValue :: Val
-boolPassConvValue =
-  let size = sizeOf pyonBoolType
-      align = alignOf pyonBoolType
-      copy = case size
-             of 4 -> llBuiltin the_fun_copy4F
-                _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dummy_finalizer)
-
--- | Create a lambda function that constructs an additive dictionary
-genAdditiveDictFun :: (Monad m, Supplies m (Ident Var)) => Gen m Atom
-genAdditiveDictFun = do
-  type_param <- lift $ newAnonymousVar (PrimType UnitType)
-  zero_param <- lift $ newAnonymousVar (PrimType OwnedType)
-  add_param <- lift $ newAnonymousVar (PrimType OwnedType)
-  sub_param <- lift $ newAnonymousVar (PrimType OwnedType)
-  let params = [type_param, zero_param, add_param, sub_param]
-  fun_body <- getBlock $ return $ PackA additiveDictRecord (map VarV params)
-  return $ ValA [LamV $ closureFun params [RecordType additiveDictRecord] fun_body]
--}

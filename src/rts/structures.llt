@@ -501,3 +501,9 @@ data owned typeObject_typeObject = TypeObject_mem {
   typeObject_typeObject,
   uint 0
 };
+
+// The type object for a function.
+data owned triolet_typeObject_function = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0
+};

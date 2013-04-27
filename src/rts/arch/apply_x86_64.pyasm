@@ -1,61 +1,66 @@
 
+// Given a PAP or function, get the function
+procedure pap_to_function (owned obj0) -> owned {
+
+  // Check header; is it a function?
+  r = while (owned obj = obj0) (obj @! PAP(unit).papTag == null) {
+    // This is a PAP; get the operator
+    obj @! PAP(unit).operator;
+  };
+  r;
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // Apply functions.
 //
 // All functions apply 'obj' to 'arg', and either return a new object or
 // write their return value to the given address.
 procedure apply_u_f (owned obj, unit _) -> owned {
-  data pointer ret;
-  () = () primcall apply_unit(obj, ret);
-  owned load ret;
+  () = () primcall exit(int -1);
+  null as owned;
 };
 
 procedure apply_u (owned obj, unit _, pointer ret) -> () {
-  () primcall apply_unit(obj, ret);
+  () primcall exit(int -1);
 };
 
-procedure apply_i64_f (owned obj, int64 arg) -> owned {
-  data pointer ret;
-  data int64 arg_ref;
-  !arg_ref = arg;
-  () = () primcall apply_word(obj, arg_ref, ret);
-  owned load ret;
+procedure apply_p_f (owned obj, pointer arg) -> owned {
+  () = () primcall exit(int -1);
+  null as owned;
 };
 
-procedure apply_i64 (owned obj, int64 arg, pointer ret) -> () {
-  data int64 arg_ref;
-  !arg_ref = arg;
-  () primcall apply_word(obj, arg_ref, ret);
+procedure apply_p (owned obj, pointer arg, pointer ret) -> () {
+  () primcall exit(int -1);
+};
+
+procedure apply_o_f (owned obj, owned arg) -> owned {
+  () = () primcall exit(int -1);
+  null as owned;
+};
+
+procedure apply_o (owned obj, owned arg, pointer ret) -> () {
+  () primcall exit(int -1);
 };
 
 procedure apply_i32_f (owned obj, int32 arg) -> owned {
-  data pointer ret;
-  data int64 arg_ref;
-  !arg_ref = arg; // Store 32-bit int in low bits of 64-bit int
-  () = () primcall apply_word(obj, arg_ref, ret);
-  owned load ret;
+  () = () primcall exit(int -1);
+  null as owned;
 };
 
 procedure apply_i32 (owned obj, int arg, pointer ret) -> () {
-  data pointer arg_ref;
-  !arg_ref = arg; // Store 32-bit int in low bits of 64-bit int
-  () primcall apply_word(obj, arg_ref, ret);
+  () primcall exit(int -1);
 };
 
 procedure apply_f32_f (owned obj, float arg) -> owned {
-  data pointer ret;
-  data int64 arg_ref;
-  !arg_ref = arg; // Store 32-bit float in low bits of 64-bit int
-  () = () primcall apply_word(obj, arg_ref, ret);
-  owned load ret;
+  () = () primcall exit(int -1);
+  null as owned;
 };
 
 procedure apply_f32 (owned obj, float arg, pointer ret) -> () {
-  data pointer arg_ref;
-  !arg_ref = arg; // Store 32-bit float in low bits of 64-bit int
-  () primcall apply_word(obj, arg_ref, ret);
+  () primcall exit(int -1);
 };
 
+#if 0
 procedure apply_word (owned obj, pointer arg_ref, pointer ret) -> () {
   obj_info = obj @! ObjectHeader.info;
   obj_tag = obj_info @! InfoTableHeader.tag;
@@ -106,32 +111,51 @@ procedure apply_word (owned obj, pointer arg_ref, pointer ret) -> () {
   };
 };
 
-// Apply a value to the unit type
-procedure apply_unit (owned obj, pointer ret) -> () {
-  obj_info = obj @! ObjectHeader.info;
-  obj_tag = obj_info @! InfoTableHeader.tag;
+// Apply a function or PAP to the unit type
+procedure apply_unit (owned obj, pointer ret) -> nil {
+  typedef PAPu = PAP(unit);
 
-  if (obj_tag == TAG_FUN) {
-    arity = uint16 primcall fun_arity(obj);
+  obj_header = owned load obj;
+
+  letrec {
+    procedure new_PAP (uint16 arity) -> nil {
+      // Create a new PAP
+      new_pap = pointer primcall malloc(sizeof(PAPu) as int);
+      !new_pap = PAPu {typeObject_PAP_unit, obj, nil, arity - uint16 1};
+      pap = new_pap as owned;
+
+      // if fully applied, then call it
+      if (arity == uint16 1) {
+        fun = owned primcall pap_to_function(obj);
+        () = () primcall (fun_info
+      }
+      else { nil; };
+    }
+  };
+
+  if (obj_header == triolet_typeObject_function) {
+    fun_info = obj @! Function.info;
+    arity = fun_info @! FunInfo.arity;
     if (arity == uint16 1) {
       // Calling a function with one argument.  Call the function now.
-      () primcall (obj_info @! FunInfo(value int 0).inexact) (obj, null, ret);
-    }
-    else if (arity == uint16 0) {
-      // TODO: Handle nullary functions
-      () primcall exit (int -1);
+      () primcall (fun_info @! FunInfo.inexact) (obj, null, ret);
+      nil;
     }
     else {
       // Undersaturated application
       // Create a PAP
-      typedef my_pap = PAP(value int 0);
-      new_pap = owned primcall pap_new (obj, uint16 1, uint16 0);
-      !ret = new_pap;
-      ();
-    };
-  } else if (obj_tag == TAG_PAP) {
+      !ret = new_pap as owned;
+      nil;
+    }
+  }
+  else {
     // Determine PAP's arity
-    arity = uint16 primcall pap_arity(obj);
+    arity = obj @! PAP(unit).arity;
+
+    // Create a new PAP
+      new_pap = pointer primcall malloc(sizeof(PAPu) as int);
+      !new_pap = PAPu {typeObject_PAP_unit, obj, nil, arity - uint16 1};
+      !ret = new_pap as owned;
     typedef my_pap = PAP(value int 0);
 
     // Add argument to PAP
@@ -151,3 +175,4 @@ procedure apply_unit (owned obj, pointer ret) -> () {
     () primcall exit (int -1);
   };
 };
+#endif

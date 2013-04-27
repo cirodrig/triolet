@@ -33,7 +33,8 @@ import Common.Identifier
 
 import LowLevel.Build
 import LowLevel.Builtins
-import LowLevel.Records hiding(globalClosureRecord) -- TODO: remove these functions from the other module
+import LowLevel.Print
+import LowLevel.Records
 import LowLevel.RecordFlattening
 import LowLevel.FreshVar
 import LowLevel.CodeTypes
@@ -137,20 +138,6 @@ writeFun f = writeDefs [GlobalFunDef f]
 writeData d = writeDefs [GlobalDataDef d]
 
 -------------------------------------------------------------------------------
--- Closure creation
-
--- | A global closure consists of only an object header
-globalClosureRecord :: StaticRecord
-globalClosureRecord = constStaticRecord [RecordField objectHeaderRecord]
-
--- | A dynamically created function closure consists of an object header and
---   some captured variables
-dynamicClosureRecord :: StaticRecord -> StaticRecord
-dynamicClosureRecord captured =
-  constStaticRecord [ RecordField objectHeaderRecord
-                    , RecordField captured]
-
--------------------------------------------------------------------------------
 -- Dynamic closure creation
 
 -- | Allocate a dynamic closure.
@@ -162,11 +149,11 @@ dynamicClosureRecord captured =
 allocateClosure :: EntryPoints -> StaticRecord -> Var -> GenM Val
 allocateClosure ep closure_record v = do
   ptr <- allocateHeapMemComposite (nativeWordV $ sizeOf closure_record)
-  
-  -- Assign the info pointer to field 0
-  -- Other fields uninitialized
-  header <- referenceField (closure_record !!: 0) ptr
-  storeField (objectHeaderRecord !!: 0) ptr (VarV $ infoTableEntry ep)
+
+  -- Assign the type object and info table fields
+  writeObjectHeader ptr (VarV $ llBuiltin the_bivar_triolet_typeObject_function)
+  writeFunInfoTable ptr (VarV $ infoTableEntry ep)
+  -- Captured variables are uninitialized
   
   -- Convert to an owned pointer
   bindAtom1 v $ PrimA PrimCastToOwned [ptr]
@@ -180,7 +167,19 @@ populateCapturedVars captured captured_record ptr
   | otherwise = mapM_ write_var (zip captured captured_fields)
   where
     captured_fields = recordFields captured_record
-    write_var (v, fld) = storeField fld ptr (VarV v)
+    write_var (v, fld) = storeField fld ptr =<< promoteVal (VarV v)
+
+-- | Read captured variables from a record.
+--   The record contains promoted data types; these are demoted 
+--   to the expected types.
+readCapturedVars :: [PrimType] -> StaticRecord -> Val -> GenM [Val]
+readCapturedVars cap_types cap_recd ptr
+  | length cap_types /= length captured_fields =
+      internalError "readCapturedVars"
+  | otherwise = mapM read_var (zip cap_types captured_fields)
+  where
+    captured_fields = recordFields cap_recd
+    read_var (ty, fld) = demoteVal ty =<< loadField fld ptr
 
 -- | Populate the closure-captured variables of a dynamic closure
 populateClosure :: [Var]        -- ^ Captured variables
@@ -189,7 +188,7 @@ populateClosure :: [Var]        -- ^ Captured variables
                 -> Val          -- ^ The closure to populate
                 -> GenM ()
 populateClosure captured captured_record clo_record ptr = do
-  captured_ptr <- referenceField (clo_record !!: 1) ptr
+  captured_ptr <- refFunCapturedVars clo_record ptr
   populateCapturedVars captured captured_record captured_ptr
 
 -- | Allocate a closure if one is prescribed.
@@ -257,22 +256,27 @@ populateLocalClosures funs = mapM_ populateClosureByCCInfo funs
 mkGlobalClosure :: EntryPoints -> CC ()
 mkGlobalClosure ep =
   let closure_values =
-        [RecV objectHeaderRecord $ objectHeaderData $ VarV $ infoTableEntry ep]
+        [ VarV $ llBuiltin the_bivar_triolet_typeObject_function -- Object header
+        , VarV $ infoTableEntry ep                 -- Info table
+        , RecV (constStaticRecord []) []           -- No captured variables
+        ]
       data_value = RecV (flattenStaticRecord globalClosureRecord)
                         (flattenGlobalValues closure_values)
   in writeData $ Def (globalClosure ep) (StaticData data_value)
 
 -- | Create argument type tags for an info table entry.
 --   The type tags are a sequence of bytes describing the function's
---   argument type.
-mkArgumentTypeTags :: [ValueType] -> (StaticRecord, Val)
-mkArgumentTypeTags arg_types = (record_type, arg_type_val)
+--   argument types, followed by a sequence of bytes describing the
+--   function's closure contents.
+mkArgumentTypeTags :: [ValueType] -> [ValueType] -> (StaticRecord, Val)
+mkArgumentTypeTags arg_types clo_captured = (record_type, arg_type_val)
   where
-    record_type = typeTagsRecord (length arg_types)
+    record_type = typeTagsRecord (length arg_types + length clo_captured)
 
     arg_type_tags =
-      map (uint8V . fromEnum . toBitsTag . promoteType . valueToPrimType) arg_types
-    
+      map (uint8V . fromEnum . toBitsTag . promoteType . valueToPrimType)
+      (arg_types ++ clo_captured)
+
     arg_type_val = RecV record_type arg_type_tags
 
 -- | Create an info table.  The info table contains data needed by the run-time
@@ -284,22 +288,20 @@ mkInfoTable cc = writeData $ Def info_table (StaticData static_value)
     info_table = infoTableEntry entry_points
     
     (type_tags_record, type_tags_value) =
-      mkArgumentTypeTags $ ccExactParamTypes cc
+      mkArgumentTypeTags (ccExactParamTypes cc) (map varType $ ccClosureCaptured cc)
 
-    fun_info_type = funInfoHeaderRecord type_tags_record
+    fun_info_type = infoTableRecord type_tags_record
     
     fun_info =
       RecV fun_info_type
-      [ info_header
-        -- The arity will be different after closure conversion if there are
+      [ -- The arity will be different after closure conversion if there are
         -- any call-captured variables.  Use the number of arguments as the
         -- arity.
-      , uint16V $ length $ ccExactParamTypes cc
+        funArityV $ length $ ccExactParamTypes cc
+      , funArityV $ length $ ccClosureCaptured cc
       , VarV $ exactEntry entry_points
       , VarV $ inexactEntry entry_points
       , type_tags_value]
-      where
-        info_header = RecV infoTableHeaderRecord [uint8V $ fromEnum FunTag]
 
     static_value = RecV (flattenStaticRecord fun_info_type)
                         (flattenGlobalValue fun_info)
@@ -333,64 +335,81 @@ mkExactEntry cc = do
     load_captured_vars closure_ptr =
       case cc
       of LocalClosure { _cRecord = recd
+                      , _cClosureCaptured = captured_vars
                       , _cClosureCapturedRecord = captured_recd} -> do
            -- Load captured variables from the closure
-           captured_ptr <- referenceField (recd !!: 1) closure_ptr
-           forM (recordFields captured_recd) $ \fld -> do
-             loadField fld captured_ptr
+           captured_ptr <- refFunCapturedVars recd closure_ptr
+           let captured_types = map varPrimType captured_vars
+           readCapturedVars captured_types captured_recd captured_ptr
          GlobalClosure {} ->
            -- Global closures don't capture variables
            return []
 
 -- | Create an inexact entry point for a closure-call function.
 --
--- The inexact entry point takes the closure, a record holding function
--- parameters, and an unitialized record to hold function return values.
---
--- The given parameters are promoted, and must be demoted before calling
--- the exact entry point.  The return values are promoted.
+-- The inexact entry point takes a PAP and an unitialized record to
+-- hold function return values.  It extracts the parameters, demotes them,
+-- and then calls the exact entry point.
+-- It promotes the return values upon returning.
 mkInexactEntry :: CCInfo -> CC ()
 mkInexactEntry cc = do
-  clo_ptr <- newAnonymousVar (PrimType OwnedType)
-  params_ptr <- newAnonymousVar (PrimType PointerType)
+  pap_ptr <- newAnonymousVar (PrimType OwnedType)
   returns_ptr <- newAnonymousVar (PrimType PointerType)
   fun_body <- execBuild [] $ do
-    -- Load and demote parameter values from the parameters record
-    param_vals <- load_parameters (VarV params_ptr)
+    -- Load and demote parameter values from the PAP
+    (param_vals, clo_ptr) <- unpackPapParameters cc (VarV pap_ptr)
 
     -- Call the exact entry
     let exact_entry = VarV $ exactEntry $ ccEntryPoints cc
     return_vals <- emitAtom (ftReturnTypes ftype) $
-                   primCallA exact_entry (VarV clo_ptr : param_vals)
+                   primCallA exact_entry (clo_ptr : param_vals)
 
     -- Store each return value
     store_returns (VarV returns_ptr) return_vals
     gen0
 
-  let fun = primFun [clo_ptr, params_ptr, returns_ptr] [] fun_body
+  let fun = primFun [pap_ptr, returns_ptr] [] fun_body
   writeFun $ Def (inexactEntry $ ccEntryPoints cc) fun
   where
     ftype = ccType cc
-
-    load_parameters params_ptr =
-      sequence [demoteVal (valueToPrimType param_type) =<< loadField fld params_ptr
-               | (fld, param_type) <-
-                   zip (recordFields param_record) param_types]
 
     store_returns returns_ptr return_vals =
       sequence [storeField fld returns_ptr =<< promoteVal val
                | (fld, val) <- zip (recordFields return_record) return_vals]
 
-    -- Actual types of parameters (except for the closure pointer)
-    param_types = ccExactParamTypes cc
-
-    -- Record type of parameters
-    param_record = papArgsRecord Constant $ map valueToPrimType param_types
-
     -- Record type of returns
     return_record = promotedPrimTypesRecord Constant $
                     map valueToPrimType $
                     ftReturnTypes ftype
+
+-- | Given a PAP that represents a fully applied function,
+--   Extract all arguments and the function.
+--
+--   The argument is a chain of PAPs, with the last application at the
+--   head of the chain.  Thus, walking the chain gives us the arguments
+--   in reverse order, starting from the final argument.
+--   This function will put the arguments in the correct order before
+--   returning them.
+unpackPapParameters cc pap_ptr =
+  -- Arguments are in reverse order, so reverse the list of parameter types
+  go (reverse $ ccExactParamTypes cc) [] pap_ptr
+  where
+    go (param_type : pts) arguments pap_ptr = do
+      -- Parameter must have a primitive type
+      let PrimType param_prim_type = param_type
+      let promoted_type = promoteType param_prim_type
+
+      -- Load the operator and operand
+      operator <- readPapOperator pap_ptr
+      promoted_param <- readPapOperand promoted_type pap_ptr
+      param <- demoteVal param_prim_type promoted_param
+
+      -- Load remaining operands
+      go pts (param : arguments) operator
+
+    go [] arguments operator =
+      -- All parameters have been read.  The operator is a function.
+      return (arguments, operator)
 
 -- | Emit global objects (other than the direct entry point) for a
 --   function or procedure.
@@ -561,40 +580,40 @@ genIndirectCall :: [PrimType]     -- ^ Return types
 genIndirectCall return_types op [] = return $ ValA [op]
 
 genIndirectCall return_types op args = do
-  -- Get the function info table and captured variables
-  inf_ptr <- loadField (objectHeaderRecord !!: 0) op
+  -- Get the function info table
+  inf_ptr <- readFunInfoTable op
 
-  -- Can make an exact call if the callee is a function and
-  -- the number of arguments matches the function's arity
-  inf_tag <- loadField (infoTableHeaderRecord !!: 0) inf_ptr
-  inf_tag_test <- primCmpZ (PrimType (IntType Unsigned S8)) CmpEQ inf_tag $
-                  uint8V $ fromEnum FunTag
-
-  -- Branch to the code for an exact or an inexact call
+  -- Create branch target for inexact call
   ret_vars <- lift $ mapM newAnonymousVar return_value_types
   getContinuation True ret_vars $ \cont -> do
     inexact_target <- define_inexact_call ret_vars cont
-    
-    genIf inf_tag_test
-      -- True: Callee is a function
-      (do
-          -- Check whether function arity matches the number of given arguments
-          arity <- loadField (funInfoHeaderRecord0 !!: 1) inf_ptr
-          arity_eq <- primCmpZ (PrimType (IntType Unsigned S16)) CmpEQ arity $
-                      uint16V $ length args
-          genIf arity_eq
-            -- True: Callee is fully applied
-            (do exact_call ret_vars inf_ptr
-                return cont)
-            -- False: Callee is under- or over-saturated
-            (return $ ReturnE $ joinCallA inexact_target []))
-      -- False: Callee is not a function
-      (return $ ReturnE $ joinCallA inexact_target [])
+
+    -- Is the callee a function?
+    is_function <- primCmpP CmpNE inf_ptr (LitV NullL)
+    genIf is_function
+      (call_function cont ret_vars inexact_target inf_ptr)
+      (goto_inexact_call inexact_target)
   return $ ValA (map VarV ret_vars)
   where
     return_value_types = map PrimType return_types
-    
-    -- Create a local function that performs an inexact call
+    given_arity = length args
+
+    -- Callee is a function
+    call_function cont ret_vars inexact_target inf_ptr = do
+      -- Check whether function arity matches the number of given arguments
+      arity <- readInfoTableArity inf_ptr
+      is_saturated <- primCmpZ (PrimType funArityType) CmpEQ
+                      arity (funArityV given_arity)
+
+      -- If exact match, produce an exact call; otherwise, inexact call
+      genIf is_saturated
+        (exact_call ret_vars inf_ptr >> return cont)
+        (goto_inexact_call inexact_target)
+
+    goto_inexact_call inexact_target =
+      return $ ReturnE $ joinCallA inexact_target []
+
+    -- Create a local jump target that performs an inexact call
     define_inexact_call ret_vars cont = do
       inexact_target <- lift $ newAnonymousVar (PrimType PointerType)
       inexact_fun_body <- lift $ execBuild return_value_types $ do
@@ -627,14 +646,50 @@ genIndirectCall return_types op args = do
     -- An exact function call
     exact_call ret_vars inf_ptr = do
       -- Get the exact entry point
-      fn <- loadField (funInfoHeaderRecord0 !!: 2) inf_ptr
+      fn <- readInfoTableExact inf_ptr
 
       -- Get the function's captured variables, then call the function
       bindAtom ret_vars $ primCallA fn (op : args)
 
--- | Create a dynamic function application
+-- | Create a dynamic function application.
 genApply :: Val -> [Val] -> Val -> GenM ()
 genApply _ [] _ = internalError "genApply: No arguments"
+genApply f [x] ret_ptr = genApplyLast f x ret_ptr
+genApply f (x:xs) ret_ptr = do f' <- genApply1 f x
+                               genApply f' xs ret_ptr
+
+-- Generate a partial application that returns a function
+genApply1 f x = do
+  -- Promote the argument
+  promoted_x <- promoteVal x
+
+  -- Decide which PAP to build depending on the argument type
+  let op = case valType promoted_x
+           of PrimType UnitType             -> llBuiltin the_prim_apply_u_f
+              PrimType (IntType Signed S32) -> llBuiltin the_prim_apply_i32_f
+              PrimType (FloatType S32)      -> llBuiltin the_prim_apply_f32_f
+              PrimType PointerType          -> llBuiltin the_prim_apply_p_f
+              PrimType OwnedType            -> llBuiltin the_prim_apply_o_f
+              t -> internalError $ "genApply1: No method for " ++ show (pprValueType t)
+
+  emitAtom1 (PrimType OwnedType) $ primCallA (VarV op) [promoted_x]
+
+genApplyLast f x ret_ptr = do
+  -- Promote the argument
+  promoted_x <- promoteVal x
+
+  -- Decide which PAP to build depending on the argument type
+  let op = case valType promoted_x
+           of PrimType UnitType             -> llBuiltin the_prim_apply_u
+              PrimType (IntType Signed S32) -> llBuiltin the_prim_apply_i32
+              PrimType (FloatType S32)      -> llBuiltin the_prim_apply_f32
+              PrimType PointerType          -> llBuiltin the_prim_apply_p
+              PrimType OwnedType            -> llBuiltin the_prim_apply_o
+              t -> internalError $ "genApplyLast: No method for " ++ show (pprValueType t)
+
+  emitAtom0 $ primCallA (VarV op) [promoted_x, ret_ptr]
+
+{-
 genApply fun args ret_ptr =
   gen_apply fun args (map (promotedTypeTag . valPrimType) args)
   where
@@ -709,3 +764,4 @@ applyFunctions = [ (UnitTag, u_node)
                (llBuiltin the_prim_apply_i64_f)
                (llBuiltin the_prim_apply_i64)
                []
+-}

@@ -3,6 +3,7 @@ module core.internal.apply_new;
 
 #include "rts.h"
 #include "memory_py.h"
+#include "structures.h"
 #include "debug.h"
 
 import procedure exit (int) -> (); 
@@ -14,6 +15,7 @@ extern data pointer core.internal.apply_new.PAP_info;
 
 #include "new_pyasm_records.h"
 
+#if 0
 // The word size.  Partially applied data is organized as words.
 #define PAP_WORDSIZE (uint WORD_SIZE)
 
@@ -126,6 +128,7 @@ procedure inline fun_arity(owned f) -> uint16 {
 procedure inline pap_arity(owned p) -> uint16 {
   uint16 primcall fun_arity (p @! PAP(value int 0).fun);
 };
+#endif
 
 #if WORD_SIZE == 4
 # include "arch/apply_x86.pyasm"

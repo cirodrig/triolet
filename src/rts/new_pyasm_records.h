@@ -1,17 +1,32 @@
 /* Record type definitions used in pyasm code */
 
-// Header fields of an info table
-record InfoTableHeader {
-  const uint8 tag;                    // What kind of object this is
+// Partial applications
+record PAP(a) {
+  const owned header;           // Object header
+  const pointer papTag;         // NULL; distinguishes PAPs from functions
+  const owned operator;         // Operator; a function or PAP
+  const uint16 arity;           // Number of args not yet applied to function
+  const a operand;              // Operand; a promoted function argument
 };
+
+record Function {
+  const owned header;
+  const pointer info;           // : FunInfo; Function info table
+  // Closure-captured variables follow
+};
+
+// Header fields of an info table
+//record InfoTableHeader {
+//  const uint8 tag;                    // What kind of object this is
+//};
 
 // Header fields of an object
-record ObjectHeader {
-  const pointer info;                 // Info table
-};
+//record ObjectHeader {
+//  const pointer info;                 // Info table
+//};
 
 record Obj(a) {
-  const ObjectHeader header;
+  const owned header;
   const a payload;
 };
 
@@ -64,17 +79,15 @@ record SomeIndInt {
   const FinIndInt index;
 };
 
+#define FUN_INFO uint 0
+#define PAP_INFO uint 1
+
 // Function info table
-record FunInfo(n_args) {
-  const InfoTableHeader header;
-  //const uint8 has_shared_closure; // True iff instances of the function share
-                                // their closure with other functions.  Closure
-                                // sharing is the result of recursive function
-                                // definitions.
+record FunInfo {
   const uint16 arity;	   // Number of arguments the function accepts
+  const uint16 captured;   // Number of captured variables in a closure
   const pointer exact;                // Exact entry point
   const pointer inexact;              // Inexact entry point
-  const const_array(value n_args, uint8) arg_types; // Types of arguments
 };
 
 // Additive dictionary
@@ -299,13 +312,14 @@ record Array3 {
 #define PBTree_LEAF   uint8 1
 #define PBTree_EMPTY  uint8 2
 /* A tree for parallel list construction. */
+// FIXME: Eliminate the tag
 record PBTree {
-  const ObjectHeader header;
+  const owned header;
   const uint8 tag;              // {BRANCH, LEAF, EMPTY}
 };
 
 record PBTreeBranch {
-  const ObjectHeader header;
+  const owned header;
   const uint8 tag;              // BRANCH
   const PBTreeBranch_other other;
 };
@@ -317,7 +331,7 @@ record PBTreeBranch_other {
 };
 
 record PBTreeLeaf {
-  const ObjectHeader header;
+  const owned header;
   const uint8 tag;              // LEAF
   const List members;
 };

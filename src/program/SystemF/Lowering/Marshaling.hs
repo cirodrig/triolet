@@ -117,8 +117,6 @@ marshalCParameter ty =
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passParameterWithType (LL.PrimType LL.trioletBoolType)
      FunctionET args ret -> marshalParameterFunctionFromC args ret
-  where
-    complex_float_type = complexRecord (LL.PrimField LL.trioletFloatType)
 
 -- | Marshal a function parameter that was passed from pyon.  The converted
 --   parameter will be passed to a C function.
@@ -231,7 +229,7 @@ marshalCReturn ty =
   of TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
-     TrioletBoolET -> passReturnWithType (LL.PrimType LL.trioletBoolType)
+     TrioletBoolET -> marshalBoolReturn
 
 -- | Marshal a return value to C++ code.
 --
@@ -245,7 +243,7 @@ marshalCxxReturn ty =
   of TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
-     TrioletBoolET -> passReturnWithType (LL.PrimType LL.trioletBoolType)
+     TrioletBoolET -> marshalBoolReturn
      ListET _ _ -> passReturnBoxed
      ArrayET _ _ _ -> passReturnBoxed
      TupleET _ -> passReturnBoxed
@@ -257,6 +255,18 @@ demarshalCReturn ty =
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passReturnWithType (LL.PrimType LL.trioletBoolType)
+
+-- Convert a bool return value from u32 (a Triolet bool) to bool (a C bool)
+marshalBoolReturn = do
+  v <- LL.newAnonymousVar (LL.PrimType LL.BoolType)
+  let setup mk_real_call = do
+        x <- emitAtom1 (LL.PrimType LL.trioletUintType) =<< mk_real_call
+        y <- primIntToBool x
+        bindAtom1 v $ LL.ValA [y]
+  return $ ReturnMarshaler { rmInputs = []
+                           , rmCode = setup
+                           , rmOutput = []
+                           , rmReturns = [v]}
 
 -- Just return a primitive value
 passReturnWithType pt = do

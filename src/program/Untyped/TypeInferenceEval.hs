@@ -73,18 +73,27 @@ evRepr pos (U.TICoreRepr op ty_args args) =
       in Representation $ ExpSF (AppE info op_exp ty_args args)
 
 -- | Convert a 'Repr' to an expression that evaluates to run-time type info
-evReprExp :: SourcePos -> U.TIRepr -> TE ExpSF
-evReprExp pos repr = evRepr pos repr >>= as_exp
+evReprExp :: SourcePos -> TIType -> U.TIRepr -> TE ExpSF
+evReprExp pos ty repr = evRepr pos repr >>= as_exp
   where
-    as_exp BoxedRepresentation = undefined
-    as_exp ValueRepresentation = undefined
+    as_exp BoxedRepresentation = do
+      -- Call 'repr_Box' to create representation of a boxed object
+      let info = mkExpInfoWithRepresentation pos BoxedRepresentation
+          op = ExpSF $ VarE info (coreBuiltin The_repr_Box)
+      ty' <- evType ty
+      return $ ExpSF $ AppE info op [ty'] []
+
+    as_exp ValueRepresentation =
+      -- Should never need run-time type info for values
+      return $! internalError "evReprExp"
+
     as_exp (Representation e) = return e
 
 -- | Convert a 'Size' to an expression that evaluates to a run-time size.
 --   Returns the size and run-time type info.
 evSizeExp :: SourcePos -> U.TISize -> TE (ExpSF, ExpSF)
 evSizeExp pos (U.TISize ty repr) = do
-  repr' <- evReprExp pos repr
+  repr' <- evReprExp pos ty repr
   ty' <- evType ty
   return (size_expression ty' repr', repr')
   where

@@ -360,7 +360,7 @@ valueIntroE adt con_index = return tag_value
     Just tag_value = varTagInfo $ disjunct con_index Nothing adt
 
 valueElimE :: AlgValueType -> [ValueType] -> ElimE L.Val
-valueElimE adt return_types scrutinee k 
+valueElimE adt return_types scrutinee k
   | algDataNumConstructors adt == 1 =
       k 0
   | otherwise =
@@ -609,6 +609,13 @@ loadAlgValue adt ptr = do
 storeAlgValue :: AlgData LayoutField -> L.Val -> L.Val -> GenM ()
 storeAlgValue adt ptr val
   | algDataBoxing adt == IsBoxed = internalError "storeAlgValue: Type is boxed"
+                                   
+  -- Write an enumeration's tag to memory.  This case avoids an unnecessary 
+  -- branch on the tag value.
+  | isEnumeration adt =
+      writeEnumerationHeader val adt ptr
+
+  -- Proceed by case over the data type.  Write data to memory.
   | otherwise = do
       mem_adt <- memoryLayout adt
       let write_value con_index Nothing fields = do
@@ -777,7 +784,8 @@ writeMemoryField ptr fld (Off offset) val =
      BoxedField  -> primStoreOffMutable (PrimType OwnedType) ptr offset val
      -- Run an initializer
      BareField _ -> do ptr <- primAddP ptr offset
-                       emitAtom0 $ L.closureCallA val [ptr]
+                       emitAtom1 (PrimType UnitType) $ L.closureCallA val [ptr]
+                       return ()
      -- Store primitive value from variable
      ValField l  -> do ptr <- primAddP ptr offset
                        storeValueType l ptr val

@@ -5,6 +5,7 @@ module core.internal.prim;
 #include "memory_py.h"
 #include "apply_py.h"
 #include "prim.h"
+#include "structures.h"
 #include "debug.h"
 
 import procedure exit (int) -> ();

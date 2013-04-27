@@ -49,6 +49,7 @@ module SystemF.Datatypes.Layout
         algUnboxedLayout,
         disjunctLayout,
         disjunctLayout1,
+        writeEnumerationHeader,
         writeHeader,
         readHeaderValue,
         castTagToWord)
@@ -574,6 +575,17 @@ disjunctFieldLayout start_off fields = do
 
 -------------------------------------------------------------------------------
 -- Header operations
+
+-- | Write an enumerative unboxed value to memory, given its tag value
+writeEnumerationHeader :: L.Val -> AlgData a -> L.Val -> GenM ()
+writeEnumerationHeader n d@(TagD NotBoxed _) ptr = do
+  let h_type = algDataHeaderType d
+  -- Coerce the tag type
+  let Just mem_tag_type = memTagInfo h_type
+  n' <- castTag (PrimType nativeWordType) mem_tag_type n
+
+  -- Write to memory
+  primStoreConst mem_tag_type ptr n'
 
 -- | Write an object header to memory
 writeHeader :: HeaderData       -- ^ Header of object to write

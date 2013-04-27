@@ -130,6 +130,11 @@ trioletFloatType = FloatType trioletFloatSize
 trioletBoolType = BoolType
 trioletNoneType = UnitType
 
+-- | The data type used to keep track of a function's arity in functions
+--   and PAPs
+funArityType :: PrimType
+funArityType = IntType Unsigned S16
+
 -- | A data type that has statically known memory management properties
 class HasSize a where
   -- | Get the size
@@ -170,7 +175,7 @@ promoteType pt =
   case pt
   of UnitType -> UnitType
      BoolType -> nativeIntType
-     IntType sgn sz -> IntType sgn (max sz nativeIntSize)
+     IntType sgn sz -> IntType Signed (max sz nativeIntSize)
      FloatType sz -> FloatType (max sz nativeFloatSize)
      PointerType -> PointerType
      OwnedType -> OwnedType

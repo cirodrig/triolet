@@ -135,12 +135,19 @@ builtinPrimitives =
      primFunctionType [PrimType OwnedType
                       , PrimType (FloatType S32)
                       , PrimType PointerType] [])
-  , (applyName "apply_i64_f",
+  , (applyName "apply_p_f",
      primFunctionType [ PrimType OwnedType
-                      , PrimType (IntType Signed S64)] [PrimType OwnedType])
-  , (applyName "apply_i64",
-     primFunctionType [PrimType OwnedType
-                      , PrimType (IntType Signed S64)
+                      , PrimType PointerType] [PrimType OwnedType])
+  , (applyName "apply_p",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType PointerType
+                      , PrimType PointerType] [])
+  , (applyName "apply_o_f",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType OwnedType] [PrimType OwnedType])
+  , (applyName "apply_o",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType OwnedType
                       , PrimType PointerType] [])
 {-  , (biName "free_pap",
      primFunctionType [PrimType PointerType] [])-}
@@ -422,6 +429,8 @@ builtinGlobals =
      Left $ PrimType PointerType)
   , (biName "global_closure_info",
      Left $ PrimType PointerType)
+  , (CName module_structures "triolet_typeObject_function",
+     Left $ PrimType OwnedType)
 
     -- Physical representations of data types
   , (CoreName module_structures "typeObject_typeObject",
