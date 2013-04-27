@@ -242,7 +242,7 @@ function inline compute_hash_table_size (FinIndInt keys_size) -> int
 
 function inline build_hash_table
     (FinIndInt keys_size, FinIndInt hash_size,
-     pointer keys, pointer hash) -> unit
+     cursor keys, pointer hash) -> unit
 {
   FinIndInt {hash_n} = hash_size;
   FinIndInt {keys_n} = keys_size;
@@ -257,7 +257,7 @@ function inline build_hash_table
 };
 
 function inline lookup_hash_table
-    (FinIndInt hash_size, pointer keys_array, pointer inds_array,
+    (FinIndInt hash_size, cursor keys_array, cursor inds_array,
      int key) -> int
 {
   FinIndInt {n} = hash_size;

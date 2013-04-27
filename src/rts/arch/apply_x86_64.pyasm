@@ -42,6 +42,15 @@ procedure apply_o (owned obj, owned arg, pointer ret) -> () {
   () primcall exit(int -1);
 };
 
+procedure apply_c_f (owned obj, cursor arg) -> owned {
+  () = () primcall exit(int -1);
+  null as owned;
+};
+
+procedure apply_c (owned obj, cursor arg, pointer ret) -> () {
+  () primcall exit(int -1);
+};
+
 procedure apply_i32_f (owned obj, int32 arg) -> owned {
   () = () primcall exit(int -1);
   null as owned;

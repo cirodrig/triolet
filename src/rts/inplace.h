@@ -35,9 +35,9 @@ extern function core.internal.inplace.appendScatter_update_real
 extern function core.internal.inplace.compute_hash_table_size
     (FinIndInt) -> int;
 extern function core.internal.inplace.build_hash_table
-    (FinIndInt, FinIndInt, pointer, pointer) -> unit;
+    (FinIndInt, FinIndInt, cursor, pointer) -> unit;
 extern function core.internal.inplace.lookup_hash_table
-    (FinIndInt, pointer, pointer, int) -> int;
+    (FinIndInt, cursor, cursor, int) -> int;
 
 import procedure triolet_hash_build
   (int, pointer, pointer, int, pointer) -> ();

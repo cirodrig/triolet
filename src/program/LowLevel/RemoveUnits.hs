@@ -41,16 +41,10 @@ flattenFunctionType ft =
   (flattenTypeList $ ftParamTypes ft)
   (flattenTypeList $ ftReturnTypes ft)
 
-flattenFieldType (PrimField UnitType) = []
-flattenFieldType (PrimField pt) = [PrimField pt]
-flattenFieldType (RecordField _) =
-  -- Nested records should have been flattened earlier on
-  internalError "flattenFieldType: Unexpected record field inside record"
-
 flattenType :: ValueType -> [ValueType]
 flattenType (PrimType UnitType) = []
 flattenType (PrimType pt) = [PrimType pt]
--- flattenType (RecordType rt) = [flattenRecordType rt]
+flattenType (RecordType rt) = [RecordType $ removeUnitFields rt]
 
 class Flatten a where
   flatten :: a -> a
@@ -85,8 +79,8 @@ instance Flatten Atom where
        CallA conv op vs -> CallA conv (flattenSingleVal op) (flattenValList vs)
 
        -- Load or store of unit value is deleted
-       PrimA (PrimLoad _ (PrimType UnitType)) _ -> ValA []
-       PrimA (PrimStore _ (PrimType UnitType)) _ -> ValA []
+       PrimA (PrimLoad _ _ (PrimType UnitType)) _ -> ValA []
+       PrimA (PrimStore _ _ (PrimType UnitType)) _ -> ValA []
        PrimA prim vs -> PrimA prim (flattenValList vs)
 
 instance Flatten Stm where

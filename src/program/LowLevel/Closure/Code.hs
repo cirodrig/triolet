@@ -670,6 +670,7 @@ genApply1 f x = do
               PrimType (FloatType S32)      -> llBuiltin the_prim_apply_f32_f
               PrimType PointerType          -> llBuiltin the_prim_apply_p_f
               PrimType OwnedType            -> llBuiltin the_prim_apply_o_f
+              PrimType CursorType           -> llBuiltin the_prim_apply_c_f
               t -> internalError $ "genApply1: No method for " ++ show (pprValueType t)
 
   emitAtom1 (PrimType OwnedType) $ primCallA (VarV op) [promoted_x]
@@ -685,6 +686,7 @@ genApplyLast f x ret_ptr = do
               PrimType (FloatType S32)      -> llBuiltin the_prim_apply_f32
               PrimType PointerType          -> llBuiltin the_prim_apply_p
               PrimType OwnedType            -> llBuiltin the_prim_apply_o
+              PrimType CursorType           -> llBuiltin the_prim_apply_c
               t -> internalError $ "genApplyLast: No method for " ++ show (pprValueType t)
 
   emitAtom0 $ primCallA (VarV op) [promoted_x, ret_ptr]

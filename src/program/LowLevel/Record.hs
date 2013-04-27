@@ -121,6 +121,12 @@ mapRecordFieldTypes f rec =
               then internalError "mapRecordFieldTypes: Alignment wasn't preserved"
               else fld'
 
+-- | Apply a transformation to all fields of a record, possibly changing
+--   the number of fields.  The transformation must preserve the sizes and 
+--   alignments of all fields, and of the entire record.
+concatMapRecordFields f rc =
+  rc {recordFields_ = concatMap f $ recordFields_ rc}
+
 -- | Select a record field
 (!!:) :: Record t -> Int -> Field t
 r !!: i = pick i $ recordFields r
@@ -237,6 +243,16 @@ flattenStaticRecord rc =
          RecordField rc -> flatten_fields (base_off + fieldOffset f) rc
 
     add_offset off f = f {fieldOffset = off + fieldOffset f}
+
+-- | Remove record fields that have type 'UnitType'.
+removeUnitFields :: StaticRecord -> StaticRecord
+removeUnitFields rc = concatMapRecordFields flatten_field rc
+  where
+    flatten_field fld = 
+      case fieldType fld
+      of PrimField UnitType -> []
+         PrimField _        -> [fld]
+         RecordField rc     -> [fld {fieldType = RecordField $ removeUnitFields rc}]
 
 type Offset = Int
 

@@ -507,6 +507,7 @@ expectReferenceType message actual =
   case actual
   of [PrimT PointerType] -> Nothing
      [PrimT OwnedType]   -> Nothing
+     [PrimT CursorType]  -> Nothing
      _ -> Just message
 
 expectRecordType message ty = throwErrorMaybe $
@@ -647,6 +648,7 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
 
     pointer_check (PrimT PointerType) = Nothing 
     pointer_check (PrimT OwnedType) = Nothing 
+    pointer_check (PrimT CursorType) = Nothing 
     pointer_check _ = Just "Expecting 'pointer' or 'owned' type"
     
     pointer_only_check (PrimT PointerType) = Nothing 
@@ -680,7 +682,11 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
                                      , eq_primtype_check x y]
 
     pointer =
-      x `checking` [single_parameter, pointer_check x, native_int_check y]
+      let pointer_type = case x
+                         of PrimT PointerType -> PrimT PointerType
+                            PrimT OwnedType   -> PrimT CursorType
+                            PrimT CursorType  -> PrimT CursorType
+      in pointer_type `checking` [single_parameter, pointer_check x, native_int_check y]
 
     atomic =
       y `checking` [single_parameter, pointer_only_check x, primtype_check y]

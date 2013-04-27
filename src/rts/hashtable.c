@@ -2,6 +2,13 @@
 #include <stdint.h>
 #include <string.h>
 
+/* A cursor, which is a pair of an object pointer and an interior pointer */
+typedef struct
+{
+  void *object;
+  void *interior;
+} cursor;
+
 // Hash tables consist of a hash array and a collision table.
 // The hash array contains keys.
 // The collision table has one full/empty bit (low bit)
@@ -63,8 +70,10 @@ void triolet_hash_build(int32_t hash_size,
                         int32_t *hash_array,
                         uint32_t *collision_table,
                         int32_t num_keys,
-                        int32_t *key_array)
+                        cursor key_array_cursor)
 {
+  int32_t *key_array = key_array_cursor.interior;
+
   //memset(hash_array, -1, hash_size*sizeof(int32_t));
   memset(collision_table, 0, hash_size*sizeof(uint32_t));
 
@@ -81,10 +90,13 @@ void triolet_hash_build(int32_t hash_size,
 }
 
 uint32_t triolet_hash_lookup(int32_t hash_size,
-                             int32_t *hash_table,
-                             uint32_t *collision_table,
+                             cursor hash_table_cursor,
+                             cursor collision_table_cursor,
                              int32_t key)
 {
+  int32_t *hash_table = hash_table_cursor.interior;
+  uint32_t *collision_table = collision_table_cursor.interior;
+
   uint32_t hash_val = indexing_hash(hash_size, key); // Hash value
   uint32_t occupancy = collision_table[hash_val] >> 1; // Number of colliding keys
 

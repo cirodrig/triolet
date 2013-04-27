@@ -110,8 +110,8 @@ combineParameterMarshalers pms =
 marshalCParameter :: ExportDataType -> Lower ParameterMarshaler
 marshalCParameter ty =
   case ty
-  of ListET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
-     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
+  of ListET _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
+     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
      TrioletNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
@@ -123,8 +123,8 @@ marshalCParameter ty =
 demarshalCParameter :: ExportDataType -> Lower ParameterMarshaler
 demarshalCParameter ty =
   case ty
-  of ListET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
-     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
+  of ListET _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
+     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
      TrioletNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
@@ -140,9 +140,9 @@ marshalCxxParameter ty =
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passParameterWithType (LL.PrimType LL.trioletBoolType)
-     ListET _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
-     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.PointerType)
-     TupleET _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     ListET _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
+     ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
+     TupleET _ -> passParameterWithType (LL.PrimType LL.CursorType)
 
 -- | Pass a parameter as a single variable.
 passParameterWithType :: LL.ValueType -> Lower ParameterMarshaler

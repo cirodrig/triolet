@@ -34,6 +34,7 @@ instance Lift PrimType where
   lift (FloatType sz) = [| FloatType sz |]
   lift PointerType = [| PointerType |]
   lift OwnedType = [| OwnedType |]
+  lift CursorType = [| CursorType |]
 
 instance Lift (Field Int) where
   lift (Field off m t) = [| Field off m t |]
@@ -148,6 +149,13 @@ builtinPrimitives =
   , (applyName "apply_o",
      primFunctionType [ PrimType OwnedType
                       , PrimType OwnedType
+                      , PrimType PointerType] [])
+  , (applyName "apply_c_f",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType CursorType] [PrimType OwnedType])
+  , (applyName "apply_c",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType CursorType
                       , PrimType PointerType] [])
 {-  , (biName "free_pap",
      primFunctionType [PrimType PointerType] [])-}

@@ -450,16 +450,19 @@ genPrimOp prim args =
      PrimAnd -> binary CLndOp args
      PrimOr -> binary CLorOp args
      PrimNot -> case args of [arg] -> CUnary CNegOp arg internalNode
-     PrimAddP ->
+
+     -- Cursors and owned references not permitted at this stage; they
+     -- should have been expanded into plain pointers
+     PrimAddP PointerPtr ->
        case args of [ptr, off] -> offset ptr off
-     PrimLoad _ (PrimType ty) ->
+     PrimLoad _ PointerPtr (PrimType ty) ->
        -- Cast the pointer to the desired pointer type, then dereference
        case args
        of [ptr, off] ->
             let offptr = offset ptr off
                 cast_ptr = cPtrCast ty offptr
             in CUnary CIndOp cast_ptr internalNode
-     PrimStore _ (PrimType ty) ->
+     PrimStore _ PointerPtr (PrimType ty) ->
        -- Cast the pointer to the desired type, then assign to it
        case args
        of [ptr, off, val] ->

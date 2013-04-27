@@ -64,6 +64,7 @@ data Token =
   | BoolTok
   | CallTok
   | ConstTok
+  | CursorTok
   | DataTok
   | DoubleTok
   | ElseTok
@@ -142,6 +143,7 @@ showToken AsTok = "'as'"
 showToken BoolTok = "'bool'"
 showToken CallTok = "'call'"
 showToken ConstTok = "'const'"
+showToken CursorTok = "'cursor'"
 showToken DataTok = "'data'"
 showToken DoubleTok = "'double'"
 showToken ElseTok = "'else'"

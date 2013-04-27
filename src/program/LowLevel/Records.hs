@@ -65,15 +65,26 @@ intSizeTypeTag S16 = Int16Tag
 intSizeTypeTag S32 = Int32Tag
 intSizeTypeTag S64 = Int64Tag
 
--- | A bits tag, representing the physical representation of a value in memory.
--- Bits-tagged data are always promoted to a value at least as big as the 
--- 'dynamicScalarAlignment'.
-data BitsTag = Bits0Tag | Bits32Tag | Bits64Tag
+-- | A bits tag.  This tag gives the physical representation of a
+--   primitive type, specifically its size and tracked pointer contents.
+--   Bits-tagged data are always promoted to a value at least as big as the 
+--   'dynamicScalarAlignment'.
+data BitsTag = Bits0Tag
+             | Bits32Tag
+             | Bits64Tag
+             | BitsOwnedTag     -- ^ An owned pointer
+             | BitsCursorTag    -- ^ An owned pointer followed by an un-owned pointer
              deriving(Eq, Ord, Enum, Show)
 
 -- | Get the bits tag of a primitive type.  The primitive type must be a
 -- suitable size, perhaps by being promoted.
 toBitsTag :: PrimType -> BitsTag
+
+-- Primitive types containing pointers to boxed objects
+toBitsTag OwnedType = BitsOwnedTag
+toBitsTag CursorType = BitsCursorTag
+
+-- Primitive types without pointers to boxed objects
 toBitsTag ty
   | sizeOf ty == 0 = Bits0Tag
   | sizeOf ty == 4 = Bits32Tag
@@ -81,34 +92,16 @@ toBitsTag ty
   | otherwise =
     internalError "toBitsTag: Cannot generate tag for this data size"
 
--- | An info table tag, which indicates an info table's type
-data InfoTag = FunTag | PAPTag | ConTag
-  deriving(Eq, Ord, Enum, Show)
-
--- | Get the type tag of a primitive type
-toTypeTag :: PrimType -> TypeTag
-toTypeTag BoolType = Int8Tag
-toTypeTag UnitType = UnitTag
-toTypeTag (IntType _ sz)  = intSizeTypeTag sz
-toTypeTag (FloatType S32) = Float32Tag
-toTypeTag (FloatType S64) = Float64Tag
-toTypeTag PointerType     = intSizeTypeTag pointerSize
-toTypeTag OwnedType       = intSizeTypeTag pointerSize
-
--- | Get the type tag of a primitive type as used in function application.
--- Only the integer/floating distinction is made (because we care about what
--- register it's passed in), and values smaller than a native word are 
--- promoted to native words.
-promotedTypeTag :: PrimType -> TypeTag
-promotedTypeTag ty = toTypeTag $ promoteType ty
-
-pointerTypeTag =
-  if pointerSize < nativeIntSize
-  then internalError "pointerTypeTag"
-  else toTypeTag nativeWordType
-
 -------------------------------------------------------------------------------
 -- Record types
+
+-- | A cursor expands to a record containing a pointer to an object
+--   and a pointer to its interior.
+cursorRecord :: StaticRecord
+cursorRecord =
+  constStaticRecord [ PrimField OwnedType
+                    , PrimField PointerType
+                    ]
 
 -- | An indexed int is a record containing an int.
 indexedIntRecord :: StaticRecord

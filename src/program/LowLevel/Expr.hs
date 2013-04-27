@@ -80,7 +80,7 @@ data CAOp =
 data BinOp =
     ModZOp !Signedness !Size
   | CmpZOp !Signedness !Size !CmpOp
-  | AddPOp
+  | AddPOp !PointerKind
     deriving(Eq, Ord)
 
 -- | A unary operator.
@@ -154,7 +154,7 @@ pprBinOp (CmpZOp _ _ cmp) =
             CmpLE -> "cmp_le"
             CmpGT -> "cmp_gt"
             CmpGE -> "cmp_ge"
-pprBinOp AddPOp = text "addp"
+pprBinOp (AddPOp _) = text "addp"
 
 pprUnOp (LoadOp t) = text "load" <+> pprValueType t
 pprUnOp (CastZOp _ _ _) = text "cast"
@@ -490,13 +490,13 @@ interpretPrim env op args = fmap (simplify env) $
      PrimModZ sgn sz -> Just $ binary (ModZOp sgn sz)
      PrimMaxZ sgn sz -> Just $ ca (MaxZOp sgn sz)
      PrimCmpZ sgn sz op -> Just $ binary (CmpZOp sgn sz op)
-     PrimAddP        -> Just $ binary AddPOp
+     PrimAddP t      -> Just $ binary (AddPOp t)
      PrimAnd         -> Just $ ca AndOp
      PrimOr          -> Just $ ca OrOp
      PrimCastZ ss ds sz -> Just $ unary (CastZOp ss ds sz)
      PrimCastFromOwned -> Just $ unary CastFromOwnedOp
      -- Only constant loads can become expressions
-     PrimLoad Constant ty -> Just $ load_op ty
+     PrimLoad Constant k ty -> Just $ load_op k ty
      PrimGetFrameP -> Just GetFramePExpr
      _               -> Nothing
   where
@@ -527,19 +527,20 @@ interpretPrim env op args = fmap (simplify env) $
            let negated = simplify' $ UnExpr (NegateZOp sgn sz) a2
            in CAExpr (AddZOp sgn sz) [a1, negated]
 
-    load_op ty =
+    load_op k ty =
       case args
       of [base, off] ->
-           let pointer = simplify' $ BinExpr AddPOp base off
+           let pointer = simplify' $ BinExpr (AddPOp k) base off
            in UnExpr (LoadOp ty) pointer
 
 -- | Update the environment to reflect the state of memory after a
 --   store of constant memory executes.
-interpretStore :: CSEEnv -> ValueType -> Expr -> Expr -> Expr -> Maybe CSEEnv
-interpretStore env ty base off val =
+interpretStore :: CSEEnv -> PointerKind -> ValueType -> Expr -> Expr -> Expr
+               -> Maybe CSEEnv
+interpretStore env ptr_kind ty base off val =
   case cseFindExpr val env `mplus` exprToCSEVal val
   of Just cse_val ->
-       let pointer = simplify env $ BinExpr AddPOp base off
+       let pointer = simplify env $ BinExpr (AddPOp ptr_kind) base off
            load_op = UnExpr (LoadOp ty) pointer
            env' = env {available = insert load_op cse_val $ available env}
        in Just env'
@@ -839,15 +840,15 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
 
 -- FIXME: The pointer argument may be owned, but the result is always 
 -- non-owned.  When eliminating an add, how do we know whether to cast?
-simplifyBinary AddPOp larg rarg
+simplifyBinary (AddPOp ptr_kind) larg rarg
   | isIntLitExpr 0 rarg = larg
   | UnExpr CastFromOwnedOp larg' <- larg =
-      simplifyBinary AddPOp larg' rarg
-  | BinExpr AddPOp larg' larg2 <- larg =
+      simplifyBinary (AddPOp OwnedPtr) larg' rarg
+  | BinExpr (AddPOp _) larg' larg2 <- larg =
       let rarg' = simplify' $
                   CAExpr (AddZOp Signed nativeIntSize) [larg2, rarg]
-      in simplifyBinary AddPOp larg' rarg'
-  | otherwise = BinExpr AddPOp larg rarg
+      in simplifyBinary (AddPOp ptr_kind) larg' rarg'
+  | otherwise = BinExpr (AddPOp ptr_kind) larg rarg
 
 simplifyUnary op arg =
   case op

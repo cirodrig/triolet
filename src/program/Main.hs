@@ -46,7 +46,7 @@ import qualified LowLevel.RemoveUnits as LowLevel
 import qualified LowLevel.CSE as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.DeadCode as LowLevel
-import qualified LowLevel.ReferenceCounting as LowLevel
+import qualified LowLevel.ReferenceTracking as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
 import qualified LowLevel.GenerateCXXHeader as LowLevel

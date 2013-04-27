@@ -813,7 +813,7 @@ lowerType' :: IdentSupply L.Var -> KindedType -> UnboxedTypeEvalM ValueType
 lowerType' var_supply (KindedType k ty) = 
   case k
   of BoxK  -> return $ PrimType OwnedType
-     BareK -> return $ PrimType PointerType
+     BareK -> return $ PrimType CursorType
      OutK  -> return $ PrimType PointerType
      ValK  -> do
        -- Layout must be computable without relying on dynamic type information

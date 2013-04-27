@@ -219,7 +219,7 @@ function inline defineIntIndex (int n) -> SomeIndInt {
 
 // Get a pointer to an array element
 function inline subscript
- (SA sizealign, pointer base, int index) -> pointer {
+ (SA sizealign, cursor base, int index) -> cursor {
    SA {repr_size, repr_align} = sizealign;
    typedef elt_type = bytes(value repr_size, value repr_align);
    base @ const_array(value int 0, elt_type)[index];

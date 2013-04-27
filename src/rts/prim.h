@@ -57,7 +57,7 @@ extern function core.internal.prim.div_float (float, float) -> float;
 extern function core.internal.prim.defineIntIndex (int) -> SomeIndInt;
 
 extern function core.internal.prim.subscript
-  (SA, pointer, int) -> pointer;
+  (SA, cursor, int) -> cursor;
 
 extern function core.internal.prim.subscript_out
   (SA, pointer, int) -> pointer;

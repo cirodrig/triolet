@@ -46,6 +46,7 @@ pprPrimType pt =
        text ('f' : show_size size)
      PointerType -> text "ptr"
      OwnedType -> text "own"
+     CursorType -> text "cursor"
   where
     show_size S8 = "8"
     show_size S16 = "16"
@@ -160,7 +161,7 @@ pprInfixPrim prim =
      PrimOr -> Just $ text "||"
      PrimShiftL _ _ -> Just $ text "<<"
      PrimShiftR _ _ -> Just $ text ">>"
-     PrimAddP -> Just $ text "^+"
+     PrimAddP _ -> Just $ text "^+"
      PrimCmpF _ c -> Just $ comparison c
      PrimAddF _ -> Just $ text "+"
      PrimSubF _ -> Just $ text "-"
@@ -207,14 +208,15 @@ pprPrim prim =
            PrimAnd -> "and_b"
            PrimOr -> "or_b"
            PrimNot -> "not_b"
-           PrimAddP   -> "ptradd"
-           PrimLoad Mutable _ -> "load"
-           PrimLoad Constant _ -> "load const"
-           PrimStore Mutable _ -> "store"
-           PrimStore Constant _ -> "store const"
+           PrimAddP _  -> "ptradd"
+           PrimLoad Mutable _ _ -> "load"
+           PrimLoad Constant _ _ -> "load const"
+           PrimStore Mutable _ _ -> "store"
+           PrimStore Constant _ _ -> "store const"
            PrimAAddZ _ _ -> "atomic_add"
            PrimCastToOwned -> "cast_ptr_own"
            PrimCastFromOwned -> "cast_own_ptr"
+           PrimCastFromCursor -> "cast_from_cursor"
            PrimGetFrameP -> "get_frame_ptr"
            PrimCastFToZ _ _ -> "cast_float_int"
            PrimCastZToF _ _ -> "cast_int_float"
@@ -232,8 +234,8 @@ pprPrim prim =
            PrimUnaryF op _ -> unary_float op
       ty =
         case prim
-        of PrimLoad _ t -> pprValueType t
-           PrimStore _ t -> pprValueType t
+        of PrimLoad _ _ t -> pprValueType t
+           PrimStore _ _ t -> pprValueType t
            _ -> empty
   in text name <+> ty
   where

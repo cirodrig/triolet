@@ -57,7 +57,7 @@ expand m v = expand_var v
       case IntMap.lookup (fromIdent $ varID v) m
       of Just (Expansion vs) -> concatMap (expand_value_from v) vs
          Just UnknownExpansion -> [VarV v]
-         Nothing -> internalError "expand: No information for variable"
+         Nothing -> internalError $ "expand: No information for variable: " ++ show v
         
     -- Expand a value that was created from 'v'.  If the variable doesn't 
     -- expand to itself, then expand recursively.  (It's necessary to check 
@@ -180,17 +180,17 @@ flattenAtom atom =
        return_atom $
        CallA conv `liftM` flattenSingleVal op `ap` flattenValList vs
      -- Eliminate a load of a unit value
-     PrimA (PrimLoad m (PrimType UnitType)) _ ->
+     PrimA (PrimLoad m _ (PrimType UnitType)) _ ->
        return (id, ValA [LitV UnitL])
      -- If loading a record, load its parts individually
-     PrimA (PrimLoad m (RecordType rec_type)) vs -> do
+     PrimA (PrimLoad m _ (RecordType rec_type)) vs -> do
        [ptr, off] <- flattenValList vs
        flattenLoad m rec_type ptr off
      -- Eliminate a store of a unit value
-     PrimA (PrimStore m (PrimType UnitType)) _ ->
+     PrimA (PrimStore m _ (PrimType UnitType)) _ ->
        return (id, ValA [])
      -- If storing a record, load its parts individually
-     PrimA (PrimStore m (RecordType rec_type)) vs ->
+     PrimA (PrimStore m _ (RecordType rec_type)) vs ->
        flattenStore m rec_type =<< flattenValList vs
      PrimA prim vs ->
        return_atom $ PrimA prim `liftM` flattenValList vs
@@ -205,7 +205,8 @@ flattenAtom atom =
                        return (id, atom)
 
 -- Flatten a load of a record by loading its fields individually
-flattenLoad :: Mutability -> StaticRecord -> Val -> Val -> RF (Stm -> Stm, Atom)
+flattenLoad :: Mutability -> StaticRecord -> Val -> Val
+            -> RF (Stm -> Stm, Atom)
 flattenLoad op_mutable record_type ptr off = do
   -- Compute (ptr ^+ off)
   (compute_base, base) <- pointerOffsetCode ptr off
@@ -219,10 +220,11 @@ flattenLoad op_mutable record_type ptr off = do
       case fieldType fld
       of PrimField pt -> do
            v <- newAnonymousVar (PrimType pt)
-           let mutable = case op_mutable
+           let ptr_kind = case valType base of PrimType t -> pointerKind t
+               mutable = case op_mutable
                          of Mutable -> Mutable
                             Constant -> fieldMutable fld
-               atom = PrimA (PrimLoad mutable (PrimType pt))
+               atom = PrimA (PrimLoad mutable ptr_kind (PrimType pt))
                       [base, nativeIntV $ fieldOffset fld]
            return (LetE [v] atom, v)
          _ -> internalError "flattenLoad"
@@ -233,14 +235,15 @@ flattenStore op_mutable record_type (ptr : off : values) = do
 
   -- Store each field
   let store_field fld val =
-        let offset = nativeIntV $ fieldOffset fld
+        let ptr_kind = case valType base of PrimType t -> pointerKind t
+            offset = nativeIntV $ fieldOffset fld
             mutable = case op_mutable
                       of Mutable -> Mutable
                          Constant -> fieldMutable fld
             pt = case fieldType fld
                  of PrimField t -> t
                     _ -> internalError "flattenStore"
-        in LetE [] $ PrimA (PrimStore mutable (PrimType pt)) [base, offset, val]
+        in LetE [] $ PrimA (PrimStore mutable ptr_kind (PrimType pt)) [base, offset, val]
 
       fields = recordFields $ flattenStaticRecord record_type      
       code = foldr (.) id $ zipWith store_field fields values
@@ -250,8 +253,10 @@ flattenStore op_mutable record_type (ptr : off : values) = do
 pointerOffsetCode ptr off
   | isZeroLit off = return (id, ptr)
   | otherwise = do
-      ptr' <- newAnonymousVar (PrimType PointerType)
-      return (LetE [ptr'] $ PrimA PrimAddP [ptr, off], VarV ptr')
+      let ptr_kind = case valType ptr of PrimType pt -> pointerKind pt
+          result_type = fromPointerKind $ addPResultType ptr_kind
+      ptr' <- newAnonymousVar (PrimType result_type)
+      return (LetE [ptr'] $ PrimA (PrimAddP ptr_kind) [ptr, off], VarV ptr')
 
 flattenStm :: Stm -> RF Stm
 flattenStm statement =
@@ -266,7 +271,7 @@ flattenStm statement =
        -- in the expansion mapping
        let expanded_vs_sizes = map expandedFieldSize $ recordFields record
        vals <- flattenVal val
-       assign_variables vs expanded_vs_sizes vals next_statement
+       assign_variables (show vs) vs expanded_vs_sizes vals next_statement
      LetE vs atom next_statement -> do
        (atom_statements, atom') <- flattenAtom atom
        defineParams vs $ \vs' -> do
@@ -314,18 +319,19 @@ flattenStm statement =
     -- Process a record unpacking statement.  Substitute each record field
     -- (which will be a variable or literal) in place of the variable from
     -- the unpacking statement.
-    assign_variables (v:vs) (size:sizes) values stm = do
+    assign_variables :: String -> [Var] -> [Int] -> [Val] -> Stm -> RF Stm
+    assign_variables text (v:vs) (size:sizes) values stm = do
       -- Take the values that will be assigned to 'v'
       let (v_values, values') = splitAt size values
-      unless (length v_values == size) unpack_size_mismatch
-      assign v v_values $ assign_variables vs sizes values' stm
+      unless (length v_values == size) $ unpack_size_mismatch text
+      assign v v_values $ assign_variables text vs sizes values' stm
     
-    assign_variables [] [] [] stm = flattenStm stm
-    assign_variables [] [] _  _   = unpack_size_mismatch
-    assign_variables _  _  [] _   = unpack_size_mismatch
+    assign_variables _    [] [] [] stm = flattenStm stm
+    assign_variables text [] [] _  _   = unpack_size_mismatch text
+    assign_variables text _  _  [] _   = unpack_size_mismatch text
 
-    unpack_size_mismatch :: forall a. a
-    unpack_size_mismatch =
+    unpack_size_mismatch :: forall a. String -> a
+    unpack_size_mismatch text =
       internalError "flattenStm: Record size mismatch when unpacking parameters"
 
 flattenFun :: Fun -> RF Fun
@@ -459,7 +465,7 @@ flattenDataDef (Def v sd) = do
   sd' <- flattenStaticData sd
   return $ Def v sd'
 
-flattenImport :: Import -> Import
+flattenImport :: Import -> RF Import
 flattenImport (ImportClosureFun ep Nothing) =
   let ep' =
         case ep
@@ -467,15 +473,19 @@ flattenImport (ImportClosureFun ep Nothing) =
              let ty'    = flattenFunctionType ty
                  arity' = length $ ftParamTypes ty'
              in EntryPoints ty' arity' dir vec exa ine inf glo
-  in ImportClosureFun ep' Nothing
+  in return $ ImportClosureFun ep' Nothing
 
 flattenImport (ImportPrimFun v t Nothing) =
-  ImportPrimFun v (flattenFunctionType t) Nothing
+  return $ ImportPrimFun v (flattenFunctionType t) Nothing
 
 flattenImport (ImportData v Nothing) =
-  ImportData v Nothing
+  return $ ImportData v Nothing
 
--- Imported things should not have a function/data definition attached now
+flattenImport (ImportData v (Just dat)) = do
+  dat' <- flattenStaticData dat
+  return $ ImportData v (Just dat')
+
+-- Imported things should not have a function definition attached now
 flattenImport _ = internalError "flattenImport: Unexpected import definition"
 
 flattenRecordTypes :: Module -> IO Module
@@ -488,7 +498,7 @@ flattenRecordTypes mod =
     exports = IntMap.fromList [(fromIdent $ varID v, sig)
                               | (v, sig) <- moduleExports mod]
     flatten_module = do
-      let imports = map flattenImport $ moduleImports mod
+      imports <- mapM flattenImport $ moduleImports mod
       defs <- flattenTopLevel exports (moduleGlobals mod)
       return $ mod { moduleImports = imports
                    , moduleGlobals = defs}

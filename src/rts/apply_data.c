@@ -8,25 +8,21 @@
 #if WORD_SIZE == 4
 
 unsigned char triolet_type_tag_pap_size[] = {
-  1,				/* Int8Tag */
-  1,				/* Int16Tag */
-  1,				/* Int32Tag */
-  2,				/* Int64Tag */
-  1,				/* Float32Tag */
-  2,				/* Float64Tag */
-  1,				/* BoxedTag */
+  0,				/* Bits0Tag */
+  1,				/* Bits32Tag */
+  2,				/* Bits64Tag */
+  1,                            /* BitsOwnedTag */
+  2                             /* BitsCursorTag */
 };
 
 #elif WORD_SIZE == 8
 
 unsigned char triolet_type_tag_pap_size[] = {
-  1,				/* Int8Tag */
-  1,				/* Int16Tag */
-  1,				/* Int32Tag */
-  1,				/* Int64Tag */
-  1,				/* Float32Tag */
-  1,				/* Float64Tag */
-  1,				/* BoxedTag */
+  0,				/* Bits0Tag */
+  255,				/* Bits32Tag is invalid */
+  1,				/* Bits64Tag */
+  1,                            /* BitsOwnedTag */
+  2                             /* BitsCursorTag */
 };
 
 #else

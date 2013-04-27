@@ -65,6 +65,10 @@ lookupTypeSynonym syn m =
 parameterVar (Parameter _ (Just v)) = v
 parameterVar (Parameter _ Nothing)  = internalError "parameterVar: No variable"
 
+-- | Get the pointer kind from an address expression
+pointerKind addr_exp =
+  case LL.valType addr_exp of PrimType t -> LL.pointerKind t
+
 -------------------------------------------------------------------------------
 
 type G a = Gen FreshVarM a
@@ -335,17 +339,21 @@ genExpr tenv expr =
      FieldE base fld -> do
        addr <- asVal =<< subexpr base
        (offset, _, _) <- genField tenv fld
-       let atom = LL.PrimA LL.PrimAddP [addr, offset]
-       return $ GenAtom [PrimType PointerType] atom
+       let ptr_kind = pointerKind addr
+           result_type = PrimType $ LL.fromPointerKind $ LL.addPResultType ptr_kind
+       let atom = LL.PrimA (LL.PrimAddP ptr_kind) [addr, offset]
+       return $ GenAtom [result_type] atom
      LoadFieldE base fld -> do
        addr <- asVal =<< subexpr base
        (offset, mutable, ty) <- genField tenv fld
-       let atom = LL.PrimA (LL.PrimLoad mutable ty) [addr, offset]
+       let ptr_kind = pointerKind addr
+       let atom = LL.PrimA (LL.PrimLoad mutable ptr_kind ty) [addr, offset]
        return $ GenAtom [ty] atom
      LoadE ty base -> do
        addr <- asVal =<< subexpr base
        let llty = convertToValueType ty
-       let atom = LL.PrimA (LL.PrimLoad Mutable llty) [addr, nativeIntV 0]
+       let ptr_kind = pointerKind addr
+       let atom = LL.PrimA (LL.PrimLoad Mutable ptr_kind llty) [addr, nativeIntV 0]
        return $ GenAtom [llty] atom
      CallE returns op args -> do
        op' <- asVal =<< subexpr op
@@ -443,8 +451,9 @@ genBinaryOp op l_arg r_arg =
     pointer_add = do
       l_val <- asVal l_arg
       r_val <- asVal r_arg
-      let atom = LL.PrimA LL.PrimAddP [l_val, r_val]
-      return $ GenAtom [PrimType PointerType] atom
+      let ptr_kind = pointerKind l_val
+      let atom = LL.PrimA (LL.PrimAddP ptr_kind) [l_val, r_val]
+      return $ GenAtom [PrimType $ LL.fromPointerKind $ LL.addPResultType ptr_kind] atom
     
     arithmetic int_op float_op = do
       l_val <- asVal l_arg
@@ -499,6 +508,9 @@ genCast ty e =
      (PointerType, OwnedType) -> do
        val <- asVal e
        success $ LL.PrimA LL.PrimCastFromOwned [val]
+     (PointerType, CursorType) -> do
+       val <- asVal e
+       success $ LL.PrimA LL.PrimCastFromCursor [val]
      (PointerType, PointerType) -> success_id
      (IntType e_sgn e_sz, IntType g_sgn g_sz)
        | e_sz == g_sz && e_sgn == g_sgn -> success_id

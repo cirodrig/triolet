@@ -35,6 +35,9 @@ data PrimType =
   | PointerType                 -- ^ A pointer
   | OwnedType                   -- ^ An owned reference requiring reference
                                 --   count updates when copied or discarded
+  | CursorType                  -- ^ A cursor pointing to the interior of 
+                                --   an object.  After closure conversion,
+                                --   cursors become a (owned, pointer) pair.
     deriving (Eq, Ord, Show)
 
 pointerSize :: Size
@@ -162,10 +165,13 @@ instance HasSize PrimType where
   sizeOf (FloatType sz) = sizeOf sz
   sizeOf PointerType    = sizeOf pointerSize
   sizeOf OwnedType      = sizeOf pointerSize
+  sizeOf CursorType     = 2 * sizeOf pointerSize
   alignOf UnitType = 1
+  alignOf CursorType    = sizeOf pointerSize
   alignOf x = sizeOf x
   pointerlessness PointerType = False
   pointerlessness OwnedType   = False
+  pointerlessness CursorType  = False
   pointerlessness _           = True
 
 -- | Promote a type to at least the size of a machine word.  Promoted types
@@ -178,7 +184,8 @@ promoteType pt =
      IntType sgn sz -> IntType Signed (max sz nativeIntSize)
      FloatType sz -> FloatType (max sz nativeFloatSize)
      PointerType -> PointerType
-     OwnedType -> OwnedType
+     OwnedType   -> OwnedType
+     CursorType  -> CursorType
 
 -------------------------------------------------------------------------------
 -- Binary instances
@@ -198,6 +205,7 @@ instance Binary PrimType where
   put (FloatType sz) = putWord8 3 >> put sz
   put PointerType = putWord8 4
   put OwnedType = putWord8 5
+  put CursorType = putWord8 6
   
   get = getWord8 >>= getPrimTypeWithTag
       
@@ -208,4 +216,5 @@ getPrimTypeWithTag 2 = IntType <$> get <*> get
 getPrimTypeWithTag 3 = FloatType <$> get
 getPrimTypeWithTag 4 = return PointerType
 getPrimTypeWithTag 5 = return OwnedType
+getPrimTypeWithTag 6 = return CursorType
 getPrimTypeWithTag _ = readError "PrimType.get"

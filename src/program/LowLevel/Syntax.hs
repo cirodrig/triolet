@@ -82,6 +82,18 @@ data UnaryFPIntrinsic =
     ExpI | LogI | SqrtI | SinI | CosI | TanI
     deriving (Eq, Ord, Bounded, Enum)
 
+-- | A pointer kind; subset of 'PrimType'.
+data PointerKind = OwnedPtr | PointerPtr | CursorPtr
+                 deriving(Eq, Ord, Bounded, Enum) 
+
+pointerKind OwnedType = OwnedPtr
+pointerKind PointerType = PointerPtr
+pointerKind CursorType = CursorPtr
+
+fromPointerKind OwnedPtr = OwnedType
+fromPointerKind PointerPtr = PointerType
+fromPointerKind CursorPtr = CursorType
+
 data Prim =
     -- | @PrimCastZ from-sign to-sign size@
     -- 
@@ -110,12 +122,13 @@ data Prim =
   | PrimAnd                           -- ^ Boolean and
   | PrimOr                            -- ^ Boolean or
   | PrimNot                           -- ^ Boolean negation
-  | PrimAddP                    -- ^ Add a native unsigned integer to a
-                                --   (owned or non-owned) pointer.  The result
-                                --   is a non-owned pointer.
+  | PrimAddP !PointerKind       -- ^ Add a native unsigned integer to a
+                                --   pointer.  The argument gives the type of
+                                --   the argument pointer.
+                                --   The result is a cursor or pointer.
     -- | @PrimLoad mutability type base offset@ 
     -- 
-    -- Load a value from a (managed or unmanaged) pointer at some byte offset.
+    -- Load a value from a pointer at some byte offset.
     -- Before the record flattening pass, the loaded value may have record
     -- type; afterward, it may only have primitive type.
     --
@@ -123,7 +136,7 @@ data Prim =
     -- be constant (possibly initialized by a single store operation).
     -- Otherwise, it should be 'Mutable'.  Incorrect use of 'Constant' may
     -- cause incorrect optimizations.
-  | PrimLoad !Mutability !ValueType
+  | PrimLoad !Mutability !PointerKind !ValueType
     -- | @PrimStore mutability type base offset value@
     --
     -- Store a value to a (managed or unmanaged) pointer at some byte offset.
@@ -134,14 +147,15 @@ data Prim =
     -- be constant.  In that case, the memory must not be written by any other
     -- instruction.  Otherwise, it should be 'Mutable'.
     -- Incorrect use of 'Constant' may cause incorrect optimizations.
-  | PrimStore !Mutability !ValueType
+  | PrimStore !Mutability !PointerKind !ValueType
   | PrimAAddZ !Signedness !Size -- ^ Atomically add the target of a pointer to
                                 --   an integer.  Return the original value at
                                 --   that address.
   | PrimCastToOwned             -- ^ Cast a non-owned pointer to an owned
-                                --   pointer.  A new reference is returned.
+                                --   pointer.
   | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
-                                --   pointer.  Consumes a reference.
+                                --   pointer.
+  | PrimCastFromCursor          -- ^ Extract the interior reference from a cursor.
   | PrimGetFrameP               -- ^ Get the current function's frame pointer,
                                 --   pointing to the function's local data.
                                 --   Returns a pointer.  If there's no frame,
@@ -171,6 +185,7 @@ primReturnType :: Prim -> [ValueType]
 primReturnType prim =
   case prim
   of PrimCastZ _ to_sgn to_sz -> int to_sgn to_sz
+     PrimExtendZ sgn _ to_sz  -> int sgn to_sz
      PrimAddZ sgn sz          -> int sgn sz
      PrimSubZ sgn sz          -> int sgn sz
      PrimMulZ sgn sz          -> int sgn sz
@@ -189,12 +204,14 @@ primReturnType prim =
      PrimAnd                  -> bool
      PrimOr                   -> bool
      PrimNot                  -> bool
-     PrimAddP                 -> pointer
-     PrimLoad _ t             -> [t]
-     PrimStore _ _            -> []
+     PrimAddP k               -> pointer_add k
+     PrimLoad _ _ t           -> [t]
+     PrimStore _ _ _          -> []
      PrimAAddZ sgn sz         -> int sgn sz
      PrimCastToOwned          -> [PrimType OwnedType]
      PrimCastFromOwned        -> pointer
+     PrimCastFromCursor       -> pointer
+     PrimGetFrameP            -> pointer
      PrimCastZToF _ sz        -> float sz
      PrimCastFToZ _ sz        -> int Signed sz
      PrimCmpF _ _             -> bool
@@ -211,6 +228,14 @@ primReturnType prim =
     float sz = [PrimType $ FloatType sz]
     bool = [PrimType BoolType]
     pointer = [PrimType PointerType]
+    pointer_add k = [PrimType $ fromPointerKind $ addPResultType k]
+
+-- | Determine the type of the result of 'PrimAddP'.
+--   The type is either a cursor or a pointer.
+addPResultType :: PointerKind -> PointerKind
+addPResultType OwnedPtr = CursorPtr
+addPResultType CursorPtr = CursorPtr
+addPResultType PointerPtr = PointerPtr
 
 data Lit =
     UnitL                       -- ^ The unit value

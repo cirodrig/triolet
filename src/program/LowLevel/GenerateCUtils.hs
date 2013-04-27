@@ -106,6 +106,7 @@ primTypeDeclSpecs is_memory pt =
      FloatType S64 -> typeDeclSpecs (CDoubleType internalNode)
      PointerType -> nameDeclSpecs "TrioletPtr"
      OwnedType -> internalError "primTypeDeclSpecs: Unexpected type"
+     CursorType -> internalError "primTypeDeclSpecs: Unexpected type"
 
 varPrimType v = 
   case varType v

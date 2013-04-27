@@ -131,10 +131,10 @@ csePrim prim args =
     arg_vals = map fst args
     rebuild_atom = PrimA prim arg_vals
 
-    update_for_store env (PrimStore Constant ty) args = 
+    update_for_store env (PrimStore Constant ptr_kind ty) args = 
       case args
       of [base, off, val] ->
-           case interpretStore env ty base off val 
+           case interpretStore env ptr_kind ty base off val 
            of Just env' -> putCSEEnv env'
               Nothing -> return ()
          _ -> internalError "csePrim"
@@ -376,25 +376,27 @@ scanGlobalData impents defs =
     scan_static_data base (StaticData value) = 
       case value
       of RecV rec fs ->
-           zipWith (add_field (varExpr base)) (recordFields rec) fs
+           zipWith (add_field ptr_kind (varExpr base)) (recordFields rec) fs
          LitV lit ->
-           [add_known_value (PrimType $ litType lit) (varExpr base)
+           [add_known_value ptr_kind (PrimType $ litType lit) (varExpr base)
             (litExpr $ nativeIntL 0) value]
+      where
+        ptr_kind = case varType base of PrimType pt -> pointerKind pt
     
     scan_global_fun fun_var fun_arity = \(arities, env) ->
       (insertArity fun_var fun_arity arities, env)
 
-    add_known_value prim_type base offset val (arities, env) =
+    add_known_value ptr_kind prim_type base offset val (arities, env) =
       let env' = 
             case interpretVal env val
             of Just cse_val ->
                  fromMaybe env $
-                 interpretStore env prim_type base offset cse_val
+                 interpretStore env ptr_kind prim_type base offset cse_val
                Nothing -> env
       in (arities, env')
 
-    add_field base fld val
-      | isConstField fld = add_known_value prim_type base offset val
+    add_field ptr_kind base fld val
+      | isConstField fld = add_known_value ptr_kind prim_type base offset val
       | otherwise = id
       where
         offset = litExpr $ nativeIntL $ fieldOffset fld

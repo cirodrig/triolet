@@ -440,17 +440,21 @@ primAnd x y =
   emitAtom1 (PrimType BoolType) $ PrimA PrimAnd [x, y]
 
 primAddP ptr off =
-  emitAtom1 (PrimType PointerType) $ PrimA PrimAddP [ptr, off]
+  let ptr_kind = case valType ptr of PrimType pt -> pointerKind pt
+  in emitAtom1 (PrimType $ fromPointerKind $ addPResultType ptr_kind) $
+     PrimA (PrimAddP ptr_kind) [ptr, off]
 
 primAddPAs ptr off ptr' =
-  bindAtom1 ptr' $ PrimA PrimAddP [ptr, off]
+  let ptr_kind = case valType ptr of PrimType pt -> pointerKind pt
+  in bindAtom1 ptr' $ PrimA (PrimAddP ptr_kind) [ptr, off]
 
 primLoadAs mut ty ptr dst = primLoadOffAs mut ty ptr (nativeIntV 0) dst
 primLoadOffAs mut ty ptr off dst
   | valType off /= PrimType nativeIntType =
       internalError "primLoadOff: Offset has wrong type"
   | otherwise =
-      bindAtom1 dst $ PrimA (PrimLoad mut ty) [ptr, off]
+      let ptr_kind = case valType ptr of PrimType pt -> pointerKind pt
+      in bindAtom1 dst $ PrimA (PrimLoad mut ptr_kind ty) [ptr, off]
 
 primLoadMutableAs ty ptr dst = primLoadAs Mutable ty ptr dst
 primLoadOffMutableAs ty ptr off dst = primLoadOffAs Mutable ty ptr off dst
@@ -470,7 +474,8 @@ primLoadOffConst ty ptr off = primLoadOff Constant ty ptr off
 
 primStore mut ty ptr val = primStoreOff mut ty ptr (nativeIntV 0) val
 primStoreOff mut ty ptr off val =
-  emitAtom0 $ PrimA (PrimStore mut ty) [ptr, off, val]
+  let ptr_kind = case valType ptr of PrimType pt -> pointerKind pt
+  in emitAtom0 $ PrimA (PrimStore mut ptr_kind ty) [ptr, off, val]
 
 primStoreMutable ty ptr val = primStore Mutable ty ptr val
 primStoreOffMutable ty ptr off val = primStoreOff Mutable ty ptr off val

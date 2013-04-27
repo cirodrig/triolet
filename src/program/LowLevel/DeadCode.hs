@@ -201,6 +201,7 @@ primHasSideEffect prim =
      PrimAAddZ {}         -> True
      PrimCastToOwned {}   -> False
      PrimCastFromOwned {} -> False
+     PrimCastFromCursor {} -> False
      PrimGetFrameP {}     -> False
      PrimCastZToF {}      -> False
      PrimCastFToZ {}      -> False

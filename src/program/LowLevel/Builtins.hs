@@ -32,6 +32,8 @@ module LowLevel.Builtins
         the_prim_apply_p,
         the_prim_apply_o_f,
         the_prim_apply_o,
+        the_prim_apply_c_f,
+        the_prim_apply_c,
         the_fun_negate_int,
         the_fun_negate_float,
         the_fun_minus_ii,

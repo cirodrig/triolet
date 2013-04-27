@@ -125,6 +125,7 @@ parseType = prim_type <|> record_type <?> "type"
     prim_type = choice [match tok >> return (PrimT typ)
                        | (tok, typ) <- primtypes]
     primtypes = [ (BoolTok, BoolType)
+                , (CursorTok, CursorType)
                 , (Int8Tok, IntType Signed S8)
                 , (Int16Tok, IntType Signed S16)
                 , (Int32Tok, IntType Signed S32)
