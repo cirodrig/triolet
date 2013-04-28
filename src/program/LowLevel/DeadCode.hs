@@ -156,12 +156,17 @@ atomHasSideEffect :: Atom -> DCEM Bool
 atomHasSideEffect atom = 
   case atom
   of ValA {} -> return False
-     CallA _ (VarV callee) args -> do
+
+     -- Partially applied functions don't have side effects.
+     -- If this is a closure call with a known callee, check whether it's
+     -- partially applied.
+     CallA ClosureCall (VarV callee) args -> do
        arity <- lookupFunctionArity callee
        case arity of
          Just n | n > length args -> return False -- Partial application
          _ -> return True       -- Fully applied or unknown callee
-     CallA {} -> return True    -- Unknown callee
+
+     CallA {} -> return True
      PrimA prim _ -> return $ primHasSideEffect prim
      PackA {} -> return False
      UnpackA {} -> return False
