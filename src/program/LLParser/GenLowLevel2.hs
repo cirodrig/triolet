@@ -329,7 +329,7 @@ genExpr tenv expr =
      NullLitE {} -> data_expr
      RecordE record fs -> do
        fs' <- mapM (asVal <=< subexpr) fs
-       let record_type = case record
+       let record_type = case dereferenceTypeSynonym record
                          of NamedT (RecordT rec) -> convertToStaticRecord rec
                             _ -> internalError "genExpr: Expecting record type"
            atom = LL.PackA record_type fs'
