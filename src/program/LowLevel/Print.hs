@@ -17,6 +17,11 @@ fillBracketList xs = brackets $ fsep $ punctuate (text ",") xs
 sepBracketList :: [Doc] -> Doc
 sepBracketList xs = brackets $ sep $ punctuate (text ",") xs
 
+pprEntryPoints :: EntryPoints -> Doc
+pprEntryPoints (EntryPoints _ _ dir _ exa ine inf glo) =
+  parens $ fsep [text "Entry points:", pprVar dir, pprVar exa,
+                 pprVar ine, pprVar inf, pprVar glo]
+
 pprVarLong :: Var -> Doc
 pprVarLong v =
   let name_doc = text $ maybe "_" labelLocalNameAsString $ varName v
@@ -117,13 +122,18 @@ pprFunDef (Def v f) =
                 OneUse -> text "[1]"
                 ManyUses -> empty
       inl = if funInlineRequest f then text "INLINE" else empty
+      ep_doc =
+        case funEntryPoints f
+        of Nothing -> empty
+           Just ep -> pprEntryPoints ep
       param_doc = map pprVarLong $ funParams f
       ret_doc = map pprValueType $ funReturnTypes f
       leader = pprVar v <> pprFunSignature param_doc ret_doc
       local_doc = if funFrameSize f == 0
                   then empty
                   else text "frame size:" <+> text (show $ funFrameSize f)
-  in intro <+> uses <+> inl <+> leader <+> text "=" $$
+  in intro <+> uses <+> inl <+> ep_doc $$ 
+     nest 2 (leader <+> text "=") $$
      nest 4 local_doc $$
      nest 4 (pprBlock (funBody f))
 
@@ -328,7 +338,7 @@ pprImport impent = text "extern" <+>
              (map pprValueType $ ftReturnTypes ftype)
            impvar = pprVar $ globalClosure entry_points
            value = case mfun
-                   of Nothing -> empty
+                   of Nothing -> pprEntryPoints entry_points
                       Just f  -> pprFun f
        in hang (text "function" <+> impvar <+> signature) 4 value
      ImportPrimFun v ftype mfun ->

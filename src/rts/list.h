@@ -7,7 +7,7 @@ extern procedure core.internal.list.triolet_List_initialize "triolet_List_initia
   (int, uint, uint, pointer) -> ();
 
 extern procedure core.internal.list.triolet_List_get_contents "triolet_List_get_contents"
-  (pointer, uint, uint) -> pointer;
+  (pointer, uint, uint) -> owned;
 
 extern procedure core.internal.list.triolet_List_get_length "triolet_List_get_length"
   (pointer) -> uint;
@@ -18,7 +18,7 @@ extern procedure core.internal.list.triolet_Array0_alignment "triolet_Array0_ali
   (uint, uint) -> uint;
 
 extern procedure core.internal.list.triolet_Array0_get_contents "triolet_Array0_get_contents"
-  (pointer, uint, uint) -> pointer;
+  (pointer, uint, uint) -> owned;
 
 extern data pointer core.internal.list.triolet_Array1_size "triolet_Array1_size";
 extern data pointer core.internal.list.triolet_Array1_alignment "triolet_Array1_alignment";
@@ -27,7 +27,7 @@ extern procedure core.internal.list.triolet_Array1_initialize "triolet_Array1_in
   (int, int, int, uint, uint, pointer) -> ();
 
 extern procedure core.internal.list.triolet_Array1_get_contents "triolet_Array1_get_contents"
-  (pointer, uint, uint) -> pointer;
+  (pointer, uint, uint) -> owned;
 
 extern procedure core.internal.list.triolet_Array1_get_bounds "triolet_Array1_get_bounds"
   (pointer) -> Tuple3(int, int, int);
@@ -39,7 +39,7 @@ extern procedure core.internal.list.triolet_Array2_initialize "triolet_Array2_in
   (int, int, int, int, int, int, uint, uint, pointer) -> ();
 
 extern procedure core.internal.list.triolet_Array2_get_contents "triolet_Array2_get_contents"
-  (pointer, uint, uint) -> pointer;
+  (pointer, uint, uint) -> owned;
 
 extern procedure core.internal.list.triolet_Array2_get_bounds "triolet_Array2_get_bounds"
   (pointer) -> Tuple6(int, int, int, int, int, int);
@@ -51,7 +51,7 @@ extern procedure core.internal.list.triolet_Array3_initialize "triolet_Array3_in
   (int, int, int, int, int, int, int, int, int, uint, uint, pointer) -> ();
 
 extern procedure core.internal.list.triolet_Array3_get_contents "triolet_Array3_get_contents"
-  (pointer, uint, uint) -> pointer;
+  (pointer, uint, uint) -> owned;
 
 extern procedure core.internal.list.triolet_Array3_get_bounds "triolet_Array3_get_bounds"
   (pointer) -> Tuple3(Tuple3(int, int, int),

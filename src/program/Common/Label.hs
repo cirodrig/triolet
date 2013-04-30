@@ -54,6 +54,8 @@ data LabelTag =
     -- | A normal variable.  This tag is used on procedures, global data, and
     --   global function closures.
     NormalLabel
+    -- | A global function info table.
+  | InfoTableLabel
     -- | A global function direct entry point.
   | DirectEntryLabel
     -- | A global function vector entry point.
@@ -164,6 +166,7 @@ encodeNameString s = concatMap encodeLetter s
 -- a mangled label.
 encodeLabelTag :: LabelTag -> String
 encodeLabelTag NormalLabel       = ""
+encodeLabelTag InfoTableLabel    = "qI"
 encodeLabelTag DirectEntryLabel  = "qD"
 encodeLabelTag VectorEntryLabel  = "qV"
 encodeLabelTag ExactEntryLabel   = "qE"

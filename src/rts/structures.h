@@ -51,7 +51,7 @@ extern data owned core.internal.structures.repr_MaybeVal_int;
 extern data owned core.internal.structures.repr_MaybeVal_MaybeVal_int;
 #endif
 
-extern data owned core.internal.structures.triolet_typeObject_typeObject;
+extern data owned core.internal.structures.typeObject_typeObject;
 extern data owned core.internal.structures.triolet_typeObject_function "triolet_typeObject_function";
 
 extern data owned core.internal.structures.OpaqueTraversableDict_list;

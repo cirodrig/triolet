@@ -718,8 +718,9 @@ tiList pos elements = do
   -- the 'elt_type' variable.
   ti_elements <- mapM (tiExpAtType listItemReason elt_type) elements
 
+  elt_repr <- requireRepr elt_type
   list_repr <- requireRepr list_type
-  let list = mkListE pos (mkType elt_type) list_repr ti_elements
+  let list = mkListE pos (mkType elt_type) elt_repr ti_elements
   return (list, list_repr, list_type)
 
 tiUndefined pos = do

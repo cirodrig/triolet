@@ -235,6 +235,16 @@ lookupVar v = Lower $ ReaderT $ \env ->
      Nothing -> internalError $
                 "Lowering: no translation for variable: " ++ show v
 
+-- | Create a new low-level variable to stand for the given variable 
+translateVariable :: Bool -> Var -> LL.ValueType -> Lower LL.Var
+translateVariable True v ty =
+  case varName v
+  of Just nm -> LL.newExternalVar nm ty
+     Nothing -> internalError $ 
+                "assumeVariableWithType: Exported variable must have label"
+    
+translateVariable False v ty =
+  LL.newVar (varName v) ty
 
 assumeVariableWithType :: Bool                -- ^ Whether variable is exported
                        -> Var                 -- ^ System F variable
@@ -243,14 +253,10 @@ assumeVariableWithType :: Bool                -- ^ Whether variable is exported
                        -> (LL.Var -> Lower a) -- ^ Use of low-level variable
                        -> Lower a
 assumeVariableWithType is_exported v sf_ty ty k = do
-  new_v <-
-    if is_exported
-    then case varName v
-         of Just nm -> LL.newExternalVar nm ty
-            Nothing -> internalError $ 
-                       "assumeVariableWithType: Exported variable must have label"
-    else LL.newVar (varName v) ty
-  add_to_env new_v (k new_v)
+  new_v <- translateVariable is_exported v ty
+  assumeTranslatedVariable v new_v sf_ty (k new_v)
+
+assumeTranslatedVariable v new_v sf_ty m = add_to_env new_v m
   where  
     add_to_env new_v (Lower m) = assume v sf_ty (Lower (local update m))
       where

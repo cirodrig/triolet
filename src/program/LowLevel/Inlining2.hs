@@ -19,6 +19,7 @@ import Common.Error
 import Common.MonadLogic
 import Common.Supply
 import Common.Identifier
+import LowLevel.Build(mkEntryPoints)
 import LowLevel.FreshVar
 import LowLevel.CodeTypes
 import qualified LowLevel.Rename
@@ -318,7 +319,7 @@ inlineCall' (!f, n_returns) args cont
   | funConvention f /= ClosureCall =
       -- Funcction has wrong number of parameters, but it's a procedure
       -- or join point.  This means an error happened earlier.
-      internalError "inlineCall: Procedure or join point called with wrong number of paramaters"
+      internalError "inlineCall: Procedure or join point called with wrong number of parameters"
 
   | n_args > n_params = do
       -- Inline a saturated call.  The saturated call returns a function.
@@ -344,23 +345,24 @@ inlineCall' (!f, n_returns) args cont
       -- Undersaturated call.
       -- Create a local function and pass it to the continuation
       let fun_body = bindArguments args (take n_args $ funParams f) (funBody f)
-          partial_app =
-            mkFun (funConvention f) (funInlineRequest f) (funFrameSize f)
-            (drop n_args $ funParams f) (funReturnTypes f) fun_body
       case cont of
         IsTailCall -> do
           partial_app_var <- newAnonymousVar (PrimType OwnedType)
+          partial_app <-
+            createPartialApplication n_args f fun_body partial_app_var
           tellReturn            -- This is an endpoint
           return $
-            LetrecE (NonRec (Def partial_app_var partial_app)) $
+            LetrecE (NonRec partial_app) $
             ReturnE (ValA [VarV partial_app_var])
         HasContinuation [cont_var] cont_rtypes cont_code
           | PrimType OwnedType <- varType cont_var -> do
             -- This is not an endpoint.  If there are endpoints, they are 
             -- part of the continuation, 'cont_stm', and they have already
             -- been marked.
+            partial_app <-
+              createPartialApplication n_args f fun_body cont_var
             return $
-              LetrecE (NonRec (Def cont_var partial_app))
+              LetrecE (NonRec partial_app)
               (fromContinuationCode cont_code)
         HasContinuation {} ->
           -- Wrong number of return values
@@ -368,6 +370,15 @@ inlineCall' (!f, n_returns) args cont
   where
     n_args = length args
     n_params = length $ funParams f
+
+-- | Construct a partially applied function from the given pieces.
+createPartialApplication :: Int -> Fun -> Stm -> Var -> Inl s FunDef
+createPartialApplication n_args f fun_body fun_var = do
+  ep <- mkEntryPoints False (funType f) fun_var
+  let new_f = mkFun ClosureCall (funInlineRequest f) (funFrameSize f)
+              (Just ep) (drop n_args $ funParams f) (funReturnTypes f) fun_body
+  return $ Def fun_var new_f
+  
 
 -- | Inline a function that is called with exactly the right number of 
 --   arguments.
@@ -415,7 +426,9 @@ insertContinuationAsJoinPoint f args params rtypes stm = do
 
   -- Create a continuation function
   cont_name <- newAnonymousVar (PrimType OwnedType)
-  let cont_function = closureFun params rtypes stm
+  let fun_type = closureFunctionType (map varType params) rtypes
+  ep <- mkEntryPoints False fun_type cont_name
+  let cont_function = closureFun ep params rtypes stm
 
   f_return_vars <- mapM newAnonymousVar fun_return_types
   let cont_call =

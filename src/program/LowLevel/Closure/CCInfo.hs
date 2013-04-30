@@ -45,16 +45,49 @@ promotedPrimTypesRecord :: Mutability -> [PrimType] -> StaticRecord
 promotedPrimTypesRecord mut tys =
   staticRecord [(mut, PrimField $ promoteType t) | t <- tys]
 
--- | Create a record representing arguments of a PAP.
---   The record's fields are promoted, then padded to a multiple of
---   'dynamicScalarAlignment'.
-papArgsRecord :: Mutability -> [PrimType] -> StaticRecord
-papArgsRecord mut tys =
-  staticRecord $ concatMap mk_field tys
+-- | Given the entry points of an imported closure-call function,
+--   create imported entities for that function's entry points.
+--   Closure conversion substitutes these entities for the original
+--   imported entity.
+importedClosureEntryPoints :: EntryPoints -> [Import]
+importedClosureEntryPoints entry_points =
+  [global_closure, info_table, direct_entry, exact_entry, inexact_entry]
   where
-    mk_field ty =
-      let pty = promoteType ty
-      in [(Constant, AlignField dynamicScalarAlignment), (mut, PrimField pty)]
+    global_closure =
+      ImportData (globalClosure entry_points) Nothing
+
+    info_table =
+      ImportData (infoTableEntry entry_points) Nothing
+
+    direct_entry =
+      ImportPrimFun (directEntry entry_points) direct_entry_type Nothing
+
+    exact_entry =
+      ImportPrimFun (exactEntry entry_points) exact_entry_type Nothing
+      
+    inexact_entry =
+      ImportPrimFun (inexactEntry entry_points) inexact_entry_type Nothing
+
+    direct_entry_type = primFunctionType param_types return_types
+
+    -- The exact entry point takes and returns promoted types.
+    -- It takes the closure in addition to other parameters.
+    exact_entry_type =
+      primFunctionType
+      (PrimType OwnedType : promoted_param_types)
+      promoted_return_types
+
+    param_types = ftParamTypes $ entryPointsType entry_points
+    return_types = ftReturnTypes $ entryPointsType entry_points
+    promoted_param_types =
+      map (PrimType . promoteType . valueToPrimType) param_types
+    promoted_return_types =
+      map (PrimType . promoteType . valueToPrimType) $ return_types
+
+    -- The inexact entry point takes a PAP and a return pointer, and
+    -- returns nothing
+    inexact_entry_type =
+      primFunctionType [PrimType OwnedType, PrimType PointerType] []
 
 -------------------------------------------------------------------------------
 
@@ -210,9 +243,7 @@ globalCCInfo :: FunDef -> FreshVarM CCInfo
 globalCCInfo (Def v f) =
   case funConvention f
   of ClosureCall -> do
-       ep <- case varName v
-             of Just name -> mkGlobalEntryPoints (funType f) name v
-                Nothing -> mkEntryPoints False (funType f) v
+       let Just ep = funEntryPoints f
        return $ GlobalClosure ep
      PrimCall -> do
        return $ GlobalPrim (funType f)
@@ -279,12 +310,13 @@ groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
         let v = definiendum member
             conv = funConvention $ definiens member
             ftype = funType $ definiens member
+            ep = funEntryPoints $ definiens member
             FunAnalysisResults hoisted closure captured = get_capture v
-        return (hoisted, (v, conv, ftype, closure, captured))
+        return (hoisted, (v, conv, ep, ftype, closure, captured))
 
       -- Find the hoisted and unhoisted functions in the group
-      hoisted   :: [(Var, CallConvention, FunctionType, Bool, Set.Set Var)]
-      unhoisted :: [(Var, CallConvention, FunctionType, Bool, Set.Set Var)]
+      hoisted   :: [(Var, CallConvention, Maybe EntryPoints, FunctionType, Bool, Set.Set Var)]
+      unhoisted :: [(Var, CallConvention, Maybe EntryPoints, FunctionType, Bool, Set.Set Var)]
       (hoisted, unhoisted) = partition_h [] [] capture_info
         where
           partition_h h u ((True,  x):xs) = partition_h (x : h) u xs
@@ -296,16 +328,16 @@ groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
       -- Identify the captured variable set, which is a subset of the
       -- variables in scope at the defgroup.
       shared_set = in_scope_set `Set.intersection`
-                   Set.unions [s | (_, _, _, _, s) <- hoisted ++ unhoisted]
+                   Set.unions [s | (_, _, _, _, _, s) <- hoisted ++ unhoisted]
       shared_list = Set.toList shared_set
       shared_record = variablesRecord shared_list
       closure_record = localClosureRecord shared_record
       
-      create_hoisted_closure (v, call_conv, ftype, want_closure, captured_set) = do
+      create_hoisted_closure (v, call_conv, entry_points, ftype, want_closure, captured_set) = do
         let call_captured = Set.toList (captured_set Set.\\ shared_set)
         entry_points <-
           case call_conv
-          of ClosureCall -> mkEntryPoints False ftype v
+          of ClosureCall -> case entry_points of Just ep -> return ep
              JoinCall -> do
                -- This function has the wrong type, so create a new variable
                v' <- newVar (varName v) (PrimType OwnedType)
@@ -315,7 +347,7 @@ groupCCInfo get_capture defined_here in_scope_set (Rec grp_members) =
         return (v, LocalClosure entry_points closure_record call_captured
                    shared_list shared_record want_closure)
 
-      create_unhoisted_closure (v, conv, ftype, _, captured_set) = do
+      create_unhoisted_closure (v, conv, _, ftype, _, captured_set) = do
         let call_captured_set1 = captured_set Set.\\ shared_set
             -- Don't capture the definition group members
             call_captured_set2 = foldr Set.delete call_captured_set1 defined_here

@@ -1,10 +1,11 @@
 {-| Remove unit types from a program.
 
-Before closure conversion, we must keep unit values around in order to
-account for curried application.  If the function @f@ takes two arguments 
+After closure conversion, unit values serve no purpose and we can
+delete them.  They must be kept before closure conversion in order to
+account for curried application.  For example, if the function @f@ takes
+two arguments 
 and returns an int, then @f(1)@ returns a function while @f(1, nil)@ returns 
-an int.  After closure conversion, unit values serve no purpose and we can
-delete them.
+an int.  
 
 The function 'removeUnits' removes unit values from local variables,
 record types, and function parameters/returns in a program.
@@ -119,9 +120,9 @@ flattenEntryPoints ep =
   in ep {_epType = ty, _epArity = arity}
 
 instance Flatten Import where
-  flatten (ImportClosureFun ep mf) =
-    importMustBeNothing mf $
-    ImportClosureFun (flattenEntryPoints ep) Nothing
+  flatten (ImportClosureFun _ _) =
+    -- Closure conversion should have eliminated these
+    internalError "removeUnits"
   
   flatten (ImportPrimFun v ft mf) =
     importMustBeNothing mf $

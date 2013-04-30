@@ -142,6 +142,7 @@ namespace Triolet {
   class IncompleteSingleRef {
   private:
     TriBoxPtr owner;
+    TriBoxPtr parent;
     TriBarePtr object;
 
   public:
@@ -152,10 +153,11 @@ namespace Triolet {
 
   public:
     // Construct an empty incomplete reference
-    IncompleteSingleRef(void) : owner(NULL), object(NULL) {}
+    IncompleteSingleRef(void) : owner(NULL), parent(NULL), object(NULL) {}
 
     // Construct a borrowed incomplete reference
-    IncompleteSingleRef(TriBarePtr _s) : owner(NULL), object(_s) {}
+    IncompleteSingleRef(TriBoxPtr _p, TriBarePtr _s)
+      : owner(NULL), parent(_p), object(_s) {}
 
     IncompleteSingleRef(const IncompleteSingleRef& other) {
       // Cannot copy incomplete references that own an object
@@ -165,6 +167,8 @@ namespace Triolet {
       owner = NULL;
       object = other.object;
     }
+
+    TriBoxPtr getParent() { return parent; }
     
     TriBarePtr getObject() { return object; }
 
@@ -189,7 +193,8 @@ namespace Triolet {
       }
 
       // Create boxed object and initialize header
-      owner = triolet_alloc_boxed(bare_type::getSize(), bare_type::getAlignment());
+      parent = owner =
+        triolet_alloc_boxed(bare_type::getSize(), bare_type::getAlignment());
 
       // Get pointer to the bare object
       object = (TriBarePtr) ((char *)owner) + addPadding<bare_type>(sizeof(void *));
@@ -199,10 +204,12 @@ namespace Triolet {
       if (!isOwner()) {
         trioletError("No incomplete object reference");
       }
-      TriBarePtr ret = object;
+      TriBoxPtr ret_parent = parent;
+      TriBarePtr ret_object = object;
       object = NULL;
       owner = NULL;
-      return bare_type(ret);
+      parent = NULL;
+      return bare_type(ret_parent, ret_object);
     }
   };
 
@@ -491,7 +498,8 @@ namespace Triolet {
       template<typename T2> friend class Incomplete;
     };
 
-    StuckRef(TriBarePtr _bare_data) : BareType(_bare_data) {}
+    StuckRef(TriBoxPtr _parent, TriBarePtr _bare_data)
+      : BareType(_parent, _bare_data) {}
 
     static unsigned int getSize(void) {return sizeof(TriBoxPtr);}
     static unsigned int getAlignment(void) {return __alignof__(TriBoxPtr);}
@@ -541,7 +549,7 @@ namespace Triolet {
         ? bare_align : TRIOLET_OBJECT_HEADER_SIZE;
     }
     operator T() const {
-      return T(getContents());
+      return T(getBoxData(), getContents());
     }
   };
 
@@ -589,7 +597,8 @@ namespace Triolet {
     public:
       // Constructors
       Tuple<T1, T2, T3, T4>(void) : BareType() {}
-      Tuple<T1, T2, T3, T4>(TriBarePtr _bare_data) : BareType(_bare_data) {}
+      Tuple<T1, T2, T3, T4>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
       static unsigned int
@@ -645,12 +654,12 @@ namespace Triolet {
 
     static type 
     get_return_object(Tuple<T1, T2, T3, T4>* tuple) {
-      return type(tuple->getBareData());
+      return type(tuple->getParent(), tuple->getBareData());
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3,T4> >* incompleteTuple) {
-      return Incomplete<type>(incompleteTuple->getObject());
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject());
     }
   };
   
@@ -667,7 +676,7 @@ namespace Triolet {
       int offset = 0;
       offset = allocateObject<T1_Bare>(offset);
       offset = addPadding<T2_Bare>(offset);
-      return type(tuple->getBareData() + offset);
+      return type(tuple->getParent(), tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
@@ -675,7 +684,7 @@ namespace Triolet {
       int offset = 0;
       offset = allocateObject<T1_Bare>(offset);
       offset = addPadding<T2_Bare>(offset);
-      return Incomplete<type>(incompleteTuple->getObject() + offset);
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject() + offset);
     }
   };
   
@@ -693,7 +702,7 @@ namespace Triolet {
       offset = allocateObject<T1_Bare>(offset);
       offset = allocateObject<T2_Bare>(offset);
       offset = addPadding<T3_Bare>(offset);
-      return type(tuple->getBareData() + offset);
+      return type(tuple->getParent(), tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
@@ -702,7 +711,7 @@ namespace Triolet {
       offset = allocateObject<T1_Bare>(offset);
       offset = allocateObject<T2_Bare>(offset);
       offset = addPadding<T3_Bare>(offset);
-      return Incomplete<type>(incompleteTuple->getObject() + offset);
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject() + offset);
     }
   };
 
@@ -721,7 +730,7 @@ namespace Triolet {
       offset = allocateObject<T2_Bare>(offset);
       offset = allocateObject<T3_Bare>(offset);
       offset = addPadding<T4_Bare>(offset);
-      return type(tuple->getBareData() + offset);
+      return type(tuple->getParent(), tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
@@ -731,7 +740,7 @@ namespace Triolet {
       offset = allocateObject<T2_Bare>(offset);
       offset = allocateObject<T3_Bare>(offset);
       offset = addPadding<T4_Bare>(offset);
-      return Incomplete<type>(incompleteTuple->getObject() + offset);
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject() + offset);
     }
   };
 
@@ -775,7 +784,8 @@ namespace Triolet {
     public:
       // Constructors
       Tuple<T1, T2, T3>(void) : BareType() {}
-      Tuple<T1, T2, T3>(TriBarePtr _bare_data) : BareType(_bare_data) {}
+      Tuple<T1, T2, T3>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -824,12 +834,12 @@ namespace Triolet {
 
     static type 
     get_return_object(Tuple<T1, T2, T3>* tuple) {
-      return type(tuple->getBareData());
+      return type(tuple->getParent(), tuple->getBareData());
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2,T3> >* incompleteTuple) {
-      return Incomplete<type>(incompleteTuple->getObject());
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject());
     }
   };
   
@@ -845,7 +855,7 @@ namespace Triolet {
       int offset = 0;
       offset = allocateObject<T1_Bare>(offset);
       offset = addPadding<T2_Bare>(offset);
-      return type(tuple->getBareData() + offset);
+      return type(tuple->getParent(), tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
@@ -853,7 +863,7 @@ namespace Triolet {
       int offset = 0;
       offset = allocateObject<T1_Bare>(offset);
       offset = addPadding<T2_Bare>(offset);
-      return Incomplete<type>(incompleteTuple->getObject() + offset);
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject() + offset);
     }
   };
   
@@ -870,7 +880,7 @@ namespace Triolet {
       offset = allocateObject<T1_Bare>(offset);
       offset = allocateObject<T2_Bare>(offset);
       offset = addPadding<T3_Bare>(offset);
-      return type(tuple->getBareData() + offset);
+      return type(tuple->getParent(), tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
@@ -879,7 +889,7 @@ namespace Triolet {
       offset = allocateObject<T1_Bare>(offset);
       offset = allocateObject<T2_Bare>(offset);
       offset = addPadding<T3_Bare>(offset);
-      return Incomplete<type>(incompleteTuple->getObject() + offset);
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject() + offset);
     }
   };
 
@@ -920,7 +930,8 @@ namespace Triolet {
     public:
       // Constructors
       Tuple<T1, T2>(void) : BareType() {}
-      Tuple<T1,T2>(TriBarePtr _bare_data) : BareType(_bare_data) {}
+      Tuple<T1,T2>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -963,12 +974,12 @@ namespace Triolet {
 
     static type 
     get_return_object(Tuple<T1, T2>* tuple) {
-      return type(tuple->getBareData());
+      return type(tuple->getParent(), tuple->getBareData());
     }
 
     static Incomplete<type> 
     get_incomplete_return_object(Incomplete< Tuple<T1,T2> >* incompleteTuple) {
-      return Incomplete<type>(incompleteTuple->getObject());
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject());
     }
   };
   
@@ -983,7 +994,7 @@ namespace Triolet {
       int offset = 0;
       offset = allocateObject<T1_Bare>(offset);
       offset = addPadding<T2_Bare>(offset);
-      return type(tuple->getBareData() + offset);
+      return type(tuple->getParent(), tuple->getBareData() + offset);
     }
 
     static Incomplete<type> 
@@ -991,7 +1002,7 @@ namespace Triolet {
       int offset = 0;
       offset = allocateObject<T1_Bare>(offset);
       offset = addPadding<T2_Bare>(offset);
-      return Incomplete<type>(incompleteTuple->getObject() + offset);
+      return Incomplete<type>(incompleteTuple->getParent(), incompleteTuple->getObject() + offset);
     }
   };
 
@@ -1016,7 +1027,8 @@ namespace Triolet {
     public:
       // Constructors
       List<T>(void) : BareType() {}
-      List<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
+      List<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -1050,11 +1062,17 @@ namespace Triolet {
 
       // Member Functions
       T_Bare 
-      at(int index) { 
-        TriBarePtr list_contents =
+      at(int index) {
+        TriBoxPtr list_contents =
           triolet_List_get_contents(getBareData(),
-                                 T_Bare::getSize(), T_Bare::getAlignment());
-        return T_Bare(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
+                                    T_Bare::getSize(), T_Bare::getAlignment());
+        /* Compute address of list element */
+        offset list_element_offset = TRIOLET_OBJECT_HEADER_SIZE;
+        list_element_offset = addPadding<T_Bare>(list_element_offset);
+        list_element_offset += index*addPadding<T_Bare>(T_Bare::getSize());
+        /* Create reference */
+        return T_Bare(list_contents,
+                      (TriBarePtr)((char *)list_contents + list_element_offset));
       }
 
       int len(void) {
@@ -1085,7 +1103,8 @@ namespace Triolet {
     public:
       // Constructors
       BList<T>(void) : BareType() {}
-      BList<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
+      BList<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -1108,14 +1127,21 @@ namespace Triolet {
         int length = triolet_List_get_length(list.getBareData());
         incompleteList.create(length);
 
-        /* Copy list contents.  It's an array of pointers. */
-        TriBarePtr src_array =
+        /* Copy list contents. */
+        TriBoxPtr src_array =
           triolet_List_get_contents(list.getBareData(),
                                  sizeof(TriBoxPtr), __alignof__(TriBoxPtr));
-        TriBarePtr dst_array =
+        TriBoxPtr dst_array =
           triolet_List_get_contents(incompleteList.getObject(),
                                  sizeof(TriBoxPtr), __alignof__(TriBoxPtr));
-        memcpy(dst_array, src_array, length * sizeof(TriBoxPtr));
+
+        /* Copy array of pointers */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+
+        memcpy((char *)dst_array + contents_offset,
+               (char *)src_array + contents_offset,
+               length * sizeof(TriBoxPtr));
       }
 
       static bool 
@@ -1124,11 +1150,17 @@ namespace Triolet {
       // Member Functions
       T_Box
       at(int index) { 
-        TriBoxPtr *list_contents =
-          (TriBoxPtr *)triolet_List_get_contents(getBareData(),
-                                               sizeof(TriBoxPtr),
-                                               __alignof__(TriBoxPtr));
-        return T_Box(list_contents[index]);
+        TriBoxPtr list_contents =
+          triolet_List_get_contents(getBareData(),
+                                    sizeof(TriBoxPtr),
+                                    __alignof__(TriBoxPtr));
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)list_contents + TRIOLET_OBJECT_HEADER_SIZE);
+
+        return T_Box(array[index]);
       }
 
       int len(void) {
@@ -1207,11 +1239,17 @@ namespace Triolet {
         if (displacement % array1Bounds.stride != 0)
           trioletError("Array index out of bounds\n");
 
-        TriBarePtr array1_contents =
+        TriBoxPtr array1_contents =
           triolet_Array1_get_contents(getBareData(),
                                    T_Bare::getSize(), T_Bare::getAlignment());
+
+        /* Compute address of array element */
+        offset element_offset = TRIOLET_OBJECT_HEADER_SIZE;
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
-        return T_Bare(array1_contents + i * element_size);
+        element_offset = addPadding<T_Bare>(element_offset);
+        element_offset += i * element_size;
+        return T_Bare(array1_contents,
+                      (TriBarePtr)((char *)array1_contents + element_offset));
       }
 
   };
@@ -1267,15 +1305,22 @@ namespace Triolet {
         incompleteArray1.create(bounds.min, bounds.min + bounds.size);
 
         /* Copy array contents, which is an array of pointers */
-        TriBarePtr dst_array =
+        TriBoxPtr dst_array =
           triolet_Array1_get_contents(incompleteArray1.getObject(),
                                    sizeof(TriBoxPtr),
                                    __alignof__(TriBoxPtr));
-        TriBarePtr src_array =
+        TriBoxPtr src_array =
           triolet_Array1_get_contents(array1.getBareData(),
                                    sizeof(TriBoxPtr),
                                    __alignof__(TriBoxPtr));
-        memcpy(dst_array, src_array, bounds.size * sizeof(TriBoxPtr));
+
+        /* Copy array of pointers */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+
+        memcpy((char *)dst_array + contents_offset,
+               (char *)src_array + contents_offset,
+               bounds.size * sizeof(TriBoxPtr));
       }
       
       static bool 
@@ -1292,11 +1337,17 @@ namespace Triolet {
         if (displacement % array1Bounds.stride != 0)
           trioletError("Array index out of bounds\n");
 
-        TriBoxPtr *array1_contents =
-          (TriBoxPtr *)triolet_Array1_get_contents(getBareData(),
-                                                 sizeof(TriBoxPtr),
-                                                 __alignof__(TriBoxPtr));
-        return T_Box(array1_contents[i]);
+        TriBoxPtr array1_contents =
+          triolet_Array1_get_contents(getBareData(),
+                                      sizeof(TriBoxPtr),
+                                      __alignof__(TriBoxPtr));
+
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)array1_contents + TRIOLET_OBJECT_HEADER_SIZE);
+        return T_Box(array[i]);
       }
 
   };
@@ -1385,11 +1436,17 @@ namespace Triolet {
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        TriBarePtr array2_contents = triolet_Array2_get_contents(getBareData(),
-                                                               T_Bare::getSize(),
-                                                               T_Bare::getAlignment());
+        TriBoxPtr array2_contents = triolet_Array2_get_contents(getBareData(),
+                                                                T_Bare::getSize(),
+                                                                T_Bare::getAlignment());
+
+        /* Compute address of array element */
+        offset element_offset = TRIOLET_OBJECT_HEADER_SIZE;
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
-        return T_Bare(array2_contents + index * element_size);
+        element_offset = addPadding<T_Bare>(element_offset);
+        element_offset += index * element_size;
+        return T_Bare(array2_contents,
+                      (TriBarePtr)((char *)array2_contents + element_offset));
       }
 
   };
@@ -1448,15 +1505,21 @@ namespace Triolet {
                                 bounds.xmin, bounds.xmin + bounds.xsize);
 
         /* Copy array contents.  It's an array of pointers. */
-        TriBarePtr dst_array =
+        TriBoxPtr dst_array =
           triolet_Array2_get_contents(incompleteArray2.getObject(),
                                    sizeof(TriBoxPtr),
                                    __alignof__(TriBoxPtr));
-        TriBarePtr src_array =
+        TriBoxPtr src_array =
           triolet_Array2_get_contents(array2.getBareData(),
                                    sizeof(TriBoxPtr),
                                    __alignof__(TriBoxPtr));
-        memcpy(dst_array, src_array,
+
+        /* Copy array of pointers */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+
+        memcpy((char *)dst_array + contents_offset,
+               (char *)src_array + contents_offset,
                bounds.ysize * bounds.xsize * sizeof(TriBoxPtr));
       }
       
@@ -1482,11 +1545,18 @@ namespace Triolet {
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        TriBoxPtr *array2_contents =
-          (TriBoxPtr *)triolet_Array2_get_contents(getBareData(),
-                                                 sizeof(TriBoxPtr),
-                                                 __alignof__(TriBoxPtr));
-        return T_Box(array2_contents[index]);
+        TriBoxPtr array2_contents =
+          triolet_Array2_get_contents(getBareData(),
+                                      sizeof(TriBoxPtr),
+                                      __alignof__(TriBoxPtr));
+
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)array2_contents + TRIOLET_OBJECT_HEADER_SIZE);
+        
+        return T_Box(array[index]);
       }
   };
 
@@ -1590,12 +1660,19 @@ namespace Triolet {
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        TriBarePtr array3_contents =
+        TriBoxPtr array3_contents =
           triolet_Array3_get_contents(getBareData(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
+
+        /* Compute address of array element */
+        offset element_offset = TRIOLET_OBJECT_HEADER_SIZE;
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
-        return T_Bare(array3_contents + index * element_size);
+        element_offset = addPadding<T_Bare>(element_offset);
+        element_offset += index * element_size;
+
+        return T_Bare(array3_contents,
+                      (TriBarePtr)((char *)array3_contents + element_offset));
       }
 
   };
@@ -1660,15 +1737,21 @@ namespace Triolet {
                                 bounds.xmin, bounds.xmin + bounds.xsize);
 
         /* Copy array contents.  It's an array of pointers. */
-        TriBarePtr dst_array =
+        TriBoxPtr dst_array =
           triolet_Array3_get_contents(incompleteArray3.getObject(),
                                    sizeof(TriBoxPtr),
                                    __alignof__(TriBoxPtr));
-        TriBarePtr src_array =
+        TriBoxPtr src_array =
           triolet_Array3_get_contents(array3.getBareData(),
                                    sizeof(TriBoxPtr),
                                    __alignof__(TriBoxPtr));
-        memcpy(dst_array, src_array,
+
+        /* Copy array of pointers */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+
+        memcpy((char *)dst_array + contents_offset,
+               (char *)src_array + contents_offset,
                bounds.zsize * bounds.ysize * bounds.xsize * sizeof(TriBoxPtr));
       }
 
@@ -1700,11 +1783,18 @@ namespace Triolet {
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        TriBoxPtr *array3_contents =
-          (TriBoxPtr *)triolet_Array3_get_contents(getBareData(),
-                                                 sizeof(TriBoxPtr),
-                                                 __alignof__(TriBoxPtr));
-        return T_Box(array3_contents[index]);
+        TriBoxPtr array3_contents =
+          triolet_Array3_get_contents(getBareData(),
+                                      sizeof(TriBoxPtr),
+                                      __alignof__(TriBoxPtr));
+
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)array3_contents + TRIOLET_OBJECT_HEADER_SIZE);
+
+        return T_Box(array[index]);
       }
 
   };
@@ -1729,7 +1819,8 @@ namespace Triolet {
 
       // Constructors
       Stored<T>(void) : BareType() {}
-      Stored<T>(TriBarePtr _bare_data) : BareType(_bare_data) {}
+      Stored<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
       static unsigned int 
@@ -1771,7 +1862,8 @@ namespace Triolet {
       };
 
       // Constructors
-      Stored<NoneType>(TriBarePtr _bare_data) : BareType(_bare_data) {}
+      Stored<NoneType>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) {}
 
       // Static Member Functions
       static unsigned int 
@@ -1805,8 +1897,8 @@ namespace Triolet {
     public:
       Incomplete < StuckRef<T> >(void)
         : IncompleteSingleRef< StuckRef<T> >() {}
-      Incomplete < StuckRef<T> >(TriBarePtr _s)
-        : IncompleteSingleRef< StuckRef<T> >(_s) {}
+      Incomplete < StuckRef<T> >(TriBoxPtr _p, TriBarePtr _s)
+        : IncompleteSingleRef< StuckRef<T> >(_p, _s) {}
       void initialize(const typename StuckRef<T>::initializer&init =
                       typename StuckRef<T>::initializer())
       {
@@ -1833,7 +1925,7 @@ namespace Triolet {
   class Incomplete< Stored<T> > : public IncompleteSingleRef< Stored<T> > {
     public:
       Incomplete< Stored<T> >(void) : IncompleteSingleRef< Stored<T> >() {}
-      Incomplete< Stored<T> >(TriBarePtr _s) : IncompleteSingleRef< Stored<T> >(_s) {}
+      Incomplete< Stored<T> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef< Stored<T> >(_p, _s) {}
       void initialize(const typename Stored<T>::initializer &init =
                       typename Stored<T>::initializer())
       {
@@ -1861,7 +1953,7 @@ namespace Triolet {
       : public IncompleteSingleRef< Stored<NoneType> > {
     public:
       Incomplete< Stored<NoneType> >(void) : IncompleteSingleRef< Stored<NoneType> >() {}
-      Incomplete< Stored<NoneType> >(TriBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_s) {}
+      Incomplete< Stored<NoneType> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef< Stored<NoneType> >(_p, _s) {}
       void initialize(const Stored<NoneType>::initializer &init =
                       Stored<NoneType>::initializer())
       {
@@ -1894,7 +1986,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete<T>(void) : IncompleteSingleRef<T>() {}
-      Incomplete<T>(TriBarePtr _s) : IncompleteSingleRef<T>(_s) {}
+      Incomplete<T>(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef<T>(_p, _s) {}
 
       // Member Functions
       void initialize(const typename T::initializer& init =
@@ -1927,7 +2019,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete<T>(void) : IncompleteSingleRef<T>() {}
-      Incomplete<T>(TriBarePtr _s) : IncompleteSingleRef<T>(_s) {}
+      Incomplete<T>(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef<T>(_p, _s) {}
       
       // Member Functions
       void initialize(const typename T::initializer& init =
@@ -1958,7 +2050,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete<T>(void) : IncompleteSingleRef<T>() {}
-      Incomplete<T>(TriBarePtr _s) : IncompleteSingleRef<T>(_s) {}
+      Incomplete<T>(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef<T>(_p, _s) {}
       
       // Member Functions
       void initialize(const typename T::initializer& init =
@@ -1989,8 +2081,8 @@ namespace Triolet {
       // Constructors
       Incomplete< List<T> >(void)
         : IncompleteSingleRef< List<T> >() {}
-      Incomplete< List<T> >(TriBarePtr _s)
-        : IncompleteSingleRef< List<T> >(_s) {}
+      Incomplete< List<T> >(TriBoxPtr _p, TriBarePtr _s)
+        : IncompleteSingleRef< List<T> >(_p, _s) {}
 
       // Member Functions
       void initialize(const typename List<T>::initializer& init =
@@ -2013,10 +2105,17 @@ namespace Triolet {
 
       Incomplete< T_Bare > 
       at(int index) { 
-        TriBarePtr list_contents = triolet_List_get_contents(this->getObject(),
-                                                           T_Bare::getSize(),
-                                                           T_Bare::getAlignment());
-        return Incomplete<T_Bare>(list_contents + index*addPadding<T_Bare>(T_Bare::getSize()) ); 
+        TriBoxPtr list_contents =
+          triolet_List_get_contents(this->getObject(),
+                                    T_Bare::getSize(),
+                                    T_Bare::getAlignment());
+
+        /* Compute address of list element */
+        offset element_offset = TRIOLET_OBJECT_HEADER_SIZE;
+        element_offset = addPadding<T_Bare>(element_offset);
+        element_offset += index*addPadding<T_Bare>(T_Bare::getSize());
+        return Incomplete<T_Bare>(list_contents,
+                                  (TriBarePtr)((char *)list_contents + element_offset));
       }
 
   };
@@ -2031,8 +2130,8 @@ namespace Triolet {
       // Constructors
       Incomplete<BList<T> >(void)
         : IncompleteSingleRef<BList<T> >() {}
-      Incomplete<BList<T> >(TriBarePtr _s)
-        : IncompleteSingleRef<BList<T> >(_s) {}
+      Incomplete<BList<T> >(TriBoxPtr _p, TriBarePtr _s)
+        : IncompleteSingleRef<BList<T> >(_p, _s) {}
 
       // Member Functions
       void initialize(const typename BList<T>::initializer& init =
@@ -2053,11 +2152,18 @@ namespace Triolet {
 
       Incomplete<StuckRef<T_Box> > 
       at(int index) {
-        TriBoxPtr *list_contents =
-          (TriBoxPtr *)triolet_List_get_contents(this->getObject(),
-                                               sizeof(TriBoxPtr),
-                                               __alignof__(TriBoxPtr));
-        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&list_contents[index]);
+        TriBoxPtr list_contents =
+          triolet_List_get_contents(this->getObject(),
+                                    sizeof(TriBoxPtr),
+                                    __alignof__(TriBoxPtr));
+
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)list_contents + TRIOLET_OBJECT_HEADER_SIZE);
+        return Incomplete<StuckRef<T_Box> >(list_contents,
+                                            (TriBarePtr)&array[index]);
       }
     };
 
@@ -2070,7 +2176,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete< Array1<T> >(void) : IncompleteSingleRef< Array1<T> >() { }
-      Incomplete< Array1<T> >(TriBarePtr _s) : IncompleteSingleRef< Array1<T> >(_s) { }
+      Incomplete< Array1<T> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef< Array1<T> >(_p, _s) { }
       
       // Member Functions
       void initialize(const typename Array1<T>::initializer &init =
@@ -2095,11 +2201,20 @@ namespace Triolet {
       Incomplete< T_Bare > 
       at(int index) { 
         int32_t min = triolet_Array1_get_bounds(this->getObject()).min;
-        TriBarePtr array1_contents =
+        int i = index - min;
+        TriBoxPtr array1_contents =
           triolet_Array1_get_contents(this->getObject(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
-        return Incomplete<T_Bare>(array1_contents + (index - min)*addPadding<T_Bare>(T_Bare::getSize()) ); 
+
+        /* Compute address of array element */
+        offset element_offset = TRIOLET_OBJECT_HEADER_SIZE;
+        int element_size = addPadding<T_Bare>(T_Bare::getSize());
+        element_offset = addPadding<T_Bare>(element_offset);
+        element_offset += i * element_size;
+
+        return Incomplete<T_Bare>(array1_contents,
+                                  (TriBarePtr)((char *)array1_contents + element_offset));
       }
 
   };
@@ -2111,7 +2226,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete< BArray1<T> >(void) : IncompleteSingleRef< BArray1<T> >() { }
-      Incomplete< BArray1<T> >(TriBarePtr _s) : IncompleteSingleRef< BArray1<T> >(_s) { }
+      Incomplete< BArray1<T> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef< BArray1<T> >(_p, _s) { }
       
       // Member Functions
       void initialize(const typename BArray1<T>::initializer &init =
@@ -2135,12 +2250,19 @@ namespace Triolet {
       Incomplete<StuckRef<T_Box> > 
       at(int index) {
         int32_t min = triolet_Array1_get_bounds(this->getObject()).min;
-        TriBoxPtr *array1_contents =
-          (TriBoxPtr *)triolet_Array1_get_contents(this->getObject(),
-                                                 sizeof(TriBoxPtr),
-                                                 __alignof(TriBoxPtr));
+        int i = index - min;
+        TriBoxPtr array1_contents =
+          triolet_Array1_get_contents(this->getObject(),
+                                      sizeof(TriBoxPtr),
+                                      __alignof(TriBoxPtr));
         
-        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&array1_contents[index - min]);
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)array1_contents + TRIOLET_OBJECT_HEADER_SIZE);
+        return Incomplete<StuckRef<T_Box> >(array1_contents,
+                                            (TriBarePtr)&array[i]);
       }
 
   };
@@ -2154,7 +2276,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete< Array2<T> >(void) : IncompleteSingleRef< Array2<T> >() { }
-      Incomplete< Array2<T> >(TriBarePtr _s) : IncompleteSingleRef< Array2<T> >(_s) { }
+      Incomplete< Array2<T> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef< Array2<T> >(_p, _s) { }
       
       // Member Functions
       void initialize(const typename Array2<T>::initializer &init =
@@ -2196,12 +2318,19 @@ namespace Triolet {
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        TriBarePtr array2_contents =
+        TriBoxPtr array2_contents =
           triolet_Array2_get_contents(this->getObject(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
+
+        /* Compute address of array element */
+        offset element_offset = TRIOLET_OBJECT_HEADER_SIZE;
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
-        return Incomplete<T_Bare>(array2_contents + index * element_size ); 
+        element_offset = addPadding<T_Bare>(element_offset);
+        element_offset += index * element_size;
+
+        return Incomplete<T_Bare>(array2_contents,
+                                  (TriBarePtr)((char *)array2_contents + element_offset));
       }
 
   };
@@ -2214,7 +2343,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete<BArray2<T> >(void) : IncompleteSingleRef<BArray2<T> >() { }
-      Incomplete<BArray2<T> >(TriBarePtr _s) : IncompleteSingleRef<BArray2<T> >(_s) { }
+      Incomplete<BArray2<T> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef<BArray2<T> >(_p, _s) { }
 
       // Member Functions
       void initialize(const typename BArray2<T>::initializer &init =
@@ -2256,11 +2385,19 @@ namespace Triolet {
 
         int32_t row_n_members = array2Bounds.xsize;
         int index = yi * row_n_members + xi;
-        TriBoxPtr *array2_contents =
-          (TriBoxPtr *)triolet_Array2_get_contents(this->getObject(),
-                                                 sizeof(TriBoxPtr),
-                                                 __alignof__(TriBoxPtr));
-        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&array2_contents[index]); 
+        TriBoxPtr array2_contents =
+          triolet_Array2_get_contents(this->getObject(),
+                                      sizeof(TriBoxPtr),
+                                      __alignof__(TriBoxPtr));
+
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)array2_contents + TRIOLET_OBJECT_HEADER_SIZE);
+
+        return Incomplete<StuckRef<T_Box> >(array2_contents,
+                                            (TriBarePtr)&array[index]); 
       }
   };
 
@@ -2273,7 +2410,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete< Array3<T> >(void) : IncompleteSingleRef< Array3<T> >() { }
-      Incomplete< Array3<T> >(TriBarePtr _s) : IncompleteSingleRef< Array3<T> >(_s) { }
+      Incomplete< Array3<T> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef< Array3<T> >(_p, _s) { }
       
       // Member Functions
       void initialize(const typename Array3<T>::initializer &init =
@@ -2330,12 +2467,19 @@ namespace Triolet {
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        TriBarePtr contents =
+        TriBoxPtr contents =
           triolet_Array3_get_contents(this->getObject(),
                                    T_Bare::getSize(),
                                    T_Bare::getAlignment());
+
+        /* Compute address of array element */
+        offset element_offset = TRIOLET_OBJECT_HEADER_SIZE;
         int element_size = addPadding<T_Bare>(T_Bare::getSize());
-        return Incomplete<T_Bare>(contents + index * element_size);
+        element_offset = addPadding<T_Bare>(element_offset);
+        element_offset += index * element_size;
+
+        return Incomplete<T_Bare>(contents,
+                                  (TriBarePtr)((char *)contents + element_offset));
       }
 
   };
@@ -2348,7 +2492,7 @@ namespace Triolet {
     public:
       // Constructors
       Incomplete<BArray3<T> >(void) : IncompleteSingleRef<BArray3<T> >() { }
-      Incomplete<BArray3<T> >(TriBarePtr _s) : IncompleteSingleRef<BArray3<T> >(_s) { }
+      Incomplete<BArray3<T> >(TriBoxPtr _p, TriBarePtr _s) : IncompleteSingleRef<BArray3<T> >(_p, _s) { }
 
       // Member Functions
       void initialize(const typename BArray3<T>::initializer &init =
@@ -2405,11 +2549,19 @@ namespace Triolet {
         int32_t row_n_members = array3Bounds.xsize;
         int32_t plane_n_members = row_n_members * array3Bounds.ysize;
         int index = zi * plane_n_members + yi * row_n_members + xi;
-        TriBoxPtr *contents =
-          (TriBoxPtr *)triolet_Array3_get_contents(this->getObject(),
-                                                 sizeof(TriBoxPtr),
-                                                 __alignof__(TriBoxPtr));
-        return Incomplete<StuckRef<T_Box> >((TriBarePtr)&contents[index]);
+        TriBoxPtr contents =
+          triolet_Array3_get_contents(this->getObject(),
+                                      sizeof(TriBoxPtr),
+                                      __alignof__(TriBoxPtr));
+
+        /* Go past header to get address of the actual array */
+        offset contents_offset =
+          addPadding(TRIOLET_OBJECT_HEADER_SIZE, sizeof(TriBoxPtr));
+        TriBoxPtr *array =
+          (TriBoxPtr *)((char *)contents + TRIOLET_OBJECT_HEADER_SIZE);
+
+        return Incomplete<StuckRef<T_Box> >(contents,
+                                            (TriBarePtr)&array[index]);
       }
   };
 
@@ -2438,9 +2590,10 @@ namespace Triolet {
          * Compute size of object header plus padding. */
         unsigned int contents_offset =
           addPadding<T_Bare>(TRIOLET_OBJECT_HEADER_SIZE);
+        TriBoxPtr contents = this->getObject();
         TriBarePtr contents_ptr =
-          (TriBarePtr)((char *)this->getObject() + contents_offset);
-        return Incomplete<T_Bare>(contents_ptr);
+          (TriBarePtr)((char *)contents + contents_offset);
+        return Incomplete<T_Bare>(contents, contents_ptr);
       }
   };
 
@@ -2611,6 +2764,7 @@ namespace Triolet {
     /* T::initializer exists and is POD */
     typename T::initializer init = *(typename T::initializer *)NULL;
 
+    TriBoxPtr parent = x.getParent();
     TriBarePtr p = x.getBareData();
 
     /* Incomplete<T> methods */
@@ -2618,7 +2772,7 @@ namespace Triolet {
     incomplete_t.allocate();
     incomplete_t.initialize(init);
     incomplete_t.create(init);
-    Incomplete<T> incomplete2(p);
+    Incomplete<T> incomplete2(parent, p);
 
     /* Methods getSize, getAlignment, isPOD, copy */
     unsigned int x1 = T::getSize();

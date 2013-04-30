@@ -182,7 +182,9 @@ mkListE pos elt_type elt_repr elts =
       array = ArrayTE (tiInfo pos array_repr) elt_type elts
       array_box = mkConE pos TIBoxed
                   (SF.coreBuiltin SF.The_stuckBox)
-                  [array_type] [] [array_size] Nothing [array]
+                  [array_type] [] [array_size]
+                  (Just $ SF.coreBuiltin SF.The_frontend_repr_stuckBox)
+                  [array]
 
       -- List object
       list_repr = TICoreRepr (SF.coreBuiltin SF.The_frontend_repr_list) [elt_type] []

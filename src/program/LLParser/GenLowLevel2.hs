@@ -21,6 +21,7 @@ import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.CodeTypes hiding(Field)
+import LowLevel.InterfaceFile
 import LowLevel.Print
 import qualified LowLevel.Syntax as LL
 import Globals
@@ -832,15 +833,23 @@ genFunctionDef :: TypeEnv -> FunctionDef Typed -> FreshVarM LL.FunDef
 genFunctionDef tenv fdef = do
   let params = map parameterVar $ functionParams fdef
       returns = map convertToValueType $ functionReturns fdef
+      conv = if functionIsProcedure fdef then PrimCall else ClosureCall
   -- Generate function body
   (body, locals_size) <- execBuild' returns $ do 
     locals_size <- genLocals $ functionLocals fdef
     body <- genStmt tenv $ functionBody fdef
     return (body, locals_size)
   
-  let conv = if functionIsProcedure fdef then PrimCall else ClosureCall
-      function =
-        LL.mkFun conv (functionInlineRequest fdef) locals_size params returns body
+  -- Create entry points, if it's a closure function
+  let ftype = mkFunctionType conv (map LL.varType params) returns
+  entry_points <-
+    case conv
+    of PrimCall -> return Nothing
+       ClosureCall -> liftM Just $ mkEntryPoints False ftype (functionName fdef)
+  
+  -- Create the function
+  let function =
+        LL.mkFun conv (functionInlineRequest fdef) locals_size entry_points params returns body
   return (LL.Def (functionName fdef) function)
 
 genDataDef :: DataDef Typed -> FreshVarM LL.DataDef
@@ -863,14 +872,16 @@ generateLowLevelModule :: ModuleName
                        -> IO LL.Module
 generateLowLevelModule module_name externs defs = do
   supply <- newLocalIDSupply
-  withTheLLVarIdentSupply $ \var_ids -> runFreshVarM var_ids $ do
+  ll_module <- withTheLLVarIdentSupply $ \var_ids -> runFreshVarM var_ids $ do
     global_defs <- genDefs defs
     
     -- Identify the actual imports and exports of this module
     let defined_here = Set.fromList $ map LL.globalDefiniendum global_defs
         (exports, imports) = find_exports defined_here
-    
     return $ LL.Module module_name supply externs [LL.Rec global_defs] exports
+
+  -- Remove redundant imports from the newly created module
+  removeSelfImports ll_module
   where
     -- If a variable is external and defined here, it's exported
     find_exports defined_here = partitionEithers $ map pick_export externs

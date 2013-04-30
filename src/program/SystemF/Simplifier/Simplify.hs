@@ -1588,11 +1588,25 @@ rwCon inf con sps ty_ob args = do
     clearCurrentReturnParameter $ rwMaybeExp False ty_ob
   (args', arg_values) <- clearCurrentReturnParameter $ rwExps False args
 
+  -- Simplify the constructor's type arguments
+  con' <- liftTypeEvalM $ simplifyCon con
+
   -- Interpret the constructor's value
   new_val <- interpretComputation' $
-             interpretCon con ty_ob_value sps_values arg_values
-  let new_exp = ExpM $ ConE inf con sps' ty_ob' args'
+             interpretCon con' ty_ob_value sps_values arg_values
+  let new_exp = ExpM $ ConE inf con' sps' ty_ob' args'
   return (new_exp, new_val)
+
+-- | Simplify type arguments of a constructor.
+--   This can slightly reduce the intermediate code size.
+simplifyCon (VarCon op ty_args ex_types) = do
+  ty_args' <- mapM reduceToWhnf ty_args
+  ex_types' <- mapM reduceToWhnf ex_types
+  return $ VarCon op ty_args' ex_types'
+
+simplifyCon (TupleCon ty_args) = do
+  ty_args' <- mapM reduceToWhnf ty_args
+  return $ TupleCon ty_args'
 
 rwApp :: Bool -> BaseExp SM -> ExpInfo -> ExpSM -> [Type] -> [ExpSM]
       -> LR (ExpM, AbsCode)

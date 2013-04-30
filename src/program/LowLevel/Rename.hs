@@ -19,6 +19,7 @@ module LowLevel.Rename
         renameVal,
         renameStm,
         renameFun,
+        renameEntryPoints,
         renameStaticData,
         renameImport,
         renameInFunDef,
@@ -279,11 +280,20 @@ rnStm rn statement =
       stm' <- rnStm rn stm
       return (tag, stm')
 
+rnEntryPoints :: Renaming -> EntryPoints -> EntryPoints
+rnEntryPoints rn (EntryPoints ty arity dir vec exa ine inf glo) =
+  EntryPoints ty arity
+  (rnVar rn dir) (fmap (rnVar rn) vec) (rnVar rn exa)
+  (rnVar rn ine) (rnVar rn inf) (rnVar rn glo)
+
 rnFun :: Rn -> Fun -> FreshVarM Fun
 rnFun rn f = do
+  let entry_points = fmap (rnEntryPoints (rnRenaming rn)) $ funEntryPoints f
   (renaming, params) <- renameParameters rn $ funParams f
   body <- rnStm (setRenaming renaming rn) $ funBody f
-  return $ f {funParams = params, funBody = body}
+  return $ f { funEntryPoints = entry_points
+             , funParams = params
+             , funBody = body}
 
 -- | Rename the contents of a data definition.
 rnStaticData :: Rn -> StaticData -> FreshVarM StaticData
@@ -297,10 +307,7 @@ rnImport :: Rn -> Import -> FreshVarM Import
 rnImport rn impent =
   case impent
   of ImportClosureFun ep mf -> do
-       let ep' = let v = globalClosure ep
-                 in case IntMap.lookup (fromIdent $ varID v) $ rnRenaming rn
-                    of Nothing -> ep
-                       Just v' -> setGlobalClosure v' ep
+       let ep' = rnEntryPoints (rnRenaming rn) ep
        mf' <- mapM (rnFun rn) mf
        return $ ImportClosureFun ep' mf'
      ImportPrimFun v ft mf -> do
@@ -381,6 +388,9 @@ renameStm policy rn stm = rnStm (policy, rn) stm
 -- | Rename variables in a function
 renameFun :: RnPolicy -> Renaming -> Fun -> FreshVarM Fun
 renameFun policy rn fun = rnFun (policy, rn) fun
+
+renameEntryPoints :: RnPolicy -> Renaming -> EntryPoints -> EntryPoints
+renameEntryPoints policy rn ep = rnEntryPoints rn ep
 
 -- | Rename variables in a static data value
 renameStaticData :: RnPolicy -> Renaming -> StaticData -> FreshVarM StaticData

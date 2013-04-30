@@ -163,7 +163,7 @@ ccHoistedFun (def, ccinfo) = do
       -- Add the captured variables as extra parameters
       let new_params = ccCaptured ccinfo ++ funParams fun
           new_fun = mkFun PrimCall (funInlineRequest fun) (funFrameSize fun)
-                    new_params (funReturnTypes fun) body
+                    Nothing new_params (funReturnTypes fun) body
 
       -- Emit the function
       writeFun (Def (directEntry $ ccEntryPoints ccinfo) new_fun)
@@ -197,8 +197,8 @@ ccGlobalFun (def, ccinfo)
       let fun = definiens def
       body <- ccFunBody fun
       let new_fun = mkFun PrimCall (funInlineRequest fun) 
-                    (funFrameSize fun) (funParams fun) (funReturnTypes fun)
-                    body
+                    (funFrameSize fun) Nothing 
+                    (funParams fun) (funReturnTypes fun) body
       writeFun (Def (directEntry $ ccEntryPoints ccinfo) new_fun)
 
   | ccIsGlobalPrim ccinfo = do
@@ -352,6 +352,17 @@ convertDataDef (Def v (StaticData val)) =
 
 convertDataDefs = map convertDataDef
 
+-- | Replace an imported symbol with its closure-converted equivalent.
+--
+--   Imported functions are expanded into multiple imported symbols.
+--   Imported function definitions are removed.
+convertImport :: Import -> [Import]
+convertImport (ImportClosureFun entry_points _) =
+  importedClosureEntryPoints entry_points
+
+convertImport x@(ImportPrimFun {}) = [x]
+convertImport x@(ImportData {}) = [x]
+
 -- | Perform closure conversion.
 --
 --   FIXME: We must globally rename functions to avoid name collisions!
@@ -364,9 +375,13 @@ closureConvert mod =
         global_vars = []
     defs' <- closureConvertTopLevel var_ids [] imports globals
 
+    -- Expand imported functions into multiple imported entities
+    let imports' = concatMap convertImport imports
+
     -- Rename variables so that variable names are unique
     -- within a top-level function
-    let mod' = mod {moduleGlobals = defs'}
+    let mod' = mod {moduleImports = imports', moduleGlobals = defs'}
+
     runFreshVarM var_ids $ renameModule RenameParameters emptyRenaming mod'
   where
     rename_global_fun (GlobalFunDef fdef) =

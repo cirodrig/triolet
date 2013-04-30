@@ -2351,6 +2351,10 @@ repr_Coercion : forall a : val. Repr (Stored a);
 
 -- Wrapper functions to create Repr objects for the frontend
 
+frontend_repr_stuckBox @(a : box) (rep : Repr (AsBare a))
+  -> TypeObject (StuckBox (AsBare a)) attribute(inline) =
+  boxedinfo stuckBox @(AsBare a) rep;
+
 frontend_repr_Maybe @(a : box) (rep : Repr (AsBare a))
   -> Repr (Maybe (AsBare a)) attribute(inline) =
   unboxedinfo Maybe @(AsBare a) rep;

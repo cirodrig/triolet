@@ -175,22 +175,7 @@ module_list = ModuleName "core.internal.list"
 -- | Predefined closure functions and the core constructor they're derived
 -- from.
 builtinFunctions =
-  [ -- Functions that do not exist in Core
-    -- memory_py.pyasm
-    (CoreName module_memory_py "deallocF",
-     Left $ closureFunctionType [PrimType PointerType] [])
-  , (CName module_memory_py "copy1F",
-     Left $
-     closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
-  , (CName module_memory_py "copy2F",
-     Left $
-     closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
-  , (CName module_memory_py "copy4F",
-     Left $
-     closureFunctionType [PrimType PointerType, PrimType PointerType] [PrimType UnitType])
-
-    -- Functions translated from Core
-  , (CoreName module_memory_py "blockcopy",
+  [ (CoreName module_memory_py "blockcopy",
      Right [| coreBuiltin SystemF.The_blockcopy |])
   , (CoreName module_prim "convertToBoxed",
      Right [| coreBuiltin (SystemF.The_asbox) |])

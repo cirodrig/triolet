@@ -257,6 +257,7 @@ builtinVariableNames =
   , "repr_EffTok"
   , "repr_SliceObject"
   , "repr_intset"
+  , "frontend_repr_stuckBox"
   , "frontend_repr_Maybe"
   , "frontend_repr_list"
   , "frontend_repr_array1"

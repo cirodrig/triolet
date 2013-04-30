@@ -285,6 +285,11 @@ data MFContext =
   , mfIdentSupply :: {-# UNPACK #-}!(IdentSupply Var)
   }
 
+runFreshVarInMFContext :: FreshVarM a -> RWST MFContext [FunDef] () IO a
+runFreshVarInMFContext m = do
+  var_supply <- asks mfIdentSupply
+  lift $ runFreshVarM var_supply m
+
 -- | Get the CPS-transformed function's return type.
 --   If the function has a continuation, it's the continuation's return type. 
 --   Otherwise, it's the function's original return type.
@@ -336,7 +341,7 @@ extractFunctionsDef is_global def@(Def v f) = do
   local new_ctx $ do
     body' <- with_hoisted is_hoisted $ extractFunctionsStm (funBody f)
     let f' = mkFun (funConvention f) (funInlineRequest f) (funFrameSize f)
-             (funParams f) new_rtype body'
+             (funEntryPoints f) (funParams f) new_rtype body'
     return $ Def v f'
   where
     with_hoisted True (RWST m) =
@@ -355,7 +360,9 @@ extractFunctionsStm stm =
          Just destination_group -> do
            -- Create continuation function
            rtype <- asks mfRType
-           let fun = mkFun ClosureCall False 0 params rtype body
+           let ftype = closureFunctionType (map varType params) rtype
+           ep <- runFreshVarInMFContext $ mkEntryPoints False ftype label
+           let fun = mkFun ClosureCall False 0 (Just ep) params rtype body
            cont_def <- extractFunctionsDef False (Def label fun)
            tell [cont_def]
 

@@ -1,7 +1,8 @@
 
 {-# LANGUAGE FlexibleInstances, Rank2Types #-}
 module LowLevel.Closure.Code
-       (CC, GenM,
+       (importedClosureEntryPoints,
+        CC, GenM,
         runCC,
         writeFun,
         writeData,
@@ -26,6 +27,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Supply
@@ -40,6 +42,8 @@ import LowLevel.FreshVar
 import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Closure.CCInfo
+
+debugPrintCalls = False
 
 -- | The monad used when closure-converting a top-level definition group.
 --
@@ -470,17 +474,20 @@ genClosureCall return_types fun args = do
            let call_captured = ccCallCaptured cc
            indirect_call (map VarV call_captured)
          EQ -> do               -- Saturated
+           debug_logging (text "direct call")
            genDirectCall cc args
          GT -> do               -- Oversaturated
            -- Generate a direct call with the correct number of arguments.
            -- Then, call the return value with remaining arguments.
+           debug_logging (text "oversaturated direct call")
            let (direct_args, indir_args) = splitAt (ccArity cc) args
            app <- emitAtom1 (PrimType OwnedType) =<<
                   genDirectCall cc direct_args
 
            genIndirectCall return_types app indir_args
 
-    indirect_call call_captured =
+    indirect_call call_captured = do
+      debug_logging (text "indirect call" <+> sep (map pprVal call_captured))
       genIndirectCall return_types (VarV fun) (call_captured ++ args)
 
     check_args cc k
@@ -489,12 +496,21 @@ genClosureCall return_types fun args = do
           internalError "genClosureCall: Procedure call has wrong number of arguments"
       | otherwise = k
 
-    prim_call entry_point cc =
+    prim_call entry_point cc = do
+      debug_logging (text "primitive call")
       return $ primCallA (VarV entry_point) args
 
-    join_call entry_point cc =
+    join_call entry_point cc = do
       let call_captured = map VarV (ccCallCaptured cc)
-      in return $ joinCallA (VarV entry_point) (call_captured ++ args)
+      debug_logging (text "join call" <+> sep (map pprVal call_captured))
+      return $ joinCallA (VarV entry_point) (call_captured ++ args)
+
+    debug_logging info =
+      if debugPrintCalls
+      then liftIO $ print $
+           text "Generating call" <+> pprAtom (closureCallA (VarV fun) args) $$ info
+      else return ()
+
 
 -- | Generate a call to a global procedure.
 genPrimCall :: Var               -- ^ Function that is called
@@ -673,7 +689,7 @@ genApply1 f x = do
               PrimType CursorType           -> llBuiltin the_prim_apply_c_f
               t -> internalError $ "genApply1: No method for " ++ show (pprValueType t)
 
-  emitAtom1 (PrimType OwnedType) $ primCallA (VarV op) [promoted_x]
+  emitAtom1 (PrimType OwnedType) $ primCallA (VarV op) [f, promoted_x]
 
 genApplyLast f x ret_ptr = do
   -- Promote the argument
@@ -689,7 +705,7 @@ genApplyLast f x ret_ptr = do
               PrimType CursorType           -> llBuiltin the_prim_apply_c
               t -> internalError $ "genApplyLast: No method for " ++ show (pprValueType t)
 
-  emitAtom0 $ primCallA (VarV op) [promoted_x, ret_ptr]
+  emitAtom0 $ primCallA (VarV op) [f, promoted_x, ret_ptr]
 
 {-
 genApply fun args ret_ptr =

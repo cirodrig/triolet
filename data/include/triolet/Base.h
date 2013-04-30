@@ -60,11 +60,16 @@ namespace Triolet {
     typedef BareKindTag kind;
 
   private:
-    TriBarePtr bare_data; // The triolet object
+    TriBoxPtr parent;           // The boxed object containing the
+                                // Triolet object.  'bare_data' points
+                                // to the interior of 'parent'.
+    TriBarePtr bare_data;       // The triolet object
 
   public:
-  BareType() : bare_data(NULL) {}
-    BareType(TriBarePtr _bare_data) : bare_data(_bare_data) {}
+    BareType() : parent(NULL), bare_data(NULL) {}
+    BareType(TriBoxPtr _parent, TriBarePtr _bare_data)
+      : parent(_parent), bare_data(_bare_data) {}
+    TriBoxPtr getParent(void) const {return parent;}
     TriBarePtr getBareData(void) const {return bare_data;}
 
 #if BEGIN_SIGNATURE

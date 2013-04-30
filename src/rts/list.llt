@@ -165,10 +165,8 @@ procedure triolet_List_initialize
   ();
 };
 
-procedure triolet_List_get_contents (pointer lst, uint size, uint align) -> pointer {
-  // Use the alignment of list contents to figure out where the array begins
-  typedef contents_dummy_type = Boxed(bytes(value size, value align));
-  ((lst @! List.contents) @ contents_dummy_type.member) as pointer;
+procedure triolet_List_get_contents (pointer lst, uint size, uint align) -> owned {
+  lst @! List.contents;
 };
 
 procedure triolet_List_get_length (pointer lst) -> uint {
@@ -177,16 +175,16 @@ procedure triolet_List_get_length (pointer lst) -> uint {
 };
 
 procedure triolet_Array0_size (uint size, uint align) -> uint {
-  sizeof Array0(bytes(value size, value align));
+  sizeof Array0;
 };
 
 procedure triolet_Array0_alignment (uint size, uint align) -> uint {
-  alignof Array0(bytes(value size, value align));
+  alignof Array0;
 };
 
 procedure triolet_Array0_get_contents
-  (pointer arr, uint size, uint align) -> pointer {
-  arr @ Array0(bytes(value size, value align)).content;
+  (pointer arr, uint size, uint align) -> owned {
+  arr @! Array0.content;
 };
 
 data pointer triolet_Array1_size = sizeof Array1;
@@ -206,9 +204,8 @@ procedure triolet_Array1_initialize
   ();
 };
 
-procedure triolet_Array1_get_contents (pointer arr, uint size, uint align) -> pointer {
-  typedef contents_dummy_type = Boxed(bytes(value size, value align));
-  ((arr @! Array1.contents) @ contents_dummy_type.member) as pointer;
+procedure triolet_Array1_get_contents (pointer arr, uint size, uint align) -> owned {
+  arr @! Array1.contents;
 };
 
 procedure triolet_Array1_get_bounds (pointer arr) -> Tuple3(int, int, int)
@@ -241,9 +238,8 @@ procedure triolet_Array2_initialize
   ();
 };
 
-procedure triolet_Array2_get_contents (pointer arr, uint size, uint align) -> pointer {
-  typedef contents_dummy_type = Boxed(bytes(value size, value align));
-  ((arr @! Array2.contents) @ contents_dummy_type.member) as pointer;
+procedure triolet_Array2_get_contents (pointer arr, uint size, uint align) -> owned {
+  arr @! Array2.contents;
 };
 
 procedure triolet_Array2_get_bounds (pointer arr)
@@ -285,9 +281,8 @@ procedure triolet_Array3_initialize
   ();
 };
 
-procedure triolet_Array3_get_contents (pointer arr, uint size, uint align) -> pointer {
-  typedef contents_dummy_type = Boxed(bytes(value size, value align));
-  ((arr @! Array3.contents) @ contents_dummy_type.member) as pointer;
+procedure triolet_Array3_get_contents (pointer arr, uint size, uint align) -> owned {
+  arr @! Array3.contents;
 };
 
 procedure triolet_Array3_get_bounds (pointer arr)

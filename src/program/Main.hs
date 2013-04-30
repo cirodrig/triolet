@@ -54,6 +54,7 @@ import qualified LowLevel.Inlining2
 import qualified LowLevel.JoinPoints as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LowLevel.NormalizeTail as LowLevel
+import qualified LowLevel.Cxx.Wrappers
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
@@ -394,7 +395,13 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
     putStrLn ""
     putStrLn "After closure conversion"
     print $ LowLevel.pprModule ll_mod
-  ll_mod <- LowLevel.insertReferenceCounting ll_mod
+  ll_mod <- LowLevel.insertReferenceTracking ll_mod
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "After eliminating reference tracking"
+    print $ LowLevel.pprModule ll_mod
+
+  ll_mod <- LowLevel.flattenRecordTypes ll_mod
 
   -- After closure conversion, unit values are superfluous
   -- remove them
@@ -421,7 +428,8 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
     Nothing -> return ()
 
   when (LowLevel.hasCXXExports ll_mod) $ do
-    writeFileWithHandle hxx_file (LowLevel.writeCxxHeader ll_mod)
+    writeFileAsString hxx_file (LowLevel.Cxx.Wrappers.cxxHeader ll_mod)
+    --writeFileWithHandle hxx_file (LowLevel.writeCxxHeader ll_mod)
 
 -- | Compile a C file to produce an object file.
 compileCFile c_fname o_fname = do

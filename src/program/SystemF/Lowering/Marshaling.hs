@@ -116,7 +116,6 @@ marshalCParameter ty =
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passParameterWithType (LL.PrimType LL.trioletBoolType)
-     FunctionET args ret -> marshalParameterFunctionFromC args ret
 
 -- | Marshal a function parameter that was passed from pyon.  The converted
 --   parameter will be passed to a C function.
@@ -129,7 +128,6 @@ demarshalCParameter ty =
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passParameterWithType (LL.PrimType LL.trioletBoolType)
-     FunctionET args ret -> marshalParameterFunctionToC args ret
 
 -- | Marshal a function parameter that was passed from C++.  The converted
 --   parameter will be passed to a pyon function.
@@ -162,38 +160,7 @@ marshalParameterFunctionFromC :: [ExportDataType]
                               -> ExportDataType
                               -> Lower ParameterMarshaler
 marshalParameterFunctionFromC params ret = do
-  -- The parameter from C
-  closure_ptr <- LL.newAnonymousVar (LL.RecordType cClosureRecord)
-  -- Triolet function
-  pyon_ptr <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
-
-  -- Parameters are passed from pyon to C; returns are passed from C to pyon
-  marshal_params <- mapM demarshalCParameter params
-  marshal_return <- demarshalCReturn ret
-  
-  -- The code generator creates a local function
-  let return_types = map LL.varType $ rmReturns marshal_return
-      (param_inputs, param_code, param_arguments) =
-        combineParameterMarshalers marshal_params
-
-      code = do
-        -- Unpack the parameter
-        [fun_ptr, cap_ptr] <- unpackRecord cClosureRecord (LL.VarV closure_ptr)
-        
-        -- Define a local function
-        f_body <- lift $ execBuild return_types $ do
-          param_code
-          rmCode marshal_return $ do
-            let call_args = LL.VarV cap_ptr : param_arguments ++ rmOutput marshal_return
-            return $ LL.primCallA (LL.VarV fun_ptr) call_args
-          return $ LL.ReturnE $ LL.ValA (map LL.VarV $ rmReturns marshal_return)
-        let f = LL.closureFun (param_inputs ++ rmInputs marshal_return) return_types f_body
-
-        emitLetrec (LL.NonRec (LL.Def pyon_ptr f))
-  
-  return $ ParameterMarshaler { pmInputs = [closure_ptr]
-                              , pmCode = code
-                              , pmOutput = LL.VarV pyon_ptr}
+  internalError "marshalParameterFunctionFromC: Not implemented"
 
 marshalParameterFunctionToC :: [ExportDataType]
                             -> ExportDataType
@@ -211,7 +178,7 @@ data ReturnMarshaler =
     rmInputs :: [LL.Var]
     -- | A wrapper generator that takes the function call code and produces
     --   the output value
-  , rmCode :: GenLower LL.Atom -> GenLower ()
+  , rmCode :: LL.Atom -> GenLower ()
     -- | Parameters to pass to the callee
   , rmOutput :: [LL.Val]
     -- | Return variables to return in the wrapper
@@ -259,8 +226,8 @@ demarshalCReturn ty =
 -- Convert a bool return value from u32 (a Triolet bool) to bool (a C bool)
 marshalBoolReturn = do
   v <- LL.newAnonymousVar (LL.PrimType LL.BoolType)
-  let setup mk_real_call = do
-        x <- emitAtom1 (LL.PrimType LL.trioletUintType) =<< mk_real_call
+  let setup real_call = do
+        x <- emitAtom1 (LL.PrimType LL.trioletUintType) real_call
         y <- primIntToBool x
         bindAtom1 v $ LL.ValA [y]
   return $ ReturnMarshaler { rmInputs = []
@@ -271,7 +238,7 @@ marshalBoolReturn = do
 -- Just return a primitive value
 passReturnWithType pt = do
   v <- LL.newAnonymousVar pt
-  let setup mk_real_call = bindAtom1 v =<< mk_real_call
+  let setup real_call = bindAtom1 v real_call
   return $ ReturnMarshaler { rmInputs = []
                            , rmCode = setup
                            , rmOutput = []
@@ -281,7 +248,7 @@ passReturnWithType pt = do
 passReturnParameter = do
   v <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
   return $ ReturnMarshaler { rmInputs = [v]
-                           , rmCode = \g -> g >>= emitAtom0
+                           , rmCode = \g -> emitAtom0 g
                            , rmOutput = [LL.VarV v]
                            , rmReturns = []}
 
@@ -289,13 +256,13 @@ passReturnParameter = do
 passReturnBoxed = do
   v <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
   return $ ReturnMarshaler { rmInputs = []
-                           , rmCode = \g -> g >>= bindAtom1 v
+                           , rmCode = \g -> bindAtom1 v g
                            , rmOutput = []
                            , rmReturns = [v]}
 
 -- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
 -- primitive function.
-createCMarshalingFunction :: CSignature -> LL.Fun -> Lower LL.Fun
+createCMarshalingFunction :: CSignature -> LL.FunDef -> Lower LL.Fun
 createCMarshalingFunction (CSignature dom rng) f = do
   -- Generate marshaling code
   marshal_params <- mapM marshalCParameter dom
@@ -304,7 +271,7 @@ createCMarshalingFunction (CSignature dom rng) f = do
 
 -- | Wrap the lowered function 'f' in marshaling code for C++.  Produce a
 -- primitive function.
-createCxxMarshalingFunction :: CXXSignature -> LL.Fun -> Lower LL.Fun
+createCxxMarshalingFunction :: CXXSignature -> LL.FunDef -> Lower LL.Fun
 createCxxMarshalingFunction (CXXSignature _ dom rng) f = do
   -- Generate marshaling code
   marshal_params <- mapM marshalCxxParameter dom
@@ -320,12 +287,13 @@ createMarshalingFunction marshal_params marshal_return f = do
 
   fun_body <- execBuild return_types $ do
     param_code                  -- Marshal the parameters
+    emitLetrec $ LL.NonRec f    -- Insert the function
     
     -- Call the function and marshal the return value
     let call_arguments = param_arguments ++ rmOutput marshal_return
-    rmCode marshal_return $ do
-      f_var <- emitLambda f
-      return $ LL.closureCallA (LL.VarV f_var) call_arguments
+        callee = LL.definiendum f
+        call = LL.closureCallA (LL.VarV callee) call_arguments
+    rmCode marshal_return call
     
     -- Return the return value
     return $ LL.ReturnE $ LL.ValA (map LL.VarV $ rmReturns marshal_return)

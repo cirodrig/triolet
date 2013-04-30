@@ -149,6 +149,11 @@ flattenRecordType rt =
 flattenFieldType (PrimField pt) = [pt]
 flattenFieldType (RecordField record_type) = flattenRecordType record_type
 
+flattenEntryPoints ep =
+  let ft = flattenFunctionType $ entryPointsType ep
+      arity = length $ ftParamTypes ft
+  in ep {_epType = ft, _epArity = arity}
+
 flattenValList :: [Val] -> RF [Val]
 flattenValList vs = liftM concat $ mapM flattenVal vs
 
@@ -339,7 +344,8 @@ flattenFun fun =
   defineParams (funParams fun) $ \params -> do
     let returns = flattenValueTypeList $ funReturnTypes fun
     body <- flattenStm $ funBody fun
-    return $! mkFun (funConvention fun) (funInlineRequest fun) (funFrameSize fun) params returns body
+    let ep = fmap flattenEntryPoints $ funEntryPoints fun
+    return $! mkFun (funConvention fun) (funInlineRequest fun) (funFrameSize fun) ep params returns body
 
 -- | Flatten a function that will be exported.
 --   Some kinds of records will actually be passed as records (like C structs) 
@@ -394,15 +400,15 @@ flattenExportedParam etype original_param = do
   let xparams = map from_var expanded_values
 
   let no_change' = no_change xparams
+      cursor' = cursor xparams
   case etype of
-    ListET _ _ -> no_change'
-    TupleET _ -> no_change'
-    ArrayET _ _ _ -> no_change'
+    ListET _ _ -> cursor'
+    TupleET _ -> cursor'
+    ArrayET _ _ _ -> cursor'
     TrioletNoneET -> no_change'
     TrioletIntET -> no_change'
     TrioletFloatET -> no_change'
     TrioletBoolET -> no_change'
-    FunctionET _ _ -> unpack_record cClosureRecord xparams
   where
     -- No flattening is performed for this parameter.
     -- Verify that the parameter hasn't been expanded.
@@ -411,12 +417,8 @@ flattenExportedParam etype original_param = do
       of [xparam] | xparam == original_param -> return (id, [xparam])
          _ -> internalError "flattenExportedParam"
 
-    -- This parameter is passed as a (flat) record, then unpacked before
-    -- executing the function body.
-    unpack_record record xparams = do
-      new_param <- newAnonymousVar (RecordType record)
-      let unpack_stm = LetE xparams $ UnpackA record (VarV new_param)
-      return (unpack_stm, [new_param])
+    -- Re-pack a cursor 
+    cursor xparams = internalError "flattenExportedParam: Not implemented"
 
     -- Parameter variables always expand to a sequence of variables
     from_var (VarV v) = v

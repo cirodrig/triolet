@@ -316,8 +316,7 @@ setFunDefUses use_map (Def fname f) =
 dceFun :: DCE Fun
 dceFun fun = do
   (body_size, body) <- tellSize $ dceStm (funBody fun)
-  let fun' = setFunSize (codeSize body_size) $
-             mkFun (funConvention fun) (funInlineRequest fun) (funFrameSize fun) (funParams fun) (funReturnTypes fun) body
+  let fun' = setFunSize (codeSize body_size) $ clearFunDCEInfo fun 
   return fun'
 
 -- | Perform dead code elimination on a data definition.  The data definition

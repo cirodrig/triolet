@@ -655,7 +655,7 @@ addInlineAttribute d
   | otherwise = d
   where
     make_inlined d = d { defAnnInlineRequest = InlAggressively
-                       , defAnnInlinePhase = InlPostfinal
+                       , defAnnInlinePhase = InlSequential
                        }
 
 boxInfoDefinitions :: DataType -> UnboxedTypeEvalM [GDef Mem]

@@ -334,7 +334,7 @@ cseDef (Def v f) = Def v <$> cseFun f
 cseFun :: Fun -> CSEF Fun
 cseFun f = do
   body <- evalCSE (funReturnTypes f) $ cseStm $ funBody f
-  return $ mkFun (funConvention f) (funInlineRequest f) (funFrameSize f) (funParams f) (funReturnTypes f) body
+  return $ f {funBody = body}
 
 cseGlobal :: ArityMap -> CSEEnv -> GlobalDef -> FreshVarM GlobalDef
 cseGlobal arities env (GlobalFunDef fdef) = do

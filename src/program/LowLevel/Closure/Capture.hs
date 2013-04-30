@@ -287,8 +287,8 @@ ifLocalFunction v m = Scan $ \env ->
 -- | Scan a reference to a variable, other than a tail call.
 --
 --   If it's not a global variable, the variable will be added to the
---   captured variable set.  If it's a local function, the function
---   will be hoisted.
+--   captured variable set.  If it's a local function, the function's
+--   call-captured variables will be inherited.
 capture :: Var -> ScanExp
 capture v = Scan $ \env ->
   let captured =
@@ -312,25 +312,28 @@ defines vs (Scan s) = Scan $ \i -> do
   ScanResult (capt, inherit) csts <- s (i {scanLocals = vs ++ scanLocals i})
   return $ ScanResult (foldr Set.delete capt vs, inherit) csts
 
--- | Scan a call of a variable.
+-- | Scan a use of a variable.
 --
---   The variable is captured.
---
---   If the callee is not fully applied, or if it's not a tail call, 
---   it must be hoisted.
---
---   Otherwise, if a function enclosing this call is hoisted, the callee
---   must also be hoisted.
-called :: Var -> ScanExp
-called v = capture v `mappend` ifLocalFunction v (called' v)
+--   The variable is captured.  If the variable is a local function,
+--   its call-captured variables are also captured.
+use :: Var -> ScanExp
+use v = capture v `mappend` ifLocalFunction v (called v)
 
--- | This function does the same thing as 'called', except that the
---   function is an implicit continuation call.
-calledCont :: Var -> ScanExp
-calledCont v = capture v `mappend` called' v
+-- | Scan a use of a continuation.  The continuation behaves
+--   like a function call.
+useCont :: Var -> ScanExp
+useCont v = capture v `mappend` called v
 
-called' v = Scan $ \env ->
+-- | Scan a reference to a local function or local continuation.
+--
+--   After closure conversion, the function reference will become a 
+--   function call @f x1 x2 ...@ where the @x@s are the function's 
+--   call-captured variables.  The current function must either capture
+--   or define all variables that are captured by @f@.
+called v = Scan $ \env ->
   let locals = scanLocals env
+      -- Inherit the captured variables of 'v', unless they are
+      -- locally defined 
       c_cst = FreeInherit (Map.singleton v locals)
       global_constraints = GlobalConstraints mempty
       result = ScanResult (mempty, c_cst) global_constraints
@@ -342,7 +345,7 @@ called' v = Scan $ \env ->
 scanValue :: Val -> ScanExp
 scanValue value =
   case value
-  of VarV v    -> capture v
+  of VarV v    -> use v
      LitV _    -> mempty
      RecV _ xs -> scanValues xs
 
@@ -360,7 +363,7 @@ scanAtom atom =
     scan_call op args =
       let op_scan =
             case op
-            of VarV v -> called v
+            of VarV v -> use v
                _      -> scanValue op 
       in op_scan `mappend` scanValues args
 
@@ -401,7 +404,7 @@ generateConstraint fun_name free inherits = do
   rconts <- getRConts
   (free_k, inherits_k) <-
     case LocalCPS.lookupCont fun_name rconts
-    of Just (LocalCPS.RCont k _) -> calledCont k
+    of Just (LocalCPS.RCont k _) -> useCont k
        _                         -> mempty
   let free' = free `mappend` free_k
       inherits' = inherits `mappend` inherits_k

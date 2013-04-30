@@ -6,6 +6,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Writer
 import Data.Bits
+import Data.Maybe
 import qualified Data.Set as Set
 import Data.Set(Set)
 import Debug.Trace
@@ -139,20 +140,35 @@ getContinuation :: (Monad m, Supplies m (Ident Var)) =>
                 -> Gen m ()
 getContinuation primcall live_outs f = Gen $ \return_type -> do
   -- Create a call to the continuation
-  cont_var <- newAnonymousVar (PrimType PointerType)
-  let convention = if primcall then JoinCall else ClosureCall
+  cont_var <- newAnonymousVar cont_var_type
   let cont_call =
         ReturnE $ CallA convention (VarV cont_var) (map VarV live_outs)
       
   -- Construct a statement that calls the continuation
   (stm, MkStm stms) <- runGen (f cont_call) return_type
-  
+
+  -- Construct entry points if needed
+  let fun_type = closureFunctionType (map varType live_outs) return_type
+  entry_points <-
+    if primcall
+    then return (internalError "getContinuation") -- Not used
+    else mkEntryPoints False fun_type cont_var
+
   -- Put the continuation into a 'letrec' statement
   let stms' cont_stm = LetrecE (NonRec (Def cont_var cont_fun)) (stms stm)
         where
-          cont_fun = mkFun convention False 0 live_outs return_type cont_stm
+          cont_fun =
+            if primcall
+            then joinFun live_outs return_type cont_stm
+            else closureFun entry_points live_outs return_type cont_stm
   
   return ((), MkStm stms')
+  where
+    !convention = if primcall then JoinCall else ClosureCall
+
+    !cont_var_type = if primcall
+                     then PrimType PointerType
+                     else PrimType OwnedType
 
 valFreeVars :: Val -> Set Var
 valFreeVars val = 
@@ -229,12 +245,15 @@ bindAtom vars atom = emit $ LetE vars atom
 emitLetrec :: Monad m => Group FunDef -> Gen m ()
 emitLetrec defs = emit $ LetrecE defs
 
-emitLambda :: (Monad m, Supplies m (Ident Var)) => Fun -> Gen m Var
-emitLambda f = do
-  let f_type = case funConvention f
-               of JoinCall -> PrimType PointerType
-                  ClosureCall -> PrimType OwnedType
-  v <- newAnonymousVar f_type
+-- | Generate a new closure-call lambda function.
+--
+--   Given a function that takes a name and constructs a new 'Fun' having 
+--   that name, run the function with a new name and bind it with a
+--   letrec.
+emitLambda :: (Monad m, Supplies m (Ident Var)) => (Var -> m Fun) -> Gen m Var
+emitLambda mk_function = do
+  v <- newAnonymousVar (PrimType OwnedType)
+  f <- lift $ mk_function v
   emit $ LetrecE (NonRec (Def v f))
   return v
 
@@ -253,10 +272,9 @@ genLambdaOrCall param_types return_types mk_code args
       let extra_param_types = drop (length args) param_types
       extra_params <- mapM newAnonymousVar extra_param_types
       
-      fun_body <- lift $ execBuild return_types $ do
+      f <- emitLambda $ \v -> genClosureFun v extra_params return_types $ do
         ret_values <- mk_code (args ++ map VarV extra_params)
         return $ ReturnE $ ValA ret_values
-      f <- emitLambda $ closureFun extra_params return_types fun_body
       return [VarV f]
         
   | n_args > n_params = internalError "genLambdaOrCall: Too many arguments"
@@ -283,8 +301,8 @@ genLambdaStm :: (Monad m, Supplies m (Ident Var)) =>
                 [ValueType] -> [ValueType] -> ([Val] -> Gen m Stm) -> Gen m Val
 genLambdaStm parameter_types return_types mk_body = do
   params <- mapM newAnonymousVar parameter_types
-  fun_body <- lift $ execBuild return_types $ mk_body (map VarV params)
-  f <- emitLambda $ closureFun params return_types fun_body
+  f <- emitLambda $ \v -> genClosureFun v params return_types $ do
+    mk_body (map VarV params)
   return (VarV f)
 
 -- | Generate a 'ThrowE' term.
@@ -340,11 +358,6 @@ builtinVar v = VarV $ llBuiltin v
 genPrimFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Stm -> m Fun
 genPrimFun params returns body =
   liftM (primFun params returns) $ execBuild returns body
-
-genClosureFun :: Monad m =>
-                 [ParamVar] -> [ValueType] -> Gen m Stm -> m Fun
-genClosureFun params returns body =
-  liftM (closureFun params returns) $ execBuild returns body
 
 -- | Generate a binary primitive integer operation
 intBinaryPrimOp :: (Monad m, Supplies m (Ident Var)) =>
@@ -949,8 +962,24 @@ selectTypeObjectConIndex = loadField (toDynamicRecord typeObjectRecord !!: 1)
 -------------------------------------------------------------------------------
 -- Values
 
+genClosureFun :: (Monad m, Supplies m (Ident Var)) =>
+                 Var -> [ParamVar] -> [ValueType] -> Gen m Stm -> m Fun
+genClosureFun v params returns body =
+  newClosureFun v params returns =<< execBuild returns body
+
+-- | Generate a new closure-call function with the given variable name.
+--   Variables are created for each entry point.
+newClosureFun :: (Monad m, Supplies m (Ident Var)) =>
+                 Var -> [ParamVar] -> [ValueType] -> Stm -> m Fun
+newClosureFun name params returns body = do
+  let fun_type = closureFunctionType (map varType params) returns
+  ep <- mkEntryPoints False fun_type name
+  return $ closureFun ep params returns body
+
 -- | Create an 'EntryPoints' data structure for an externally visible
 -- global function and populate it with new variables.
+--
+-- TODO: merge with mkEntryPoints
 mkGlobalEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
                        FunctionType   -- ^ Function type
                     -> Label          -- ^ Function name
@@ -960,12 +989,16 @@ mkGlobalEntryPoints ftype label global_closure
   | not $ ftIsClosure ftype =
     internalError $
     "mkGlobalEntryPoints: Not a closure function: " ++ show global_closure
+  | isJust $ labelExternalName label =
+    -- Closure-call functions cannot be externally visible
+    internalError $
+    "mkGlobalEntryPoints: Closure function has external name: " ++ show global_closure
   | Just name <- varName global_closure,
     labelTag name /= NormalLabel =
     internalError $
     "mkGlobalEntryPoints: Invalid variable name"
   | otherwise = do
-      inf <- newVar (Just label) (PrimType PointerType)
+      inf <- make_entry_point InfoTableLabel
       dir <- make_entry_point DirectEntryLabel
       exa <- make_entry_point ExactEntryLabel
       ine <- make_entry_point InexactEntryLabel
@@ -975,7 +1008,7 @@ mkGlobalEntryPoints ftype label global_closure
     -- If the global closure is externally visible, the other entry points
     -- will also be externally visible
     make_entry_point tag =
-      let new_label = label {labelTag = tag, labelExternalName = Nothing}
+      let new_label = label {labelTag = tag}
       in if varIsExternal global_closure
          then newExternalVar new_label (PrimType PointerType)
          else newVar (Just new_label) (PrimType PointerType)
@@ -990,13 +1023,32 @@ mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
 mkEntryPoints False ftype global_closure
   | not $ ftIsClosure ftype =
     internalError "mkEntryPoints: Not a closure function"
+  | Just label <- varName global_closure,
+    isJust $ labelExternalName label =
+    -- Closure-call functions cannot be externally visible
+    internalError $
+    "mkGlobalEntryPoints: Closure function has external name: " ++ show global_closure
   | Just name <- varName global_closure,
     labelTag name /= NormalLabel =
     internalError $
     "mkGlobalEntryPoints: Invalid variable name"
   | otherwise = do
       let label = varName global_closure
-      [inf, dir, exa, ine] <-
-        replicateM 4 $ newVar label (PrimType PointerType)
+      inf <- make_entry_point label InfoTableLabel
+      dir <- make_entry_point label DirectEntryLabel
+      exa <- make_entry_point label ExactEntryLabel
+      ine <- make_entry_point label InexactEntryLabel
       let arity = length $ ftParamTypes ftype
       return $! EntryPoints ftype arity dir Nothing exa ine inf global_closure
+  where
+    -- If the global closure is externally visible, the other entry points
+    -- will also be externally visible
+    make_entry_point m_label tag =
+      let new_label = case m_label
+                      of Nothing -> Nothing
+                         Just l -> Just $ l {labelTag = tag}
+      in if varIsExternal global_closure
+         then let Just l = new_label 
+              in newExternalVar l (PrimType PointerType)
+         else newVar new_label (PrimType PointerType)
+      --in newVar new_label (PrimType PointerType)

@@ -89,7 +89,7 @@ namespace Triolet {
                        TrioletUInt elt_size,
                        TrioletUInt elt_align,
                        TriBarePtr ret);
-  extern "C" TriBarePtr
+  extern "C" TriBoxPtr
   triolet_List_get_contents(TriBarePtr list,
                          TrioletUInt elt_size,
                          TrioletUInt elt_align) __attribute__((pure));
@@ -102,7 +102,7 @@ namespace Triolet {
   extern "C" TrioletUInt
   triolet_Array0_alignment(TrioletUInt elt_size,
                         TrioletUInt elt_align) __attribute__((const));
-  extern "C" TriBarePtr
+  extern "C" TriBoxPtr
   triolet_Array0_get_contents(TriBarePtr array,
                            TrioletUInt elt_size,
                            TrioletUInt elt_align) __attribute__((pure));
@@ -116,7 +116,7 @@ namespace Triolet {
                          TrioletUInt elt_size,
                          TrioletUInt elt_align,
                          TriBarePtr ret);
-  extern "C" TriBarePtr
+  extern "C" TriBoxPtr
   triolet_Array1_get_contents(TriBarePtr array,
                            TrioletUInt elt_size,
                            TrioletUInt elt_align) __attribute__((pure));
@@ -141,7 +141,7 @@ namespace Triolet {
                          TrioletUInt elt_size,
                          TrioletUInt elt_align,
                          TriBarePtr ret);
-  extern "C" TriBarePtr
+  extern "C" TriBoxPtr
   triolet_Array2_get_contents(TriBarePtr array,
                            TrioletUInt elt_size,
                            TrioletUInt elt_align) __attribute__((pure));
@@ -173,7 +173,7 @@ namespace Triolet {
                          TrioletUInt elt_align,
                          TriBarePtr ret);
 
-  extern "C" TriBarePtr
+  extern "C" TriBoxPtr
   triolet_Array3_get_contents(TriBarePtr array,
                            TrioletUInt elt_size,
                            TrioletUInt elt_align) __attribute__((pure));

@@ -5,7 +5,16 @@
 
 module test.test;
 
-extern function test.test.testfoo "testfoo" (int32, int32, int32) -> int32;
+extern data owned core.internal.structures.triolet_typeObject_function "triolet_typeObject_function";
+
+extern function test.test.testfoo (int32, int32, int32) -> int32;
+
+extern procedure test.test.testfoo_wrapper "testfoo_wrapper"
+  (int32, int32, int32) -> int32;
+
+procedure testfoo_wrapper (int32 z, int32 y, int32 x) -> int32 {
+  int32 call testfoo (z, y, x);
+};
 
 function testfoo (int32 z, int32 y, int32 x) -> int32 {
   letrec {

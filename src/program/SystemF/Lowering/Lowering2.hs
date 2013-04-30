@@ -5,9 +5,9 @@
 module SystemF.Lowering.Lowering2(lowerModule)
 where
 
-import Prelude hiding(mapM)
+import Prelude hiding(mapM, sequence)
 
-import Control.Monad hiding(forM, mapM)
+import Control.Monad hiding(forM, mapM, sequence)
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.List
@@ -164,8 +164,8 @@ bindPatternMaybe (Just p) (Just v) m = bindPattern p v m
 
 -- | Lower an expression to a constant value.
 --   TODO: Generate a lazy term.
-lowerConstantExp :: Maybe Label -> ExpM -> Lower (LL.Val, [LL.GlobalDef], Bool)
-lowerConstantExp m_name expression =
+lowerConstantExp :: ExpM -> Lower (LL.Val, [LL.GlobalDef], Bool)
+lowerConstantExp expression =
   internalError "lowerConstantExp: Not implemented"
 {-
   case fromExpM expression
@@ -281,7 +281,7 @@ lowerApp rt op ty_args args = do
     emitAtom1 returns $ LL.closureCallA op' args'
 
 lowerLam f = do
-  f' <- emitLambda =<< lift (lowerFun f)
+  f' <- emitLambda $ \v -> lowerFun v f
   return $ LL.VarV f'
 
 lowerLet binder rhs body = do
@@ -399,12 +399,13 @@ lowerArray ty es = do
 
     write_array_elements _ _ [] = return [LL.LitV LL.UnitL]
 
-lowerFun :: FunM -> Lower LL.Fun
-lowerFun (FunM fun) =
+lowerFun :: LL.Var -> FunM -> Lower LL.Fun
+lowerFun fun_name (FunM fun) =
   assumeTyParams (funTyParams fun) $
   withMany lower_param (funParams fun) $ \params -> do
     return_type <- lowerLowerType $ funReturn fun
-    genClosureFun params [return_type] $ lower_body (funBody fun)
+    body <- execBuild [return_type] $ lower_body (funBody fun)
+    newClosureFun fun_name params [return_type] body
   where
     lower_param pat k = assumeVar False (patMVar pat) (patMType pat) k
     
@@ -425,12 +426,17 @@ lowerDefGroup defgroup k =
   case defgroup
   of NonRec def -> do
        -- Lower the function before adding the variable to the environment
-       f' <- lowerFun $ definiens def
-       assume_variable def $ \v' -> k (LL.NonRec (LL.Def v' f'))
+       let sf_var = definiendum def
+           sf_type = functionType $ definiens def
+       lowered_type <- lowerLowerType sf_type
+       v' <- translateVariable False sf_var lowered_type
+       f' <- lowerFun v' $ definiens def
+       assumeTranslatedVariable sf_var v' sf_type $ do
+         k (LL.NonRec (LL.Def v' f'))
      Rec defs ->
        -- Add all variables to the environment, then lower
        assume_variables defs $ \vs' -> do
-         fs' <- mapM (lowerFun . definiens) defs
+         fs' <- sequence [lowerFun v' $ definiens d | (v', d) <- zip vs' defs]
          k $ LL.Rec $ zipWith LL.Def vs' fs'
   where
     assume_variables defs k = withMany assume_variable defs k
@@ -442,18 +448,18 @@ lowerDefGroup defgroup k =
       | otherwise =
           assumeVar False v (functionType f) k
 
-lowerEntity :: Maybe Label -> Ent Mem -> Lower (LL.Var -> [LL.GlobalDef])
-lowerEntity _ (FunEnt f) = do
-  f' <- lowerFun f
-  return (\ll_var -> [LL.GlobalFunDef (LL.Def ll_var f')])
+lowerEntity :: LL.Var -> Ent Mem -> Lower [LL.GlobalDef]
+lowerEntity ll_var (FunEnt f) = do
+  f' <- lowerFun ll_var f
+  return [LL.GlobalFunDef (LL.Def ll_var f')]
 
-lowerEntity lab (DataEnt d) = do
-  (const_value, extra_defs, is_value) <- lowerConstantExp lab (constExp d)
-  let global_def ll_var =
+lowerEntity ll_var (DataEnt d) = do
+  (const_value, extra_defs, is_value) <- lowerConstantExp (constExp d)
+  let global_def =
         LL.GlobalDataDef (LL.Def ll_var (LL.StaticData const_value))
   return $! if is_value
-            then \_ -> extra_defs
-            else \ll_var -> extra_defs ++ [global_def ll_var]
+            then extra_defs
+            else extra_defs ++ [global_def]
 
 -- | Lower a global definition group.
 --   The definitions and a list of exported functions are returned.
@@ -463,70 +469,78 @@ lowerGlobalDefGroup :: DefGroup (GDef Mem)
 lowerGlobalDefGroup defgroup k =
   case defgroup
   of NonRec def -> do
-       -- Lower the entity before adding the variable to the environment
-       let name = varName $ definiendum def
-       mk_entity <- lowerEntity name $ definiens def
-       assume_variable def $ \(v', m_export) ->
-         k (LL.Rec (mk_entity v')) (maybeToList m_export)
+       -- Translate the variable without adding it to the environment
+       let name = definiendum def
+           ent = definiens def
+           sf_type = entityType ent
+       ty <- lowerLowerType sf_type
+       v <- translateVariable True name ty
+
+       -- Lower the definition
+       defs' <- lowerEntity v ent
+
+       -- Add to environment and continue
+       assumeTranslatedVariable name v sf_type $
+         let defgroup' = LL.Rec defs'
+             new_exports = pick_exports [(v, def)]
+         in k defgroup' new_exports
+
      Rec defs ->
        -- Add all variables to the environment, then lower
-       assume_variables defs $ \lowered -> do
-         let (vs', m_exports) = unzip lowered
-             exports = catMaybes m_exports
-         entities <- forM (zip vs' defs) $ \(v', def) ->
-           let name = varName $ definiendum def
-           in liftM ($ v') $ lowerEntity name $ definiens def
-         k (LL.Rec $ concat entities) exports
+       assume_variables defs $ \vs' -> do
+         entities <- zipWithM lowerEntity vs' (map definiens defs)
+         let defgroup' = LL.Rec $ concat entities
+             exports = pick_exports $ zip vs' defs
+         k defgroup' exports
   where
+    pick_exports xs = [(v, sig) | (v, d) <- xs, sig <- maybeToList $ export_sig d]
+      where
+        export_sig d
+          | defAnnExported $ defAnnotation d = Just TrioletExportSig
+          | otherwise                        = Nothing
+
     assume_variables defs k = withMany assume_variable defs k
 
     assume_variable (Def v annotation ent) k =
-      -- Decide whether the function is exported
-      let is_exported = defAnnExported annotation
-          
-          -- If exported, add it to the export list
-          k' v
-            | is_exported = k (v, Nothing)
-            | otherwise = k (v, Just (v, TrioletExportSig))
-
-          ty = case ent
-               of FunEnt f  -> functionType f
-                  DataEnt d -> constType d
-      in assumeVar is_exported v ty k'
+      assumeVar (defAnnExported annotation) v (entityType ent) k
 
 lowerExport :: ModuleName
             -> Export Mem
             -> Lower (LL.FunDef, (LL.Var, ExportSig))
 lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
-  fun' <- lowerFun fun
+  -- Lower the given function.  The lowered function will be part of the  
+  -- exported function.
+  exported_fun_name <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
+  fun' <- lowerFun exported_fun_name fun
+  let fun_def = LL.Def exported_fun_name fun'
   
   -- Create exported function
   (fun_def, export_sig) <-
     case lang
-    of CCall     -> define_c_fun fun'
-       CPlusPlus -> define_cxx_fun fun'
+    of CCall     -> define_c_fun exported_fun_name fun_def
+       CPlusPlus -> define_cxx_fun exported_fun_name fun_def
   return (fun_def, (LL.definiendum fun_def, export_sig))
   where
     fun_type = functionType fun
 
-    define_c_fun fun = do
+    define_c_fun exported_fun_name fun_def = do
       -- Create export signature
       c_export_sig <- liftTypeEvalM $ getCExportSig fun_type
 
       -- Generate marshalling code
-      wrapped_fun <- createCMarshalingFunction c_export_sig fun
+      wrapped_fun <- createCMarshalingFunction c_export_sig fun_def
 
       -- Create function name.  Function is exported with the given name.
       let label = externLabel module_name exported_name (Just exported_name)
       v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
       return (LL.Def v wrapped_fun, CExportSig c_export_sig)
 
-    define_cxx_fun fun = do
+    define_cxx_fun exported_fun_name fun_def = do
       -- Create export signature
       cxx_export_sig <- liftTypeEvalM $ getCxxExportSig exported_name fun_type
 
       -- Generate marshalling code
-      wrapped_fun <- createCxxMarshalingFunction cxx_export_sig fun
+      wrapped_fun <- createCxxMarshalingFunction cxx_export_sig fun_def
 
       -- Create a function name.  This isn't the name the user sees.
       -- The function with this name will be put into object code.  It will

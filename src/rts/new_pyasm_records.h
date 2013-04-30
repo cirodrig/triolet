@@ -15,6 +15,13 @@ record Function {
   // Closure-captured variables follow
 };
 
+record InfoTable {
+  const uint16 arity;
+  const uint16 captured;
+  const pointer exact;
+  const pointer inexact;
+};
+
 // Header fields of an info table
 //record InfoTableHeader {
 //  const uint8 tag;                    // What kind of object this is
@@ -262,8 +269,8 @@ record ListBuilder {
  *
  * A 0-dimensional array contains just a single value.
  */
-record Array0(a) {
-  const a content;          // The single value contained in the array
+record Array0 {
+  const owned content;          // The single value contained in this array
 };
 
 /* 1D arrays

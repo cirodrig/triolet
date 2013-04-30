@@ -9,7 +9,8 @@ module LowLevel.InterfaceFile
        (Interface,
         pprInterface,
         createModuleInterface,
-        addInterfaceToModuleImports)
+        addInterfaceToModuleImports,
+        removeSelfImports)
 where
 
 import Prelude hiding(mapM)
@@ -41,21 +42,65 @@ import LowLevel.Syntax
 import Export
 import Globals
 
+-- | A lookup table from labels to variables.  This table is used for
+--   unifying variables that have the same label
+type LabelMap = Map.Map Label Var
+
+-- | Create a label map from a list of variables.
+--   Order is important: if there are multiple variables with the same
+--   label, the last one will be in the map.
+labelMap :: [Var] -> LabelMap
+labelMap vs = Map.fromList $ map assoc vs
+  where
+    assoc v = let !label = externVarName v in (label, v)
+
+-- | Take the subset of the 'labelMap' whose labels match one of the given
+--   variables
+labelMapRestriction :: LabelMap -> [Var] -> LabelMap
+labelMapRestriction m vars =
+  Map.intersection m $ labelMap vars
+
+-- | Check whether the given externally visible variable's label
+--   is a key in the label map
+labelMapContains :: LabelMap -> Var -> Bool
+labelMapContains m v =
+  let !label = externVarName v in label `Map.member` m
+
+labelMapDoesn'tContain :: LabelMap -> Var -> Bool
+labelMapDoesn'tContain m v = not $ labelMapContains m v
+
+-- | Rename a variable by looking up its label in the label map.
+--   If label is not found, create a fresh variable ID.
+renameExternallyVisibleVar :: LabelMap -> Var -> FreshVarM Var
+renameExternallyVisibleVar m v =
+  case Map.lookup lab m
+  of Just v' -> return v'
+     Nothing -> newExternalVar lab (varType v)
+  where
+    lab = externVarName v
+
+-- | Get the label of a variable that is externally visible.
+--   The variable must have a label.
+externVarName v =
+  case varName v
+  of Just lab -> lab
+     Nothing  -> internalError $ "Externally visible variable has no label"
+
 -- | A definition that's being prepared for output to an interface file
 type PreImport = Def PreImportData
 
 -- | A symbol that's being prepared for output to an interface file
 data PreImportData =
-    PreImportFun !FunctionType !(Maybe Fun)
+    PreImportFun !FunctionType !(Maybe EntryPoints) !(Maybe Fun)
   | PreImportData !StaticData
 
 renamePreImport :: Renaming -> PreImport -> FreshVarM PreImport
 renamePreImport rn (Def v pi) = do
   pi' <- case pi
-         of PreImportFun ft Nothing -> return pi
-            PreImportFun ft (Just f) -> do
+         of PreImportFun ft m_ep Nothing -> return pi
+            PreImportFun ft m_ep (Just f) -> do
               f' <- renameFun RenameNothing rn f
-              return $ PreImportFun ft (Just f')
+              return $ PreImportFun ft m_ep (Just f')
             PreImportData sd -> do
               sd' <- renameStaticData RenameNothing rn sd
               return $ PreImportData sd'
@@ -65,12 +110,12 @@ renamePreImport rn (Def v pi) = do
 mkImport :: PreImport -> FreshVarM Import
 mkImport pre_import = label `seq` -- Verify that label is valid
   case definiens pre_import
-  of PreImportFun ft mfun ->
+  of PreImportFun ft m_ep mfun ->
        case ftConvention ft
        of PrimCall ->
             return $ ImportPrimFun import_var ft mfun
           ClosureCall -> do
-            ep <- mkGlobalEntryPoints ft label import_var
+            let Just ep = m_ep
             return $ ImportClosureFun ep mfun
           JoinCall ->
             internalError "Imported function is a join point"
@@ -129,9 +174,9 @@ pprInterface iface =
 createModuleInterface :: Module -> IO (Module, Interface)
 createModuleInterface mod = do
   -- Find all exported symbols, transitively
-  let export_vars = Set.fromList [v | (v, TrioletExportSig) <- moduleExports mod]
-      (pre_imports, _) =
-        slurpExports export_vars $ concatMap groupMembers $ moduleGlobals mod
+  let declared_export_vars = Set.fromList [v | (v, TrioletExportSig) <- moduleExports mod]
+      (export_vars, pre_imports, _) =
+        slurpExports declared_export_vars $ concatMap groupMembers $ moduleGlobals mod
       
   -- Rename all exported variables to externally visible names
   renaming <- createExternNames (moduleModuleName mod) (moduleNameSupply mod) $
@@ -162,8 +207,7 @@ createModuleInterface mod = do
           
       -- Extend the export list with the new exported variables
       let new_exports = [(v, TrioletExportSig)
-                        | Def v _ <- pre_imports'
-                        , not $ v `Set.member` export_vars]
+                        | v <- Set.elems $ export_vars Set.\\ declared_export_vars]
           mod3 = mod2 {moduleExports = new_exports ++ moduleExports mod2}
       
       return (mod3, interface)
@@ -208,9 +252,15 @@ renameGlobalDefinitions renaming mod =
           GlobalDataDef def
 
 -- | Scan the given exports to select additional variables for export.
-slurpExports :: Set.Set Var -> [GlobalDef] -> ([PreImport], [GlobalDef])
-slurpExports exported gdefs 
-  | Set.null exported = ([], gdefs)
+slurpExports :: Set.Set Var -> [GlobalDef]
+             -> (Set.Set Var, [PreImport], [GlobalDef])
+slurpExports exported gdefs = slurpExports' Set.empty exported gdefs
+
+slurpExports' :: Set.Set Var -> Set.Set Var -> [GlobalDef]
+              -> (Set.Set Var, [PreImport], [GlobalDef])
+slurpExports' old_exported new_exported gdefs 
+    -- If no new exported variables were added since last time, then finish
+  | Set.null (new_exported Set.\\ old_exported) = (new_exported, [], gdefs)
   | otherwise =
     let -- Find the exported definitions and convert them
         (export_defs, other_defs) = partition is_exported gdefs
@@ -222,15 +272,17 @@ slurpExports exported gdefs
           (mconcat $ map findReferencedGlobals imports) other_def_vars
         
         -- Include the additional definitions
-        (imports2, leftover) = slurpExports additional_exported other_defs
-    in (imports ++ imports2, leftover)
+        (final_exported, imports2, leftover) =
+          slurpExports' new_exported (new_exported `Set.union` additional_exported) other_defs
+    in (final_exported, imports ++ imports2, leftover)
   where
-    is_exported gdef = globalDefiniendum gdef `Set.member` exported
+    is_exported gdef = globalDefiniendum gdef `Set.member` new_exported
 
 mkPreImport :: GlobalDef -> PreImport
 mkPreImport (GlobalFunDef (Def v f)) =
   let f_val = if shouldInline f then Just f else Nothing
-  in Def v (PreImportFun (funType f) f_val)
+      ep    = funEntryPoints f
+  in Def v (PreImportFun (funType f) ep f_val)
 
 mkPreImport (GlobalDataDef (Def v dat)) =
   Def v (PreImportData dat)
@@ -238,19 +290,63 @@ mkPreImport (GlobalDataDef (Def v dat)) =
 -------------------------------------------------------------------------------
 -- Finding global variable references
 
+-- | The variables in a global definition that may be referenced by another
+--   module.  These variables include entry points because closure conversion 
+--   may insert references to entry points.
+importReferenceableVars :: Import -> [Var]
+importReferenceableVars (ImportClosureFun ep _) = entryPointsVars ep
+importReferenceableVars (ImportPrimFun v _ _) = [v]
+importReferenceableVars (ImportData v _) = [v]
+
+importListReferenceableVars :: [Import] -> [Var]
+importListReferenceableVars = concatMap importReferenceableVars
+
+-- | The variables that are defined by a module and may be referenced
+--   by another module.  These variables include entry points because
+--   closure conversion may insert references to entry points. This
+--   function doesn't transitively find references that may appear
+--   after inlining a global entity's definition into another module.
+moduleExportReferenceableVars :: Module -> [Var]
+moduleExportReferenceableVars mod =
+  let exported_vars = [v | (v, _) <- moduleExports mod]
+      defs = concatMap groupMembers $ moduleGlobals mod
+
+      -- Get a list including 'v' and its entry points (if any)
+      with_entry_points v =
+        case find ((v ==) . globalDefiniendum) defs
+        of Just (GlobalFunDef (Def _ fun)) ->
+             case funEntryPoints fun
+             of Just ep -> entryPointsVars ep
+                Nothing -> [v]
+           Just (GlobalDataDef (Def _ _)) ->
+             [v]
+           Nothing ->
+             internalError "moduleReferenceableVars"
+  in concatMap with_entry_points exported_vars
+
 -- | Given a set of global variables in the current module,
 --   get the subset that is referenced by something.
 type FindRefs = Set.Set Var -> Set.Set Var
 
+findRefsMaybe f Nothing  s = s
+findRefsMaybe f (Just x) s = f x s
+
 findReferencedGlobals :: PreImport -> FindRefs
-findReferencedGlobals (Def _ (PreImportFun _ Nothing)) = mempty
-findReferencedGlobals (Def _ (PreImportFun _ (Just f))) = findRefsFun f
+findReferencedGlobals (Def _ (PreImportFun _ m_ep m_f)) =
+  findRefsMaybe findRefsEntryPoints m_ep `mappend`
+  findRefsMaybe findRefsFun m_f
+
 findReferencedGlobals (Def _ (PreImportData (StaticData val))) =
   findRefsVal val
 
+findRefsEntryPoints :: EntryPoints -> FindRefs
+findRefsEntryPoints ep = mconcat $ map findRefVar $ entryPointsVars ep
+
+findRefVar v dom = if v `Set.member` dom then Set.singleton v else mempty
+
 findRefsVal value =
   case value
-  of VarV v -> \dom -> if v `Set.member` dom then Set.singleton v else mempty
+  of VarV v -> findRefVar v
      RecV _ vs -> findRefsVals vs
      LitV _ -> mempty
 
@@ -274,58 +370,174 @@ findRefsStm stm =
        mconcat (findRefsVal v : map (findRefsStm . snd) alts)
      ReturnE atom -> findRefsAtom atom
 
-findRefsFun f = findRefsStm $ funBody f
+findRefsFun f = findRefsStm (funBody f) `mappend`
+                findRefsMaybe findRefsEntryPoints (funEntryPoints f)
 
 -------------------------------------------------------------------------------
 -- Loading an interface
 
--- | Add an interface to a module's import set.  Variables in the 
---   interface will be renamed to be consistent with the database of
---   builtin variables and with the module.  The interface will be added
---   to the module's import list.
+-- | Add an interface to a module's import set.  Variable IDs are not
+--   necessarily unique between the module and interface.  Variables are
+--   renamed so that distinct variables have distinct IDs, and so that
+--   variables having the same label will be renamed to have the same ID.
+--   The interface will be added to the module's import list.
 --
 --   The module being updated should have gone through record flattening, 
 --   and should not have gone through closure conversion.
 addInterfaceToModuleImports :: Interface -> Module -> IO Module
 addInterfaceToModuleImports iface mod = do
-  let -- The set of all variables that the interface may share with
-      -- the builtins and/or the module.  Since closure conversion hasn't 
-      -- happened, we only care about a closure-based function's global
-      -- closure.
-      --
-      -- Using a set also eliminates duplicate list entries. 
-      extern_variables =
-        Set.toList $ Set.fromList $
-        allBuiltins ++ map importVar (moduleImports mod)
+  -- Rename all variables in the interface to avoid variable ID collisions
+  rn_iface <-
+    withTheLLVarIdentSupply $ \id_supply -> runFreshVarM id_supply $ do
+      freshenInterface iface
+
+  -- Identify variables defined in 'iface' and defined in 'mod'
+  let iface_export_vars = importListReferenceableVars $ ifaceExports rn_iface
+  let module_import_vars = importListReferenceableVars $ moduleImports mod
+  let module_export_vars = moduleExportReferenceableVars mod
+
+  -- The set of all variables that the interface may share with
+  -- the builtins and/or the module.  This set includes variables that
+  -- may be created later by closure conversion.
+  --
+  -- Duplicate list entries are eliminated by creating a set.
+  let visible_variables =
+        let vs = 
+              -- Order is important.  From last to first,
+              -- builtin variable IDs override
+              -- the module's variable IDs, and either of these
+              -- overrides the interface's variable IDs.
+              importListReferenceableVars (ifaceImports rn_iface) ++
+              iface_export_vars ++
+              module_import_vars ++
+              module_export_vars ++
+              allBuiltins
+        in labelMap vs
+
+  -- Get 'LabelMap's of the exported variables
+  let iface_exports = labelMapRestriction visible_variables iface_export_vars
+  let mod_imports = labelMapRestriction visible_variables module_import_vars
+  let mod_exports = labelMapRestriction visible_variables module_export_vars
+
+  -- No variable may be defined by both the interface and the module
+  unless (Map.null $ iface_exports `Map.intersection` mod_exports) $
+    fail "Found a duplicate variable definition when loading a module interface"
+
+  -- Remove duplicate definitions.
+  -- Remove imports from the interface that are defined or imported by the 
+  -- module.  Remove imports from the module that are defined by the
+  -- interface.
+  let filtered_iface = filterInterface mod_imports mod_exports rn_iface
+  let filtered_mod = filterModule iface_exports mod
 
   -- Rename variables in the interface
   (rn_imports, rn_exports, interface_renaming) <-
     withTheLLVarIdentSupply $ \id_supply -> runFreshVarM id_supply $ do
-      renameInterface extern_variables iface
+      renameInterface visible_variables filtered_iface
 
   -- DEBUG
   when False $ do
     putStrLn "Renamed interface"
     putStrLn "** imports"
-    print $ map importVar (ifaceImports iface)
+    print $ map importVar (ifaceImports filtered_iface)
     putStrLn "** exports"
-    print $ map importVar (ifaceExports iface)
-    putStrLn "** pre-existing variables"
-    print extern_variables
+    print $ map importVar (ifaceExports filtered_iface)
+    putStrLn "** all visible variables"
+    putStrLn $ intercalate ", " $ map showLabel $ Map.keys visible_variables
     putStrLn "** renaming"
     print interface_renaming
 
-  -- Insert the interface's symbols into the module's imports,
-  -- replacing the existing imports.
-  -- Error out if a type mismatch is detected.
-  let imports = rn_imports ++ rn_exports ++
-                filter not_from_interface (moduleImports mod)
-        where
-          not_from_interface impent =
-            let v = importVar impent
-            in all ((v /=) . importVar) rn_exports
-      
-  return $ mod {moduleImports = imports}
+  -- Insert the interface's symbols into the module's imports
+  let mod' = filtered_mod {moduleImports = rn_imports ++ rn_exports ++
+                                           moduleImports filtered_mod}
+
+  -- Sanity check: the module's imports should not overlap with the
+  -- filtered interface
+  checkRenamedInterfaceCollisions
+    (rn_imports ++ rn_exports) (moduleImports filtered_mod)
+
+  return mod'
+
+-- | Verify that no variable is defined by both sets of imports.
+--   This should always pass, as a consequence of earlier checks.
+checkRenamedInterfaceCollisions interface_imports module_imports =
+  let i_vars = importListReferenceableVars interface_imports
+      m_vars = importListReferenceableVars module_imports
+      intersection = Set.fromList i_vars `Set.intersection` Set.fromList m_vars
+  in if Set.null intersection
+     then return ()
+     else traceShow intersection $ internalError "checkRenamedInterfaceCollisions"
+  
+-- | Remove imports from the interface if they define any variables with
+--   the same label as a variable that's in the list.
+--   Verify that the exports don't define any such variables.
+filterInterface :: LabelMap -> LabelMap -> Interface -> Interface
+filterInterface other_imports other_exports (Interface imports exports) =
+  Interface (filter_imports imports) (check_exports exports)
+  where
+    filter_imports xs = filter unique xs
+      where
+      unique i =
+        -- Only check the import's defined variable.
+        -- We don't need to check for other referenceable variables, since 
+        -- they won't actually be used until closure conversion occurs
+        other_imports `labelMapDoesn'tContain` importVar i &&
+        other_exports `labelMapDoesn'tContain` importVar i
+
+    check_exports xs =
+      if any (any (labelMapContains other_exports) . importReferenceableVars) xs
+      then internalError "filterInterface: Redefined variable"
+      else xs
+
+-- | Remove imports from the module if they define a variable found in
+--   the list.
+filterModule :: LabelMap -> Module -> Module
+filterModule label_map mod =
+  mod {moduleImports = filter_imports $ moduleImports mod}
+  where
+    filter_imports xs =
+      filter (labelMapDoesn'tContain label_map . importVar) xs
+
+-- | Remove all imports of variables from a module if the variable is 
+--   defined in the module.
+--
+--   This function is called immediately after parsing low-level modules.
+--   As an artifact of the parser, a module can import a variable that
+--   it defines.  Such imports are superfluous.
+removeSelfImports :: Module -> IO Module
+removeSelfImports mod =
+  let exp_vars = moduleExportReferenceableVars mod
+      exp_var_map = labelMap exp_vars
+  in return $ filterModule exp_var_map mod
+
+-- | Rename all variables in an interface.  This is done after an interface
+--   is loaded to eliminate ID collisions.
+freshenInterface :: Interface -> FreshVarM Interface
+freshenInterface iface = do
+  -- Get all external variables in the interface.  Remove duplicates.
+  let iface_extern_variables =
+        let imp_vars = importListReferenceableVars $ ifaceImports iface
+            exp_vars = importListReferenceableVars $ ifaceExports iface
+        in imp_vars ++ (exp_vars \\ imp_vars)
+
+  -- Rename each of these variables
+  renamed_vars <- mapM newClonedVar iface_extern_variables
+
+  -- Construct a renaming
+  let renaming = mkRenaming $ zip iface_extern_variables renamed_vars
+
+  -- Rename the interface
+  new_imports <- mapM (rename_import renaming) $ ifaceImports iface
+  new_exports <- mapM (rename_import renaming) $ ifaceExports iface
+  return $ Interface new_imports new_exports
+  where
+    -- Rename within an imported module
+    rename_import renaming impent
+      -- Error if the imported entity isn't being renamed
+      | Nothing <- getRenamedVar (importVar impent) renaming =
+          internalError "freshenInterface"
+      | otherwise =
+           renameImport RenameEverything renaming impent
 
 -- | Rename an interface's imported and exported symbols, given the set of
 --   variables that the interface's symbols should be renamed to.
@@ -337,75 +549,32 @@ addInterfaceToModuleImports iface mod = do
 --   Imported symbols are discarded if the variable name is found in the 
 --   list of renamed variables.  Otherwise they are renamed to a new variable
 --   name.
-renameInterface :: [Var]        -- ^ Variables targeted by renaming
+renameInterface :: LabelMap     -- ^ The varible renaming to perform
                 -> Interface    -- ^ Interface that should be renamed
                 -> FreshVarM ([Import], [Import], Renaming)
                 -- ^ Computes the new imports and exports
-renameInterface extern_variables iface = do
-  -- Discard imports if the variable name is found in extern_variables.
-  -- Those variables are
-  -- already defined, or will be defined by another loaded interface.
-  let orig_imports = filter is_not_duplicate $ ifaceImports iface
-        where
-          is_not_duplicate impent =
-            externVarName (importVar impent) `Map.notMember` extern_variable_labels
-      orig_exports = ifaceExports iface
-
+renameInterface visible_variables iface = do
   -- Get all external variables in the interface.  Remove duplicates.
   let iface_extern_variables =
-        let imp_vars = map importVar $ ifaceImports iface
-            exp_vars = map importVar $ ifaceExports iface
+        let imp_vars = importListReferenceableVars $ ifaceImports iface
+            exp_vars = importListReferenceableVars $ ifaceExports iface
         in imp_vars ++ (exp_vars \\ imp_vars)
 
   -- Create a renaming for these variables
-  new_e_vars <- mapM pick_renamed_name iface_extern_variables
+  new_e_vars <- mapM (renameExternallyVisibleVar visible_variables)
+                iface_extern_variables
   let renaming = mkRenaming $ zip iface_extern_variables new_e_vars
 
   -- Apply renaming
-  new_imports <- mapM (rename_import renaming) orig_imports
-  new_exports <- mapM (rename_import renaming) orig_exports
+  new_imports <- mapM (rename_import renaming) $ ifaceImports iface
+  new_exports <- mapM (rename_import renaming) $ ifaceExports iface
   return (new_imports, new_exports, renaming)
   where
-    -- Map from variable name to variable
-    extern_variable_labels =
-      Map.fromList [(externVarName v, v) | v <- extern_variables]
-
-    externVarName v =
-      case varName v
-      of Just lab -> lab
-         Nothing  -> internalError $ "renameInterface: " ++
-                     "Imported variable has no label"
-
-    -- Decide what to rename an external variable to.  Rename to the
-    -- preexisting variable with the same name, if one exists.
-    -- Otherwise create a new variable.
-    pick_renamed_name interface_var
-      | Just global_var <- Map.lookup lab extern_variable_labels =
-          -- Rename to the preexisting variable with the same label
-          return global_var
-      | otherwise =
-          -- Rename to a new variable with the same label
-          newExternalVar lab (varType interface_var)
-      where
-        lab = externVarName interface_var
-
     -- Rename within an imported module
-    rename_import renaming impent =
-      let renamed_var = case getRenamedVar (importVar impent) renaming
-                        of Just v -> v
-                           Nothing -> internalError "renameInterface"
-          Just lab = varName renamed_var
-      in case impent
-         of ImportClosureFun ep mfun -> do
-              ep' <- mkGlobalEntryPoints (entryPointsType ep) lab renamed_var
-              mfun' <- mapM (renameFun RenameEverything renaming) mfun
-              return $ ImportClosureFun ep' mfun'
-            ImportPrimFun _ t mfun -> do
-              mfun' <- mapM (renameFun RenameEverything renaming) mfun
-              return $ ImportPrimFun renamed_var t mfun'
-            ImportData _ Nothing ->
-              return $ ImportData renamed_var Nothing
-            ImportData _ (Just (StaticData val)) -> do
-              let val' = renameVal RenameEverything renaming val
-              return $ ImportData renamed_var (Just (StaticData val'))
-      
+    rename_import renaming impent
+      -- Error if the imported entity isn't being renamed
+      | Nothing <- getRenamedVar (importVar impent) renaming =
+          internalError "renameInterface"
+      | otherwise =
+           renameImport RenameNothing renaming impent
+         

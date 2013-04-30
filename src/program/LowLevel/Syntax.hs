@@ -411,6 +411,12 @@ data FunBase a =
     --   If zero, no bytes are reserved and the local data are can't be
     --   accessed.  Only top-level functions may have a nonzero frame size.
   , funFrameSize   :: {-# UNPACK #-}!Int
+    -- | The function's entry points.  'ClosureCall' functions have
+    --   entry points; other calling conventions don't.
+    --
+    --   These names are used by closure conversion and in interface files. 
+  , funEntryPoints :: !(Maybe EntryPoints)
+
   , funParams      :: [ParamVar] 
   , funReturnTypes :: [ValueType] 
   , funBody        :: a
@@ -429,37 +435,44 @@ setFunSize sz f = f {funSize = sz}
 setFunUses :: Uses -> Fun -> Fun
 setFunUses u f = f {funUses = u}
 
-mkFun :: CallConvention -> Bool -> Int -> [ParamVar] -> [ValueType] -> a
+-- | Remove size and uses information from a function
+clearFunDCEInfo :: FunBase a -> FunBase a
+clearFunDCEInfo f = f { funSize = unknownCodeSize
+                      , funUses = ManyUses}
+
+mkFun :: CallConvention -> Bool -> Int -> Maybe EntryPoints
+      -> [ParamVar] -> [ValueType] -> a
       -> FunBase a
-mkFun cc inl_req frame_size params returns body =
+mkFun cc inl_req frame_size entry_points params returns body =
   Fun { funConvention  = cc
       , funSize        = unknownCodeSize
       , funUses        = ManyUses
       , funInlineRequest = inl_req
       , funFrameSize   = frame_size
+      , funEntryPoints = entry_points
       , funParams      = params
       , funReturnTypes = returns
       , funBody        = body}
 
-closureFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
-closureFun params returns body =
-  mkFun ClosureCall False 0 params returns body
+closureFun :: EntryPoints -> [ParamVar] -> [ValueType] -> Stm -> Fun
+closureFun ep params returns body =
+  mkFun ClosureCall False 0 (Just ep) params returns body
 
 primFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
 primFun params returns body =
-  mkFun PrimCall False 0 params returns body
+  mkFun PrimCall False 0 Nothing params returns body
 
 joinFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
 joinFun params returns body =
-  mkFun JoinCall False 0 params returns body
+  mkFun JoinCall False 0 Nothing params returns body
 
 changeFunBody :: (a -> b) -> FunBase a -> FunBase b
-changeFunBody f (Fun cc s u inl fs p r b) = Fun cc s u inl fs p r (f b)
+changeFunBody f (Fun cc s u inl fs ep p r b) = Fun cc s u inl fs ep p r (f b)
 
 changeFunBodyM :: Monad m => (a -> m b) -> FunBase a -> m (FunBase b)
-changeFunBodyM f (Fun cc s u inl fs p r b) =
+changeFunBodyM f (Fun cc s u inl fs ep p r b) =
   do b' <- f b
-     return $ Fun cc s u inl fs p r b'
+     return $ Fun cc s u inl fs ep p r b'
 
 type Alt = (Lit, Stm)
 
@@ -513,7 +526,10 @@ partitionGlobalDefs ds = part id id ds
 data Import =
     -- | A global function
     ImportClosureFun
-    { importEntryPoints :: EntryPoints
+    { -- | The imported function's entry points.
+      --   If the function is present, it has the same entry points.
+      importEntryPoints :: EntryPoints
+
       -- | The function's value.  The value is present if the function was
       -- deemed suitable for inlining.  The value is from before closure
       -- conversion.
@@ -584,11 +600,19 @@ clearImportedDefinitions mod =
 
 -------------------------------------------------------------------------------
 
--- | Names of the global objects that make up a Pyon function.
---   Call 'mkEntryPoints' or 'mkGlobalEntryPoints' to create an 'EntryPoints'.
---   The definitions of these variables are created during closure conversion.
+-- | Names of the global objects that make up a function.
+--   These names are created when a closure-call function is created.  They're
+--   used during closure conversion to generate function call code.
 --
---   Dynamically allocated data such as closure records are not included here.
+--   Call 'mkEntryPoints' or 'mkGlobalEntryPoints' to create an 'EntryPoints'.
+--
+--   The variables mentioned in 'EntryPoints'es behave like uses of the
+--   variables, not as definitions.  Note that, prior to closure conversion, 
+--   only the \"global closure\" field is defined.
+--
+--   Despite its name, the \"global closure\" is only global for global
+--   functions.  For local functions, it's the name of a local variable
+--   pointing to a dynamically allocated closure.
 data EntryPoints =
   EntryPoints
   { _epType          :: {-# UNPACK #-} !FunctionType
