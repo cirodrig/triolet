@@ -77,8 +77,9 @@ callConstantBoxedInfoFunction dcon_type ty_args ex_types =
 constructInfo :: CoreDynTypeInfo -> KindedType -> Gen (Maybe ExpM)
 constructInfo type_info (KindedType k t) =
   case k
-  of BareK   -> constructBareInfo type_info t
-     ValK    -> constructValInfo type_info t
+  of BareK     -> constructBareInfo type_info t
+     ValK      -> constructValInfo type_info t
+     IntIndexK -> constructIntInfo type_info t
 
 constructBareInfo type_info ty = constructBareInfo' build type_info ty
   where
@@ -91,6 +92,12 @@ constructValInfo type_info ty = constructValInfo' build type_info ty
     build (Right e)  = return e
     build (Left rep) = return $ packReprVal ty rep
 
+constructIntInfo type_info ty = do
+  x <- lift $ lookupIntTypeInfo type_info ty
+  return $ case x
+           of Just (Length e) -> Just e
+              Nothing -> Nothing
+
 -- | Call auto-generated global functions to construct sizes for an unboxed
 --   type.
 --   Return 'Nothing' if there's not enough dynamic information to construct 
@@ -100,7 +107,7 @@ constructSizeParameter type_info (KindedType k t) =
   case k
   of BareK     -> constructBareSizeParameter type_info t
      ValK      -> constructValSizeParameter type_info t
-     IntIndexK -> internalError "constructSizeParameter: Not implemented"
+     IntIndexK -> constructIntInfo type_info t
 
 constructBareSizeParameter type_info ty = constructBareInfo' build type_info ty
   where
