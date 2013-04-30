@@ -45,9 +45,11 @@ builtinModuleName = ModuleName "Builtin"
 -- | A label tag, used to distinguish multiple variables that were created
 --   from the same original variable.
 --
---   Label tags are purely cosmetic extensions of variable names.  They
---   help to produce readable names in the generated code.  They have no
---   semantic significance.
+--   Label tags are used as a stable way of identifying such variables.
+--   Because label tags are created in a reliable way, a variable always
+--   gets the same label under separate compilation, though it may get
+--   multiple IDs.  Thanks to label tags, when the compiler reads multiple
+--   files, it can rename variables so that their IDs are consistent.
 data LabelTag =
     -- | A normal variable.  This tag is used on procedures, global data, and
     --   global function closures.
@@ -94,8 +96,12 @@ data Label =
     
     -- | If present, this is the variable's name, overriding the normal 
     --   name mangling process.  External names can be referenced from
-    --   non-Pyon code.  Only externally visible variables may have an
+    --   non-Triolet code.  Only externally visible variables may have an
     --   external name.
+    --
+    --   If a function has an external name, its tag must be 'NormalTag'.
+    --   Other tags arise on entities created by the compilation process;
+    --   these entities are not visible to non-Triolet code.
   , labelExternalName :: !(Maybe String)
   }
   deriving(Eq, Ord)
