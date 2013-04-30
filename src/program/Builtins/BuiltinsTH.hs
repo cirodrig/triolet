@@ -58,6 +58,7 @@ builtinTypeNames =
     -- Container type functions
   , "cartesianDomain"
   , "index"
+  , "offset"
   , "slice"
   , "array"
     
@@ -109,6 +110,7 @@ builtinTypeNamesForTypeFunctions =
   , "AsBare"
   , "cartesianDomain"
   , "index"
+  , "offset"
   , "slice"
   , "array"
   , "shape"

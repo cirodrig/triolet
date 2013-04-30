@@ -107,6 +107,7 @@ builtinTypeFunctions name_environment =
           , ("shape", shapePureTF, idTF The_shape 1, shapeMemTF)
           , ("cartesianDomain", cartPureTF, idTF The_cartesianDomain 1, cartMemTF)
           , ("index", indexPureTF, idTF The_index 1, indexMemTF)
+          , ("offset", offsetPureTF, idTF The_offset 1, offsetMemTF)
           , ("slice", slicePureTF, idTF The_slice 1, sliceMemTF)
           , ("Stream", streamPureTF, idTF The_Stream 1, streamMemTF)
 
@@ -415,6 +416,45 @@ indexMemTF bi = typeFunction 1 compute_eliminator
                 [int_type, int_type]
     int3_type = varApp (getBuiltin bi The_Tuple3)
                 [int_type, int_type, int_type]
+
+offsetPureTF bi = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator [shape_arg] = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_dim0 op -> return none_type
+           | isBuiltin bi The_dim1 op -> return none_type
+           | isBuiltin bi The_dim2 op -> return none_type
+           | isBuiltin bi The_dim3 op -> return none_type
+        _ -> return $ varApp (getBuiltin bi The_index) [shape_arg']
+
+    none_type = VarT (getBuiltin bi The_NoneType)
+    int_type = intT
+
+offsetMemTF bi = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator [shape_arg] = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_dim0 op -> return none_type
+           | isBuiltin bi The_dim1 op -> return none_type
+           | isBuiltin bi The_dim2 op -> return none_type
+           | isBuiltin bi The_dim3 op -> return none_type
+        _ -> return $ varApp (getBuiltin bi The_index) [shape_arg']
+
+    compute_eliminator ts =
+      internalError "Error in type application when reducing a type function"
+
+    none_type = varApp (getBuiltin bi The_Stored) [VarT (getBuiltin bi The_NoneType)]
+    int_type = varApp (getBuiltin bi The_Stored) [intT]
 
 slicePureTF bi = typeFunction 1 compute_eliminator
   where

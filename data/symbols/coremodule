@@ -461,6 +461,7 @@ data IndexableDict (t : box -> box) : box
 -- The cartesian domain corresponding to an index type
 type cartesianDomain : bare -> box;
 type index : box -> bare;
+type offset : box -> bare;
 type slice : box -> bare;
 
 -------------------------------------------------------------------------------
