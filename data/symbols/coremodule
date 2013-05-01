@@ -10178,3 +10178,350 @@ blocked_PBTree_doall :
  -> (int -> PBTree a -> Store)
  -> Store;
 
+
+
+
+-------------------------------------------------------------------------------
+-- New library
+
+
+
+-- A sequence of values.
+-- This data structure is based on the "Stream Fusion" paper.
+data Seq (a : box) : box
+{
+  seq @(s : box) (s, s -> SeqStep s a);
+};
+
+con_seq @(a s : box) (state : s) (next : s -> SeqStep s a)
+  -> Seq a attribute(inline) =
+  seq @a @s (boxedinfo seq @a) state next;
+
+data SeqStep (s a : box) : val
+{
+  seqYield (s, a);           -- Produce a new state and a value
+  seqSkip (s);               -- Produce a new state, but no value
+  seqDone ();                -- End of sequence
+};
+
+data Either (a b : box) : box
+{
+  left (a);
+  right (b);
+};
+
+con_left @(a b : box) (x : a) -> Either a b attribute(inline) =
+  left @a @b (boxedinfo left @a @b) x;
+
+con_right @(a b : box) (x : b) -> Either a b attribute(inline) =
+  right @a @b (boxedinfo right @a @b) x;
+
+data BindStateSeq (s a : box) : box
+{
+    outer_Seq (s);
+    inner_Seq @(sp : box) (s, sp, sp -> SeqStep sp a);
+};
+
+bind_Seq @(a b : box) (sq : Seq a) (k : a -> Seq b)
+  -> Seq b attribute(inline, inline_final) =
+  case sq of seq @s tyob st g.
+  let type bind_state = BindStateSeq s b in
+  let outer_info = boxedinfo outer_Seq @s @b in
+  let inner_info = boxedinfo inner_Seq @s @b in
+
+  letfun
+    gp (c : bind_state) -> SeqStep bind_state b =
+        case c of {
+          outer_Seq tyob p.
+            case g p of {
+              seqYield new_state x.
+                case k x of seq @sp tyob s2 g2.
+                seqSkip @bind_state @b
+                (inner_Seq @s @b @sp inner_info new_state s2 g2)
+            ; seqSkip new_state.
+                seqSkip @bind_state @b
+                (outer_Seq @s @b outer_info new_state)
+            ; seqDone.
+                seqDone @bind_state @b
+            }
+        ; inner_Seq @sp tyob st s2 g2.
+            case g2 s2 of {
+              seqYield new_state x.
+                seqYield @bind_state @b
+                (inner_Seq @s @b @sp inner_info st new_state g2)
+                x
+            ; seqSkip new_state.
+                seqSkip @bind_state @b
+                (inner_Seq @s @b @sp inner_info st new_state g2)
+            ; seqDone.
+                seqSkip @bind_state @b
+                (outer_Seq @s @b outer_info st)
+            }
+        }
+  in
+  con_seq @b @bind_state (outer_Seq @s @b outer_info st) gp;
+
+concat_Seq @(a : box) (sq1 : Seq a) (sq2 : Seq a)
+  -> Seq a attribute(inline, inline_final) =
+  case sq1 of seq @st1 tyob s1 g1.
+  case sq2 of seq @st2 tyob s2 g2.
+
+  let type concat_state = Either st1 st2 in
+  let L_info = boxedinfo left @st1 @st2 in
+  let R_info = boxedinfo right @st1 @st2 in
+
+  letfun
+    g (c : concat_state) -> SeqStep concat_state a =
+        case c of {
+          left tyob p.
+            case g1 s1 of {
+              seqYield new_state x.
+                seqYield @concat_state @a (left @st1 @st2 L_info new_state) x
+            ; seqSkip new_state.
+                seqSkip @concat_state @a (left @st1 @st2 L_info new_state)
+            ; seqDone.
+                seqSkip @concat_state @a (right @st1 @st2 R_info s2)
+            }
+        ; right tyob p.
+            case g2 s2 of {
+              seqYield new_state x.
+                seqYield @concat_state @a (right @st1 @st2 R_info new_state) x
+            ; seqSkip new_state.
+                seqSkip @concat_state @a (right @st1 @st2 R_info new_state)
+            ; seqDone.
+                seqDone @concat_state @a
+            }
+        }
+  in
+  con_seq @a @concat_state (con_left @st1 @st2 s1) g;
+
+peel_Seq @(a : box) (rep : Repr (AsBare a)) (sq : Seq a)
+  -> Boxed (Maybe (Tuple2 (AsBare a) (Ref (Seq a))))
+  attribute(inline, inline_final) =
+
+  case sq of seq @s tyob state generator.
+
+  let type peeled = Tuple2 (AsBare a) (Ref (Seq a)) in
+  let ref_info = unboxedinfo Ref @(Seq a) in
+  let peeled_info = unboxedinfo Tuple2 @(AsBare a) @(Ref (Seq a))
+                    rep ref_info in
+  let maybe_info = unboxedinfo Maybe @peeled peeled_info in
+
+  letfun
+    peel (state : s) -> Boxed (Maybe peeled) =
+
+      case generator state of {
+        seqYield new_state x.
+          con_boxed @(Maybe peeled) maybe_info
+          (just @peeled (reprSizeAlign @peeled peeled_info)
+           (tuple2 @(AsBare a) @(Ref (Seq a))
+            (reprSizeAlign @(AsBare a) rep)
+            (reprSizeAlign @(Ref (Seq a)) ref_info)
+            (asbare @(AsBare a) rep x)
+            (ref @(Seq a) (con_seq @a @s new_state generator))))
+
+      ; seqSkip new_state. peel new_state
+
+      ; seqDone. 
+          con_boxed @(Maybe peeled) maybe_info
+          (nothing @peeled (reprSizeAlign @peeled peeled_info))
+      }
+   in
+   peel state;
+
+map_Seq @(a b : box) (f : a -> b) (sq : Seq a)
+  -> Seq b attribute(inline, inline_final) =
+  case sq of seq @s tyob state generator.
+  letfun
+    g (state : s) -> SeqStep s b =
+      case generator state of {
+        seqYield new_state x.   seqYield @s @b new_state (f x)
+      ; seqSkip new_state.      seqSkip @s @b new_state
+      ; seqDone.                seqDone @s @b
+      }
+    in
+    con_seq @b @s state g;
+
+fold_Seq @(a acc : box) (f: a -> acc -> acc) (sq: Seq a) (ac : acc)
+  -> acc attribute(inline, inline_final) =
+  case sq of seq @s tyob state generator.
+  letfun
+    go (state : s) (ac : acc) -> acc =
+      case generator state of {
+        seqYield new_state x.   go new_state (f x ac)
+      ; seqSkip new_state.      go new_state ac
+      ; seqDone.                ac
+      }
+    in
+    go state ac;
+
+-- The functor type class
+data Funct (t : box -> box) : box
+{
+    funct (forall a b : box. (a -> b) -> t a -> t b);
+};
+
+data Indexable2 (t : box -> box) : box
+{
+    indexable2
+    (
+    -- functor
+    Funct t,
+    -- shape
+    forall a: box. t a -> shape t,
+    -- at
+    forall a: box. t a -> AsBox (index (shape t)) -> a,
+    -- slice
+    forall a: box.
+    t a -> shape t -> AsBox (offset (shape t)) -> SomeIndexable (shape t) a
+    )
+};
+
+data Stream2 (d a : box) : box
+{
+    seqStream (Seq a);
+    splittable (Shape2 d, View2 d (Stream2 list_dim a));
+    ixStream (SomeIndexable d a);
+};
+
+data Shape2 (d : box) : box
+{
+    shape2
+    (
+        -- noOffset
+        AsBox (offset d),
+        -- addOffset
+        AsBox (offset d) -> AsBox (offset d) -> AsBox (offset d),
+        -- appOffset
+        AsBox (offset d) -> AsBox (index d) -> AsBox (index d),
+        -- intersect
+        d -> d -> d,
+        -- split
+        d -> AsBox (Maybe (Tuple3 (AsBare d) (offset d) (AsBare d))),
+        -- peel
+        forall a r : box. (a -> Stream2 list_dim a -> r) -> (NoneType -> r)
+                           -> (View2 d (Stream2 list_dim a) -> r) -> r,
+        -- flatten
+        forall a : box. Stream2 d a -> Stream2 list_dim a,
+        -- generate
+        forall a : box. offset d -> d -> (index d -> a) -> Stream2 d a,
+        -- map
+        Funct (Stream2 d),
+        -- zipWith
+        forall a b c : box.
+        (a -> b -> c) -> Stream2 d a -> Stream2 d b -> Stream2 d c,
+        -- fold
+        forall a acc : box.
+        (a -> acc -> acc) -> Stream2 d a -> acc -> acc,
+        -- foreach
+        forall acc : box.
+        d -> offset d -> (index d -> acc -> acc) -> acc -> acc
+    )
+};
+
+shIntersect @(d : box) (sh : Shape2 d) -> d -> d -> d =
+    case sh of shape2 tyob noOff addOff appOff intersect split peel
+                      flat gen map zipWith fold foreach.
+    intersect;
+
+shAddOffset @(d : box) (sh : Shape2 d)
+    -> AsBox (offset d) -> AsBox (offset d) -> AsBox (offset d) =
+    case sh of shape2 tyob noOff addOff appOff intersect split peel
+                      flat gen map zipWith fold foreach.
+    addOff;
+
+shAppOffset @(d : box) (sh : Shape2 d)
+    -> AsBox (offset d) -> AsBox (index d) -> AsBox (index d) =
+    case sh of shape2 tyob noOff addOff appOff intersect split peel
+                      flat gen map zipWith fold foreach.
+    appOff;
+
+ix_shape @(t : box -> box) (ix : Indexable2 t)
+    -> forall a: box. t a -> shape t =
+    case ix of indexable2 tyob f sh at sl.
+    sh;
+
+ix_at @(t : box -> box) (ix : Indexable2 t)
+    -> forall a : box . t a -> AsBox (index (shape t)) -> a =
+    case ix of indexable2 tyob f sh at sl.
+    at;
+
+data View2 (d a : box) : box 
+{
+    view2 (d, AsBox (index d) -> a);
+};
+
+con_view2 @(d a : box) (x : d) (f : AsBox (index d) -> a)
+  -> View2 d a attribute(inline) =
+  view2 @d @a (boxedinfo view2 @d @a) x f;
+
+someIndexableToView @(d a : box) (si : SomeIndexable d a)
+  -> View2 d a attribute(inline) =
+  case si of someIndexable @t tyob c ix x.
+  coerce @(View2 (shape t) a) @(View2 d a) (indexableToView @t @a ix x);
+
+indexableToView @(t : box -> box) @(a :box) (ix : Indexable2 t) (x : t a)
+  -> View2 (shape t) a attribute(inline) =
+  let type d = (shape t) in
+  let ixshape = ix_shape @t ix in
+  let ixat = ix_at @t ix in
+  con_view2 @d @a (ixshape @a x)
+  (\ (i : AsBox (index d)) -> a . ixat @a x i) ;
+
+zipWithView @(d a b c : box)
+  (sh: Shape2 d) (f : a -> b -> c) (v1 : View2 d a) (v2 : View2 d b)
+  -> View2 d c attribute(inline) =
+  case v1 of view2 tyob d1 g1.
+  case v2 of view2 tyob d2 g2.
+  con_view2 @d @c (shIntersect @d sh d1 d2)
+  (\ (x : AsBox (index d)) -> c. f (g1 x) (g2 x));
+
+mapView @(d a b : box) (f : a -> b) (v: View2 d a)
+  -> View2 d b attribute(inline) =
+  case v of view2 tyob dv g.
+  con_view2 @d @b dv (\ (x : AsBox (index d)) -> b. f (g x));
+
+functView @(d a : box) -> Funct (View2 d) attribute(inline) =
+  funct @(View2 d) (boxedinfo funct @(View2 d)) (mapView @d);
+
+shapeView @(d a : box) (v : View2 d a) -> d attribute(inline) =
+  case v of view2 tyob dv rest.
+  dv;
+
+atView @(d a : box) (v : View2 d a) (i : AsBox (index d))
+  -> a attribute(inline) =
+  case v of view2 tyob f g.
+  g i;
+
+
+data SomeIndexable (d a : box) : box
+{
+    someIndexable @(t : box -> box)
+    (
+       coerce @box (shape t) d,
+       Indexable2 t,
+       t a
+    )
+};
+
+indexableToView @(t : box -> box) @(a :box) (ix : Indexable2 t) (x : t a)
+  -> View2 (shape t) a attribute(inline) =
+  let type d = (shape t) in
+  let ixshape = ix_shape @t ix in
+  let ixat = ix_at @t ix in
+  con_view2 @d @a (ixshape @a x) (\ (i : AsBox (index d)) -> a. ixat @a x i) ;
+
+{-
+indexableView @(d : box) (sh : Shape2 d) -> Indexable2 (View2 d) =
+    let type t = View2 d in
+    indexable2 @t functView shapeView atView (sliceView @d sh);
+
+sliceView @(d a : box) (sh : Shape2 d) (v : View2 d a) (dom : d) (off : offset d) -> SomeIndexable d a =
+    case v of view2 f g.
+    let type t = View2 d in
+    someIndexable @d @a @t (indexableView @t @a sh) (
+        View2 @d @a dom (\ (i : (index d)) -> a . g ((shAppOffset @d sh) off i)));
+-}
+
+
+
