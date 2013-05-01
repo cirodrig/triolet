@@ -196,16 +196,21 @@ build_arr1D g n = Array.listArray (0, n-1) [g i | i <- [0..n-1]]
 -------------------------------------------------------------------------------
 -- Lists (zero-indexed 1D arrays)
 
--- | A list is an array with an associated length 
+-- | A list is an array with an associated length.
+--   In Triolet, the data type is called 'list' and the data constructor is
+--   called 'make_list'.
 data List a = List !Int !(Array.Array Int a)
 
 type instance Domain List = ListDim
+
+listToListSection :: List a -> ListSection a
+listToListSection lst@(List n arr) = ListSection lst 0 n
 
 funct_List :: Funct List
 funct_List = Funct map_List
 
 map_List :: (a -> b) -> List a -> List b
-map_List f (List n arr) = List n (fmap f arr)
+map_List f l = build_List $ map_Stream f $ traverse_List l
 
 indexable_List :: Indexable List
 indexable_List =
@@ -223,9 +228,19 @@ at_List :: List a -> Int -> a
 at_List (List n arr) i = arr Array.! i
 
 slice_List :: List a -> ListDim -> Int -> SomeIndexable ListDim a
-slice_List (List n arr) dom off =
-  SomeIndexable indexable_ListSection $
-  ListSection n off dom arr
+slice_List lst dom off =
+  case dom
+  of ListDim Nothing -> error "Unbounded list domain"
+     ListDim (Just n) ->
+       SomeIndexable indexable_ListSection $
+       ListSection lst off n
+
+traversable_List :: Traversable List
+traversable_List = Traversable traverse_List build_List
+
+traverse_List :: List a -> Stream ListDim a
+traverse_List lst =
+  IxStream id $ SomeIndexable indexable_ListSection (listToListSection lst)
 
 build_List :: Stream ListDim a -> List a
 build_List s = 
@@ -238,18 +253,49 @@ build_List s =
           of ListDim (Just length) -> List length (build_arr1D visit length)
              ListDim Nothing -> error "Unbounded stream"
   where
-    -- Implemented with mutable array-appending in Triolet
+    -- Implemented with a primitive array-appending function in Triolet;
+    -- not defined in Haskell
     from_seq s = undefined
 
 -- | A section of a list.
---   A section has the real array's size, an offset, the section's size,
---   and the real array.
-data ListSection a = ListSection !Int !Int !ListDim !(Array.Array Int a)
+--   A section consists of a list, 
+--   an offset within the list, and a length.
+data ListSection a = ListSection !(List a) !Int !Int
 
 type instance Domain ListSection = ListDim
 
+funct_ListSection :: Funct ListSection
+funct_ListSection = Funct map_ListSection
+
+map_ListSection :: (a -> b) -> ListSection a -> ListSection b
+map_ListSection f sec =
+  build_ListSection $ map_Stream f $ traverse_ListSection sec
+
 indexable_ListSection :: Indexable ListSection
-indexable_ListSection = undefined
+indexable_ListSection =
+  Indexable funct_ListSection shape_ListSection
+            at_ListSection slice_ListSection
+
+shape_ListSection :: ListSection a -> ListDim
+shape_ListSection (ListSection _ _ length) = ListDim (Just length)
+
+at_ListSection :: ListSection a -> Int -> a
+at_ListSection (ListSection lst offset _) i =
+  at_List lst (offset + i)
+
+slice_ListSection :: ListSection a -> ListDim -> Int -> SomeIndexable ListDim a
+slice_ListSection (ListSection lst offset _) dom offset2 =
+  slice_List lst dom (offset + offset2)
+
+traversable_ListSection :: Traversable ListSection
+traversable_ListSection = Traversable traverse_ListSection build_ListSection 
+
+traverse_ListSection :: ListSection a -> Stream ListDim a
+traverse_ListSection sec =
+  IxStream id (SomeIndexable indexable_ListSection sec)
+
+build_ListSection :: Stream ListDim a -> ListSection a
+build_ListSection s = listToListSection $ build_List s
 
 -------------------------------------------------------------------------------
 -- Arrays
