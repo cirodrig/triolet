@@ -184,7 +184,6 @@ Executable triolet
     CParser2.GenCode2
     CParser2.LexData
     CParser2.Lexer
-    CParser2.MoveFunctions
     CParser2.Parser
     CParser2.Resolve
     LLParser.AST
