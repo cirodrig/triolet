@@ -1191,7 +1191,8 @@ namespace Triolet {
     public:
       // Constructors
       Array1<T>(void) : BareType() { }
-      Array1<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
+      Array1<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
       static unsigned int 
@@ -1278,7 +1279,8 @@ namespace Triolet {
     public:
       // Constructors
       BArray1<T>(void) : BareType() { }
-      BArray1<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
+      BArray1<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
       static unsigned int 
@@ -1376,7 +1378,8 @@ namespace Triolet {
     public:
       // Constructors
       Array2<T>(void) : BareType() { }
-      Array2<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
+      Array2<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
       static unsigned int 
@@ -1477,7 +1480,8 @@ namespace Triolet {
     public:
       // Constructors
       BArray2<T>(void) : BareType() { }
-      BArray2<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
+      BArray2<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
       static unsigned int 
@@ -1590,7 +1594,8 @@ namespace Triolet {
     public:
       // Constructors
       Array3<T>(void) : BareType() { }
-      Array3<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
+      Array3<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
       static unsigned int 
@@ -1708,7 +1713,8 @@ namespace Triolet {
     public:
       // Constructors
       BArray3<T>(void) : BareType() { }
-      BArray3<T>(TriBarePtr _bare_data) : BareType(_bare_data) { }
+      BArray3<T>(TriBoxPtr _parent, TriBarePtr _bare_data)
+        : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
       static unsigned int 
@@ -2780,6 +2786,12 @@ namespace Triolet {
     bool b = T::isPOD();
 
     T::copy(x, incomplete_t);
+
+    /* Empty constructor and construct from a pointer */
+    {
+      T y();
+      T z((TriBoxPtr)NULL, (TriBarePtr)NULL);
+    }
   }
 
   template<class T>
