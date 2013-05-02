@@ -682,11 +682,8 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
                                      , eq_primtype_check x y]
 
     pointer =
-      let pointer_type = case x
-                         of PrimT PointerType -> PrimT PointerType
-                            PrimT OwnedType   -> PrimT CursorType
-                            PrimT CursorType  -> PrimT CursorType
-      in pointer_type `checking` [single_parameter, pointer_check x, native_int_check y]
+      pointerAddType x
+      `checking` [single_parameter, pointer_check x, native_int_check y]
 
     atomic =
       y `checking` [single_parameter, pointer_only_check x, primtype_check y]
@@ -701,6 +698,13 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
       PrimT BoolType `checking` [ single_parameter
                                 , bool_check x
                                 , bool_check y]
+
+-- | Given the type of base pointer 'b', get the type of the new pointer
+--   produced by adding some offset to 'b'.
+pointerAddType (PrimT PointerType) = PrimT PointerType
+pointerAddType (PrimT OwnedType)   = PrimT CursorType
+pointerAddType (PrimT CursorType)  = PrimT CursorType
+
 
 -- | Determine the type of a unary operation's result.  Throw errors if the
 -- operation is ill-typed.
@@ -787,7 +791,10 @@ resolveExpr expr =
        let mkexp b f =
              check (expectReferenceType "Base address must have 'pointer' or 'owned' type" (expType b)) $
              FieldE b f
-       return1 (pure $ PrimT PointerType) (mkexp <$> base' <*> fld')
+           -- Result is a pointer or cursor
+           result_type = case expType $ applyTo [] base'
+                         of [t] -> pointerAddType t
+       return1 (pure result_type) (mkexp <$> base' <*> fld')
      LoadFieldE base fld -> do
        base' <- resolveExpr base
        fld' <- resolveField fld
