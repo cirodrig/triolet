@@ -170,6 +170,7 @@ computeStructure t = liftTypeEvalM $ do
       | con == intV -> return $ PrimStruct trioletIntType
       | con == uintV -> return $ PrimStruct trioletUintType
       | con == floatV -> return $ PrimStruct trioletFloatType
+      | con == byteV -> return $ PrimStruct trioletByteType
       {-  | con `isCoreBuiltin` The_bool -> return BoolStruct -}
 
     Just (con, [size, element])

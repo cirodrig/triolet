@@ -126,11 +126,12 @@ trioletFloatSize :: Size
 trioletFloatSize = S32
 
 trioletIntType, trioletUintType, trioletFloatType,
-  trioletBoolType, trioletNoneType :: PrimType
+  trioletBoolType, trioletByteType, trioletNoneType :: PrimType
 trioletIntType = IntType Signed trioletIntSize
 trioletUintType = IntType Unsigned trioletIntSize
 trioletFloatType = FloatType trioletFloatSize
 trioletBoolType = BoolType
+trioletByteType = IntType Unsigned S8
 trioletNoneType = UnitType
 
 -- | The data type used to keep track of a function's arity in functions

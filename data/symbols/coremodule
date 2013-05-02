@@ -2428,6 +2428,9 @@ reprVal_uint : ReprVal uint attribute(inline, builtin) =
 reprVal_float : ReprVal float attribute(inline, builtin) =
   reprVal @float (sizeAlignVal @float 4U 4U) True;
 
+reprVal_byte : ReprVal byte attribute(inline, builtin) =
+  reprVal @byte (sizeAlignVal @byte 1U 1U) True;
+
 sizealign_store : SizeAlign (Stored Store);
 sizealign_EffTok : SizeAlign (Stored EffTok);
 sizealign_StuckRef : forall a : box. SizeAlign (StuckRef a);

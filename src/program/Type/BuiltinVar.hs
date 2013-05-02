@@ -108,6 +108,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("int", "int", TypeLevel, False)
         , ("uint", "uint", TypeLevel, False)
         , ("float", "float", TypeLevel, False)
+        , ("byte", "byte", TypeLevel, False)
         
         , ("asBox", "AsBox", TypeLevel, True)
         , ("asBare", "AsBare", TypeLevel, True)
@@ -152,6 +153,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("valInfo_int", "reprVal_int", ObjectLevel, True)
         , ("valInfo_uint", "reprVal_uint", ObjectLevel, True)
         , ("valInfo_float", "reprVal_float", ObjectLevel, True)
+        , ("valInfo_byte", "reprVal_byte", ObjectLevel, True)
         , ("bareInfo_arr", "repr_arr", ObjectLevel, True)
         , ("bareInfo_ref", "repr_Ref", ObjectLevel, True)
         , ("fieldInfo_ref", "fieldSize_ref", ObjectLevel, True)
