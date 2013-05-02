@@ -401,24 +401,38 @@ inlineSaturatedCall (!f) (!n_returns) args (HasContinuation params rtypes cont) 
      One ->
        -- The function has one endpoint.  Graft the continuation onto the
        -- endpoint.
-       insertContinuationInline f args params cont
+       insertContinuationInline f args params rtypes cont
        --return $ insertContinuation params stm $
        --  bindArguments args (funParams f) (funBody f)
      Many ->
        case cont
        of BigContinuation stm ->
             insertContinuationAsJoinPoint f args params rtypes stm
-          _ -> insertContinuationInline f args params cont
+          _ -> insertContinuationInline f args params rtypes cont
   
 -- | Given a function that will be inlined, inline the function's
 --   continuation into its body.  Return the code of the inlined function.
-insertContinuationInline f args params cont =
+insertContinuationInline :: Fun   -- ^ Function being inlined
+                         -> [Val] -- ^ Arguments of function call
+                         -> [ParamVar] -- ^ Parameters of continuation
+                         -> [ValueType] -- ^ Return types of continuation
+                         -> ContinuationCode -- ^ Code of continuation
+                         -> Inl s Stm       
+                            -- ^ Computes the inlined function body
+insertContinuationInline f args params rtypes cont =
   let inlined_body = bindArguments args (funParams f) (funBody f)
       cont_stm     = fromContinuationCode cont
-  in return $ insertContinuation params cont_stm inlined_body
+  in return $ insertContinuation params rtypes cont_stm inlined_body
 
 -- | Given a function that will be inlined, inline the function's
 --   continuation into its body.  Return the code of the inlined function.
+insertContinuationAsJoinPoint :: Fun   -- ^ Function being inlined
+                              -> [Val] -- ^ Arguments of function call
+                              -> [ParamVar] -- ^ Parameters of continuation
+                              -> [ValueType] -- ^ Return types of continuation
+                              -> Stm -- ^ Code of continuation
+                              -> Inl s Stm
+                                 -- ^ Computes the inlined function body
 insertContinuationAsJoinPoint f args params rtypes stm = do
   let fun_params       = funParams f 
       fun_return_types = funReturnTypes f 
@@ -440,7 +454,7 @@ insertContinuationAsJoinPoint f args params rtypes stm = do
         LetrecE (NonRec (Def cont_name cont_function)) $
         -- Insert a call to the continuation at the end of the
         -- inlined function body
-        insertContinuation f_return_vars cont_call fun_body
+        insertContinuation f_return_vars rtypes cont_call fun_body
 
   return inlined_body
 
@@ -452,7 +466,7 @@ bindArguments _ _ _ = internalError "bindArguments: Wrong number of arguments"
 
 -- | Insert 'call' at every return point in expression 'e', which is a
 --   function body that has been inlined.
-insertContinuation return_vars cont_code e = go e
+insertContinuation return_vars cont_rtypes cont_code e = go e
   where
     go (LetE params rhs body) = LetE params rhs (go body)
     go (LetrecE defs body) = LetrecE (fmap go_local_function defs) (go body)
@@ -466,12 +480,15 @@ insertContinuation return_vars cont_code e = go e
     -- If the local function is a join point,
     -- continuations will be inserted in the function body instead of
     -- after a call to the function.
+    -- Since the function now ends with the continuation's code,  
+    -- the new function has the same return types as the continuation does.
     -- Other local functions are not modified.
     go_local_function def
       | funConvention (definiens def) == JoinCall =
           let Def v f = def
               f' = changeFunBody go f
-          in Def v f'
+              f'' = f' {funReturnTypes = cont_rtypes}
+          in Def v f''
       | otherwise = def
 
 -------------------------------------------------------------------------------
