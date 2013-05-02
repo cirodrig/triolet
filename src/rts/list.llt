@@ -6,7 +6,6 @@ module core.internal.list;
 #include "prim.h"
 #include "memory_py.h"
 #include "apply_py.h"
-#include "stream.h"
 #include "list.h"
 #include "structures.h"
 
