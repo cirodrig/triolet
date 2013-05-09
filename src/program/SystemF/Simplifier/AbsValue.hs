@@ -170,6 +170,9 @@ codeTrivialExp code =
        case _codeValue code
        of LitAV l -> Just $ ExpM (LitE defaultExpInfo l)
           VarAV v -> Just $ ExpM (VarE defaultExpInfo v)
+          DataAV d
+            | Just True <- fromBoolData d -> Just $ trueE defaultExpInfo
+            | Just False <- fromBoolData d -> Just $ falseE defaultExpInfo
           _ -> case _codeLabel code
                of Nothing -> Nothing
                   Just exp -> 
@@ -272,6 +275,15 @@ data AbsData =
 -- | Construct an 'AbsData' for a value type
 valAbsData :: ConInst -> [AbsCode] -> AbsData
 valAbsData con fs = AbsData con [] Nothing fs
+
+-- | If the 'AbsData' is a a boolean constant, get the boolean value
+fromBoolData :: AbsData -> Maybe Bool
+fromBoolData d =
+  case dataCon d
+  of VarCon op _ _ 
+       | op == coreBuiltin The_True -> Just True 
+       | op == coreBuiltin The_False -> Just False
+     _ -> Nothing
 
 -- | A heap fragment.  The domain of the heap fragment indicates exactly
 --   the contents of the heap fragment.
