@@ -833,21 +833,22 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
       | otherwise =
           BinExpr (CmpZOp sgn sz CmpLE) larg rarg
 
--- Pointer addition.
--- Eliminate add of 0.
--- Reassociate pointer addition.
--- Remove casting from the base address.
-
--- FIXME: The pointer argument may be owned, but the result is always 
--- non-owned.  When eliminating an add, how do we know whether to cast?
 simplifyBinary (AddPOp ptr_kind) larg rarg
-  | isIntLitExpr 0 rarg = larg
+  -- Eliminate add of 0 if argument is a cursor or an ordinary pointer.
+  -- Cannot eliminate if argument is an owned pointer because adding 
+  -- converts to a cursor.
+  | isIntLitExpr 0 rarg &&
+    (ptr_kind == PointerPtr || ptr_kind == CursorPtr) = larg
+
+  -- Merge load with pointer casting
   | UnExpr CastFromOwnedOp larg' <- larg =
       simplifyBinary (AddPOp OwnedPtr) larg' rarg
-  | BinExpr (AddPOp _) larg' larg2 <- larg =
+
+  -- Merge load with pointer arithmetic
+  | BinExpr (AddPOp ptr_kind') larg' larg2 <- larg =
       let rarg' = simplify' $
                   CAExpr (AddZOp Signed nativeIntSize) [larg2, rarg]
-      in simplifyBinary (AddPOp ptr_kind) larg' rarg'
+      in simplifyBinary (AddPOp ptr_kind') larg' rarg'
   | otherwise = BinExpr (AddPOp ptr_kind) larg rarg
 
 simplifyUnary op arg =
