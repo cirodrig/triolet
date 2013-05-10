@@ -97,10 +97,10 @@ data PreImportData =
 renamePreImport :: Renaming -> PreImport -> FreshVarM PreImport
 renamePreImport rn (Def v pi) = do
   pi' <- case pi
-         of PreImportFun ft m_ep Nothing -> return pi
-            PreImportFun ft m_ep (Just f) -> do
-              f' <- renameFun RenameNothing rn f
-              return $ PreImportFun ft m_ep (Just f')
+         of PreImportFun ft m_ep m_f -> do
+              let m_ep' = fmap (renameEntryPoints RenameNothing rn) m_ep
+              m_f' <- mapM (renameFun RenameNothing rn) m_f
+              return $ PreImportFun ft m_ep' m_f'
             PreImportData sd -> do
               sd' <- renameStaticData RenameNothing rn sd
               return $ PreImportData sd'
@@ -172,52 +172,39 @@ pprInterface iface =
 --   Any global symbols that are mentioned in the exported code will become
 --   exported symbols themselves.
 createModuleInterface :: Module -> IO (Module, Interface)
-createModuleInterface mod = do
-  -- Find all exported symbols, transitively
-  let declared_export_vars = Set.fromList [v | (v, TrioletExportSig) <- moduleExports mod]
-      (export_vars, pre_imports, _) =
-        slurpExports declared_export_vars $ concatMap groupMembers $ moduleGlobals mod
-      
-  -- Rename all exported variables to externally visible names
-  renaming <- createExternNames (moduleModuleName mod) (moduleNameSupply mod) $
-              [v | Def v _ <- pre_imports, not $ varIsExternal v]
+createModuleInterface pre_mod = do
+  -- Find externally visible variables
+  let (mod, pre_imports, _) = slurpExports pre_mod
 
-  (renamed_mod, interface) <-
+  -- Rename all exported variables
+  (renaming, mod') <- renameExternNames mod
+  pre_imports' <- 
     withTheLLVarIdentSupply $ \ll_supply -> runFreshVarM ll_supply $ do
-      -- Rename all uses of the exported variables.
-      -- Also, rename definitions of the exported variables.
-      mod1 <- renameModule RenameNothing renaming mod
-      let mod2 = renameGlobalDefinitions renaming mod1
-      pre_imports' <- mapM (renamePreImport renaming) pre_imports
+      mapM (renamePreImport renaming) pre_imports
 
-      -- Create the interface
+  -- Create the interface
+  interface <-
+    withTheLLVarIdentSupply $ \ll_supply -> runFreshVarM ll_supply $ do
       exports <- mapM mkImport pre_imports'
-
+      
       -- If a symbol is in the export list, it shouldn't be in the import
       -- list too.  (Really, it should be an error if a symbol is ever in
       -- both lists.)
       let imports = filter not_in_exports $
-                    map clearImportDefinition $ moduleImports mod
+                    map clearImportDefinition $ moduleImports mod'
             where
               not_in_exports impent =
                 all ((importVar impent /=) . importVar) exports
 
-      let interface = Interface { ifaceImports = imports
-                                , ifaceExports = exports}
-          
-      -- Extend the export list with the new exported variables
-      let new_exports = [(v, TrioletExportSig)
-                        | v <- Set.elems $ export_vars Set.\\ declared_export_vars]
-          mod3 = mod2 {moduleExports = new_exports ++ moduleExports mod2}
-      
-      return (mod3, interface)
+      return $ Interface { ifaceImports = imports
+                         , ifaceExports = exports}
 
   -- DEBUG: Print the interface
   when False $ print $
     text ("Module interface of " ++ showModuleName (moduleModuleName mod)) $$
     pprInterface interface
 
-  return (renamed_mod, interface)
+  return (mod', interface)
 
 -- | Rename each non-external variable in the list to a new,
 --   externally visible name.
@@ -235,6 +222,23 @@ createExternNames mod_name id_supply from_vars =
         new_v <- runFreshVarM ll_supply $ newExternalVar label (varType v)
         return (v, new_v)
 
+-- | Rename all the module's exported variables to externally visible names.
+--   The set of exported variables should have been expanded with
+--   'slurpExports'.
+renameExternNames :: Module -> IO (Renaming, Module)
+renameExternNames mod = do
+  -- Rename all exported variables that aren't already external
+  let exported_local_vars =
+        [v | (v, _) <- moduleExports mod, not $ varIsExternal v]
+  renaming <- createExternNames (moduleModuleName mod) (moduleNameSupply mod)
+              exported_local_vars
+
+  -- Apply the renaming to the module
+  withTheLLVarIdentSupply $ \ll_supply -> runFreshVarM ll_supply $ do
+    mod1 <- renameModule RenameNothing renaming mod
+    let mod2 = renameGlobalDefinitions renaming mod1
+    return (renaming, mod2)
+
 -- | Replace the globally defined variables that are in the renaming.
 --   All other appearances of the variables have already been renamed.
 renameGlobalDefinitions renaming mod =
@@ -251,10 +255,29 @@ renameGlobalDefinitions renaming mod =
       | otherwise =
           GlobalDataDef def
 
--- | Scan the given exports to select additional variables for export.
-slurpExports :: Set.Set Var -> [GlobalDef]
-             -> (Set.Set Var, [PreImport], [GlobalDef])
-slurpExports exported gdefs = slurpExports' Set.empty exported gdefs
+-- | Scan the module to find all variables that are visible to other
+--   modules.  These include the exported variables and any variables
+--   that may show up due to inlining.
+--   Add the visible variables to the export list.
+--   Return the new module, the set of exported definitions, and the set of
+--   non-exported definitions.
+slurpExports :: Module -> (Module, [PreImport], [GlobalDef])
+slurpExports mod = let
+  -- Start with the variables that are explicitly exported
+  declared_export_vars =
+    Set.fromList [v | (v, TrioletExportSig) <- moduleExports mod]
+
+  -- Add all reachable variables
+  (export_vars, pre_imports, other_globals) =
+    let global_defs = concatMap groupMembers $ moduleGlobals mod
+    in slurpExports' Set.empty declared_export_vars global_defs
+
+  -- Construct the module's new export list
+  new_export_vars = export_vars Set.\\ declared_export_vars
+  exports = [(v, TrioletExportSig) | v <- Set.elems new_export_vars] ++
+            moduleExports mod
+
+  in (mod {moduleExports = exports}, pre_imports, other_globals)
 
 slurpExports' :: Set.Set Var -> Set.Set Var -> [GlobalDef]
               -> (Set.Set Var, [PreImport], [GlobalDef])
@@ -578,3 +601,5 @@ renameInterface visible_variables iface = do
       | otherwise =
            renameImport RenameNothing renaming impent
          
+renameVarSet :: Renaming -> Set.Set Var -> Set.Set Var
+renameVarSet rn s = Set.fromList $ map (renameVar rn) $ Set.toList s

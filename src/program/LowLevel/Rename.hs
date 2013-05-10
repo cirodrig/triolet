@@ -16,6 +16,7 @@ module LowLevel.Rename
         mkRenaming,
         emptyRenaming,
         getRenamedVar,
+        renameVar,
         renameVal,
         renameStm,
         renameFun,
@@ -376,6 +377,9 @@ rnTopLevel rn global_defs exports = do
            dat' <- rnStaticData in_rn dat
            return (GlobalDataDef (Def new_name dat'))
 
+-- | Apply a renaming to a variable, and return the renamed variable.
+renameVar :: Renaming -> Var -> Var
+renameVar rn v = fromMaybe v $ lookupRenamedVar rn v
 
 -- | Rename variables in a value.  Start with the given renaming.
 renameVal :: RnPolicy -> Renaming -> Val -> Val
