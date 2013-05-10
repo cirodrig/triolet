@@ -312,11 +312,15 @@ setFunDefUses use_map (Def fname f) =
   in Def fname $! annotated_fun
 
 -- | Perform dead code elimination on a function.  Only the function body 
---   contributes to the code size.
+--   contributes to the code size.  Use information is cleared. 
+--   (Use information is annotated when processing the definition group
+--   containing the function).
 dceFun :: DCE Fun
 dceFun fun = do
   (body_size, body) <- tellSize $ dceStm (funBody fun)
-  let fun' = setFunSize (codeSize body_size) $ clearFunDCEInfo fun 
+  let fun' = fun { funSize = codeSize body_size
+                 , funUses = ManyUses
+                 , funBody = body}
   return fun'
 
 -- | Perform dead code elimination on a data definition.  The data definition
