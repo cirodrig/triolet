@@ -41,6 +41,14 @@ record Obj(a) {
 record SA {
   const uint size;
   const uint align;
+  const uint pointerless;       // 0 = False; 1 = True
+};
+
+// Size and alignment of an object (stored in memory)
+record SA_mem {
+  const uint size;
+  const uint align;
+  const uint8 pointerless;       // 0 = False; 1 = True
 };
 
 #define NOT_A_REFERENCE uint8 0
@@ -54,7 +62,7 @@ record IsRef_mem {
 // Object layout information stored in memory
 record Repr_mem {
   const owned header;
-  const SA sizealign;          // Size and alignment in bytes
+  const SA_mem sizealign;      // Size and alignment in bytes
   const bool pointerless;      // True if object contains no pointers
   const IsRef_mem is_ref;      // Whether this 'Repr' describes a reference
 };
@@ -63,6 +71,8 @@ record Repr_mem {
 record TypeObject_mem {
   const owned header;
   const uint con_index;         // Data constructor index
+  const owned serializer;
+  const owned deserializer;
 };
 
 record FinIndInt {
@@ -97,36 +107,45 @@ record FunInfo {
   const pointer inexact;              // Inexact entry point
 };
 
-// Additive dictionary
-// record AdditiveDict(a) {
-//   const ObjectHeader header;
-//   const owned add;			// Add two values
-//   const owned subtract;			// A value minus another
-//   const owned negate;			// Negate a value
-//   const a zero;				// The zero value
-// };
+// The values of a 'BitsTag'
+#define BITS0TAG uint8 0
+#define BITS32TAG uint8 1
+#define BITS64TAG uint8 2
+#define BITSOWNEDTAG uint8 3
+#define BITSCURSORTAG uint8 4
 
-// Multiplicative dictionary
-// record MultiplicativeDict(a) {
-//   const ObjectHeader header;
-//   const owned additive;			// Additive dictionary
-//   const owned mul;			// Multiply two values
-//   const owned fromInt;			// Create from an integer
-//   const a one;				// The one value
-// };
+// Data used for creating a buffer
+record MkBuffer {
+  owned header;                 // Object header
+  pointer buffer;               // The buffer (array of bytes)
+  pointer hashtable;            // Hash table of objects in buffer
+                                // (array of owned pointers)
+  pointer hashtable_count;      // Number of items in each hash bin
+                                // (array of int)
+  uint buffer_capacity;         // Number of allocated bytes in buffer
+  uint buffer_size;             // Number of used bytes in buffer
+  uint ht_capacity;             // Number of allocated entries in hash table
+  uint ht_size;                 // Number of used entries in hash table
+};
 
-// Traversable dictionary
-// record TraversableDict {
-//   const ObjectHeader header;
-//   const owned traverse;               // Traverse an object
-//   const owned build;                  // Build an object
-// };
+// Result of reading from a buffer
+record ReadResult(a) {
+  const cursor buffer;
+  const a payload;
+};
 
-// Complex numbers
-// record complex(a) {
-//   const a real;
-//   const a imag;
-// };
+// A lazily evaluated global value.
+// The payload is initialized to null, and is assigned when the value
+// is forced.
+record Lazy(a) {
+  uint status;
+  const pointer generator;      /* Procedure that generates this value */
+  a payload;                    /* The generated value */
+};
+
+#define LAZY_UNEVALUATED uint 0 /* Not yet evaluated */
+#define LAZY_BUSY        uint 1 /* Being evaluated */
+#define LAZY_MANIFEST    uint 2 /* Has been computed */
 
 // Unboxed 1-tuples
 record U1Tuple(a) {

@@ -348,7 +348,7 @@ getCExportType ty = do
       | con `isCoreBuiltin` The_bool -> return TrioletBoolET
     Just (con, [arg])
       -- Look through 'Stored' and 'Boxed' constructors
-      | con `isCoreBuiltin` The_Stored -> getCExportType arg
+      | con == storedV -> getCExportType arg
       | con `isCoreBuiltin` The_Boxed -> getCExportType arg
       | con `isCoreBuiltin` The_list ->
           ListET False <$> getCExportType arg
@@ -369,7 +369,7 @@ getCxxExportType ty = do
       | con `isCoreBuiltin` The_bool -> return TrioletBoolET
     Just (con, [arg])
       -- Look through 'Stored' and 'Boxed' constructors
-      | con `isCoreBuiltin` The_Stored -> getCxxExportType arg
+      | con == storedV -> getCxxExportType arg
       | con `isCoreBuiltin` The_Boxed -> getCxxExportType arg
        
       | con `isCoreBuiltin` The_list ->

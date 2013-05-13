@@ -185,8 +185,8 @@ bool_operation op =
   genLambdaOrCall1 [uint_type, uint_type] uint_type $ \ [x, y] -> do
     b1 <- emitAtom1 bool_type $ PrimA (PrimCmpZ Unsigned S32 CmpNE) [x, zero]
     b2 <- emitAtom1 bool_type $ PrimA (PrimCmpZ Unsigned S32 CmpNE) [y, zero]
-    emitAtom1 bool_type $ PrimA op [b1, b2]
-    emitAtom1 uint_type $ PrimA (PrimSelect uint_type) [one, zero]
+    bool_result <- emitAtom1 bool_type $ PrimA op [b1, b2]
+    emitAtom1 uint_type $ PrimA (PrimSelect uint_type) [bool_result, one, zero]
   where
     one = LitV (IntL Unsigned S32 1)
     zero = LitV (IntL Unsigned S32 0)

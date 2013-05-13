@@ -7,6 +7,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
@@ -79,6 +80,9 @@ runGenMWithoutOutput supply m = do
 -------------------------------------------------------------------------------
 -- Building blocks for generating low-level code
 
+-- | A boolean value, indicating whether a type is free of pointers.
+type PointerFree = L.Val
+
 -- | An offset, which is a signed integer value.
 newtype Off = Off L.Val
 
@@ -97,36 +101,45 @@ type Al = L.Val
 valueAlign :: ValueType -> Al
 valueAlign ty = nativeWordV $ alignOf ty
 
+valuePointerfree :: ValueType -> PointerFree
+valuePointerfree ty = booleanV $ pointerlessness ty
+
 -- | A size and alignment.  Both values are unsigned integers.
-data SizeAlign = SizeAlign {objectSize :: !Sz, objectAlign :: !Al}
+data SizeAlign = SizeAlign { objectSize :: !Sz
+                           , objectAlign :: !Al
+                           , objectPointerfree :: !PointerFree}
 
 emptySizeAlign :: SizeAlign
-emptySizeAlign = SizeAlign (nativeWordV 0) (nativeWordV 1)
+emptySizeAlign = SizeAlign (nativeWordV 0) (nativeWordV 1) (booleanV True)
 
 valueSizeAlign :: ValueType -> SizeAlign
-valueSizeAlign ty = SizeAlign (valueSize ty) (valueAlign ty)
+valueSizeAlign ty =
+  SizeAlign (valueSize ty) (valueAlign ty) (valuePointerfree ty)
 
 -- | An offset and alignmnent.  Offset is signed.  Alignment is unsigned.
-data OffAlign = OffAlign {offsetOff :: !Off, offsetAlign :: !Al}
+data OffAlign = OffAlign { offsetOff :: !Off
+                         , offsetAlign :: !Al
+                         , offsetPointerfree :: !PointerFree}
 
 emptyOffAlign :: OffAlign
-emptyOffAlign = OffAlign (Off (nativeIntV 0)) (nativeWordV 1)
+emptyOffAlign = OffAlign (Off (nativeIntV 0)) (nativeWordV 1) (booleanV True)
 
 -- | Convert an offset and alignment to a size and alignment.
 offAlignToSize :: OffAlign -> GenM SizeAlign
-offAlignToSize (OffAlign (Off o) a) = do
+offAlignToSize (OffAlign (Off o) a pf) = do
   -- Convert offset to an unsigned value
   s <- primCastZ (PrimType nativeWordType) o
-  return $ SizeAlign s a
+  return $ SizeAlign s a pf
 
 -- | Add padding to an offset.
 --   Return the field offset and the new offset.
 padOff :: OffAlign -> SizeAlign -> GenM (Off, OffAlign)
-padOff (OffAlign (Off off) al) sa = do
+padOff (OffAlign (Off off) al pf) sa = do
   off' <- addRecordPadding off (objectAlign sa)
   off'' <- addSize (Off off') (objectSize sa)
   al' <- nativeMaxUZ al (objectAlign sa)
-  return (Off off', OffAlign off'' al')
+  pf' <- primAnd pf (objectPointerfree sa)
+  return (Off off', OffAlign off'' al' pf')
 
 -- | Compute offsets of a sequence of objects.
 padOffs :: OffAlign -> [SizeAlign] -> GenM ([Off], OffAlign)
@@ -155,25 +168,26 @@ addSize (Off off) size = do
 
 -- | Compute the size of an array
 arraySize :: L.Val -> SizeAlign -> GenM SizeAlign
-arraySize n_elements (SizeAlign elem_size elem_align) 
+arraySize n_elements (SizeAlign elem_size elem_align elem_pf) 
   | L.valType n_elements /= PrimType nativeIntType =
+    traceShow (L.pprVal n_elements $$ L.pprVal elem_size $$ L.pprVal elem_align) $
     internalError "arraySize: Number of elements has wrong type"
 
   | otherwise = do
     -- The size of one array element is the element size,
     -- plus any necessary padding
-    size1 <- primCastZ (PrimType nativeWordType) elem_size
+    size1 <- primCastZ (PrimType nativeIntType) elem_size
     size2 <- addRecordPadding size1 elem_align
 
     -- Multiply by number of elements
     size3 <- nativeMulUZ size2 =<< primCastZ (PrimType nativeWordType) n_elements
 
-    return $ SizeAlign size3 elem_align
+    return $ SizeAlign size3 elem_align elem_pf
 
 -- | Compute the size and alignment of two overlaid objects
 overlay :: SizeAlign -> SizeAlign -> GenM SizeAlign
-overlay (SizeAlign s1 a1) (SizeAlign s2 a2) =
-  liftM2 SizeAlign (nativeMaxUZ s1 s2) (nativeMaxUZ a1 a2)
+overlay (SizeAlign s1 a1 pf1) (SizeAlign s2 a2 pf2) =
+  liftM3 SizeAlign (nativeMaxUZ s1 s2) (nativeMaxUZ a1 a2) (primAnd pf1 pf2)
 
 overlays :: [SizeAlign] -> GenM SizeAlign
 overlays (x:xs) = foldM overlay x xs

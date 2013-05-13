@@ -318,7 +318,7 @@ convertJoinPoints :: Module -> IO Module
 convertJoinPoints mod = do
   -- Globally rename functions
   rn_mod <- withTheLLVarIdentSupply $ \var_ids ->
-    runFreshVarM var_ids $ renameModule RenameFunctions emptyRenaming mod
+    runFreshVarM var_ids $ renameModule RenameFunctions mod
   
   -- Convert all join points
   globals <- mapM convertJoinPointsGroup $ moduleGlobals mod

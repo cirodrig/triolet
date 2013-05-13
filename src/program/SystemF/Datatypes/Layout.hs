@@ -31,6 +31,7 @@ module SystemF.Datatypes.Layout
         algDataHeaderType,
         isEnumeration,
         disjunct,
+        disjunctFields,
         disjuncts,
         disjunctData,
         mapDisjuncts, mapMDisjuncts,
@@ -50,6 +51,7 @@ module SystemF.Datatypes.Layout
         disjunctLayout,
         disjunctLayout1,
         writeEnumerationHeader,
+        readEnumerationHeader,
         writeHeader,
         readHeaderValue,
         castTagToWord)
@@ -68,6 +70,7 @@ import Type.Type
 import LowLevel.Build
 import LowLevel.CodeTypes
 import qualified LowLevel.Syntax as L
+import qualified LowLevel.Print as L
 
 -- | The type of a reference to a type object
 typeObjectReferenceType :: ValueType
@@ -87,8 +90,8 @@ data Layout =
     -- | A primitive type
     PrimLayout !PrimType
 
-    -- | A block of memory with unspecified contents.  Only the size and
-    --   alignment are known.
+    -- | A block of memory with unspecified contents.  Only the size,
+    --   alignment, and pointerlessness are known.
   | BlockLayout {-# UNPACK #-}!SizeAlign
 
     -- | A tagged sum of products.  It's given as the common prefix
@@ -304,15 +307,23 @@ disjunct n m_tyob d
   | n < 0 || n >= algDataNumConstructors d =
       internalError "disjunct: Out of bounds"
   | otherwise =
-      let fields = case d
-                   of TagD {}                  -> []
-                      ProductD {adFields = fs} -> fs
-                      SumD {adDisjuncts = fss} -> fss !! n
+      let fields = disjunctFields n d
           h_type = algDataHeaderType d
           header = case (adBoxing d, m_tyob)
                    of (IsBoxed, Just tyob) -> BoxedHeaderData n tyob
                       (NotBoxed, Nothing)  -> UnboxedHeaderData h_type n
       in AlgDisjunct header fields
+
+-- | Get the fields of an algebraic disjunct
+disjunctFields :: Int -> AlgData a -> [a]
+disjunctFields n d 
+  | n < 0 || n >= algDataNumConstructors d =
+      internalError "disjunctFields: Out of bounds"
+  | otherwise =
+      case d
+      of TagD {}                  -> []
+         ProductD {adFields = fs} -> fs
+         SumD {adDisjuncts = fss} -> fss !! n
 
 disjuncts :: AlgData a -> [AlgDisjunct a]
 disjuncts adt 
@@ -402,13 +413,17 @@ data MemoryField =
     --   type in general.
   | ValField !Layout
 
-    -- | A field of bare type.  Only its size and alignment are needed.
+    -- | A field of bare type.  Only its size, alignment, and
+    --   pointerlessness are needed.
   | BareField !SizeAlign
 
 -- | Get the size of a field as it exists in memory
 memoryFieldSize :: MemoryField -> GenM SizeAlign
-memoryFieldSize BoxedField    = return $ valueSizeAlign (PrimType OwnedType)
-memoryFieldSize (ValField l)  = memorySize l
+memoryFieldSize BoxedField =
+  return $ valueSizeAlign (PrimType OwnedType)
+
+memoryFieldSize (ValField l) = memorySize l
+
 memoryFieldSize (BareField s) = return s
 
 -- | Compute the memory layout characteristics of a data type's fields
@@ -427,10 +442,6 @@ memoryLayout adt = mapMAlgData memory_field adt
 -- | Dynamic type information in terms of low-level values
 type LLDynTypeInfo = DynTypeInfo SizeAlign SizeAlign L.Val
 
-instance DefaultValue SizeAlign where dummy = emptySizeAlign
-                                     
-instance DefaultValue L.Val where dummy = nativeIntV 0
-
 -- | Determine the physical layout of a type, using the arguments to choose
 --   layouts for unknowns.
 computeLayout :: LLDynTypeInfo  -- ^ Dynamic type information
@@ -440,6 +451,7 @@ computeLayout :: LLDynTypeInfo  -- ^ Dynamic type information
 computeLayout type_info kind structure =
   case structure
   of PrimStruct pt            -> return $ PrimLayout pt
+     StoredStruct t           -> stored_layout t
      ArrStruct t ts           -> arr_layout t ts
      DataStruct (Data tag fs) -> sum_layout tag fs
      ForallStruct fa          -> forall_layout fa
@@ -455,18 +467,20 @@ computeLayout type_info kind structure =
       where
         -- If dynamic size information is available, use that
         dyn (Just sa) = return $ BlockLayout sa
-        dyn Nothing   = static
+        dyn Nothing         = static
 
         -- Otherwise, compute the structure statically
         static = computeLayout type_info k =<< computeStructure component_type
 
+    stored_layout t = do
+      l <- continue ValK t
+      let decon = VarDeCon stored_conV [t] []
+      return $ DataLayout $ algebraicData NotBoxed [[(ValK, l)]]
+
     var_layout v
-      | kind == ValK =
-          BlockLayout `liftM` lookupValTypeInfo' type_info v
-      | kind == BareK =
-          BlockLayout `liftM` lookupBareTypeInfo' type_info v
-      | otherwise =
-          traceShow kind $ internalError "computeLayout: Unexpected kind"
+      | kind == ValK  = BlockLayout `liftM` lookupValTypeInfo' type_info v
+      | kind == BareK = BlockLayout `liftM` lookupBareTypeInfo' type_info v
+      | otherwise     = internalError "computeLayout: Unexpected kind"
 
     sum_layout _ [] =
       internalError "computeLayout: Uninhabited type"
@@ -495,16 +509,21 @@ computeLayout type_info kind structure =
 
     arr_layout size elem = do
       size_val <- lookupIntTypeInfo' type_info size
+      unless (L.valType size_val == PrimType nativeIntType) $
+        internalError "computeLayout: Size has wrong type"
+
       -- Array elements are bare objects
       elem_size <- memorySize =<< continue BareK elem
-      liftM BlockLayout $ arraySize size_val elem_size
+      arr_size <- arraySize size_val elem_size
+      return $ BlockLayout arr_size
 
 -- | Get the size and alignment of an unboxed object
 --   described by a physical layout
 memorySize :: Layout -> GenM SizeAlign
 memorySize (PrimLayout pt) =
   return $ SizeAlign (nativeWordV $ sizeOf pt) (nativeWordV $ alignOf pt)
-  
+                     (booleanV $ pointerlessness pt)
+
 memorySize (BlockLayout sa) =
   return sa
 
@@ -587,6 +606,17 @@ writeEnumerationHeader n d@(TagD NotBoxed _) ptr = do
   -- Write to memory
   primStoreConst mem_tag_type ptr n'
 
+-- | Read an enumerative unboxed value to memory and convert it appropriately
+readEnumerationHeader :: AlgData a -> L.Val -> GenM L.Val
+readEnumerationHeader d@(TagD NotBoxed _) ptr = do
+  let h_type = algDataHeaderType d
+  -- Read from memory
+  let Just mem_tag_type = memTagInfo h_type
+  n <- primLoadConst mem_tag_type ptr
+
+  -- Coerce the tag type
+  castTag mem_tag_type (PrimType nativeWordType) n
+
 -- | Write an object header to memory
 writeHeader :: HeaderData       -- ^ Header of object to write
             -> HeaderOffsets
@@ -625,8 +655,17 @@ castTagToWord htype@(UnboxedHeaderType {}) (Just t) =
 castTag :: ValueType -> ValueType -> L.Val -> GenM L.Val
 castTag from_ty to_ty val
   -- If types are the same, return the value
-  | from_ty == to_ty =
-      return val
+  | from_ty == to_ty = return val
 
-  | PrimType (IntType {}) <- from_ty, PrimType (IntType {}) <- to_ty =
-      primExtendZ to_ty val
+  | otherwise =
+    case (to_ty, from_ty) 
+    of (PrimType to_pt, PrimType from_pt) -> 
+         case (to_pt, from_pt)
+         of (IntType {},     IntType {}) -> primExtendZ to_ty val
+            (UnitType,       IntType {}) -> return $ L.LitV L.UnitL
+            (IntType sgn sz, UnitType)   -> return $ L.LitV (L.IntL sgn sz 0)
+            _ -> can't_cast
+  where
+    can't_cast =
+      internalError $ "castTag: Cannot cast " ++
+      show (L.pprValueType from_ty) ++ " to " ++ show (L.pprValueType to_ty)

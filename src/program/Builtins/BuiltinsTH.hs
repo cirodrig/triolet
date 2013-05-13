@@ -48,7 +48,6 @@ builtinTypeNames =
   , "PBTree"
 
     -- Representation coercions
-  , "Stored"
   , "StuckRef"
   , "StuckBox"
   , "Boxed"
@@ -102,7 +101,6 @@ builtinTypeNamesForTypeFunctions =
   , "Tuple2"
   , "Tuple3"
   , "SliceObject"
-  , "Stored"
   , "StuckRef"
   , "StuckBox"
   , "Boxed"
@@ -160,7 +158,6 @@ builtinVariableNames =
   , "nothing"
   , "justVal"
   , "nothingVal"
-  , "stored"
   , "stuckRef"
   , "stuckBox"
   , "boxed"
@@ -235,7 +232,6 @@ builtinVariableNames =
   , "repr_dim1"
   , "repr_dim2"
   , "repr_dim3"
-  , "repr_arr"
 {-  , "repr_append_list"
   , "repr_ListBuilder"
   , "repr_list"
@@ -256,9 +252,8 @@ builtinVariableNames =
   , "repr_view"
   , "repr_EmptyReference"
   , "repr_Coercion"
-  , "repr_EffTok"
-  , "repr_SliceObject"
   , "repr_intset"
+  , "repr_Stored"
   , "frontend_repr_stuckBox"
   , "frontend_repr_Maybe"
   , "frontend_repr_list"
@@ -453,6 +448,10 @@ builtinVariableNames =
   , "sinF"
   , "cosF"
   , "tanF"
+
+    -- Serialization
+  , "putArrWithSerializer"
+  , "getArrWithSerializer"
 
     -- Type class dictionary members
   , "EqDict_int"
@@ -703,11 +702,14 @@ builtinVariableNames =
   , "idCoercion"
   , "idBareCoercion"
   , "cartesianIndexCoercion"
+  , "makeIdCoercion"
+  , "makeIdBareCoercion"
   , "unsafeMakeCoercion"
   , "unsafeMakeBareCoercion"
   , "unsafeMakeViewCoercion"
   , "traceInt_int"
   , "traceInt_box"
+  , "testCopyViaBuffer"
     
   , "isCons"
   , "isNil"

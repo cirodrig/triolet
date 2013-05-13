@@ -171,6 +171,17 @@ toPointerPrim prim vs k =
                    packCursor (Cursor owned (VarV interior')) $ \x ->
                      k $ ValA [x]
 
+     PrimSubP ptr_kind ->
+       let ![ptr1, ptr2] = map toPointerData vs
+       in case ptr_kind
+          of PointerPtr ->
+               k $ PrimA (PrimSubP PointerPtr) [ptr1, ptr2]
+
+             CursorPtr ->
+               unpackCursor ptr1 $ \(Cursor _ interior1) ->
+               unpackCursor ptr2 $ \(Cursor _ interior2) ->
+               k $ PrimA (PrimSubP PointerPtr) [interior1, interior2]
+
      -- Since owned types are being ignored, just convert these casts to moves
      PrimCastToOwned -> k $ ValA (map toPointerData vs)
      PrimCastFromOwned -> k $ ValA (map toPointerData vs)
@@ -178,6 +189,11 @@ toPointerPrim prim vs k =
        let [v] = vs
        in unpackCursor (toPointerData v) $ \(Cursor _ interior) -> 
           k $ ValA [interior]
+
+     PrimCursorBase ->
+       let [v] = vs
+       in unpackCursor (toPointerData v) $ \(Cursor owned _) ->
+          k $ ValA [owned]
 
      -- Other primops are unchanged
      _ -> with_new_prim prim

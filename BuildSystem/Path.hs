@@ -152,7 +152,7 @@ trioletCFiles lbi = cSources $ buildInfo $ getTrioletExe lbi
 -- | Low-level Triolet library source files
 rtsLltSourceFiles = ["apply_new.llt", "memory_py.llt", "effects.llt",
                      "prim.llt", "inplace.llt", "structures.llt",
-                     "list.llt"]
+                     "list.llt", "buffer.llt", "lazy.llt"]
 
 -- | Object files that should be created in 'rtsBuildDir'
 rtsObjectFiles = ["apply_data.c.o", "memory.c.o", "debug.c.o", "hashtable.c.o",

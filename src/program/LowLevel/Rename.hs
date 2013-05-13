@@ -24,7 +24,8 @@ module LowLevel.Rename
         renameStaticData,
         renameImport,
         renameInFunDef,
-        renameModule
+        renameModule,
+        renameModuleGlobals
        )
 where
 
@@ -37,12 +38,17 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
 import Data.Traversable
+import Debug.Trace
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
+import LowLevel.Builtins(allBuiltins)
 import LowLevel.FreshVar
 import LowLevel.Syntax
 import Export
+
+allBuiltinsSet = Set.fromList allBuiltins
 
 -------------------------------------------------------------------------------
 -- Free variables
@@ -112,6 +118,45 @@ instance HasScope a => HasScope (FunBase a) where
   freeVars f = maskFreeVars (funParams f) $ freeVars (funBody f)
 
 -------------------------------------------------------------------------------
+-- Definientia
+
+-- | The definienda of a definition
+data Definienda = SingleD !Var | MultipleD !EntryPoints
+
+globalDefinienda :: GlobalDef -> Definienda
+globalDefinienda (GlobalFunDef (Def v fdef)) =
+  case funEntryPoints fdef
+  of Nothing -> SingleD v
+     Just ep | v /= globalClosure ep -> internalError "globalDefinienda"
+             | otherwise             -> MultipleD ep
+               
+globalDefinienda (GlobalDataDef (Def v _)) = SingleD v
+
+setGlobalDefinienda :: Definienda -> GlobalDef -> GlobalDef
+setGlobalDefinienda (SingleD v) (GlobalFunDef (Def _ fdef)) =
+  GlobalFunDef $ Def v fdef
+
+setGlobalDefinienda (SingleD v) (GlobalDataDef (Def _ d)) =
+  GlobalDataDef $ Def v d
+
+setGlobalDefinienda (MultipleD ep) (GlobalFunDef (Def _ fdef)) =
+  GlobalFunDef $ Def (globalClosure ep) (fdef {funEntryPoints = Just ep})
+
+localDefinienda :: FunDef -> Definienda
+localDefinienda (Def v fdef) =
+  case funEntryPoints fdef
+  of Nothing -> SingleD v
+     Just ep | v /= globalClosure ep -> traceShow v $ internalError "localDefinienda"
+             | otherwise             -> MultipleD ep
+
+setLocalDefinienda :: Definienda -> FunDef -> FunDef
+setLocalDefinienda (SingleD v)    (Def _ f) =
+  Def v f
+
+setLocalDefinienda (MultipleD ep) (Def _ f) =
+  Def (globalClosure ep) (f {funEntryPoints = Just ep})
+
+-------------------------------------------------------------------------------
 
 -- | A variable renaming
 type Renaming = IntMap.IntMap Var
@@ -138,6 +183,7 @@ data RnPolicy =
                       --   but not letrec-bound variables
   | RenameFunctions   -- ^ Rename function names bound by a 'Def' only
   | RenameNothing     -- ^ Don't rename anything; only apply the given renaming
+    deriving(Eq)
 
 type Rn = (RnPolicy, Renaming)
 
@@ -154,19 +200,28 @@ setRenaming rn (p, _) = (p, rn)
 --   renaming.
 renameVariable :: Renaming -> Var -> FreshVarM (Renaming, Var)
 renameVariable rn v = do
-  v' <- newVar (varName v) (varType v)
+  v' <- newClonedVar v
   let rn' = IntMap.insert (fromIdent $ varID v) v' rn
   return (rn', v')
 
 renameVariables :: Renaming -> [Var] -> FreshVarM (Renaming, [Var])
-renameVariables rn vs = go rn [] vs
-  where
-    go rn rev_vs' (v:vs) = do
-      (rn', v') <- renameVariable rn v
-      go rn' (v':rev_vs') vs
-    
-    go rn rev_vs' [] =
-      return (rn, reverse rev_vs')
+renameVariables rn vs = mapAccumM renameVariable rn vs
+
+-- | Assign a fresh ID to all variables in the 'EntryPoints',
+--   and insert the assignments into the renaming.
+renameEntryPointsVariables :: Renaming -> EntryPoints
+                           -> FreshVarM (Renaming, EntryPoints)
+renameEntryPointsVariables rn ep = do
+  (rn', _) <- renameVariables rn $ entryPointsVars ep
+  return (rn', rnEntryPoints rn' ep)
+
+renameDefinienda rn (SingleD var) = do
+  (rn', var') <- renameVariable rn var
+  return (rn', SingleD var')
+  
+renameDefinienda rn (MultipleD ep) = do
+  (rn', ep') <- renameEntryPointsVariables rn ep
+  return (rn', MultipleD ep')
 
 renameParameters :: Rn -> [ParamVar] -> FreshVarM (Renaming, [ParamVar])
 renameParameters rn param_vars =
@@ -180,8 +235,8 @@ renameParameters rn param_vars =
     rename = renameVariables (rnRenaming rn) param_vars
     don't = return (rnRenaming rn, param_vars)
 
-renameLetrecFunction :: Rn -> Var -> FreshVarM (Renaming, Var)
-renameLetrecFunction rn var =
+renameLetrecFunction :: Rn -> Definienda -> FreshVarM (Renaming, Definienda)
+renameLetrecFunction rn da =
   case rnPolicy rn
   of RenameEverything -> rename
      RenameLocals     -> rename
@@ -189,22 +244,15 @@ renameLetrecFunction rn var =
      RenameFunctions  -> rename
      RenameNothing    -> don't
   where
-    don't = return (rnRenaming rn, var)
-    rename = renameVariable (rnRenaming rn) var
+    don't = return (rnRenaming rn, da)
+    rename = renameDefinienda (rnRenaming rn) da
 
-renameLetrecFunctions :: Rn -> [Var] -> FreshVarM (Renaming, [Var])
-renameLetrecFunctions rn vars =
-  case rnPolicy rn
-  of RenameEverything -> rename
-     RenameLocals     -> rename
-     RenameParameters -> don't
-     RenameFunctions  -> rename
-     RenameNothing    -> don't
-  where
-    don't = return (rnRenaming rn, vars)
-    rename = renameVariables (rnRenaming rn) vars
+renameLetrecFunctions :: Rn -> [Definienda] -> FreshVarM (Renaming, [Definienda])
+renameLetrecFunctions rn das = mapAccumM rename (rnRenaming rn) das
+  where rename r d = renameLetrecFunction (setRenaming r rn) d
 
-renameGlobalFunction rn var = 
+renameGlobalDef :: Rn -> Definienda -> FreshVarM (Renaming, Definienda)
+renameGlobalDef rn definientia =
   case rnPolicy rn
   of RenameEverything -> rename
      RenameLocals     -> don't
@@ -212,19 +260,23 @@ renameGlobalFunction rn var =
      RenameFunctions  -> rename
      RenameNothing    -> don't
   where
-    don't = return (rnRenaming rn, var)
-    rename = renameVariable (rnRenaming rn) var
+    -- Even if we're not renaming, it's possible that a global variable has
+    -- been given a name because we're merging with another module.
+    -- Consequently, it must be renamed.
+    don't = return (rnRenaming rn, rnDefinienda (rnRenaming rn) definientia)
 
-renameGlobalData rn var = 
-  case rnPolicy rn
-  of RenameEverything -> rename
-     RenameLocals     -> don't
-     RenameParameters -> don't
-     RenameFunctions  -> don't
-     RenameNothing    -> don't
-  where
-    don't = return (rnRenaming rn, var)
-    rename = renameVariable (rnRenaming rn) var
+    rename
+      -- Don't rename built-in variables      
+      | global_name `Set.member` allBuiltinsSet = don't
+      | otherwise = renameDefinienda (rnRenaming rn) definientia
+
+    global_name = case definientia
+                  of SingleD v    -> v
+                     MultipleD ep -> globalClosure ep
+
+renameGlobalDefs :: Rn -> [Definienda] -> FreshVarM (Renaming, [Definienda])
+renameGlobalDefs rn das = mapAccumM rename (rnRenaming rn) das
+  where rename r d = renameGlobalDef (setRenaming r rn) d
 
 rnVar :: Renaming -> Var -> Var
 rnVar rn v = fromMaybe v $ IntMap.lookup (fromIdent $ varID v) rn
@@ -255,19 +307,8 @@ rnStm rn statement =
        (renaming, params') <- renameParameters rn params
        stm' <- rnStm (setRenaming renaming rn) stm
        return $ LetE params' rhs' stm'
-     LetrecE (NonRec def) stm -> do
-       definiens <- rnFun rn $ definiens def
-       (renaming, definiendum) <-
-         renameLetrecFunction rn $ definiendum def
-       stm' <- rnStm (setRenaming renaming rn) stm
-       return $ LetrecE (NonRec (Def definiendum definiens)) stm'
-     LetrecE (Rec defs) stm -> do
-       (renaming, definienda) <-
-         renameLetrecFunctions rn $ map definiendum defs
-       definientia <-
-         mapM (rnFun (setRenaming renaming rn) . definiens) defs
-       stm' <- rnStm (setRenaming renaming rn) stm
-       return $ LetrecE (Rec $ zipWith Def definienda definientia) stm'
+     LetrecE group stm ->
+       rnLocalGroup rn group stm
      SwitchE scr alts -> do
        let scr' = rnVal rn scr
        alts' <- mapM rename_alt alts
@@ -281,20 +322,42 @@ rnStm rn statement =
       stm' <- rnStm rn stm
       return (tag, stm')
 
+rnLocalGroup :: Rn -> Group FunDef -> Stm -> FreshVarM Stm
+rnLocalGroup rn group stm = do
+  (renaming, group') <- rnLocalGroupDefs rn group
+  stm' <- rnStm (setRenaming renaming rn) stm
+  return $ LetrecE group' stm'
+
+rnLocalGroupDefs rn (NonRec def) = do
+  -- Rename the function body first, then rename the bound variables
+  rn_fun <- rnFun rn $ definiens def
+  let def1 = def {definiens = rn_fun}
+  (renaming, rn_da) <- renameLetrecFunction rn $ localDefinienda def
+  let def2 = setLocalDefinienda rn_da def1
+  return (renaming, NonRec def2)
+
+rnLocalGroupDefs rn (Rec defs) = do
+  -- Rename bound varibles, then functions
+  (renaming, rn_das) <- renameLetrecFunctions rn $ map localDefinienda defs
+  rn_funs <- mapM (rnFun (setRenaming renaming rn)) $ map definiens defs
+  let defs' = [setLocalDefinienda da $ def {definiens = fun}
+              | (def, da, fun) <- zip3 defs rn_das rn_funs]
+  return (renaming, Rec defs')
+
 rnEntryPoints :: Renaming -> EntryPoints -> EntryPoints
 rnEntryPoints rn (EntryPoints ty arity dir vec exa ine inf glo) =
   EntryPoints ty arity
   (rnVar rn dir) (fmap (rnVar rn) vec) (rnVar rn exa)
   (rnVar rn ine) (rnVar rn inf) (rnVar rn glo)
 
+rnDefinienda rn (SingleD v)   = SingleD (rnVar rn v)
+rnDefinienda rn (MultipleD v) = MultipleD (rnEntryPoints rn v)
+
 rnFun :: Rn -> Fun -> FreshVarM Fun
 rnFun rn f = do
-  let entry_points = fmap (rnEntryPoints (rnRenaming rn)) $ funEntryPoints f
   (renaming, params) <- renameParameters rn $ funParams f
   body <- rnStm (setRenaming renaming rn) $ funBody f
-  return $ f { funEntryPoints = entry_points
-             , funParams = params
-             , funBody = body}
+  return $ f {funParams = params, funBody = body}
 
 -- | Rename the contents of a data definition.
 rnStaticData :: Rn -> StaticData -> FreshVarM StaticData
@@ -323,6 +386,9 @@ rnImport rn impent =
 rnExport :: Renaming -> (Var, ExportSig) -> (Var, ExportSig)
 rnExport rn (v, sig) = (rnVar rn v, sig)
 
+-- | Rename the top-level definitions in a module.
+--   Variables defined at this level will be renamed if they're
+--   present in the given renaming.
 rnTopLevel :: Rn -> [Group GlobalDef] -> [(Var, ExportSig)]
            -> FreshVarM (Renaming, [Group GlobalDef], [(Var, ExportSig)])
 rnTopLevel rn global_defs exports = do
@@ -336,46 +402,41 @@ rnTopLevel rn global_defs exports = do
                     -> [Group GlobalDef]
                     -> FreshVarM (Rn, [Group GlobalDef])
     rename_globals1 rn (group : groups) = do
-      (rn', group') <- rename_global_group rn id group
-      (rn'', groups') <- rename_globals1 rn' groups
+      (renaming, group') <- rnGlobalGroupDefs rn group
+      (rn'', groups') <- rename_globals1 (setRenaming renaming rn) groups
       return (rn'', group' : groups')
     
     rename_globals1 rn [] = return (rn, [])
 
-    -- Rename one definition group
-    rename_global_group in_rn hd (NonRec def) = do
-      (rn, [v']) <- rename_global_defs in_rn [def]
-      -- The definition cannot refer to itself, so use the original renaming.
-      def' <- rename in_rn v' def
-      return (rn, NonRec def')
- 
-    rename_global_group in_rn hd (Rec defs) = do
-      -- Rename bound variables
-      (rn, vs) <- rename_global_defs in_rn defs
-      -- Rename definitions, which may refer to the bound variables
-      defs' <- zipWithM (rename rn) vs defs
-      return (rn, Rec defs')
-    
-    -- Rename the variables that are defined by some global definitions
-    rename_global_defs in_rn (def : defs) = do
-      (renaming, v) <-
-        case def
-        of GlobalFunDef (Def v _) -> renameGlobalFunction in_rn v
-           GlobalDataDef (Def v _) -> renameGlobalData in_rn v
-      (renaming', vs) <- rename_global_defs (setRenaming renaming in_rn) defs
-      return (renaming', v : vs)
-      
-    rename_global_defs rn [] = return (rn, [])
+rnGlobalGroupDefs :: Rn -> Group GlobalDef
+                  -> FreshVarM (Renaming, Group GlobalDef)
+rnGlobalGroupDefs rn (NonRec def) = do
+  -- Rename the body first, then rename the bound variables
+  rn_ens <- rnGlobalDefiniens rn def
+  (renaming, rn_da) <- renameGlobalDef rn $ globalDefinienda def
+  let def2 = rebuildGlobalDef rn_da rn_ens
+  return (renaming, NonRec def2)
 
-    -- Rename a global definition.
-    rename in_rn new_name global_def =
-      case global_def
-      of GlobalFunDef (Def _ fun) -> do
-           fun' <- rnFun in_rn fun
-           return (GlobalFunDef (Def new_name fun'))
-         GlobalDataDef (Def _ dat) -> do
-           dat' <- rnStaticData in_rn dat
-           return (GlobalDataDef (Def new_name dat'))
+rnGlobalGroupDefs rn (Rec defs) = do
+  -- Rename the bound variables, then the definitions
+  (renaming, rn_das) <- renameGlobalDefs rn $ map globalDefinienda defs
+  rn_enss <- mapM (rnGlobalDefiniens (setRenaming renaming rn)) defs
+  let defs' = zipWith rebuildGlobalDef rn_das rn_enss
+  return (renaming, Rec defs')
+
+rnGlobalDefiniens rn (GlobalFunDef (Def v f)) = do
+  f' <- rnFun rn f
+  return $ Left $ Def v f'
+
+rnGlobalDefiniens rn (GlobalDataDef (Def v d)) = do
+  d' <- rnStaticData rn d
+  return $ Right $ Def v d'
+
+rebuildGlobalDef da (Left (Def v f)) =
+  setGlobalDefinienda da (GlobalFunDef (Def v f))
+
+rebuildGlobalDef da (Right (Def v d)) =
+  setGlobalDefinienda da (GlobalDataDef (Def v d))
 
 -- | Apply a renaming to a variable, and return the renamed variable.
 renameVar :: Renaming -> Var -> Var
@@ -400,6 +461,8 @@ renameEntryPoints policy rn ep = rnEntryPoints rn ep
 renameStaticData :: RnPolicy -> Renaming -> StaticData -> FreshVarM StaticData
 renameStaticData policy rn d = rnStaticData (policy, rn) d
 
+-- | Rename variables in an import declaration.  Variables defined by
+--   the import declaration are also renamed, if present in the renaming.
 renameImport :: RnPolicy -> Renaming -> Import -> FreshVarM Import
 renameImport policy rn i = rnImport (policy, rn) i
 
@@ -410,12 +473,32 @@ renameInFunDef policy (Def v f) = do
   f' <- renameFun policy emptyRenaming f
   return (Def v f')
 
--- | Rename variables in a module
-renameModule :: RnPolicy -> Renaming -> Module -> FreshVarM Module
-renameModule policy rn mod = do
-  imports <- mapM (rnImport (policy, rn)) (moduleImports mod)
+-- | Rename some of the variables defined in a module
+renameModule :: RnPolicy -> Module -> FreshVarM Module
+renameModule policy mod = do
+  -- Since 'emptyRenaming' is used as the initial renaming, the
+  -- top-level definitions will either keep their original name or be
+  -- given a fresh name
+  imports <- mapM (rnImport (policy, emptyRenaming)) (moduleImports mod)
   (_, defs, exports) <- do
-    rnTopLevel (policy, rn) (moduleGlobals mod) (moduleExports mod)
-  return $ mod { moduleImports = imports
-               , moduleGlobals = defs
+    rnTopLevel (policy, emptyRenaming) (moduleGlobals mod) (moduleExports mod)
+  return $ mod { moduleGlobals = defs
                , moduleExports = exports}
+ 
+-- | Rename some of the variables in a module.  Also apply the given 
+--   renaming to global variables defined within the module.
+renameModuleGlobals :: RnPolicy -> Renaming -> Module -> FreshVarM Module
+renameModuleGlobals policy rn mod
+  | policy == RenameFunctions || policy == RenameEverything =
+    -- We cannot both use the given mapping and assign fresh names to globals.
+    -- 'renameGlobalDef' must not assign fresh names. 
+    -- See 'don't' in 'renameGlobalDef'.
+    internalError "renameModuleGlobals: Invalid arguments"
+      
+  | otherwise = do
+    imports <- mapM (rnImport (policy, rn)) (moduleImports mod)
+    (_, defs, exports) <- do
+      rnTopLevel (policy, rn) (moduleGlobals mod) (moduleExports mod)
+    return $ mod { moduleImports = imports
+                 , moduleGlobals = defs
+                 , moduleExports = exports}

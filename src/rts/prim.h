@@ -1,4 +1,7 @@
 
+extern function core.internal.prim.makeIdCoercion (unit) -> unit;
+extern function core.internal.prim.makeIdBareCoercion (unit) -> unit;
+
 extern function core.internal.prim.traceInt_int (int, int) -> int;
 extern function core.internal.prim.traceInt_box (int, owned) -> owned;
 

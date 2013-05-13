@@ -70,6 +70,7 @@ frontendSourceGlobals =
   , "displaceView"
   , "multiplyView"
   , "divideView"
+  , "testCopyViaBuffer"
   {-, "permute1D"
   , "boxedPermute1D"
   , "stencil2D"

@@ -1,0 +1,56 @@
+
+module core.internal.lazy;
+
+#include "rts.h"
+#include "debug.h"
+#include "prim.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "lazy.h"
+
+import procedure exit (int) -> ();
+
+#include "new_pyasm_records.h"
+
+// Force evaluation of a 'Lazy' and get the value
+procedure force_Lazy(pointer p, uint size, uint align) -> () {
+  typedef lazy_type = Lazy(bytes(value (size as int), value (align as int)));
+
+  status = p @! lazy_type.status;
+  if (status == LAZY_MANIFEST) {
+    ();
+  }
+  else if (status == LAZY_UNEVALUATED) {
+    // Set status to 'busy' before evaluating
+    p @! lazy_type.status = LAZY_BUSY;
+    () = () primcall (p @! lazy_type.generator) (p @ lazy_type.payload);
+
+    // Update status
+    p @! lazy_type.status = LAZY_MANIFEST;
+    ();
+  }
+  else {
+    // Error, this is a self-referential lazy value
+    () primcall exit(int -1);
+  };
+};
+
+#if 0
+// Create a type object for a lazy object
+procedure typeObject_Lazy (SA size, pointer lazy_obj) -> owned {
+  p = pointer primcall triolet_alloc (sizeof TypeObject_mem);
+
+  letrec {
+    function serialize_Lazy (cursor obj, owned buffer, unit dummy) -> unit {
+    };
+
+    function deserialize_Lazy (cursor buffer) -> ReadResult(cursor) {
+    };
+  };
+
+  p @! TypeObject_mem.header = typeObject_typeObject;
+  p @! TypeObject_mem.con_index = uint 0;
+  p @! TypeObject_mem.serializer = owned call serialize_Lazy(size, lazy_obj);
+  p @! TypeObject_mem.deserializer = owned call serialize_Lazy(size, lazy_obj);
+};
+#endif

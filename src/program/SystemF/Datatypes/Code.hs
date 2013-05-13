@@ -7,6 +7,7 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer
+import Control.Monad.RWS
 import qualified Data.IntMap as IntMap
 import Data.List
 import Data.Maybe
@@ -19,6 +20,7 @@ import Common.Identifier
 import Common.MonadLogic
 import Common.Supply
 import qualified LowLevel.Types as LL
+import qualified LowLevel.Syntax as LL
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Datatypes.DynamicTypeInfo
@@ -38,11 +40,13 @@ instance Monoid MkExp where
   mempty = MkExp id
   mappend (MkExp f) (MkExp g) = MkExp (f . g)
 
-type Gen a = WriterT MkExp UnboxedTypeEvalM a
+type Gen a = RWST (IdentSupply LL.Var) MkExp () UnboxedTypeEvalM a
 
 -- | Size and alignment of an object.
 --   Corresponds to data type @SizeAlign@ or @SizeAlignVal@.
-data SizeAlign = SizeAlign {objectSize :: !Sz, objectAlign :: !Al}
+data SizeAlign = SizeAlign { objectSize :: !Sz
+                           , objectAlign :: !Al
+                           , objectPointerfree :: !PointerFree}
 
 -- | A length value, holding an 'int'
 newtype Length = Length ExpM
@@ -63,37 +67,44 @@ newtype IsRef = IsRef ExpM
 data BoxInfo =
   BoxInfo
   { box_info_conid :: !ExpM    -- An unsigned integer
+  , box_info_serializer :: !ExpM
+  , box_info_deserializer :: !ExpM
   }
 
 -- | The unpacked fields of a 'Repr' object
 data BareInfo =
   BareInfo 
-  { bare_info_size     :: !SizeAlign 
-  , bare_info_pointers :: !PointerFree
-  , bare_info_isref    :: !IsRef
+  { bare_info_size         :: !SizeAlign
+  , bare_info_isref        :: !IsRef
+  , bare_info_serializer   :: !ExpM
+  , bare_info_deserializer :: !ExpM
   }
 
 -- | The unpacked fields of a 'ReprVal' object
 data ValInfo =
   ValInfo
-  { val_info_size     :: !SizeAlign
-  , val_info_pointers :: !PointerFree
+  { val_info_size         :: !SizeAlign
+  , val_info_serializer   :: !ExpM
+  , val_info_deserializer :: !ExpM
   }
 
-runGen :: Gen ExpM -> UnboxedTypeEvalM ExpM
-runGen m = do (x, MkExp f) <- runWriterT m
-              return $ f x
+runGen :: IdentSupply LL.Var -> Gen ExpM -> UnboxedTypeEvalM ExpM
+runGen var_supply m = do (x, (), MkExp f) <- runRWST m var_supply () 
+                         return $ f x
 
 -- | Run a @Gen (Maybe ExpM)@; raise an exception if it returns 'Nothing'
-runMaybeGen :: Gen (Maybe ExpM) -> UnboxedTypeEvalM ExpM
-runMaybeGen m = do (mx, MkExp f) <- runWriterT m
-                   case mx of
-                     Nothing -> internalError "runMaybeGen"
-                     Just x -> return $ f x
+runMaybeGen :: IdentSupply LL.Var -> Gen (Maybe ExpM) -> UnboxedTypeEvalM ExpM
+runMaybeGen var_supply m = do (mx, (), MkExp f) <- runRWST m var_supply ()
+                              case mx of
+                                Nothing -> internalError "runMaybeGen"
+                                Just x  -> return $ f x
 
-execGen :: Gen a -> UnboxedTypeEvalM (a, ExpM -> ExpM)
-execGen m = do (x, MkExp f) <- runWriterT m
-               return (x, f)
+execGen :: IdentSupply LL.Var -> Gen a -> UnboxedTypeEvalM (a, ExpM -> ExpM)
+execGen var_supply m = do (x, (), MkExp f) <- runRWST m var_supply ()
+                          return (x, f)
+
+getLLVarIdentSupply :: Gen (IdentSupply LL.Var)
+getLLVarIdentSupply = ask
 
 -- | Bind an expression's result to a variable.
 --
@@ -203,66 +214,65 @@ mkCase ty scrutinee size_params alt_handlers = do
 -- | Extract the fields of a @SizeAlignVal a@ term.
 unpackSizeAlignVal :: Type -> ExpM -> Gen SizeAlign
 unpackSizeAlignVal ty e = do
-  ([], [s, a]) <- decon (sizeAlignValV `varApp` [ty]) e
-  return $ SizeAlign s a
+  ([], [s, a, pf]) <- decon (sizeAlignValV `varApp` [ty]) e
+  return $ SizeAlign s a (PointerFree pf)
 
 -- | Construct a @SizeAlignVal a@ term.
 packSizeAlignVal :: Type -> SizeAlign -> ExpM
-packSizeAlignVal ty (SizeAlign s a) =
-  valConE' (VarCon sizeAlignVal_conV [ty] []) [s, a]
+packSizeAlignVal ty (SizeAlign s a (PointerFree pf)) =
+  valConE' (VarCon sizeAlignVal_conV [ty] []) [s, a, pf]
 
 -- | Extract the fields of a @ReprVal a@ term.
 unpackReprVal :: Type -> ExpM -> Gen ValInfo
 unpackReprVal ty e = do
-  ([], [sa, p]) <- decon (valInfoV `varApp` [ty]) e
+  ([], [sa, ser, des]) <- decon (valInfoV `varApp` [ty]) e
   sa' <- unpackSizeAlignVal ty sa
-  return $ ValInfo sa' (PointerFree p)
+  return $ ValInfo sa' ser des
 
 -- | Construct a @SizeAlignVal a@ term.
 packReprVal :: Type -> ValInfo -> ExpM
-packReprVal ty (ValInfo sa (PointerFree p)) =
+packReprVal ty (ValInfo sa ser des) =
   let con = VarCon valInfo_conV [ty] []
       ty_obj = varAppE' boxInfo_valInfoV [ty] []
-  in conE' con [] (Just ty_obj) [packSizeAlignVal ty sa, p]
+  in conE' con [] (Just ty_obj) [packSizeAlignVal ty sa, ser, des]
 
 -- | Extract the fields of a @SizeAlign a@ term.
 unpackSizeAlign :: Type -> ExpM -> Gen SizeAlign
 unpackSizeAlign ty e = do
-  ([], [s, a]) <- decon (sizeAlignV `varApp` [ty]) e
-  return $ SizeAlign s a
+  ([], [s, a, pf]) <- decon (sizeAlignV `varApp` [ty]) e
+  return $ SizeAlign s a (PointerFree pf)
 
 -- | Construct a @SizeAlign a@ term.
 packSizeAlign :: Type -> SizeAlign -> ExpM
-packSizeAlign ty (SizeAlign s a) =
-  valConE' (VarCon sizeAlign_conV [ty] []) [s, a]
+packSizeAlign ty (SizeAlign s a (PointerFree pf)) =
+  valConE' (VarCon sizeAlign_conV [ty] []) [s, a, pf]
 
 -- | Extract the fields of a @Repr a@ term.
 unpackRepr :: Type -> ExpM -> Gen BareInfo
 unpackRepr ty e = do
-  ([], [size_align, just_bytes, is_ref]) <-
+  ([], [size_align, is_ref, ser, des]) <-
     decon (bareInfoV `varApp` [ty]) e
   sa <- unpackSizeAlign ty size_align
-  return $ BareInfo sa (PointerFree just_bytes) (IsRef is_ref)
+  return $ BareInfo sa (IsRef is_ref) ser des
 
 -- | Rebuild a @Repr a@ term.
 packRepr :: Type -> BareInfo -> ExpM
-packRepr ty (BareInfo sa (PointerFree just_bytes) (IsRef is_ref)) =
+packRepr ty (BareInfo sa (IsRef is_ref) ser des) =
   let con = VarCon bareInfo_conV [ty] []
       ty_obj = varAppE' boxInfo_bareInfoV [ty] []
   in conE' con [] (Just ty_obj)
-     [packSizeAlign ty sa, just_bytes, is_ref]
+     [packSizeAlign ty sa, is_ref, ser, des]
 
 unpackTypeObject :: Type -> ExpM -> Gen BoxInfo
 unpackTypeObject ty e = do
-  ([], [conid]) <-
-    decon (boxInfoV `varApp` [ty]) e
-  return $ BoxInfo conid
+  ([], [conid, ser, des]) <- decon (boxInfoV `varApp` [ty]) e
+  return $ BoxInfo conid ser des
 
 packTypeObject :: Type -> BoxInfo -> ExpM
-packTypeObject ty (BoxInfo conid) =
+packTypeObject ty (BoxInfo conid ser des) =
   let con = VarCon boxInfo_conV [ty] []
       ty_obj = varAppE' boxInfo_boxInfoV [ty] []
-  in conE' con [] (Just ty_obj) [conid]
+  in conE' con [] (Just ty_obj) [conid, ser, des]
 
 unpackLength :: Type -> ExpM -> Gen Length
 unpackLength ty e = do
@@ -378,35 +388,20 @@ type Sz = ExpM
 -- | An alignment, with type 'uint'
 type Al = ExpM
 
-instance DefaultValue SizeAlign where dummy = emptySizeAlign
-
-instance DefaultValue Length where dummy = Length (intL 0)
-
-instance DefaultValue PointerFree where
-  dummy = PointerFree (falseE defaultExpInfo)
-
-instance DefaultValue IsRef where
-  dummy = IsRef (falseE defaultExpInfo) -- Not well-typed
-
-instance DefaultValue ValInfo where dummy = ValInfo dummy dummy
-
-instance DefaultValue BareInfo where
-  dummy = BareInfo dummy dummy dummy
-    where
-      z = intL 0
-
 emptySizeAlign :: SizeAlign
-emptySizeAlign = SizeAlign (uintL 0) (uintL 1)
+emptySizeAlign = SizeAlign (uintL 0) (uintL 1) isPointerFree
 
-data OffAlign = OffAlign {offsetOff :: !Off, offsetAlign :: !Al}
+data OffAlign = OffAlign { offsetOff :: !Off
+                         , offsetAlign :: !Al
+                         , offsetPointerfree :: !PointerFree}
 
 emptyOffAlign :: OffAlign
-emptyOffAlign = OffAlign zero (uintL 1)
+emptyOffAlign = OffAlign zero (uintL 1) isPointerFree
 
 -- | Convert an offset and alignment to a size and alignment
 offAlignToSize :: OffAlign -> SizeAlign
-offAlignToSize (OffAlign (Off o) a) =
-  SizeAlign (intToUintE o) a
+offAlignToSize (OffAlign (Off o) a pf) =
+  SizeAlign (intToUintE o) a pf
 
 -- | Round up an offset to the nearest multiple of an alignment
 addRecordPadding :: Off -> Al -> Gen Off
@@ -424,11 +419,14 @@ addSize (Off off) size = do
 -- | Add padding to an offset.
 --   Return the field offset and the new offset.
 padOff :: OffAlign -> SizeAlign -> Gen (Off, OffAlign)
-padOff (OffAlign off al) sa = do
+padOff (OffAlign off al pf) sa = do
   off' <- addRecordPadding off (objectAlign sa)
   off'' <- addSize off' (objectSize sa)
   al' <- emit uintT $ maxUE_1 al (objectAlign sa)
-  return (off', OffAlign off'' al')
+  pf' <- let PointerFree x = pf
+             PointerFree y = objectPointerfree sa
+         in emit boolT $ andIE x y
+  return (off', OffAlign off'' al' (PointerFree pf'))
 
 -- | Add padding to an offset.
 --   Return the field offset and the new offset.
@@ -441,7 +439,7 @@ padOffMaybe o (Just sa) = do
 -- | Compute the size of an array, given the size of an array element.
 --   The number of array elements is an @int@.
 arraySize :: Length -> SizeAlign -> Gen SizeAlign
-arraySize (Length n_elements) (SizeAlign elem_size elem_align) = do
+arraySize (Length n_elements) (SizeAlign elem_size elem_align elem_pf) = do
   -- Add padding to each array element
   let off1 = Off (uintToIntE elem_size)
   elem_size <- addRecordPadding off1 elem_align
@@ -451,7 +449,7 @@ arraySize (Length n_elements) (SizeAlign elem_size elem_align) = do
         intToUintE $
         varAppE' mulIV [] [n_elements, case elem_size of Off o -> o]
 
-  return $ SizeAlign array_size elem_align
+  return $ SizeAlign array_size elem_align elem_pf
 
 -- | Compute the size of a data structure consisting of two fields
 --   placed consecutively in memory, with padding
@@ -467,10 +465,13 @@ structSize xs = offAlignToSize `liftM` foldM abut emptyOffAlign xs
 
 -- | Compute the size and alignment of two overlaid objects
 overlay :: SizeAlign -> SizeAlign -> Gen SizeAlign
-overlay (SizeAlign s1 a1) (SizeAlign s2 a2) = do
+overlay (SizeAlign s1 a1 pf1) (SizeAlign s2 a2 pf2) = do
   s <- emit uintT $ maxUE s1 s2
   a <- emit uintT $ maxUE_1 a1 a2
-  return $ SizeAlign s a
+  pf <- let PointerFree x = pf1
+            PointerFree y = pf2
+        in emit boolT $ andIE x y
+  return $ SizeAlign s a (PointerFree pf)
 
 overlays :: [SizeAlign] -> Gen SizeAlign
 overlays (x:xs) = foldM overlay x xs

@@ -183,7 +183,7 @@ mkAlt con ty_args mk_body = do
 
 outType t = outPtrT `typeApp` [t]
 initEffectType t = storeT
-storedType t = varApp (coreBuiltin The_Stored) [t]
+storedType t = varApp storedV [t]
 
 writerType t = outType t `FunT` initEffectType t
 

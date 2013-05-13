@@ -112,6 +112,10 @@ offset base off
       CCall (CVar (internalIdent "TRIOLET_OFF") internalNode) [base, off]
       internalNode
 
+diff :: CExpr -> CExpr -> CExpr
+diff x y = CCall (CVar (internalIdent "TRIOLET_DIFF") internalNode) [x, y]
+           internalNode
+
 isZeroCExpr :: CExpr -> Bool
 isZeroCExpr e =
   case e

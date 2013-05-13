@@ -10,6 +10,7 @@ import Control.Monad.Reader
 import Control.Monad.ST
 import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 import Common.Error
 import Common.Identifier
@@ -30,6 +31,28 @@ import Type.Type
 import Type.Substitute(TypeSubst)
 import qualified Type.Substitute as Substitute
 
+-- | A low-level translation of a variable.
+--
+--   Most core variables translate to low-level variables.
+--   However, some global constants are
+--   translated to lazy evaluation of global functions.
+data VarTranslation =
+    -- | An ordinary variable
+    Variable !LL.Var
+
+    -- | A lazily evaluated object.
+    --   The kind and low-level type of the lazy variable's value are included
+    --   here.  The variable is a lazy object.
+  | Lazy !BaseKind !LL.ValueType !LL.Var
+
+-- | Get the translated variable from a 'VarTranslation'.
+--   Because there are different ways of translating a core variable to a
+--   low-level one, the translated variable may not be a drop-in replacement
+--   for the original variable.
+translatedVar :: VarTranslation -> LL.Var
+translatedVar (Variable v) = v
+translatedVar (Lazy _ _ v) = v
+
 newtype Lower a = Lower (ReaderT LowerEnv UnboxedTypeEvalM a)
                 deriving(Functor, Applicative, Monad, MonadIO)
 
@@ -41,108 +64,32 @@ type GenLower a = Gen Lower a
 data LowerEnv =
   LowerEnv { llVarSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
 
-             -- | A low-level variable is associated to each variable that
-             --   is in scope
-           , varMap :: IntMap.IntMap LL.Var
+             -- | Each in-scope variable is associated with a
+             --   low-level variable or expression
+           , varMap :: !(IntMap.IntMap VarTranslation)
+           
+             -- | Pre-defined variables are kept in this map as well as
+             --   in 'varMap'
+           , predefinedVarMap :: !(IntMap.IntMap VarTranslation)
            }
 
 getLLVarSupply :: Lower (IdentSupply LL.Var)
 getLLVarSupply = Lower $ asks llVarSupply
 
+getVarSupply :: Lower (IdentSupply Var)
+getVarSupply = Lower $ lift $ TypeEvalM $ \s _ -> return s
+
+getTypeEnvironment :: Lower TypeEnv
+getTypeEnvironment = Lower $ lift getTypeEnv
+
 initializeLowerEnv :: IdentSupply LL.Var
                    -> Map.Map Var LL.Var
                    -> IO LowerEnv
 initializeLowerEnv var_supply var_map =
-  return $ LowerEnv var_supply global_map
+  return $ LowerEnv var_supply global_map global_map
   where
-    global_map = IntMap.fromList [(fromIdent $ varID v, v')
+    global_map = IntMap.fromList [(fromIdent $ varID v, Variable v')
                                  | (v, v') <- Map.toList var_map]
-  
-
-{-
-mkGlobalIntEnv = do
-  minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (coreBuiltin The_min_i) [VarT arg1, VarT arg2],
-     binary_function arg1 arg2 (LL.llBuiltin LL.the_prim_min_fii))
-  minus_int <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (coreBuiltin The_minus_i) [VarT arg1, VarT arg2],
-     binary_function arg1 arg2 (LL.llBuiltin LL.the_prim_minus_fii))
-  return $ DictEnv.DictEnv [minimum_int, minus_int]
-  where
-    binary_function :: Var -> Var -> LL.Var -> TypeSubst -> GenLower LL.Val
-    binary_function arg1 arg2 op_var subst = do
-      val1 <- lookupIndexedInt (get_arg arg1)
-      val2 <- lookupIndexedInt (get_arg arg2)
-      emitAtom1 (LL.RecordType LL.finIndexedIntRecord) $ 
-        LL.primCallA (LL.VarV op_var) [val1, val2]
-      where
-        get_arg a =
-          case Substitute.lookup a subst
-          of Just t -> t
-             Nothing -> internalError "mkGlobalIntEnv"
-
--- | Create the global representation dictionary environment
-mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
-mkGlobalReprEnv = do
-  internalError "mkGlobalReprEnv"
-  -- All boxed objects use the same representation
-  box_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp refV [VarT arg], mk_boxed_dict arg)
-
-  -- Value dictionaries
-  let int_dict = mono_dict (stored_type intT) LL.the_bivar_repr_int
-  let float_dict = mono_dict (stored_type floatT) LL.the_bivar_repr_float
-
-  -- Bare object dictionaries
-  (tuple2_dict, tuple3_dict, tuple4_dict) <- do
-    v1 <- newAnonymousVar TypeLevel
-    v2 <- newAnonymousVar TypeLevel
-    v3 <- newAnonymousVar TypeLevel
-    v4 <- newAnonymousVar TypeLevel
-    let ty2 = varApp (coreBuiltin The_Tuple2)
-              [VarT v1, VarT v2]
-    let ty3 = varApp (coreBuiltin The_Tuple3)
-              [VarT v1, VarT v2, VarT v3]
-    let ty4 = varApp (coreBuiltin The_Tuple4)
-              [VarT v1, VarT v2, VarT v3, VarT v4]
-    return (DictEnv.pattern [v1, v2] ty2 (mk_tuple_dict [v1, v2]),
-            DictEnv.pattern [v1, v2, v3] ty3 (mk_tuple_dict [v1, v2, v3]),
-            DictEnv.pattern [v1, v2, v3, v4] ty4 (mk_tuple_dict [v1, v2, v3]))
-  return $ DictEnv.DictEnv [float_dict, int_dict, box_dict,
-                            tuple2_dict, tuple3_dict, tuple4_dict]
-  where
-    stored_type t = varApp (coreBuiltin The_Stored) [t]
-    mono_dict ty val =
-      DictEnv.monoPattern ty (return (LL.VarV $ LL.llBuiltin val))
-
-    -- Get a representation dictionary for boxed objects
-    mk_boxed_dict _ _ = return repr_Box_value
-
-    -- This is the representation dictionary for boxed objects
-    repr_Box_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Box
-    
-    mk_tuple_dict :: [Var] -> TypeSubst -> GenLower LL.Val
-    mk_tuple_dict args = \subst -> do
-      -- Get repr dictionaries for each type argument
-      withMany (with_arg_dict subst) args $ \arg_dicts -> do
-        -- Pick the correct function
-        let op = tuple_dict_constructor (length arg_dicts)
-            
-        -- Call the constructor function
-        emitAtom1 (LL.PrimType LL.OwnedType) $
-          LL.closureCallA (LL.VarV op) arg_dicts
-      
-      where
-        with_arg_dict subst arg k =
-          let arg' = case Substitute.lookup arg subst
-                     of Just t -> t
-                        Nothing -> internalError "initializeLowerEnv"
-          in lookupReprDict arg' k
-    
-    tuple_dict_constructor 2 = LL.llBuiltin LL.the_fun_repr_Tuple2
-    tuple_dict_constructor 3 = LL.llBuiltin LL.the_fun_repr_Tuple3
-    tuple_dict_constructor 4 = LL.llBuiltin LL.the_fun_repr_Tuple4
--}
 
 instance Supplies Lower (Ident Var) where
   fresh = Lower $ lift fresh
@@ -174,94 +121,43 @@ instance TypeEnvMonad Lower where
 instance EvalMonad Lower where
   liftTypeEvalM m = Lower $ lift m
 
-{-
--- | Find the Repr dictionary for the given type, which should be a type
---   variable.  Fail if not found.
-lookupReprDict :: Type -> (LL.Val -> GenLower a) -> GenLower a
-lookupReprDict ty k = do
-  match <- lift lookup_dict
-  case match of
-    Just dict_val -> k =<< dict_val
-    Nothing -> internalError $ 
-               "lookupReprDict: Dictionary not found for type:\n" ++ show (pprType ty)
-  where
-    lookup_dict = do
-      dict_env <- Lower $ asks reprDictEnvironment  
-      DictEnv.lookup ty dict_env
+isPredefinedVar :: Var -> Lower Bool
+isPredefinedVar v = Lower $ ReaderT $ \env ->
+  return $ (fromIdent $ varID v) `IntMap.member` predefinedVarMap env
 
--- | Add a Repr dictionary for this type to the environment
-assumeReprDict :: Type -> LL.Val -> Lower a -> Lower a
-assumeReprDict ty val (Lower m) = Lower $ local update m
-  where
-    update env = env {reprDictEnvironment =
-                         DictEnv.insert (DictEnv.monoPattern ty (return val)) $
-                         reprDictEnvironment env}
-
--- | Find a finite integer indexed by the given index, which should be a type
---   of kind @intindex@.  Fail if not found.
-lookupIndexedInt :: Type -> GenLower LL.Val
-lookupIndexedInt ty = do
-  whnf_ty <- lift $ reduceToWhnf ty
-  case whnf_ty of
-    IntT n -> create_indexed_int n
-    _ -> do
-      match <- lookup_dict
-      case match of
-        Just make_int_val -> make_int_val
-        Nothing -> internalError $
-                   "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
-  where
-    create_indexed_int n =
-      -- Create a literal value
-      return $ LL.RecV (LL.finIndexedIntRecord) [nativeIntV n]
-
-    lookup_dict = lift $ do
-      dict_env <- Lower $ asks intEnvironment
-      DictEnv.lookup ty dict_env
-
--- | Add a finite indexed integer for this type index to the environment
-assumeIndexedInt :: Type -> LL.Val -> Lower a -> Lower a
-assumeIndexedInt ty val (Lower m) = Lower $ local update m
-  where
-    update env = env {intEnvironment =
-                         DictEnv.insert (DictEnv.monoPattern ty (return val)) $
-                         intEnvironment env}
--}
-
-lookupVar :: Var -> Lower LL.Var
+lookupVar :: Var -> Lower VarTranslation
 lookupVar v = Lower $ ReaderT $ \env ->
   case IntMap.lookup (fromIdent $ varID v) $ varMap env
-  of Just ll_var -> return ll_var
+  of Just vt -> return vt
      Nothing -> internalError $
                 "Lowering: no translation for variable: " ++ show v
 
 -- | Create a new low-level variable to stand for the given variable 
-translateVariable :: Bool -> Var -> LL.ValueType -> Lower LL.Var
-translateVariable True v ty =
+translateVariable :: Bool -> Var -> Type -> Lower LL.Var
+translateVariable is_external v sf_ty = do
+  ty <- lowerLowerType sf_ty
+  translateVariableWithType is_external v ty
+
+-- | Create a new low-level lazy variable to stand for the given variable 
+translateLazyVariable :: Bool -> Var -> Lower LL.Var
+translateLazyVariable is_external v =
+  translateVariableWithType is_external v (LL.PrimType LL.PointerType)
+
+translateVariableWithType True v ty =
   case varName v
   of Just nm -> LL.newExternalVar nm ty
      Nothing -> internalError $ 
-                "assumeVariableWithType: Exported variable must have label"
-    
-translateVariable False v ty =
+                "translateVariableWithType: Exported variable must have label"
+                
+translateVariableWithType False v ty =
   LL.newVar (varName v) ty
 
-assumeVariableWithType :: Bool                -- ^ Whether variable is exported
-                       -> Var                 -- ^ System F variable
-                       -> Type                -- ^ System F type
-                       -> LL.ValueType        -- ^ Low-level type
-                       -> (LL.Var -> Lower a) -- ^ Use of low-level variable
-                       -> Lower a
-assumeVariableWithType is_exported v sf_ty ty k = do
-  new_v <- translateVariable is_exported v ty
-  assumeTranslatedVariable v new_v sf_ty (k new_v)
-
-assumeTranslatedVariable v new_v sf_ty m = add_to_env new_v m
-  where  
-    add_to_env new_v (Lower m) = assume v sf_ty (Lower (local update m))
-      where
-        update env =
-          env {varMap = IntMap.insert (fromIdent $ varID v) new_v $ varMap env}
+assumeTranslatedVariable :: Var -> VarTranslation -> Type -> Lower a -> Lower a
+assumeTranslatedVariable v new_v sf_ty (Lower m) =
+  assume v sf_ty (Lower (local update m))
+  where
+    update env =
+      env {varMap = IntMap.insert (fromIdent $ varID v) new_v $ varMap env}
 
 -- | Perform some computation that also generates code; emit the code
 lowerAndGenerateCode :: GenM a -> GenLower a
@@ -279,20 +175,15 @@ lowerAndGenerateNothing g = Lower $ ReaderT $ \env ->
 --   for later use.
 embedIntoGenM :: (a -> GenLower b) -> GenLower (a -> GenM b)
 embedIntoGenM f = do
-  var_map <- lift $ Lower (asks varMap) -- Get the current variable map
+  -- Get the current variable maps
+  env <- lift $ Lower ask
+  let var_map = varMap env
+      predefined_var_map = predefinedVarMap env
   return $ \x -> Gen $ \rt -> SizeComputing $ ReaderT $ \var_supply ->
-    let lower_env = LowerEnv var_supply var_map
+    let lower_env = LowerEnv var_supply var_map predefined_var_map
     in runLowering lower_env (runGen (f x) rt)
     
 lowerLowerType :: Type -> Lower LL.ValueType
 lowerLowerType ty = Lower $ ReaderT $ \env -> do
   lowerType (llVarSupply env) ty
 
-{-
--- | Add a type variable to the type environment
-assumeType :: Var -> Type -> Lower a -> Lower a
-assumeType v kind m
-  | getLevel v /= TypeLevel = internalError "assumeType: Not a type variable"
-  | getLevel kind /= KindLevel = internalError "assumeType: Not a kind"
-  | otherwise = assume v kind m
--}

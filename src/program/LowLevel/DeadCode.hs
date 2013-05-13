@@ -24,6 +24,7 @@ import Data.Traversable
 import Common.Error
 import Common.Identifier
 import LowLevel.Syntax
+import LowLevel.Print
 import LowLevel.CodeTypes
 
 -- | A map from variable IDs to the number of uses the variable has.
@@ -201,12 +202,15 @@ primHasSideEffect prim =
      PrimOr {}            -> False
      PrimNot {}           -> False
      PrimAddP {}          -> False
+     PrimSubP {}          -> False
      PrimLoad {}          -> False
      PrimStore {}         -> True
      PrimAAddZ {}         -> True
      PrimCastToOwned {}   -> False
      PrimCastFromOwned {} -> False
      PrimCastFromCursor {} -> False
+     PrimCursorBase {}    -> False
+     PrimCastPtrToInt {}  -> False
      PrimGetFrameP {}     -> False
      PrimCastZToF {}      -> False
      PrimCastFToZ {}      -> False

@@ -9,7 +9,8 @@ module SystemF.Datatypes.InfoCall
         callKnownUnboxedInfoFunction,
         callConstantUnboxedInfoFunction,
         callBoxedInfoFunction,
-        callConstantBoxedInfoFunction)
+        callConstantBoxedInfoFunction,
+        constructInfo)
 where
 
 import Prelude hiding(catch)
@@ -181,7 +182,13 @@ callUnboxedInfoFunction type_info data_type ty_args = do
   -- Create a constructor call
   return $ do
     args <- sequence m_args
-    return $ varAppE' (dataTypeUnboxedInfoVar data_type) ty_args args
+
+    -- Special case for 'Stored'
+    let info_function =
+          if dataTypeCon data_type == storedV
+          then bareInfo_storedV
+          else dataTypeUnboxedInfoVar data_type
+    return $ varAppE' info_function ty_args args
 
 -- | Generate a call to a boxed type constructor's info function
 callBoxedInfoFunction :: CoreDynTypeInfo -> DataConType -> [Type] -> [Type]

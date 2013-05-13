@@ -29,6 +29,7 @@ data BinOp =
   | AddOp                       -- ^ '+'
   | SubOp                       -- ^ '-'
   | PointerAddOp                -- ^ '^+'
+  | PointerSubOp                -- ^ '^-'
   | AtomicAddOp                 -- ^ '!+'
   | CmpEQOp                     -- ^ '=='
   | CmpNEOp                     -- ^ '!='
@@ -170,6 +171,8 @@ data BaseExpr a =
   | LoadFieldE (Expr a) (Field a)
     -- | Dereference a pointer (only valid in LValue expressions)
   | DerefE (Expr a)
+    -- | Get base address of a cursor
+  | BaseE (Expr a)
     -- | Load from a pointer
   | LoadE (Type a) (Expr a)
     -- | Call a function

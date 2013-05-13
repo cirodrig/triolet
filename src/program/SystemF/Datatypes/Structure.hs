@@ -60,10 +60,8 @@ import qualified LowLevel.Print
 -- | The structure of the outermost term of a data type.
 data Structure =
     PrimStruct !PrimType               -- ^ A primitive type
-  | BoolStruct                         -- ^ The boolean type.  This type is
-                                       --   special-cased because it has
-                                       --   different representations in memory
-                                       --   and in local variables.
+  | StoredStruct Type                  -- ^ Special case for a
+                                       --   @Stored t@ type
   | ArrStruct Type Type                -- ^ An array
   | DataStruct {-# UNPACK #-}!Data     -- ^ An algebraic data type
   | ForallStruct {-# UNPACK #-}!Forall -- ^ A universally quantified type
@@ -105,8 +103,7 @@ data Forall = Forall Binder Type
 pprStructure :: Structure -> Doc
 pprStructure (PrimStruct pt) =
   LowLevel.Print.pprPrimType pt
-pprStructure BoolStruct =
-  LowLevel.Print.pprPrimType BoolType
+pprStructure (StoredStruct t) = text "(StoredStruct {})"
 pprStructure (ArrStruct size elem) =
   pprTypePrec elem ? atomicPrec <> brackets (pprType size)
 
@@ -171,7 +168,10 @@ computeStructure t = liftTypeEvalM $ do
       | con == uintV -> return $ PrimStruct trioletUintType
       | con == floatV -> return $ PrimStruct trioletFloatType
       | con == byteV -> return $ PrimStruct trioletByteType
-      {-  | con `isCoreBuiltin` The_bool -> return BoolStruct -}
+
+    Just (con, [arg])
+      | con == cursorV -> return $ PrimStruct CursorType
+      | con == storedV -> return $ StoredStruct arg
 
     Just (con, [size, element])
       | con == arrV -> return $ ArrStruct size element
@@ -253,8 +253,8 @@ variableStructuralSubterms ty = do
   case l of
     PrimStruct _ ->
       return []
-    BoolStruct ->
-      return []
+    StoredStruct t ->
+      variableStructuralSubterms t
     ArrStruct size element ->
       mappend `liftM`
       int_subterm size `ap`
@@ -337,9 +337,12 @@ computeDataSizes dtype
           st2 <- nubKindTypeList static_types
           return $ StructuralTypeVariance params sp2 st2
 
+        StoredStruct t -> do
+          st <- variableStructuralSubterms t
+          return $ StructuralTypeVariance params [] st
+
         UninhabitedStruct -> invariant
         PrimStruct _ -> invariant
-        BoolStruct -> invariant
 
         _ -> internalError "computeDataSizes: Unexpected layout"
 

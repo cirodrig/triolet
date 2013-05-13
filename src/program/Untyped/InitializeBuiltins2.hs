@@ -347,8 +347,6 @@ reprClassInstance :: SF.TypeEnv
                   -> TyCon
                   -> InitM (Qualified (Instance ClassInstance))
 reprClassInstance tenv tcm tc = do
-  stored_info <- lookup_stored_info
-
   -- Get the data type's kind and its size parameters' kinds
   -- using the core type environment
   Just dtype <- withCoreTypeEnv tenv $ SF.lookupDataType (tyConSFVar tc)
@@ -360,14 +358,12 @@ reprClassInstance tenv tcm tc = do
 
   -- Depending on the data type's kind, build an instance
   case data_kind of
-    SF.ValK  -> unboxedReprClassInstance (buildValReprInstance stored_info) param_kinds tcm tc
+    SF.ValK  -> do unboxedReprClassInstance (buildValReprInstance stored_info) param_kinds tcm tc
     SF.BareK -> unboxedReprClassInstance buildBareReprInstance param_kinds tcm tc
     SF.BoxK  -> boxedReprClassInstance tcm tc
   where
-    -- Get the info variable for type constructor 'Stored'
-    lookup_stored_info = do
-      Just dtype <- SF.lookupDataType SF.storedV
-      return $ SF.dataTypeUnboxedInfoVar dtype
+    -- Get the info constructor for stored types
+    stored_info = coreBuiltin The_repr_Stored
 
 boxedReprClassInstance tcm tc = do
   Just dtype <- SF.lookupDataType (tyConSFVar tc)
@@ -651,12 +647,12 @@ reprClass core_env tc_map = do
     --[maybe_instance, tuple2_instance, tuple3_instance, tuple4_instance] ++
     --instances1 ++ instances2 ++ instances3
   where
-    monomorphic_instances =
+    {-monomorphic_instances =
       [(lookupBuiltinVar SF.intV tc_map, The_repr_int),
        (lookupBuiltinVar SF.floatV tc_map, The_repr_float),
        (lookupBuiltinCon The_bool tc_map, The_repr_bool),
        (lookupBuiltinCon The_NoneType tc_map, The_repr_NoneType),
-       (lookupBuiltinCon The_SliceObject tc_map, The_repr_SliceObject),
+       (lookupBuiltinCon The_SliceObject tc_map, The_frontend_repr_SliceObject),
        (lookupBuiltinCon The_intset tc_map, The_repr_intset)]
 
     -- Instances for bare container types whose representation is
@@ -675,7 +671,7 @@ reprClass core_env tc_map = do
     -- Instances for boxed types.
     boxed_instances =
       [The_list_dim, The_dim1, The_dim2, The_dim3,
-       The_Stream, The_view, The_Scatter]
+       The_Stream, The_view, The_Scatter]-}
 
     -- Create an abstract Repr instance for a boxed type.
     -- The instance is parameterized over the boxed type's type parameters.
@@ -1213,6 +1209,7 @@ varInitializers =
       , (TheV_displaceView, The_displaceView)
       , (TheV_multiplyView, The_multiplyView)
       , (TheV_divideView, The_divideView)
+      , (TheV_testCopyViaBuffer, The_testCopyViaBuffer)
       {- Temporarily commented out while porting the library
       , (TheV_permute1D, The_permute1D)
       , (TheV_boxedPermute1D, The_boxedPermute1D)

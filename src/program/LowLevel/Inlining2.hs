@@ -3,13 +3,16 @@
 module LowLevel.Inlining2(shouldInline, inlineModule)
 where
 
+import Prelude hiding(sequence, mapM)
+
 import Control.Applicative
-import Control.Monad
-import Control.Monad.RWS
+import Control.Monad hiding(sequence, mapM)
+import Control.Monad.RWS hiding(sequence, mapM)
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Data.Monoid
+import Data.Traversable
 import Debug.Trace
 
 import System.IO
@@ -185,6 +188,23 @@ renameParameter v f = do
 renameParameters :: [Var] -> ([Var] -> Inl s a) -> Inl s a
 renameParameters = withMany renameParameter
 
+-- | Rename the variables defined by a function definition.
+--   The function body may or may not have been renamed yet.
+--   Uses of the variables are not renamed.
+renameDefinienda :: FunDef -> (FunDef -> Inl s a) -> Inl s a
+renameDefinienda (Def v f) k =
+  case funEntryPoints f
+  of Nothing ->
+       -- Rename the bound variable only
+       renameParameter v $ \v' -> k (Def v' f)
+     Just ep ->
+       -- Rename all entry points
+       let vs = entryPointsVars ep
+       in renameParameters vs $ \_ -> do
+            ep' <- renameEntryPoints ep
+            let f' = f {funEntryPoints = Just ep'}
+            k (Def (globalClosure ep') f')
+
 setReturns :: [ValueType] -> Inl s a -> Inl s a
 setReturns rtypes m = local set_returns m
   where set_returns env = env {currentReturns = Just rtypes}
@@ -207,6 +227,15 @@ renameVar v = Inl $ RWST $ \env s ->
 renameVal (VarV v) = VarV <$> renameVar v
 renameVal (RecV r vs) = RecV r <$> mapM renameVal vs
 renameVal (LitV l) = return $ LitV l
+
+renameEntryPoints (EntryPoints ty arity dir vec exa ine inf glo) = do
+  dir' <- renameVar dir
+  vec' <- mapM renameVar vec
+  exa' <- renameVar exa
+  ine' <- renameVar ine
+  inf' <- renameVar inf
+  glo' <- renameVar glo
+  return $ EntryPoints ty arity dir' vec' exa' ine' inf' glo'
 
 renameStaticData (StaticData v) = StaticData <$> renameVal v
 
@@ -374,9 +403,14 @@ inlineCall' (!f, n_returns) args cont
 -- | Construct a partially applied function from the given pieces.
 createPartialApplication :: Int -> Fun -> Stm -> Var -> Inl s FunDef
 createPartialApplication n_args f fun_body fun_var = do
-  ep <- mkEntryPoints False (funType f) fun_var
+  let params = drop n_args $ funParams f
+
+  -- Type of the partially applied function
+  let f_type =
+        mkFunctionType ClosureCall (map varType params) (funReturnTypes f)
+  ep <- mkEntryPoints False f_type fun_var
   let new_f = mkFun ClosureCall (funInlineRequest f) (funFrameSize f)
-              (Just ep) (drop n_args $ funParams f) (funReturnTypes f) fun_body
+              (Just ep) params (funReturnTypes f) fun_body
   return $ Def fun_var new_f
   
 
@@ -616,20 +650,21 @@ inlineGroup (NonRec (Def v f)) do_body = do
   -- after inlining.
   let delete_definition = shouldInline f' && funConvention f' == JoinCall
 
-  -- Rename the bound variable and perform inlining in the body 
-  renameParameter v $ \v' -> do
-    body' <- considerForInlining v' f' n_returns do_body
+  -- Rename the function names and perform inlining in the body 
+  renameDefinienda (Def v f') $ \(Def v' f'') -> do
+    body' <- considerForInlining v' f'' n_returns do_body
 
     return $! if delete_definition
               then body'
-              else LetrecE (NonRec (Def v' f')) body'
+              else LetrecE (NonRec (Def v' f'')) body'
 
 inlineGroup (Rec defs) do_body = do
   -- Rename bound variables
-  renameParameters (map definiendum defs) $ \vs' -> do
+  withMany renameDefinienda defs $ \defs' -> do
+    let vs' = map definiendum defs'
 
     -- Perform renaming inside each function
-    results <- doFunction $ mapM (inlineFun . definiens) defs
+    results <- doFunction $ mapM (inlineFun . definiens) defs'
     let fs' = [f | (f, _, _) <- results]
         code_growth = mconcat [g | (_, _, g) <- results]
     sequence [propagateLetrecReturn f n | (f, n, _) <- results]
@@ -711,10 +746,7 @@ inlineModule mod =
     (globals, exports) <-
       runInl (inlineGlobals (moduleGlobals mod) (moduleExports mod)) env
     let new_mod = mod {moduleGlobals = globals, moduleExports = exports}
-    --putStrLn "After inlineModule"
-    --print $ pprModule new_mod
         
     -- Rename so that all inlined variables are unique
     runFreshVarM var_ids $
-      LowLevel.Rename.renameModule LowLevel.Rename.RenameLocals
-      LowLevel.Rename.emptyRenaming new_mod
+      LowLevel.Rename.renameModule LowLevel.Rename.RenameLocals new_mod

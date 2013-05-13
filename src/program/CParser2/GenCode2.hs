@@ -19,6 +19,7 @@ import Common.Label
 import Builtins.TypeFunctions
 import CParser2.AST
 import CParser2.AdjustTypes
+import qualified LowLevel.Syntax as LL
 import SystemF.Datatypes.Driver
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
@@ -673,13 +674,13 @@ variableNameTable decls = Map.fromList keyvals
                          , Just lab <- return $ varName v
                          , Left name <- return $ labelLocalName lab]
 
-createCoreModule :: IdentSupply Var -> RModule
+createCoreModule :: IdentSupply LL.Var -> IdentSupply Var -> RModule
                  -> IO (ITypeEnvBase FullyBoxedMode,
                         ITypeEnvBase SpecMode,
                         ITypeEnvBase UnboxedMode,
                         SystemF.Module SystemF.Mem,
                         Map.Map String Var)
-createCoreModule var_supply mod@(Module decls) = do
+createCoreModule ll_var_supply var_supply mod@(Module decls) = do
   -- Create a table of variable names
   let name_table = variableNameTable decls
   let builtin_type_functions = builtinTypeFunctions name_table
@@ -705,13 +706,19 @@ createCoreModule var_supply mod@(Module decls) = do
   type_env <- typeTranslation var_supply type_subst kind_env builtin_type_functions mod
 
   -- Compute size parameters in this type environment, updating 'type_env'
-  type_info_defs <- computeDataTypeInfo var_supply type_env
+  (updated_types, type_info_defs) <-
+    computeDataTypeInfo ll_var_supply var_supply type_env
+
+  -- DEBUG
+  --putStrLn "Type info definitions"
+  --liftIO $ mapM_ (print . pprGDef) type_info_defs
 
   -- Add size parameters to the type environment
-  let type_info_types = [(v, SystemF.entityType ens)
-                        | SystemF.Def v _ ens <- type_info_defs]
+  addLayoutVariablesToTypeEnvironment updated_types type_env
 
-  forM_ type_info_types $ \(v, t) -> insertGlobalType type_env v t
+{-let type_info_types = [(v, SystemF.entityType ens)
+                        | SystemF.Def v _ ens <- type_info_defs]
+  forM_ type_info_types $ \(v, t) -> insertGlobalType type_env v t-}
 
   -- Translate functions using this type environment
   mem_env <- runTypeEnvM type_env freezeTypeEnv :: IO (ITypeEnvBase UnboxedMode)
@@ -726,8 +733,9 @@ createCoreModule var_supply mod@(Module decls) = do
     return $ m {SystemF.modDefs = new_defs}
 
   -- DEBUG
-  putStrLn "Parsed module"
+  {-putStrLn "Parsed module"
   print $ pprModule mem_module
+  liftIO $ print $ pprTypeEnv mem_env-}
 
   -- Construct final expressions and type environments
   (spec_env, sf_env) <- convertFromMemTypeEnv name_table mem_env

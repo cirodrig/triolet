@@ -449,8 +449,12 @@ primCmpZ prim_type@(PrimType (IntType sign size)) comparison x y =
 primCmpP comparison x y =
   emitAtom1 (PrimType BoolType) $ PrimA (PrimCmpP comparison) [x, y]
 
-primAnd x y =
-  emitAtom1 (PrimType BoolType) $ PrimA PrimAnd [x, y]
+primAnd x y 
+  | LitV (BoolL True) <- x  = return y
+  | LitV (BoolL False) <- x = return x
+  | LitV (BoolL True) <- y  = return x
+  | LitV (BoolL False) <- y = return y
+  | otherwise = emitAtom1 (PrimType BoolType) $ PrimA PrimAnd [x, y]
 
 primAddP ptr off =
   let ptr_kind = case valType ptr of PrimType pt -> pointerKind pt
@@ -569,6 +573,14 @@ funArityV n =
 
 booleanV :: Bool -> Val
 booleanV b = LitV (BoolL b)
+
+-------------------------------------------------------------------------------
+-- List operations
+
+
+primAll :: (Monad m, Supplies m (Ident Var)) =>
+           (a -> Gen m Val) -> [a] -> Gen m Val
+primAll f xs = foldM primAnd (booleanV True) =<< mapM f xs
 
 -------------------------------------------------------------------------------
 -- Record operations
@@ -958,6 +970,10 @@ readPapOperand t = loadField (papRecord t !!: 4)
 writePapPapTag ptr = storeField (papRecord0 !!: 0) ptr (LitV NullL)
 
 selectTypeObjectConIndex = loadField (toDynamicRecord typeObjectRecord !!: 1)
+
+writeLazyValue t = storeField (lazyRecord t !!: 2)
+
+readLazyValue t = loadField (lazyRecord t !!: 2)
 
 -------------------------------------------------------------------------------
 -- Values

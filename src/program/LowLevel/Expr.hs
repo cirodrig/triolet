@@ -840,11 +840,11 @@ simplifyBinary (AddPOp ptr_kind) larg rarg
   | isIntLitExpr 0 rarg &&
     (ptr_kind == PointerPtr || ptr_kind == CursorPtr) = larg
 
-  -- Merge load with pointer casting
+  -- Merge add with pointer casting
   | UnExpr CastFromOwnedOp larg' <- larg =
       simplifyBinary (AddPOp OwnedPtr) larg' rarg
 
-  -- Merge load with pointer arithmetic
+  -- Merge add with pointer arithmetic
   | BinExpr (AddPOp ptr_kind') larg' larg2 <- larg =
       let rarg' = simplify' $
                   CAExpr (AddZOp Signed nativeIntSize) [larg2, rarg]

@@ -2,6 +2,12 @@
 
 #include "machine.h"
 
+// For debugging, print message when reading from a buffer
+//#define PRINT_GETS
+
+// For debugging, print message when writing to a buffer
+//#define PRINT_PUTS
+
 // Info table tags
 #define TAG_FUN (uint8 0)
 #define TAG_PAP (uint8 1)

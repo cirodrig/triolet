@@ -32,6 +32,7 @@ import qualified LowLevel.Print as LL
 import SystemF.Datatypes.Code hiding(runGen, SizeAlign, arraySize, unpackSizeAlign, addRecordPadding)
 import SystemF.Datatypes.DynamicTypeInfo
 import SystemF.Datatypes.InfoCall
+import SystemF.Datatypes.Serialize
 import SystemF.Datatypes.Structure
 import SystemF.Datatypes.Size
 import SystemF.Datatypes.Layout
@@ -94,8 +95,8 @@ assumeVarG is_exported v ty k = liftT1 (assumeVar is_exported v ty) k
 --   If it's a Repr dictionary, add that to the environment also.
 assumeVar :: Bool -> Var -> Type -> (LL.Var -> Lower a) -> Lower a
 assumeVar is_exported v rt k = do
-  rtype <- lowerLowerType rt
-  assumeVariableWithType is_exported v rt rtype k
+  new_v <- translateVariable is_exported v rt
+  assumeTranslatedVariable v (Variable new_v) rt (k new_v)
 
 assumeTyParam :: TypeEnvMonad m => TyPat -> m a -> m a
 assumeTyParam (TyPat b) m = assumeBinder b m
@@ -103,51 +104,25 @@ assumeTyParam (TyPat b) m = assumeBinder b m
 assumeTyParams ps m = foldr assumeTyParam m ps
 
 -------------------------------------------------------------------------------
--- Data types
-
-{-
--- | Compile a data constructor.  If the data constructor takes no   
---   arguments, the constructor value is returned; otherwise a function 
---   is returned.  All type arguments must be provided.
-compileConstructor :: LayoutCon -> Type -> [LL.Val] -> GenLower RetVal
-compileConstructor con data_type args = do
-  layout <- lift $ getAlgLayout data_type
-  fmap RetVal $ algebraicIntro layout con args
-
-compileCase :: Type             -- ^ Case statement result type
-            -> Type             -- ^ Scrutinee type
-            -> LL.Val           -- ^ Scrutinee value
-            -> [(LayoutCon, [RetVal] -> GenLower RetVal)]
-            -> GenLower RetVal
-compileCase result_type scrutinee_type scrutinee_val branches = do
-  tenv <- lift getTypeEnv
-  layout <- lift $ getAlgLayout scrutinee_type
-  rtypes <- lift $ lowerType result_type
-  rparams <- lift $ mapM LL.newAnonymousVar (maybeToList rtypes)
-  getContinuation True rparams $ \cont ->
-    algebraicElim layout scrutinee_val $
-    map (elim_branch rparams cont) branches
-  return $ case rparams
-           of []  -> NoVal
-              [v] -> RetVal (LL.VarV v)
-  where
-    elim_branch rparams cont (con, mk_branch) = (con, mk_branch')
-      where
-        mk_branch' args = do
-          -- Generate code
-          result <- mk_branch (map RetVal args)
-          
-          -- Assign return values
-          case (result, rparams) of
-            (NoVal, [])      -> return ()
-            (RetVal v, [rv]) -> bindAtom1 rv $ LL.ValA [v]
-
-          -- Execute the continuation
-          return cont
--}
-
--------------------------------------------------------------------------------
 -- Lowering
+
+-- | Generate code to force evaluation of a lazy boxed value
+forceLazyBox v = do
+  emitAtom0 $
+    LL.primCallA (LL.VarV $ LL.llBuiltin LL.the_prim_force_Lazy)
+    [v, nativeWordV (LL.sizeOf LL.OwnedType), nativeWordV (LL.alignOf LL.OwnedType)]
+  readLazyValue (LL.PrimType LL.OwnedType) v
+
+-- | Generate code to force evaluation of a lazy bare value
+forceLazyBare v = undefined
+                  {-emitAtom1 (LL.PrimType LL.OwnedType) $
+  LL.primCallA (LL.VarV $ LL.llBuiltin LL.the_prim_force_Lazy) [v]-}
+
+forceLazyVal ty v = do
+  emitAtom0 $
+    LL.primCallA (LL.VarV $ LL.llBuiltin LL.the_prim_force_Lazy)
+    [v, nativeWordV (LL.sizeOf ty), nativeWordV (LL.alignOf ty)]
+  readLazyValue ty v
 
 bindPatterns pats m = foldr (uncurry bindPattern) m pats
 
@@ -162,11 +137,62 @@ bindPatternMaybe :: Maybe PatM -> Maybe LL.Val -> GenLower a -> GenLower a
 bindPatternMaybe Nothing Nothing m = m
 bindPatternMaybe (Just p) (Just v) m = bindPattern p v m
 
+-- | Lower a global constant to a lazy value.
+--   The lazy value is bound to the given global variable.
+lowerGlobalConstant :: LL.Var -> BaseKind -> LL.ValueType -> Type -> ExpM
+                    -> Lower [LL.GlobalDef]
+lowerGlobalConstant ll_var kind ll_ty ty exp = do
+  -- Create a function to evaluate the lazy value
+  evaluator_param <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
+  evaluator_fun <- genPrimFun [evaluator_param] [] $
+    let initialize_lazy_value = do
+          e <- lowerExp exp
+          primStoreConst ll_ty (LL.VarV evaluator_param) e
+          return $ LL.ReturnE $ LL.ValA []
+    in case kind
+       of ValK -> initialize_lazy_value
+          BoxK -> initialize_lazy_value
+          BareK -> do
+         {- -- Compute the size of a value
+         let boxed_ty = coreBuiltin The_StuckBox `varApp` [ty]
+         mem_adt <- computeStructure boxed_ty >>=
+                    computeLayout emptyTypeInfo BoxK >>=
+                    memoryLayout
+
+         -- Create a lazy boxed object header
+         header <- 
+         allocateHeapmem 
+         e <- lowerExp exp
+         memoryIntro mem_adt -}
+            internalError $ "lowerGlobalConstant: Bare type: " ++ show (pprType ty)
+
+  -- Create a global lazy value and an evaluator
+  evaluator <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
+
+  return [lazyGlobalValue ll_var ll_ty evaluator,
+          LL.GlobalFunDef $ LL.Def evaluator evaluator_fun]
+
+lazyGlobalValue v ty e =
+  LL.GlobalDataDef $ LL.Def v $ LL.StaticData initial_value
+  where
+    initial_value =
+      LL.RecV (LL.lazyRecord ty)
+      [nativeWordV 0, LL.VarV e, dummyValue ty]
+
+{-lowerEntity ll_var (DataEnt d) = do
+  (const_value, extra_defs, is_value) <- lowerConstantExp (constExp d)
+  let global_def =
+        LL.GlobalDataDef (LL.Def ll_var (LL.StaticData const_value))
+  return $! if is_value
+            then extra_defs
+            else extra_defs ++ [global_def]
+
+
 -- | Lower an expression to a constant value.
 --   TODO: Generate a lazy term.
 lowerConstantExp :: ExpM -> Lower (LL.Val, [LL.GlobalDef], Bool)
 lowerConstantExp expression =
-  internalError "lowerConstantExp: Not implemented"
+  internalError "lowerConstantExp: Not implemented"-}
 {-
   case fromExpM expression
   of VarE _ v -> do val <- lowerNonIntrinsicVar v
@@ -213,9 +239,15 @@ lowerExp expression =
 lowerVar v =
   case LL.lowerIntrinsicOp v
   of Just lower_var -> lower_var []
-     Nothing -> lift $ lowerNonIntrinsicVar v
+     Nothing -> lowerNonIntrinsicVar v
   
-lowerNonIntrinsicVar v = liftM LL.VarV $ lookupVar v
+lowerNonIntrinsicVar v = do
+  translation <- lift $ lookupVar v
+  case translation of
+    Variable v            -> return $ LL.VarV v
+    Lazy BoxK _ lazy_ref  -> forceLazyBox (LL.VarV lazy_ref)
+    Lazy BareK _ lazy_ref -> forceLazyBare (LL.VarV lazy_ref)
+    Lazy ValK ty lazy_ref -> forceLazyVal ty (LL.VarV lazy_ref)
 
 lowerLit :: Lit -> LL.Val
 lowerLit lit =
@@ -374,14 +406,16 @@ lowerArray ty es = do
   val <- genLambda [LL.PrimType LL.PointerType] [LL.PrimType LL.UnitType] $ \[ret_param] -> do
     -- Compute the size of one array element, including padding
     -- FIXME: Use a size parameter on array literals
-    elt_size_exp <- liftTypeEvalM $ runMaybeGen $
+    ll_var_supply <- lift getLLVarSupply
+    elt_size_exp <- liftTypeEvalM $ runMaybeGen ll_var_supply $
                     constructConstantSizeParameter (KindedType BareK ty)
-    elt_size <- unpackSizeAlign =<< lowerExp elt_size_exp
+    size_exp <- lowerExp elt_size_exp
+    elt_size <- lowerAndGenerateCode $ unpackSizeAlign size_exp
     
     -- Add padding to size of array elements.
     -- This is done by computing the size of a one-element array.
-    SizeAlign padded_size _ <-
-      lowerAndGenerateCode $ arraySize (nativeWordV 1) elt_size
+    SizeAlign padded_size _ _ <-
+      lowerAndGenerateCode $ arraySize (nativeIntV 1) elt_size
 
     -- Write the array
     write_array_elements padded_size ret_param es
@@ -400,12 +434,13 @@ lowerArray ty es = do
     write_array_elements _ _ [] = return [LL.LitV LL.UnitL]
 
 lowerFun :: LL.Var -> FunM -> Lower LL.Fun
-lowerFun fun_name (FunM fun) =
-  assumeTyParams (funTyParams fun) $
-  withMany lower_param (funParams fun) $ \params -> do
-    return_type <- lowerLowerType $ funReturn fun
-    body <- execBuild [return_type] $ lower_body (funBody fun)
-    newClosureFun fun_name params [return_type] body
+lowerFun fun_name (FunM fun) 
+  | null (funParams fun) = internalError "lowerFun"
+  | otherwise =
+    assumeTyParams (funTyParams fun) $
+    withMany lower_param (funParams fun) $ \params -> do
+      return_type <- lowerLowerType $ funReturn fun
+      genClosureFun fun_name params [return_type] $ lower_body (funBody fun)
   where
     lower_param pat k = assumeVar False (patMVar pat) (patMType pat) k
     
@@ -428,10 +463,9 @@ lowerDefGroup defgroup k =
        -- Lower the function before adding the variable to the environment
        let sf_var = definiendum def
            sf_type = functionType $ definiens def
-       lowered_type <- lowerLowerType sf_type
-       v' <- translateVariable False sf_var lowered_type
+       v' <- translateVariable False sf_var sf_type
        f' <- lowerFun v' $ definiens def
-       assumeTranslatedVariable sf_var v' sf_type $ do
+       assumeTranslatedVariable sf_var (Variable v') sf_type $ do
          k (LL.NonRec (LL.Def v' f'))
      Rec defs ->
        -- Add all variables to the environment, then lower
@@ -448,61 +482,93 @@ lowerDefGroup defgroup k =
       | otherwise =
           assumeVar False v (functionType f) k
 
-lowerEntity :: LL.Var -> Ent Mem -> Lower [LL.GlobalDef]
-lowerEntity ll_var (FunEnt f) = do
+-- | Create the low-level translation of a global variable
+translateGlobalDefiniendum :: GDef Mem -> Lower VarTranslation
+translateGlobalDefiniendum (Def var ann ent)
+  | definesGlobalFunction ent = do
+      v <- translateVariable (defAnnExported ann) var ty
+      return $ Variable v
+
+  | otherwise = do
+      -- This term will be translated to a lazy global variable
+      -- Create a lazy object
+      v <- translateLazyVariable (defAnnExported ann) var
+      ll_ty <- lowerLowerType ty
+      k <- typeBaseKind ty
+      return $ Lazy k ll_ty v
+
+  where
+    ty = entityType ent
+
+-- | Determine whether the entity will be lowered to a function.
+--
+--   If a global entity takes no parameters, or only type parameters,
+--   it's lowered to a lazy value.
+definesGlobalFunction (FunEnt (FunM f))
+  | null (funParams f) = False
+  | otherwise          = True
+
+definesGlobalFunction (DataEnt _) = False
+
+lowerEntity :: VarTranslation -> Ent Mem -> Lower [LL.GlobalDef]
+lowerEntity (Variable ll_var) (FunEnt f) = do
   f' <- lowerFun ll_var f
   return [LL.GlobalFunDef (LL.Def ll_var f')]
 
-lowerEntity ll_var (DataEnt d) = do
-  (const_value, extra_defs, is_value) <- lowerConstantExp (constExp d)
-  let global_def =
-        LL.GlobalDataDef (LL.Def ll_var (LL.StaticData const_value))
-  return $! if is_value
-            then extra_defs
-            else extra_defs ++ [global_def]
+lowerEntity (Lazy kind ll_ty ll_var) (FunEnt (FunM f))
+  | not $ null (funParams f) =
+      internalError "lowerEntity"
+  | otherwise =
+      assumeTyParams (funTyParams f) $
+      lowerGlobalConstant ll_var kind ll_ty (funReturn f) (funBody f)
+
+lowerEntity (Lazy kind ll_ty ll_var) (DataEnt d) =
+  lowerGlobalConstant ll_var kind ll_ty (constType d) (constExp d)
 
 -- | Lower a global definition group.
 --   The definitions and a list of exported functions are returned.
 lowerGlobalDefGroup :: DefGroup (GDef Mem)
                     -> (LL.Group LL.GlobalDef -> [(LL.Var, ExportSig)] -> Lower a)
                     -> Lower a
-lowerGlobalDefGroup defgroup k =
+lowerGlobalDefGroup defgroup k = do
+  g <- filterPredefinedDefs defgroup
+  lowerGlobalDefGroup' g k
+
+lowerGlobalDefGroup' defgroup k =
   case defgroup
   of NonRec def -> do
-       -- Translate the variable without adding it to the environment
-       let name = definiendum def
-           ent = definiens def
-           sf_type = entityType ent
-       ty <- lowerLowerType sf_type
-       v <- translateVariable True name ty
-
        -- Lower the definition
-       defs' <- lowerEntity v ent
-
+       v <- translateGlobalDefiniendum def
+       lowered_defs <- lowerEntity v $ definiens def
+       
        -- Add to environment and continue
-       assumeTranslatedVariable name v sf_type $
-         let defgroup' = LL.Rec defs'
+       assume_variable (v, def) $
+         let defgroup' = LL.Rec lowered_defs
              new_exports = pick_exports [(v, def)]
          in k defgroup' new_exports
 
-     Rec defs ->
-       -- Add all variables to the environment, then lower
-       assume_variables defs $ \vs' -> do
-         entities <- zipWithM lowerEntity vs' (map definiens defs)
+     Rec defs -> do
+       -- Add all variables to the environment first
+       vs <- mapM translateGlobalDefiniendum defs
+       assume_variables (zip vs defs) $ do
+         entities <- zipWithM lowerEntity vs (map definiens defs)
          let defgroup' = LL.Rec $ concat entities
-             exports = pick_exports $ zip vs' defs
+             exports = pick_exports $ zip vs defs
          k defgroup' exports
   where
-    pick_exports xs = [(v, sig) | (v, d) <- xs, sig <- maybeToList $ export_sig d]
+    pick_exports xs = [(translatedVar v, sig)
+                      | (v, d) <- xs, sig <- maybeToList $ export_sig d]
       where
         export_sig d
           | defAnnExported $ defAnnotation d = Just TrioletExportSig
           | otherwise                        = Nothing
 
-    assume_variables defs k = withMany assume_variable defs k
+    assume_variables xs k = foldr assume_variable k xs
 
-    assume_variable (Def v annotation ent) k =
-      assumeVar (defAnnExported annotation) v (entityType ent) k
+    assume_variable (v, def) k =
+      let name = definiendum def
+          ent = definiens def
+      in assumeTranslatedVariable name v (entityType ent) k
 
 lowerExport :: ModuleName
             -> Export Mem
@@ -553,7 +619,8 @@ lowerModuleCode :: ModuleName
                 -> [DefGroup (GDef Mem)]
                 -> [Export Mem]
                 -> Lower ([LL.Group LL.GlobalDef], [(LL.Var, ExportSig)])
-lowerModuleCode module_name defss exports = lower_definitions defss
+lowerModuleCode module_name defss exports = {-# SCC "lowerModuleCode" #-}
+  lower_definitions defss
   where
     lower_definitions (defs:defss) =
       lowerGlobalDefGroup defs $ \defs' exported_defs -> do
@@ -565,30 +632,75 @@ lowerModuleCode module_name defss exports = lower_definitions defss
       let (functions, signatures) = unzip ll_exports
       return ([LL.Rec (map LL.GlobalFunDef functions)], signatures)
 
+filterPredefinedDefs (NonRec def) = do
+  is_defined <- checkPredefined $ definiendum def
+  return $! if is_defined
+            then Rec []
+            else NonRec def 
+
+filterPredefinedDefs (Rec defs) = do
+  is_defined <- mapM (checkPredefined . definiendum) defs
+  return $ Rec [d | (False, d) <- zip is_defined defs]
+
+-- | Filter out 'v' if its label has a predefined low-level value.
+--   This shouldn't be necessary; we shouldn't have duplicate
+--   definitions at all.
+checkPredefined v = do  
+  is_defined <- isPredefinedVar v
+
+  -- Warn if a variable is being filtered out
+  when is_defined $
+    liftIO $ putStrLn $ "Warning: ignoring duplicate definition of " ++ show v
+
+  return is_defined
+
+-- | Auto-generate serializer code and add it to the environment
+lowerSerializers :: Lower a -> Lower ([LL.GlobalDef], a)
+lowerSerializers m = do
+  serializers <- do
+    var_supply <- getVarSupply
+    ll_var_supply <- getLLVarSupply
+    tenv <- getTypeEnvironment
+    liftIO $ createAllSerializers ll_var_supply var_supply tenv
+
+  x <- assume_serializers serializers m
+  return (map snd serializers, x)
+  where
+    assume_serializers ss m = foldr assume_serializer m ss
+    assume_serializer (v, ll_def) m = do
+      is_defined <- checkPredefined v
+      if is_defined then m else do
+        -- Add the translated variable to the environment
+        Just ty <- lookupType v
+        assumeTranslatedVariable v (Variable $ LL.globalDefiniendum ll_def) ty m
+
 lowerModule :: Module Mem -> IO LL.Module
 lowerModule (Module { modName = mod_name
                     , modImports = imports
                     , modDefs = globals
                     , modExports = exports}) = do
-  (ll_functions, ll_export_sigs) <-
+  (serializers, (ll_functions, ll_export_sigs)) <-
     withTheNewVarIdentSupply $ \var_supply ->
     withTheLLVarIdentSupply $ \ll_var_supply -> do
       i_global_types <- readInitGlobalVarIO the_memTypes
       global_types <- thawTypeEnv i_global_types
       global_map <- readInitGlobalVarIO the_loweringMap
       env <- initializeLowerEnv ll_var_supply global_map
-      
-      let all_defs = if False
+
+      let all_defs = if True
                      then Rec imports : globals -- DEBUG: also lower imports
                      else globals
-      runTypeEvalM (runLowering env $ lowerModuleCode mod_name all_defs exports)
-        var_supply global_types
+
+      -- Create serializers and add them to the environment
+      let do_lowering = lowerSerializers $
+                        lowerModuleCode mod_name all_defs exports
+      runTypeEvalM (runLowering env do_lowering) var_supply global_types
 
   ll_name_supply <- newLocalIDSupply  
 
   return $ LL.Module { LL.moduleModuleName = mod_name
                      , LL.moduleNameSupply = ll_name_supply
                      , LL.moduleImports = LL.allBuiltinImports
-                     , LL.moduleGlobals = ll_functions
+                     , LL.moduleGlobals = LL.Rec serializers : ll_functions
                      , LL.moduleExports = ll_export_sigs}
 

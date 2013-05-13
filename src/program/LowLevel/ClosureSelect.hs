@@ -340,8 +340,14 @@ extractFunctionsDef is_global def@(Def v f) = do
                         , mfCurrentFun = v}
   local new_ctx $ do
     body' <- with_hoisted is_hoisted $ extractFunctionsStm (funBody f)
+    let f_ep = case funEntryPoints f
+               of Just ep ->
+                    let f_type = closureFunctionType
+                                 (map varType $ funParams f) new_rtype
+                    in Just $ ep {_epType = f_type}
+                  _ -> Nothing
     let f' = mkFun (funConvention f) (funInlineRequest f) (funFrameSize f)
-             (funEntryPoints f) (funParams f) new_rtype body'
+             f_ep (funParams f) new_rtype body'
     return $ Def v f'
   where
     with_hoisted True (RWST m) =

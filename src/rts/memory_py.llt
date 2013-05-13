@@ -39,7 +39,7 @@ function inline copy8F (pointer src, pointer dst) -> unit {
 
 // Copy some bytes
 function inline blockcopy (SA sa, cursor src, pointer dst) -> unit {
-  SA {sz, al} = sa;
+  SA {sz, al, pointerless} = sa;
   _ = pointer primcall memcpy (dst, src as pointer, sz as word);
   nil;
 };

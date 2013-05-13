@@ -33,7 +33,7 @@ data Type =
   | AnyT Type
     -- | An integer type index.  These inhabit kind 'intIndexT'.
   | IntT !Integer
-    
+
     -- | A coercion type constructor.
     --
     --   A coercion (s ~ t) carries the ability to coerce a value of type s
@@ -101,6 +101,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
           -- Types
         , ("initCon", "Init", TypeLevel, False)
         , ("outPtr", "OutPtr", TypeLevel, False)
+        , ("cursor", "cursor", TypeLevel, False)
         , ("store", "Store", TypeLevel, False)
         , ("posInfty", "pos_infty", TypeLevel, False)
         , ("negInfty", "neg_infty", TypeLevel, False)
@@ -109,7 +110,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("uint", "uint", TypeLevel, False)
         , ("float", "float", TypeLevel, False)
         , ("byte", "byte", TypeLevel, False)
-        
+
         , ("asBox", "AsBox", TypeLevel, True)
         , ("asBare", "AsBare", TypeLevel, True)
         , ("bool", "bool", TypeLevel, True)
@@ -122,10 +123,13 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("fiInt", "FIInt", TypeLevel, True)
         , ("isRef", "IsRef", TypeLevel, True)
         , ("ref", "Ref", TypeLevel, False) -- Has special boxing rules
-        , ("stored", "Stored", TypeLevel, True)
+        , ("stored", "Stored", TypeLevel, False) -- Has special layout rules
         , ("boxed", "Boxed", TypeLevel, True)
+        , ("opaqueRef", "OpaqueRef", TypeLevel, True)
 
           -- Type variables
+        , ("cursorTypeParameter", "a", TypeLevel, False)
+        , ("storedTypeParameter", "a", TypeLevel, False)
         , ("arrTypeParameter1", "n", TypeLevel, False)
         , ("arrTypeParameter2", "a", TypeLevel, False)
         , ("refTypeParameter", "a", TypeLevel, False)
@@ -143,21 +147,59 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("isAReference", "isAReference", ObjectLevel, True)
         , ("notAReference", "notAReference", ObjectLevel, True)
         , ("ref_con", "ref", ObjectLevel, False) -- Has special boxing rules
-        , ("stored_con", "stored", ObjectLevel, True)
+        , ("stored_con", "stored", ObjectLevel, False)
 
           -- Global size information variables
         , ("boxInfo_valInfo", "typeObject_reprVal", ObjectLevel, True)
         , ("boxInfo_bareInfo", "typeObject_repr", ObjectLevel, True)
         , ("boxInfo_boxInfo", "typeObject_typeObject", ObjectLevel, True)
+        , ("valInfo_cursor", "reprVal_cursor", ObjectLevel, True)
         , ("valInfo_store", "reprVal_store", ObjectLevel, True)
         , ("valInfo_int", "reprVal_int", ObjectLevel, True)
         , ("valInfo_uint", "reprVal_uint", ObjectLevel, True)
         , ("valInfo_float", "reprVal_float", ObjectLevel, True)
         , ("valInfo_byte", "reprVal_byte", ObjectLevel, True)
+        , ("bareInfo_stored", "repr_Stored", ObjectLevel, True)
         , ("bareInfo_arr", "repr_arr", ObjectLevel, True)
         , ("bareInfo_ref", "repr_Ref", ObjectLevel, True)
         , ("fieldInfo_ref", "fieldSize_ref", ObjectLevel, True)
-          
+
+          -- Global variables for serialization
+        , ("putInt", "putInt", ObjectLevel, True)
+        , ("putUint", "putUint", ObjectLevel, True)
+        , ("putUintAsUint8", "putUintAsUint8", ObjectLevel, True)
+        , ("putUintAsUint16", "putUintAsUint16", ObjectLevel, True)
+        , ("putFloat", "putFloat", ObjectLevel, True)
+        , ("putByte", "putByte", ObjectLevel, True)
+        , ("putCursor", "putCursor", ObjectLevel, True)
+        , ("putStore", "putStore", ObjectLevel, True)
+        , ("putBareCoercion", "putBareCoercion", ObjectLevel, True)
+        , ("putBoxCoercion", "putBoxCoercion", ObjectLevel, True)
+        , ("putStoredInt", "putStoredInt", ObjectLevel, True)
+        , ("putStoredUint", "putStoredUint", ObjectLevel, True)
+        , ("putStoredFloat", "putStoredFloat", ObjectLevel, True)
+        , ("putArr", "putArr", ObjectLevel, True)
+        , ("putRef", "putRef", ObjectLevel, True)
+        , ("putPointerlessObject", "putPointerlessObject", ObjectLevel, True)
+        , ("putBoxedObject", "putBoxedObject", ObjectLevel, True)
+        , ("getInt", "getInt", ObjectLevel, True)
+        , ("getUint", "getUint", ObjectLevel, True)
+        , ("getUint8AsUint", "getUint8AsUint", ObjectLevel, True)
+        , ("getUint16AsUint", "getUint16AsUint", ObjectLevel, True)
+        , ("getFloat", "getFloat", ObjectLevel, True)
+        , ("getByte", "getByte", ObjectLevel, True)
+        , ("getCursor", "getCursor", ObjectLevel, True)
+        , ("getStore", "getStore", ObjectLevel, True)
+        , ("getBareCoercion", "getBareCoercion", ObjectLevel, True)
+        , ("getBoxCoercion", "getBoxCoercion", ObjectLevel, True)
+        , ("getStoredInt", "getStoredInt", ObjectLevel, True)
+        , ("getStoredUint", "getStoredUint", ObjectLevel, True)
+        , ("getStoredFloat", "getStoredFloat", ObjectLevel, True)
+        , ("getArr", "getArr", ObjectLevel, True)
+        , ("getRef", "getRef", ObjectLevel, True)
+        , ("getPointerlessObject", "getPointerlessObject", ObjectLevel, True)
+        , ("getBoxedObject", "getBoxedObject", ObjectLevel, True)
+
           -- Global variables used for generating address arithmetic and
           -- size computation
         , ("and", "and", ObjectLevel, True)
@@ -171,6 +213,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("modI", "modI", ObjectLevel, True)
         , ("maxI", "maxI", ObjectLevel, True)
 
+        , ("eqU", "eqU", ObjectLevel, True)
         , ("addU", "addU", ObjectLevel, True)
         , ("subU", "subU", ObjectLevel, True)
         , ("modU", "modU", ObjectLevel, True)
@@ -193,7 +236,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         | (sname, mname, _, True) <- variables]
 
       fixed_declarations =
-        [d| firstAvailableVarID = toIdent (1 + num_variables) 
+        [d| firstAvailableVarID = toIdent (1 + num_variables)
             builtinVarTable = $(TH.listE builtin_var_table) |]
 
       var_declarations =
@@ -201,5 +244,5 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         [ define_variable sname id mname level
         | ((sname, mname, level, _), id) <- zip variables [1..]]
   in fixed_declarations `concat_decs` var_declarations
-     
+
  )

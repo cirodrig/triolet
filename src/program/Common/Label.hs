@@ -150,7 +150,7 @@ anonymousLabel mod id ext_name =
 --   as an external name, is removed.  The cloned label must not be externally
 --   visible.
 cloneLabel :: Label -> Label
-cloneLabel lab = lab {labelExternalName = Nothing}
+cloneLabel lab = lab {labelExternalName = Nothing, labelTag = NormalLabel}
 
 -- | Encode a string appearing in a name.  Characters used by mangling are
 -- replaced by a two-character string beginning with \'q\'.

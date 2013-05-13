@@ -12,6 +12,15 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+// Create an identity coercion
+function inline makeIdCoercion (unit _) -> unit {
+  nil;
+};
+
+function inline makeIdBareCoercion (unit _) -> unit {
+  nil;
+};
+
 // Print an int.  Return another int.
 function inline traceInt_int (int t, int n) -> int {
   () = () primcall triolet_db_int (t as int32);
@@ -44,7 +53,16 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
 
 #if 0
 function inline convertToBoxed (owned repr, owned writer) -> owned {
-  owned call (repr @! Repr.convert_to_boxed) (writer);
+  data owned ret; // Temporary storage for written value
+
+  is_ref = repr @! Repr_mem.is_ref.tag;
+  if (is_ref == NOT_A_REFERENCE) {
+    
+  }
+  else {
+    _ = unit call writer (ret);    // Write value to stack
+    owned load ret;
+  };
 };
 
 function inline convertToBare (owned repr, owned src, pointer dst) -> unit {
@@ -219,18 +237,18 @@ function inline defineIntIndex (int n) -> SomeIndInt {
 
 // Get a pointer to an array element
 function inline subscript
- (SA sizealign, cursor base, int index) -> cursor {
-   SA {repr_size, repr_align} = sizealign;
+ (SA sizealign, cursor ar, int index) -> cursor {
+   SA {repr_size, repr_align, repr_pointerless} = sizealign;
    typedef elt_type = bytes(value repr_size, value repr_align);
-   base @ const_array(value int 0, elt_type)[index];
+   ar @ const_array(value int 0, elt_type)[index];
 };
 
 // Get a pointer to an array element.  Exactly the same as 'subscript'.
 function inline subscript_out
- (SA sizealign, pointer base, int index) -> pointer {
-   SA {repr_size, repr_align} = sizealign;
+ (SA sizealign, pointer ar, int index) -> pointer {
+   SA {repr_size, repr_align, repr_pointerless} = sizealign;
    typedef elt_type = bytes(value repr_size, value repr_align);
-   base @ const_array(value int 0, elt_type)[index];
+   ar @ const_array(value int 0, elt_type)[index];
 };
 
 function inline min_ii (IndInt x, IndInt y) -> IndInt {

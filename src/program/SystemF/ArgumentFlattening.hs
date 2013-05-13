@@ -50,6 +50,7 @@ import SystemF.ReprDict
 import SystemF.TypecheckMem
 import SystemF.Datatypes.Code
 import SystemF.Datatypes.InfoCall
+import qualified LowLevel.Syntax as LL
 import Type.Compare
 import Type.Environment
 import Type.Eval
@@ -58,9 +59,6 @@ import Type.Type
 import Globals
 import GlobalVar
 
-
--- TODO: remove this from the file
-type ReprDictMonad (m :: * -> *) = Monoid [Int]
 
 -- * Utility functions
 
@@ -92,8 +90,7 @@ storeType = storeT
 --
 --   Creates either a let expression or a case-of-boxed expression, depending
 --   on the data type that will be bound.
-bindVariable :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                Binder -> ExpM -> m (ExpM -> ExpM)
+bindVariable :: Binder -> ExpM -> AF (ExpM -> ExpM)
 bindVariable binder rhs = do
   k <- typeBaseKind $ binderType binder
   case k of
@@ -106,16 +103,13 @@ bindVariable binder rhs = do
       -- only generate info for types with known representation
       Just (op, args) <- liftTypeEvalM $ deconVarAppType (binderType binder)
       Just data_type <- lookupDataType op
-      rep <- liftTypeEvalM $ runMaybeGen $
+      rep <- liftMaybeGen $
              callConstantUnboxedInfoFunction data_type args
       return $ \body -> letViaBoxed binder rep rhs body
 
     value_binding =
       let mk body = ExpM $ LetE defaultExpInfo (patM binder) rhs body
       in return mk
-
-noneValue :: ExpM
-noneValue = valConE defaultExpInfo (VarCon (coreBuiltin The_None) [] []) []
 
 -------------------------------------------------------------------------------
 -- * The argument flattening monad
@@ -125,26 +119,31 @@ noneValue = valConE defaultExpInfo (VarCon (coreBuiltin The_None) [] []) []
 data AFLVEnv a =
   AFLVEnv
   { afVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
+  , afLLVarSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
   , afTypeEnv :: TypeEnv
   , afOther :: a
   }
 
 -- | The monad for argument and local variable flattening
-newtype AFMonad e a =
-  AF {unAF :: ReaderT (AFLVEnv e) IO a}
+newtype AF a =
+  AF {unAF :: ReaderT (AFLVEnv ()) IO a}
   deriving(Functor, Applicative, Monad, MonadIO)
 
--- | The argument flattening monad
-type AF = AFMonad ()
-
-instance Supplies (AFMonad e) (Ident Var) where
+instance Supplies AF (Ident Var) where
   fresh = AF $ ReaderT $ \env -> supplyValue $ afVarSupply env
 
-liftFreshVarAF :: FreshVarM a -> AFMonad e a
+getLLVarSupply = AF $ asks afLLVarSupply
+
+liftMaybeGen :: Gen (Maybe ExpM) -> AF ExpM
+liftMaybeGen m = do
+  s <- getLLVarSupply
+  liftTypeEvalM $ runMaybeGen s m
+
+liftFreshVarAF :: FreshVarM a -> AF a
 liftFreshVarAF m = AF $ ReaderT $ \env -> runFreshVarM (afVarSupply env) m
 
-instance TypeEnvMonad (AFMonad e) where
-  type EvalBoxingMode (AFMonad e) = UnboxedMode
+instance TypeEnvMonad AF where
+  type EvalBoxingMode AF = UnboxedMode
   getTypeEnv = AF $ asks afTypeEnv
   {-assumeWithProperties v t b m = AF $ local insert_type $ unAF m
     where
@@ -157,16 +156,14 @@ instance TypeEnvMonad (AFMonad e) where
   localDictEnv f m =
     AF $ local (\env -> env {afDictEnv = f $ afDictEnv env}) $ unAF m-}
 
-instance EvalMonad (AFMonad e) where
+instance EvalMonad AF where
   liftTypeEvalM m = AF $ ReaderT $ \env -> do
     runTypeEvalM m (afVarSupply env) (afTypeEnv env)
 
-assumePat :: (EvalMonad m, ReprDictMonad m) =>
-             PatM -> m a -> m a
+assumePat :: EvalMonad m => PatM -> m a -> m a
 assumePat pat m = assumeBinder (patMBinder pat) m
 
-assumePats :: (EvalMonad m, ReprDictMonad m) =>
-              [PatM] -> m a -> m a
+assumePats :: EvalMonad m => [PatM] -> m a -> m a
 assumePats pats m = foldr assumePat m pats
 
 assumeDef :: TypeEnvMonad m => FDef Mem -> m a -> m a
@@ -263,7 +260,7 @@ isSmallDecomp (ty, decomp) =
 
           -- 'Stored' contains a value, which is cheap to copy
         , do Just (op, [arg]) <- lift $ liftTypeEvalM $ deconVarAppType t'
-             aguard $ op == coreBuiltin The_Stored
+             aguard $ op == storedV
              return True
 
           -- Tuples are cheap to copy if their contents are
@@ -464,7 +461,7 @@ flattenedParameterValue (FlatArg pat decomp) =
     put_pat p = ([], [ExpM $ VarE defaultExpInfo (patMVar p)])
 
 flattenedParameterValue (DummyArg _) =
-  ([], [noneValue])
+  ([], [noneE defaultExpInfo])
 
 -- | Get the flattened parameter values from a sequence of flattened
 --   parameters.  Each value is a type variable or variable expression.
@@ -544,8 +541,7 @@ bindFlattenedReturn inf patterns source_exp body =
 --
 --   The parameter is assumed to be bound in the surrounding code.  The
 --   generated code deconstructs the parameter variable and binds its fields.
-flattenParameter :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                    FlatArg -> ExpM -> m ExpM
+flattenParameter :: FlatArg -> ExpM -> AF ExpM
 flattenParameter (FlatArg pat decomp) body =
   case decomp
   of IdDecomp -> return body
@@ -561,14 +557,13 @@ flattenParameter (FlatArg pat decomp) body =
 
 flattenParameter (DummyArg _) body = return body
 
-flattenParameters :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                     [FlatArg] -> ExpM -> m ExpM
+flattenParameters :: [FlatArg] -> ExpM -> AF ExpM
 flattenParameters (arg:args) e =
   flattenParameter arg =<< flattenParameters args e
 
 flattenParameters [] e = return e
 
-packParametersWrite :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) => FlatArgs -> m [ExpM]
+packParametersWrite :: FlatArgs -> AF [ExpM]
 packParametersWrite (arg:args) = do
   e <- packParameterWrite arg
   es <- assumeRepackedArg arg $ packParametersWrite args
@@ -580,15 +575,13 @@ packParametersWrite [] = return []
 --
 --   TODO: Don't return the parameter expression.  It's always just the
 --   pattern variable.
-packParameterWrite :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                      FlatArg -> m (Maybe ExpM)
+packParameterWrite :: FlatArg -> AF (Maybe ExpM)
 packParameterWrite (FlatArg pat flat_arg) =
   liftM Just $ packParameterWrite' pat flat_arg
 
 packParameterWrite (DummyArg _) = return Nothing
   
-packParameterWrite' :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                       PatM -> Decomp -> m ExpM
+packParameterWrite' :: PatM -> Decomp -> AF ExpM
 packParameterWrite' pat flat_arg =
   case flat_arg
   of IdDecomp -> copy_expr (patMType pat) (var_exp $ patMVar pat)
@@ -602,13 +595,13 @@ packParameterWrite' pat flat_arg =
          Just dcon_type <- lookupDataCon con_var
          let data_type = dataConType dcon_type
          size_param_types <- instantiateSizeParams data_type types
-         sps <- liftTypeEvalM $ forM size_param_types $ \kt ->
-           runMaybeGen $ constructConstantSizeParameter kt
+         sps <- forM size_param_types $ \kt ->
+           liftMaybeGen $ constructConstantSizeParameter kt
 
          -- Generate type object
          ty_ob <- case dataTypeKind data_type
                   of BoxK -> do
-                       e <- liftTypeEvalM $ runMaybeGen $
+                       e <- liftMaybeGen $
                             callConstantBoxedInfoFunction dcon_type types ex_types
                        return $ Just e
                      _ -> return Nothing
@@ -628,9 +621,8 @@ packParameterWrite' pat flat_arg =
         BareK -> do
           -- Insert a copy operation
           -- The type must have a statically known size
-          size <- liftTypeEvalM $ runGen $ do
-            Just s <- constructConstantSizeParameter (KindedType BareK ty)
-            return s
+          size <- liftMaybeGen $
+                  constructConstantSizeParameter (KindedType BareK ty)
           return $ appE defaultExpInfo copy_op [ty] [size, src]
         _ ->
           return src
@@ -638,9 +630,7 @@ packParameterWrite' pat flat_arg =
     copy_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_copy)
 
 -- | Pack a parameter, so that the result is readable
-packParametersRead :: (ReprDictMonad m, EvalMonad m,
-                       EvalBoxingMode m ~ UnboxedMode) =>
-                      FlatArgs -> m (ExpM -> ExpM)
+packParametersRead :: FlatArgs -> AF (ExpM -> ExpM)
 packParametersRead (arg : args) = do
   ctx <- packParameterRead arg
   ctxs <- assumePackedArg arg $ packParametersRead args
@@ -652,9 +642,7 @@ packParametersRead [] = return id
 --
 --   TODO: Don't return the parameter expression.  It's always just the
 --   pattern variable.
-packParameterRead :: (ReprDictMonad m, EvalMonad m,
-                      EvalBoxingMode m ~ UnboxedMode) =>
-                     FlatArg -> m (ExpM -> ExpM)
+packParameterRead :: FlatArg -> AF (ExpM -> ExpM)
 packParameterRead (FlatArg pat flat_arg) =
   case flat_arg
   of IdDecomp ->
@@ -696,8 +684,7 @@ packParameterRead (DummyArg _) = return id
 --
 --   Deconstruction is sunk to the tail position of let, letrec, and
 --   case statements by calling 'mapOverTailExps'.
-flattenReturnWrite :: forall m. (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                      FlatRet -> ExpM -> m ExpM
+flattenReturnWrite :: FlatRet -> ExpM -> AF ExpM
 flattenReturnWrite flat_ret orig_exp =
   case frDecomp flat_ret
   of IdDecomp -> 
@@ -743,13 +730,12 @@ flattenReturnWrite flat_ret orig_exp =
 --   Otherwise, the constructor's result is deconstructed, its fields are 
 --   bound to the given 'FlatArgs' patterns, and code is generated to
 --   deconstruct those patterns.
-deconReturn :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-               DeConInst          -- ^ Constructor to match against
+deconReturn :: DeConInst          -- ^ Constructor to match against
             -> FlatArgs           -- ^ Fields to deconstruct
-            -> ([ExpM] -> m ExpM) -- ^ Deconstruct initializers
-            -> m ExpM             -- ^ Deconstruct values bound to patterns
+            -> ([ExpM] -> AF ExpM) -- ^ Deconstruct initializers
+            -> AF ExpM             -- ^ Deconstruct values bound to patterns
             -> ExpM               -- ^ Expression to deconstruct
-            -> m ExpM             -- ^ Deconstructor
+            -> AF ExpM             -- ^ Deconstructor
 deconReturn decon dc_fields decon_initializers decon_patterns expression =
   mapOverTailExps decon_tail expression
   where
@@ -800,7 +786,7 @@ deconReturn decon dc_fields decon_initializers decon_patterns expression =
       let var_exp = ExpM $ VarE defaultExpInfo local_var
 
       -- TODO: representation for 'letViaboxed'
-      rep <- liftTypeEvalM $ runMaybeGen $
+      rep <- liftMaybeGen $
              callConstantUnboxedInfoFunction data_type ty_args
       return $ letViaBoxed (local_var ::: local_type) rep tail_exp (case_of var_exp)
     
@@ -821,7 +807,7 @@ deconExpression decon@(VarDeCon con ty_args ex_binders) params body = do
 
   -- Construct size parameters
   sp_types <- instantiateSizeParams data_type ty_args
-  sps <- forM sp_types $ \kt -> liftTypeEvalM $ runMaybeGen $
+  sps <- forM sp_types $ \kt -> liftMaybeGen $
                                 constructConstantSizeParameter kt
 
   let match = AltM $ Alt decon ty_ob_param params body
@@ -839,13 +825,13 @@ conExpression con@(VarCon v ty_args ex_args) fields = do
   -- Construct type object
   ty_ob <-
     case dataTypeKind data_type
-    of BoxK -> liftM Just $ liftTypeEvalM $ runMaybeGen $
+    of BoxK -> liftM Just $ liftMaybeGen $
                callConstantBoxedInfoFunction dcon_type ty_args ex_args
        _ -> return Nothing
 
   -- Construct size parameters
   sp_types <- instantiateSizeParams data_type ty_args
-  sps <- forM sp_types $ \kt -> liftTypeEvalM $ runMaybeGen $
+  sps <- forM sp_types $ \kt -> liftMaybeGen $
                                 constructConstantSizeParameter kt
 
   return $ conE' con sps ty_ob fields
@@ -853,8 +839,7 @@ conExpression con@(VarCon v ty_args ex_args) fields = do
 -- | Given a list of initializer expressions and argument flattening
 --   specifications, flatten all initializer values.  All variables in the 
 --   flattened arguments are bound.
-flattenReturnFields :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                       [(ExpM, FlatArg)] -> ExpM -> m ExpM
+flattenReturnFields :: [(ExpM, FlatArg)] -> ExpM -> AF ExpM
 flattenReturnFields fields e = foldM flatten_field e fields
   where
     flatten_field consumer (exp, arg) =
@@ -868,8 +853,7 @@ flattenReturnFields fields e = foldM flatten_field e fields
 --
 --   The return value is flattened to a value or tuple using 'flattenReturn', 
 --   then the result is bound to variables.
-flattenLocalWrite :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                     FlatLocal -> ExpM -> ExpM -> m ExpM
+flattenLocalWrite :: FlatLocal -> ExpM -> ExpM -> AF ExpM
 flattenLocalWrite (FlatLocal (FlatArg old_binder decomp)) expr consumer =
   case decomp
   of IdDecomp ->
@@ -890,13 +874,13 @@ flattenLocalWrite (FlatLocal (FlatArg old_binder decomp)) expr consumer =
     flatten_patterns flat_args =
       flattenParameters flat_args consumer
 
+{-
 -- | Flatten a local read value.
 --
 --   For value or boxed types, this simply calls 'flattenLocalWrite'.
 --   For bare types, the value is bound to a variable, then deconstructed
 --   with 'flattenParameter'.
-flattenLocalRead :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-                    FlatLocal -> ExpM -> ExpM -> m ExpM
+flattenLocalRead :: FlatLocal -> ExpM -> ExpM -> AF ExpM
 flattenLocalRead flat_local@(FlatLocal flat_arg) expr consumer = do
   k <- typeBaseKind arg_type
   case k of
@@ -911,10 +895,10 @@ flattenLocalRead flat_local@(FlatLocal flat_arg) expr consumer = do
     decon_value = do
       decon_expr <- flattenParameter flat_arg consumer
       return $ ExpM $ LetE defaultExpInfo (faPattern flat_arg) expr decon_expr
+-}
 
 -- | Transform a flattened return value to packed form
-packReturn :: (EvalBoxingMode m ~ UnboxedMode, EvalMonad m) =>
-              FlatRet -> ExpM -> m ExpM
+packReturn :: FlatRet -> ExpM -> AF ExpM
 packReturn (FlatRet _ IdDecomp) orig_exp = return orig_exp
 
 packReturn (FlatRet _ (DeadDecomp {})) orig_exp = internalError "packReturn"
@@ -1002,15 +986,11 @@ data ExistentialHandling =
     deriving(Eq)
 
 -- | Decide how to flatten a function arguments
-planParameters :: (ReprDictMonad m, EvalMonad m,
-                   EvalBoxingMode m ~ UnboxedMode) =>
-                  PlanMode -> [PatM] -> m [FlatArg]
+planParameters :: PlanMode -> [PatM] -> AF [FlatArg]
 planParameters mode pats = do mapM (planParameter mode) pats
 
 -- | Decide how to flatten a function argument.
-planParameter :: (ReprDictMonad m, EvalMonad m,
-                  EvalBoxingMode m ~ UnboxedMode) =>
-                 PlanMode -> PatM -> m FlatArg
+planParameter :: PlanMode -> PatM -> AF FlatArg
 planParameter mode pat = do
   (whnf_type, decomp) <-
     planFlattening mode (patMType pat) (specificity $ patMDmd pat)
@@ -1023,9 +1003,7 @@ planParameter mode pat = do
 --   parameter @ty@ reduced to HNF form.
 --
 --   This function does the real work of 'planParameter' and 'planReturn'.
-planFlattening :: (ReprDictMonad m, EvalMonad m,
-                   EvalBoxingMode m ~ UnboxedMode) =>
-                  PlanMode -> Type -> Specificity -> m (Type, Decomp)
+planFlattening :: PlanMode -> Type -> Specificity -> AF (Type, Decomp)
 planFlattening mode ty spc = do
   whnf_type <- reduceToWhnf ty
   let
@@ -1089,8 +1067,8 @@ planFlattening mode ty spc = do
     -- If data type is a Stored type, then deconstruct it.
     stored_decomp =
       case fromVarApp whnf_type
-      of Just (op, [arg]) | op `isCoreBuiltin` The_Stored ->
-           decon_decomp (coreBuiltin The_stored) Nothing
+      of Just (op, [arg]) | op == storedV ->
+           decon_decomp stored_conV Nothing
          _ -> id_decomp
 
   cond spc $
@@ -1142,10 +1120,8 @@ planFlattening mode ty spc = do
 --   Specificity about the fields of the data value, if available, is used
 --   to direct the deconstruction plan.  Types inside the specificity are
 --   ignored.
-planDeconstructedValue :: (ReprDictMonad m, EvalMonad m,
-                           EvalBoxingMode m ~ UnboxedMode) =>
-                          PlanMode -> Var -> [Type] -> Maybe [Specificity]
-                       -> m Decomp
+planDeconstructedValue :: PlanMode -> Var -> [Type] -> Maybe [Specificity]
+                       -> AF Decomp
 planDeconstructedValue mode con ty_args maybe_fields = do
   m_dcon <- lookupDataCon con
   case m_dcon of
@@ -1187,7 +1163,7 @@ deadValue t = do
       case fromTypeApp t
       of (VarT con, [])
            | con `isCoreBuiltin` The_NoneType ->
-               return noneValue
+               return $ noneE defaultExpInfo
            | con == intV ->
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
            | con == floatV ->
@@ -1246,27 +1222,21 @@ deadValue t = do
     make_x_coercion_op = varE' (coreBuiltin The_unsafeMakeCoercion)
     make_b_coercion_op = varE' (coreBuiltin The_unsafeMakeBareCoercion)
 
-planReturn :: (ReprDictMonad m, EvalMonad m,
-               EvalBoxingMode m ~ UnboxedMode) =>
-              PlanMode -> Specificity -> Type -> m FlatRet
+planReturn :: PlanMode -> Specificity -> Type -> AF FlatRet
 planReturn mode spc ty = do
   (whnf_type, decomp) <- planFlattening mode ty spc
   return $ FlatRet whnf_type decomp
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming a return-by-value function only.
-planValueReturn :: (ReprDictMonad m, EvalMonad m,
-                    EvalBoxingMode m ~ UnboxedMode) =>
-                   Type -> m PlanRet
+planValueReturn :: Type -> AF PlanRet
 planValueReturn ty = liftM PlanRetValue $ planReturn mode Used ty
   where
     mode = PlanMode LiberalSmall Don'tUnpackExistentials
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming an initializer function only.
-planOutputReturn :: (ReprDictMonad m, EvalMonad m,
-                     EvalBoxingMode m ~ UnboxedMode) =>
-                    PatM -> m PlanRet
+planOutputReturn :: PatM -> AF PlanRet
 planOutputReturn pat = do
   let return_type = fromOutPtrType $ patMType pat
   flat_ret <- planReturn mode Used return_type
@@ -1687,9 +1657,10 @@ flattenModuleContents (Module mod_name imports defss exports) = do
 
 flattenArguments :: Module Mem -> IO (Module Mem)
 flattenArguments mod =
-  withTheNewVarIdentSupply $ \id_supply -> do
+  withTheNewVarIdentSupply $ \id_supply ->
+  withTheLLVarIdentSupply $ \ll_id_supply -> do
     i_type_env <- readInitGlobalVarIO the_memTypes
     type_env <- thawTypeEnv i_type_env
-    let env = AFLVEnv id_supply type_env ()
+    let env = AFLVEnv id_supply ll_id_supply type_env ()
     runReaderT (unAF $ flattenModuleContents mod) env
 

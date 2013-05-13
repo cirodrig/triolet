@@ -245,13 +245,15 @@ resolveMaybe _ Nothing  = return Nothing
 
 -- | Create and define a new variable inhabiting the current module.
 newRVarOrCon :: Bool            -- ^ True for constructors; False for variables
+             -> Bool            -- ^ If true, name shadowing is permitted
              -> SourcePos       -- ^ Location of variable definition
              -> Maybe ResolvedVar -- ^ Predefined variable to use instead of
                                   --   creating a new one
              -> Level           -- ^ Level of variable
              -> Identifier Parsed -- ^ Name of variable
              -> NR ResolvedVar
-newRVarOrCon is_con pos builtin_var lv parsed_name =
+newRVarOrCon is_con shadow pos builtin_var lv parsed_name = do
+  unless shadow $ checkForShadowing pos parsed_name
   case builtin_var of
     -- Create a new variable
     Nothing -> do
@@ -279,6 +281,15 @@ newRVarOrCon is_con pos builtin_var lv parsed_name =
       if is_con
       then defCon pos parsed_name v
       else def pos parsed_name v
+
+checkForShadowing pos name = NR $ \env names ->
+  let error_messages =
+        case lookupInEnv name names
+        of Just _  -> [redefined]
+           Nothing -> []
+  in return (Just (), names, (error_messages++))
+  where
+    redefined = name ++ " redefined at " ++ show pos
 
 newRVar = newRVarOrCon False
 newRCon = newRVarOrCon True
@@ -338,7 +349,7 @@ resolveDomain :: SourcePos -> Level -> Domain Parsed
               -> (Domain Resolved -> NR a) -> NR a
 resolveDomain pos level (Domain binder t) k = do
   t' <- resolveMaybe (resolveLType (succ level)) t
-  enter $ do binder' <- newRVar pos Nothing level binder
+  enter $ do binder' <- newRVar True pos Nothing level binder
              k (Domain binder' t')
 
 {-
@@ -381,7 +392,7 @@ resolveExp pos expression =
          return $ LetE binder' rhs' body'
      LetTypeE lhs rhs body -> do
        rhs' <- resolveLType TypeLevel rhs 
-       enter $ do lhs' <- newRVar pos Nothing TypeLevel lhs
+       enter $ do lhs' <- newRVar True pos Nothing TypeLevel lhs
                   body' <- resolveL resolveExp body
                   return $ LetTypeE lhs' rhs' body'
      LetfunE defs e ->
@@ -405,7 +416,7 @@ resolveExp pos expression =
 resolveDefGroup :: [LDef Parsed] -> ([LDef Resolved] -> NR a) -> NR a
 resolveDefGroup defs k = enter $ do
   -- Create a new variable for each local variable
-  resolved <- sequence [newRVar pos Nothing ObjectLevel (dName d) | L pos d <- defs]
+  resolved <- sequence [newRVar True pos Nothing ObjectLevel (dName d) | L pos d <- defs]
   
   -- Process local functions and pass them to the continuation
   k =<< zipWithM resolve_def resolved defs
@@ -520,13 +531,13 @@ resolveDeclName (L pos (Decl name ent)) =
     builtin = lookupBuiltinVariable name $ entityAttributes ent
 
     object_level_var =
-      liftM GlobalName $ newRVar pos builtin ObjectLevel name
+      liftM GlobalName $ newRVar False pos builtin ObjectLevel name
     type_level_con =
-      liftM GlobalName $ newRCon pos builtin TypeLevel name
+      liftM GlobalName $ newRCon False pos builtin TypeLevel name
     type_level_var =
-      liftM GlobalName $ newRVar pos builtin TypeLevel name
+      liftM GlobalName $ newRVar False pos builtin TypeLevel name
     data_definition constructors = do
-      tycon <- newRCon pos builtin TypeLevel name
+      tycon <- newRCon False pos builtin TypeLevel name
       datacons <- mapM data_constructor constructors
       return $ DataConNames tycon datacons
 
@@ -534,7 +545,7 @@ resolveDeclName (L pos (Decl name ent)) =
     -- Create a new variable if not builtin.
     data_constructor (L _ d) =
       let bi = lookupBuiltinVariable (dconVar d) $ dconAttributes d
-      in newRCon pos bi ObjectLevel $ dconVar d
+      in newRCon False pos bi ObjectLevel $ dconVar d
 
 -- | Resolve top-level declarations, with limited error recovery
 resolveDecls decls = do

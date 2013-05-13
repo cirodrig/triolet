@@ -51,7 +51,16 @@ extern data owned core.internal.structures.repr_MaybeVal_int;
 extern data owned core.internal.structures.repr_MaybeVal_MaybeVal_int;
 #endif
 
+extern function core.internal.structures.typeObject_serialize
+  (owned, owned, unit) -> unit;
+
+extern function core.internal.structures.typeObject_deserialize
+  (owned, cursor) -> ReadResult(owned);
+
 extern data owned core.internal.structures.typeObject_typeObject;
+#if 0
+extern data owned core.internal.structures.typeObject_repr;
+#endif
 extern data owned core.internal.structures.triolet_typeObject_function "triolet_typeObject_function";
 
 extern data owned core.internal.structures.OpaqueTraversableDict_list;

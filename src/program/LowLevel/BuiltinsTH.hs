@@ -157,8 +157,11 @@ builtinPrimitives =
      primFunctionType [ PrimType OwnedType
                       , PrimType CursorType
                       , PrimType PointerType] [])
-{-  , (biName "free_pap",
-     primFunctionType [PrimType PointerType] [])-}
+  
+  , (CoreName module_lazy "force_Lazy",
+     primFunctionType [PrimType PointerType,
+                       PrimType nativeWordType,
+                       PrimType nativeWordType] [])
   ]
 
 closureBinaryFunctionType t = closureFunctionType [t, t] [t]
@@ -167,20 +170,23 @@ module_prim = ModuleName "core.internal.prim"
 module_memory_py = ModuleName "core.internal.memory_py"
 module_stream = ModuleName "core.internal.stream"
 module_structures = ModuleName "core.internal.structures"
+module_buffer = ModuleName "core.internal.buffer"
 module_effects = ModuleName "core.internal.effects"
 module_inplace = ModuleName "core.internal.inplace"
 module_complex = ModuleName "core.internal.complex"
 module_list = ModuleName "core.internal.list"
+module_lazy = ModuleName "core.internal.lazy"
 
 -- | Predefined closure functions and the core constructor they're derived
 -- from.
 builtinFunctions =
   [ (CoreName module_memory_py "blockcopy",
      Right [| coreBuiltin SystemF.The_blockcopy |])
-  , (CoreName module_prim "convertToBoxed",
-     Right [| coreBuiltin (SystemF.The_asbox) |])
-  , (CoreName module_prim "convertToBare",
-     Right [| coreBuiltin (SystemF.The_asbare) |])
+  --, (CoreName module_prim "convertToBoxed",
+  --  Right [| coreBuiltin (SystemF.The_asbox) |])
+  --, (CoreName module_prim "convertToBare",
+  --   Right [| coreBuiltin (SystemF.The_asbare) |])
+
 {-  , (CoreName module_structures "makeComplex",
      Right [| coreBuiltin (SystemF.The_makeComplex) |]) -}
   --, (CoreName module_list "list_len",
@@ -279,6 +285,57 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_build_hash_table) |])
   , (CoreName module_inplace "lookup_hash_table",
      Right [| coreBuiltin (SystemF.The_lookup_hash_table) |])
+
+  , (CoreName module_buffer "putInt",
+     Right [| SystemF.putIntV |])
+  , (CoreName module_buffer "putUint",
+     Right [| SystemF.putUintV |])
+  , (CoreName module_buffer "putUintAsUint8",
+     Right [| SystemF.putUintAsUint8V |])
+  , (CoreName module_buffer "putUintAsUint16",
+     Right [| SystemF.putUintAsUint16V |])
+  , (CoreName module_buffer "putFloat",
+     Right [| SystemF.putFloatV |])
+  , (CoreName module_buffer "putUnit",
+     Left (closureFunctionType
+           [PrimType UnitType, PrimType OwnedType, PrimType UnitType]
+           [PrimType UnitType]))
+  , (CoreName module_buffer "putBoxedObject",
+     Right [| SystemF.putBoxedObjectV |])
+  , (CoreName module_buffer "putStoredInt",
+     Right [| SystemF.putStoredIntV |])
+  , (CoreName module_buffer "putStoredUint",
+     Right [| SystemF.putStoredUintV |])
+  , (CoreName module_buffer "putStoredFloat",
+     Right [| SystemF.putStoredFloatV |])
+  , (CoreName module_buffer "putArrWithSerializer",
+     Right [| coreBuiltin SystemF.The_putArrWithSerializer |])
+  , (CoreName module_buffer "getInt",
+     Right [| SystemF.getIntV |])
+  , (CoreName module_buffer "getUint",
+     Right [| SystemF.getUintV |])
+  , (CoreName module_buffer "getUint8AsUint",
+     Right [| SystemF.getUint8AsUintV |])
+  , (CoreName module_buffer "getUint16AsUint",
+     Right [| SystemF.getUint16AsUintV |])
+  , (CoreName module_buffer "getFloat",
+     Right [| SystemF.getFloatV |])
+  , (CoreName module_buffer "getUnit",
+     Left (closureFunctionType
+           [PrimType CursorType]
+           [RecordType $ constStaticRecord [PrimField CursorType, PrimField UnitType]]))
+  , (CoreName module_buffer "getBoxedObject",
+     Right [| SystemF.getBoxedObjectV |])
+  , (CoreName module_buffer "getStoredInt",
+     Right [| SystemF.getStoredIntV |])
+  , (CoreName module_buffer "getStoredUint",
+     Right [| SystemF.getStoredUintV |])
+  , (CoreName module_buffer "getStoredFloat",
+     Right [| SystemF.getStoredFloatV |])
+  , (CoreName module_buffer "getArrWithSerializer",
+     Right [| coreBuiltin SystemF.The_getArrWithSerializer |])
+  , (CoreName module_buffer "testCopyViaBuffer",
+     Right [| coreBuiltin SystemF.The_testCopyViaBuffer |])
     
   , (CoreName module_effects "seqEffTok",
      Right [| coreBuiltin (SystemF.The_seqEffTok) |])
@@ -309,6 +366,10 @@ builtinFunctions =
   {-, (CoreName module_structures "sizealign_arr",
      Right [| SystemF.coreBuiltin SystemF.The_sizealign_arr |])-}
   
+  , (CoreName module_prim "makeIdCoercion",
+     Right [| coreBuiltin SystemF.The_makeIdCoercion |])
+  , (CoreName module_prim "makeIdBareCoercion",
+     Right [| coreBuiltin SystemF.The_makeIdBareCoercion |])
   , (CoreName module_prim "traceInt_int",
      Right [| coreBuiltin (SystemF.The_traceInt_int) |])
   , (CoreName module_prim "traceInt_box",
@@ -428,6 +489,8 @@ builtinGlobals =
     -- Physical representations of data types
   , (CoreName module_structures "typeObject_typeObject",
      Right [| SystemF.boxInfo_boxInfoV |])
+  {-, (CoreName module_structures "typeObject_repr",
+     Right [| SystemF.boxInfo_bareInfoV |])-}
   {-, (CoreName module_list "repr_list",
      Right [| coreBuiltin SystemF.The_repr_list |])
   , (CoreName module_list "repr_array0",

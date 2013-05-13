@@ -51,6 +51,7 @@ import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
 import qualified LowLevel.GenerateCXXHeader as LowLevel
 import qualified LowLevel.Inlining2
+import qualified LowLevel.Lint as LowLevel
 import qualified LowLevel.JoinPoints as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LowLevel.NormalizeTail as LowLevel
@@ -199,10 +200,6 @@ compilePyonToPyonMem compile_flags path text = do
   -- Generate System F
   sf_mod <- Untyped.typeInferModule untyped_mod
   
-  -- System F transformations
-  --sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
-  --sf_mod <- SystemF.DeadCodeSF.eliminateDeadCode sf_mod
-
   when debugMode $ void $ do
     putStrLn ""
     putStrLn "System F"
@@ -212,11 +209,6 @@ compilePyonToPyonMem compile_flags path text = do
 
   -- Convert to explicit memory representation  
   repr_mod <- SystemF.insertCoercions sf_mod
-  --putStrLn ""
-  --putStrLn "New Core IR generation"
-  --print $ pprMemModule repr_mod
-  
-  -- repr_mod <- SystemF.representationInference sf_mod
 
   -- Add predefined functions to the module
   repr_mod <- SystemF.insertGlobalSystemFFunctions repr_mod
@@ -328,6 +320,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   printTimes times
 
   ll_mod <- SystemF.lowerModule repr_mod
+  ll_mod <- LowLevel.removeTrioletExports ll_mod
   return ll_mod
 
 parsePyonAsm input_path input_text = do
@@ -343,6 +336,9 @@ loadIface iface_file = do
 -- | Compile an input low-level module to C code.  Generate an interface file.
 -- Generate a header file if there are exported routines.
 compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
+  when debugMode $ do
+    evaluate $ LowLevel.checkDuplicateGlobalDefinitions ll_mod
+
   -- Low-level transformations
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
   
@@ -353,6 +349,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
     putStrLn "Lowered and flattened"
     print $ LowLevel.pprModule ll_mod
   
+  when debugMode $ do
+    evaluate $ LowLevel.checkDuplicateGlobalDefinitions ll_mod
+
   -- First round of optimizations: Simplify code
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
@@ -395,23 +394,25 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
     putStrLn ""
     putStrLn "After closure conversion"
     print $ LowLevel.pprModule ll_mod
+
+  when debugMode $ do
+    evaluate $ LowLevel.checkDuplicateGlobalDefinitions ll_mod
+
+  -- After closure conversion, cursors, owned pointers, and unit values
+  -- are superfluous.  Convert pointer types and remove units.
   ll_mod <- LowLevel.insertReferenceTracking ll_mod
+  ll_mod <- LowLevel.flattenRecordTypes ll_mod
+  ll_mod <- LowLevel.removeUnits ll_mod
+
   when debugMode $ void $ do
     putStrLn ""
     putStrLn "After eliminating reference tracking"
     print $ LowLevel.pprModule ll_mod
 
-  ll_mod <- LowLevel.flattenRecordTypes ll_mod
-
-  -- After closure conversion, unit values are superfluous
-  -- remove them
-  ll_mod <- LowLevel.removeUnits ll_mod
-
   -- Second round of optimizations
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  -- FIXME: Why do we need to call 'eliminateDeadCode' twice to
-  -- get the job done?
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   when debugMode $ void $ do
     putStrLn ""

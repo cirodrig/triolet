@@ -1,5 +1,7 @@
 
 type ReprBox = \ (a : box). Repr (AsBare a);
+type MessageWriter = OpaqueRef -> Store -> Store;
+type MessageReader = cursor (Stored byte);
 
 {- This data type definition should be caught as an error, because its
    memory layout depends on an existential type parameter.
@@ -9,21 +11,15 @@ data ErroneousType : bare
 };
 -}
 
--- Data types
+-- Built-in data types
 
-data Stored (a : val) : bare attribute(builtin)
-{
-  stored (a) attribute(builtin);
-};
+-- data Stored (a : val) : bare
+-- { stored (a); };
 
--- Definition is builtin
 -- data Ref (a : box) : bare
--- {
---   ref (a);
--- };
+-- { ref (a); };
 
--- A stuck reference is like a 'Ref' but doesn't get unwrapped
--- by 'asbare'.
+-- A stuck reference is like a 'Ref' but doesn't get unwrapped by 'asbare'.
 data StuckRef (a : box) : bare
 {
   stuckRef (a);
@@ -180,20 +176,124 @@ data Tuple4 (a b c d : bare) : bare
   tuple4 (a, b, c, d);
 };
 
+-- Create a Tuple2 holding boxed references
+pack_Tuple2_box @(a b : box) (x : a) (y : b)
+  -> Boxed (Tuple2 (StuckRef a) (StuckRef b)) attribute(inline) =
+  let rep_a = unboxedinfo StuckRef @a in
+  let rep_b = unboxedinfo StuckRef @b in
+  let rep_tuple = unboxedinfo Tuple2 @(StuckRef a) @(StuckRef b) rep_a rep_b in
+
+  con_boxed @(Tuple2 (StuckRef a) (StuckRef b)) rep_tuple
+  (tuple2 @(StuckRef a) @(StuckRef b)
+   (reprSizeAlign @(StuckRef a) rep_a)
+   (reprSizeAlign @(StuckRef b) rep_b) (stuckRef @a x) (stuckRef @b y));
+
+-- Deconstruct a Tuple2 holding boxed references
+unpack_Tuple2_box @(a b : box) (t : Boxed (Tuple2 (StuckRef a) (StuckRef b)))
+  -> (a, b) attribute(inline) =
+  let rep_a = unboxedinfo StuckRef @a in
+  let rep_b = unboxedinfo StuckRef @b in
+  let rep_tuple = unboxedinfo Tuple2 @(StuckRef a) @(StuckRef b) rep_a rep_b in
+
+  case t of
+    [reprSizeAlign @(Tuple2 (StuckRef a) (StuckRef b)) rep_tuple]
+    boxed tyob ([reprSizeAlign @(StuckRef a) rep_a,
+                 reprSizeAlign @(StuckRef b) rep_b]
+                tuple2 (stuckRef x) (stuckRef y)).
+  (x, y);
+
+-- Create a Tuple3 holding boxed references
+pack_Tuple3_box @(a b c : box) (x : a) (y : b) (z : c)
+  -> Boxed (Tuple3 (StuckRef a) (StuckRef b) (StuckRef c)) attribute(inline) =
+  let rep_a = unboxedinfo StuckRef @a in
+  let rep_b = unboxedinfo StuckRef @b in
+  let rep_c = unboxedinfo StuckRef @c in
+  let rep_tuple = unboxedinfo Tuple3 @(StuckRef a) @(StuckRef b) @(StuckRef c)
+                  rep_a rep_b rep_c in
+
+  con_boxed @(Tuple3 (StuckRef a) (StuckRef b) (StuckRef c)) rep_tuple
+  (tuple3 @(StuckRef a) @(StuckRef b) @(StuckRef c)
+   (reprSizeAlign @(StuckRef a) rep_a)
+   (reprSizeAlign @(StuckRef b) rep_b)
+   (reprSizeAlign @(StuckRef c) rep_c)
+   (stuckRef @a x) (stuckRef @b y) (stuckRef @c z));
+
+-- Deconstruct a Tuple3 holding boxed references
+unpack_Tuple3_box @(a b c : box)
+  (t : Boxed (Tuple3 (StuckRef a) (StuckRef b) (StuckRef c)))
+  -> (a, b, c) attribute(inline) =
+  let rep_a = unboxedinfo StuckRef @a in
+  let rep_b = unboxedinfo StuckRef @b in
+  let rep_c = unboxedinfo StuckRef @c in
+  let rep_tuple =
+        unboxedinfo Tuple3 @(StuckRef a) @(StuckRef b) @(StuckRef c)
+        rep_a rep_b rep_c in
+
+  case t of
+    [reprSizeAlign @(Tuple3 (StuckRef a) (StuckRef b) (StuckRef c)) rep_tuple]
+    boxed tyob ([reprSizeAlign @(StuckRef a) rep_a,
+                 reprSizeAlign @(StuckRef b) rep_b,
+                 reprSizeAlign @(StuckRef c) rep_c]
+                tuple3 (stuckRef x) (stuckRef y) (stuckRef z)).
+  (x, y, z);
+
+-- Create a Tuple4 holding boxed references
+pack_Tuple4_box @(a b c d : box) (x : a) (y : b) (z : c) (w : d)
+  -> Boxed (Tuple4 (StuckRef a) (StuckRef b) (StuckRef c) (StuckRef d))
+  attribute(inline) =
+  let rep_a = unboxedinfo StuckRef @a in
+  let rep_b = unboxedinfo StuckRef @b in
+  let rep_c = unboxedinfo StuckRef @c in
+  let rep_d = unboxedinfo StuckRef @d in
+  let rep_tuple = unboxedinfo Tuple4 @(StuckRef a) @(StuckRef b) @(StuckRef c) @(StuckRef d)
+                  rep_a rep_b rep_c rep_d in
+
+  con_boxed @(Tuple4 (StuckRef a) (StuckRef b) (StuckRef c) (StuckRef d)) rep_tuple
+  (tuple4 @(StuckRef a) @(StuckRef b) @(StuckRef c) @(StuckRef d)
+   (reprSizeAlign @(StuckRef a) rep_a)
+   (reprSizeAlign @(StuckRef b) rep_b)
+   (reprSizeAlign @(StuckRef c) rep_c)
+   (reprSizeAlign @(StuckRef d) rep_d)
+   (stuckRef @a x) (stuckRef @b y) (stuckRef @c z) (stuckRef @d w));
+
+-- Deconstruct a Tuple3 holding boxed references
+unpack_Tuple4_box @(a b c d : box)
+  (t : Boxed (Tuple4 (StuckRef a) (StuckRef b) (StuckRef c) (StuckRef d)))
+  -> (a, b, c, d) attribute(inline) =
+  let rep_a = unboxedinfo StuckRef @a in
+  let rep_b = unboxedinfo StuckRef @b in
+  let rep_c = unboxedinfo StuckRef @c in
+  let rep_d = unboxedinfo StuckRef @d in
+  let rep_tuple =
+        unboxedinfo Tuple4 @(StuckRef a) @(StuckRef b) @(StuckRef c) @(StuckRef d)
+        rep_a rep_b rep_c rep_d in
+
+  case t of
+    [reprSizeAlign @(Tuple4 (StuckRef a) (StuckRef b) (StuckRef c) (StuckRef d)) rep_tuple]
+    boxed tyob ([reprSizeAlign @(StuckRef a) rep_a,
+                 reprSizeAlign @(StuckRef b) rep_b,
+                 reprSizeAlign @(StuckRef c) rep_c,
+                 reprSizeAlign @(StuckRef d) rep_d]
+                tuple4 (stuckRef x) (stuckRef y) (stuckRef z) (stuckRef w)).
+  (x, y, z, w);
+
+
 -- Dictionaries
 
--- Size and alignment used by a data constructor/deconstructor
+-- Size, alignment, and pointerfreeness
+-- used by a data constructor/deconstructor
 data SizeAlign (a : bare) : val
   attribute(builtin)
 {
-  sizeAlign (uint, uint) attribute(builtin);
+  sizeAlign (uint, uint, bool) attribute(builtin);
 };
 
--- Size and alignment used by a data constructor/deconstructor
+-- Size, alignment, and pointerfreeness
+-- used by a data constructor/deconstructor
 data SizeAlignVal (a : val) : val
   attribute(builtin)
 {
-  sizeAlignVal (uint, uint) attribute(builtin);
+  sizeAlignVal (uint, uint, bool) attribute(builtin);
 };
 
 -- Evidence that a bare type is or is not of the form 'Ref t'.
@@ -208,21 +308,22 @@ data Repr (a : bare) : box
 {
   repr
   (SizeAlign a,       -- Size and alignment
-   bool,              -- Pointerlessness
-                      -- (True if an 'a' definitely doesn't contain pointers)
-   IsRef a)
+   IsRef a,           -- Whether 'a' is an application of 'Ref'
+   a -> MessageWriter, -- Serializer
+   MessageReader -> (MessageReader, OutPtr a -> Store) -- Deserializer
+  )
   attribute(builtin);
 };
 
 
 copy @(a : bare) (r : Repr a) (x : a) (y : OutPtr a) -> Store attribute(inline) =
-  case r of repr tyob sa pl isref.
+  case r of repr tyob sa isref put get.
   blockcopy @a sa x y;
 
 
 -- Convert from boxed to bare
 asbox @(a : bare) (r : Repr a) (x : Init a) -> AsBox a attribute(inline) =
-  case r of repr tyob sa pl isref.
+  case r of repr tyob sa isref put get.
   case isref of {
     notAReference co.
       -- Write into a new 'boxed' container
@@ -242,7 +343,7 @@ asbox @(a : bare) (r : Repr a) (x : Init a) -> AsBox a attribute(inline) =
 asbare @(a : bare) (r : Repr a) (x : AsBox a) (ret : OutPtr a) -> Store
   attribute(inline) =
 
-  case r of repr tyob sa pl isref.
+  case r of repr tyob sa isref put get.
   case isref of {
     notAReference co.
       -- Copy contents of boxed object
@@ -265,8 +366,10 @@ data ReprVal (a : val) : box
   attribute(builtin)
 {
   reprVal
-  (SizeAlignVal a,              -- Size and alignment
-   bool)                        -- Pointerlessness
+  (SizeAlignVal a,               -- Size and alignment
+   Stored a -> MessageWriter, -- Serializer
+   MessageReader -> (MessageReader, OutPtr (Stored a) -> Store) -- Deserializer
+  )
   attribute(builtin);
 };
 
@@ -276,7 +379,10 @@ data TypeObject (a : box) : box
   attribute(builtin)
 {
   typeObject
-  (uint)                  -- Data constructor index
+  (uint,                  -- Data constructor index
+   a -> MessageWriter,    -- Serializer
+   TypeObject a -> MessageReader -> (MessageReader, a) -- Deserializer
+  ) 
   attribute(builtin);
 };
 
@@ -498,7 +604,7 @@ fromEffTok : forall a : bare. EffTok -> Store;
 
 -- An opaque reference to mutable data.
 data OpaqueRef : box
-  attribute(abstract, nonalgebraic)
+  attribute(abstract, nonalgebraic, builtin)
 {};
 
 -- The state of a list-building computation.
@@ -507,7 +613,6 @@ data ListBuilder (a : bare) : val
 {
   listBuilder (int, int, OpaqueRef);
 };
-
 
 -- Primitive function for building a list by appending to it.
 -- Defined in low-level.
@@ -1704,6 +1809,62 @@ TEMPORARILY COMMENTED OUT FOR DEVELOPMENT
 -}
 
 -------------------------------------------------------------------------------
+-- Serialization and deserialization
+
+putInt : int -> MessageWriter attribute(builtin);
+putUint : uint -> MessageWriter attribute(builtin);
+putUintAsUint8 : uint -> MessageWriter attribute(builtin);
+putUintAsUint16 : uint -> MessageWriter attribute(builtin);
+putFloat : float -> MessageWriter attribute(builtin);
+putByte : byte -> MessageWriter attribute(builtin);
+putCursor : forall a : bare. cursor a -> MessageWriter attribute(builtin);
+putStore : Store -> MessageWriter attribute(builtin);
+putBareCoercion : forall a b : bare. coerce @bare a b -> MessageWriter attribute(builtin);
+putBoxCoercion : forall a b : box. coerce @box a b -> MessageWriter attribute(builtin);
+putStoredInt : Stored int -> MessageWriter attribute(builtin);
+putStoredUint : Stored uint -> MessageWriter attribute(builtin);
+putStoredFloat : Stored float -> MessageWriter attribute(builtin);
+
+putArrWithSerializer : forall n : intindex, a : bare.
+                       FIInt n -> SizeAlign a -> (a -> MessageWriter)
+                    -> arr n a -> MessageWriter;
+
+putRef : forall a : box. Ref a -> MessageWriter attribute(builtin);
+
+-- Write a boxed object out.
+putBoxedObject : forall a : box. a -> MessageWriter attribute(builtin);
+putPointerlessObject : forall a : bare. SizeAlign a -> a -> OpaqueRef -> Store
+  -> Store attribute(builtin);
+
+getInt : MessageReader -> (MessageReader, int) attribute(builtin);
+getUint : MessageReader -> (MessageReader, uint) attribute(builtin);
+getUint8AsUint : MessageReader -> (MessageReader, uint) attribute(builtin);
+getUint16AsUint : MessageReader -> (MessageReader, uint) attribute(builtin);
+getFloat : MessageReader -> (MessageReader, float) attribute(builtin);
+getByte : MessageReader -> (MessageReader, byte) attribute(builtin);
+getCursor : forall a : bare. MessageReader -> (MessageReader, cursor a) attribute(builtin);
+getStore : MessageReader -> (MessageReader, Store) attribute(builtin);
+getBareCoercion : forall a b : bare. MessageReader -> (MessageReader, coerce @bare a b) attribute(builtin);
+getBoxCoercion : forall a b : box. MessageReader -> (MessageReader, coerce @box a b) attribute(builtin);
+getStoredInt : MessageReader -> (MessageReader, Init (Stored int)) attribute(builtin);
+getStoredUint : MessageReader -> (MessageReader, Init (Stored uint)) attribute(builtin);
+getStoredFloat : MessageReader -> (MessageReader, Init (Stored float)) attribute(builtin);
+
+getArrWithSerializer : forall n : intindex, a : bare.
+                       FIInt n -> SizeAlign a
+                    -> (MessageReader -> (MessageReader, Init a))
+                    -> MessageReader -> (MessageReader, Init (arr n a));
+
+getRef : forall a : box.
+         MessageReader -> (MessageReader, OutPtr (Ref a) -> Store) attribute(builtin);
+getPointerlessObject : forall a : bare. SizeAlign a -> MessageReader
+  -> (MessageReader, OutPtr a -> Store) attribute(builtin);
+getBoxedObject : forall a : box. MessageReader -> (MessageReader, a) attribute(builtin);
+
+-- For testing: Write an object to a buffer and read it back
+testCopyViaBuffer : forall a : box. Repr (AsBare a) -> a -> a;
+
+-------------------------------------------------------------------------------
 -- Sets of integers
 
 -- A set of integers, represented as a hash table.
@@ -1874,7 +2035,7 @@ PBTree_flatten @(a : bare)
   case defineIntIndex (PBTree_size @a tree) of
     someIInt @(n : intindex) (out_list_dim : FIInt n).
 
-  let rep_array : Repr (arr n a) = repr_arr @n @a out_list_dim rep in
+  let rep_array : Repr (arr n a) = unboxedinfo arr @n @a out_list_dim rep in
 
   letfun
     -- Copy the given subtree to the output, at the given offset
@@ -1892,7 +2053,7 @@ PBTree_flatten @(a : bare)
 
       ; pbLeaf tyob tree_list.
           case tree_list of make_list @m (tree_list_dim : FIInt m) list_sb.
-          let rep_array_m : Repr (arr m a) = repr_arr @m @a tree_list_dim rep in
+          let rep_array_m : Repr (arr m a) = unboxedinfo arr @m @a tree_list_dim rep in
           case list_sb of [reprSizeAlign @(arr m a) rep_array_m]
             stuckBox tyob (tree_list_array : (arr m a)).
           let sa = reprSizeAlign @a rep in
@@ -2200,7 +2361,7 @@ initToBare @(a : bare) (rep : Repr a) (x : Init a) -> a attribute(inline) =
 reprSizeAlign @(a : bare) (rep : Repr a) -> SizeAlign a
   attribute(inline) =
 
-  case rep of repr tyob sa pointerless isref.
+  case rep of repr tyob sa isref put get.
 
   sa;
 
@@ -2215,9 +2376,10 @@ copyArray @(N : intindex) @(a : bare)
   (rep : Repr a) (size : IInt N) (src : arr N a) (ret : OutPtr (arr N a))
   -> Store
   attribute(inline) =
-  case rep of repr tyob sa pointerless is_ref.
+  case rep of repr tyob sa is_ref.
+  case sa of SizeAlign elem_size elem_align elem_pointerless.
 
-  if pointerless
+  if elem_pointerless
   then blockcopy @(arr N a) 
 
   case size of {
@@ -2251,21 +2413,25 @@ defaultAsBare @(a : bare)
 repr_Ref @(a : box) -> Repr (Ref a)
   attribute(inline, inline_postfinal, builtin) =
 
-  repr @(Ref a) (boxedinfo repr @(Ref a)) (sizealign_Ref @a) False
-  (isAReference @(Ref a) @a (idBareCoercion @(Ref a)));
+  repr @(Ref a) (boxedinfo repr @(Ref a)) (sizealign_Ref @a)
+  (isAReference @(Ref a) @a (idBareCoercion @(Ref a)))
+  (putRef @a) (getRef @a);
 
 sizealign_int : SizeAlign (Stored int);
 sizealign_uint : SizeAlign (Stored uint);
 sizealign_float : SizeAlign (Stored float);
 sizealign_bool : SizeAlign (Stored bool);
 sizealign_NoneType : SizeAlign (Stored NoneType);
-sizealign_Ref : forall a : box. SizeAlign (Ref a);
+
+-- FIXME: These sizes are architecture-dependent!
+sizealign_Ref @(a : box) -> SizeAlign (Ref a) =
+  sizeAlign @(Ref a) 8U 8U False;
 
 sizealign_arr @(n : intindex) @(e : bare) (len : FIInt n) (sa : SizeAlign e)
   -> SizeAlign (arr n e)
   attribute(inline, inline_postfinal) =
 
-  case sa of sizeAlign elt_size elt_align.
+  case sa of sizeAlign elt_size elt_align elt_pointerless.
   case len of fiInt length_int.
 
   -- Pad size to a multiple of alignment
@@ -2275,45 +2441,69 @@ sizealign_arr @(n : intindex) @(e : bare) (len : FIInt n) (sa : SizeAlign e)
   -- Multiply by number of array elements
   let array_size = intToUint (length_int *# padded) in
 
-  sizeAlign @(arr n e) array_size elt_align;
+  sizeAlign @(arr n e) array_size elt_align elt_pointerless;
 
 
 repr_arr @(n : intindex) @(e : bare)
   (size : FIInt n) (repr_e : Repr e) -> Repr (arr n e)
   attribute(inline, inline_postfinal, builtin) =
 
-  case repr_e of repr tyob sa_e pointerless is_ref_e.
+  case repr_e of repr tyob sa_e is_ref_e put get.
 
   repr @(arr n e)
   (boxedinfo repr @(arr n e))
   (sizealign_arr @n @e size sa_e)
-  pointerless
-  (notAReference @(arr n e) (idCoercion @(Boxed (arr n e))));
+  (notAReference @(arr n e) (idCoercion @(Boxed (arr n e))))
+  (putArr @n @e size repr_e)
+  (getArrWithSerializer @n @e size sa_e get);
+
+putArr @(n : intindex) @(e : bare) (size : FIInt n) (repr_e : Repr e)
+  (x : arr n e) (buf : OpaqueRef) (s : Store) -> Store
+  attribute(inline, builtin) =
+
+  case repr_e of repr tyob sa_e is_ref_e put get.
+  putArrWithSerializer @n @e size sa_e put x buf s;
+
+getArr @(n : intindex) @(e : bare) (size : FIInt n) (repr_e : Repr e)
+  (buf : MessageReader) -> (MessageReader, Init (arr n e))
+  attribute(inline, builtin) =
+
+  case repr_e of repr tyob sa_e is_ref_e put get.
+  getArrWithSerializer @n @e size sa_e get buf;
+
+repr_Stored @(a : val) (rep : ReprVal a)
+  -> Repr (Stored a) attribute(inline, inline_postfinal, builtin) =
+  case rep of reprVal tyob (sizeAlignVal sz al pointerless) ser des.
+
+  repr @(Stored a) (typeObject_repr @(Stored a))
+  (sizeAlign @(Stored a) sz al pointerless)
+  (notAReference @(Stored a) (idCoercion @(Boxed (Stored a))))
+  ser des;
 
 repr_int : Repr (Stored int) attribute(inline, inline_final) =
-  unboxedinfo Stored @int (unboxedinfo int);
+  repr_Stored @int (unboxedinfo int);
 
 repr_uint : Repr (Stored uint) attribute(inline, inline_final) =
-  unboxedinfo Stored @uint (unboxedinfo uint);
+  repr_Stored @uint (unboxedinfo uint);
 
 repr_float : Repr (Stored float) attribute(inline, inline_final) =
-  unboxedinfo Stored @float (unboxedinfo float);
+  repr_Stored @float (unboxedinfo float);
 
 repr_bool : Repr (Stored bool) attribute(inline, inline_final) =
-  unboxedinfo Stored @bool (unboxedinfo bool);
+  repr_Stored @bool (unboxedinfo bool);
 
 repr_NoneType : Repr (Stored NoneType) attribute(inline, inline_final) =
-  unboxedinfo Stored @NoneType (unboxedinfo NoneType);
+  repr_Stored @NoneType (unboxedinfo NoneType);
 
 repr_FIInt @(n : intindex) -> Repr (Stored (FIInt n))
   attribute(inline, inline_final) =
-  unboxedinfo Stored @(FIInt n) (unboxedinfo FIInt @n);
+  repr_Stored @(FIInt n) (unboxedinfo FIInt @n);
 
-repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_postfinal) =
-  unboxedinfo Stored @EffTok (unboxedinfo EffTok);
+--repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_postfinal) =
+--  repr_Stored @EffTok (unboxedinfo EffTok);
 
 
-repr_SliceObject : Repr SliceObject;
+-- repr_SliceObject : Repr SliceObject;
 repr_list_dim : Repr (Ref list_dim);
 repr_dim0 : Repr (Ref dim0);
 repr_dim1 : Repr (Ref dim1);
@@ -2404,11 +2594,13 @@ frontend_repr_Tuple4 @(a b c d : box)
   -> Repr (Tuple4 (AsBare a) (AsBare b) (AsBare c) (AsBare d)) =
   unboxedinfo Tuple4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) rep_a rep_b rep_c rep_d;
 
+--frontend_repr_SliceObject : Repr SliceObject = unboxedinfo SliceObject;
+
 frontend_repr_arr @(n : intindex) @(e : box)
   (size : Boxed (Stored int)) (repr_e : Repr (AsBare e))
   -> Repr (arr n (AsBare e))
   attribute(inline) =
-  repr_arr @n @(AsBare e) (fiInt @n (unboxIntValue size)) repr_e;
+  unboxedinfo arr @n @(AsBare e) (fiInt @n (unboxIntValue size)) repr_e;
 
 -- TEMPORARILY COMMENTED OUT FOR DEVELOPMENT
 {-
@@ -2440,7 +2632,8 @@ repr_index2 : Repr (Tuple2 (Stored int) (Stored int)) =
   repr_Tuple2 @(Stored int) @(Stored int) repr_int repr_int;
 
 repr_slice2 : Repr (Tuple2 SliceObject SliceObject) =
-  repr_Tuple2 @SliceObject @SliceObject repr_SliceObject repr_SliceObject;
+  repr_Tuple2 @SliceObject @SliceObject
+  (unboxedinfo SliceObject) (unboxedinfo SliceObject);
 
 repr_index3 : Repr (Tuple3 (Stored int) (Stored int) (Stored int)) =
   repr_Tuple3 @(Stored int) @(Stored int) @(Stored int)
@@ -2448,7 +2641,8 @@ repr_index3 : Repr (Tuple3 (Stored int) (Stored int) (Stored int)) =
 
 repr_slice3 : Repr (Tuple3 SliceObject SliceObject SliceObject) =
   repr_Tuple3 @SliceObject @SliceObject @SliceObject
-  repr_SliceObject repr_SliceObject repr_SliceObject;
+  (unboxedinfo SliceObject) (unboxedinfo SliceObject)
+  (unboxedinfo SliceObject);
 
 repr_append_list @(a : bare) (rep : Repr a) -> Repr (append_list a)
   attribute(inline, inline_postfinal) =
@@ -2933,15 +3127,14 @@ TraversableDict_list_traverse @(a : box)
   case size of fiInt size_i.
 
   let shp = con_list_dim (justVal @int size_i) in
-
-  case rep of repr tyob sa pointerless_a is_ref_a.
+  let sa_a = reprSizeAlign @(AsBare a) rep in
 
   con_viewStream @a
   (view_generate @list_dim
    ShapeDict_list_dim @a rep shp
    (\ (bi : Boxed (Stored int)) -> a.
      let i = unboxIntValue bi in
-     bareToBox @(AsBare a) rep (subscript @N @(AsBare a) sa ay i)));
+     bareToBox @(AsBare a) rep (subscript @N @(AsBare a) sa_a ay i)));
 
 
 TraversableDict_array0_build
@@ -2989,15 +3182,14 @@ TraversableDict_array1_traverse
   case ayref of [reprSizeAlign @(arr N (AsBare a)) rep_arr] stuckBox tyob ay.
   
   let linear_map = linearMap stride lo in
-
-  case rep of repr tyob sa pointerless_a is_ref_a.
+  let sa_a = reprSizeAlign @(AsBare a) rep in
 
   view_generate @dim1 ShapeDict_dim1 @a rep
   (arrayDescToDim1 @N lo stride size)
   (\ (ix : Boxed (Stored int)) -> a.
     let ix_i = unboxIntValue ix in
     let real_ix : int = invEvalLM ix_i linear_map in
-    bareToBox @(AsBare a) rep (subscript @N @(AsBare a) sa ay real_ix));
+    bareToBox @(AsBare a) rep (subscript @N @(AsBare a) sa_a ay real_ix));
 
 
 TraversableDict_array2_build
@@ -3420,7 +3612,7 @@ TraversableDict_barray3_traverse
 ShapeDict_list_dim : ShapeDict list_dim =
   shapeDict @list_dim (boxedinfo shapeDict @list_dim)
   repr_int
-  repr_SliceObject
+  (unboxedinfo SliceObject)
   ShapeDict_list_dim_member
   ShapeDict_list_dim_intersect
   ShapeDict_list_dim_flatten
@@ -3811,7 +4003,7 @@ ShapeDict_dim0_slice @(t : box -> box) @(a : box)
 ShapeDict_dim1 : ShapeDict dim1 =
   shapeDict @dim1 (boxedinfo shapeDict @dim1)
   repr_int
-  repr_SliceObject
+  (unboxedinfo SliceObject)
   ShapeDict_dim1_member
   ShapeDict_dim1_intersect
   ShapeDict_dim1_flatten
@@ -4559,7 +4751,7 @@ IndexableDict_array2_at_point @(a : box)
   case ay of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
     boxed tyob (mk_array2 @(M N : intindex)
                 lb_y stride_y size_y lb_x stride_x size_x ayref).
-  let row_repr = repr_arr @N @(AsBare a) size_x rep in
+  let row_repr = unboxedinfo arr @N @(AsBare a) size_x rep in
   let rep_plane = unboxedinfo arr @M @(arr N (AsBare a)) size_y row_repr in
   case ayref of [reprSizeAlign @(arr M (arr N (AsBare a))) rep_plane]
     stuckBox tyob (ay : arr M (arr N (AsBare a))).
@@ -5913,7 +6105,7 @@ CartesianDict_dim3_unbounded :
 -- Boxing/unboxing helper functions
 
 boxIntValue (n : int) -> Boxed (Stored int) =
-  let rep_Sint = unboxedinfo Stored @int (unboxedinfo int) in
+  let rep_Sint = repr_Stored @int (unboxedinfo int) in
   boxed @(Stored int)
   (reprSizeAlign @(Stored int) rep_Sint)
   (boxedinfo boxed @(Stored int) rep_Sint)
@@ -5924,7 +6116,7 @@ unboxIntValue (n : Boxed (Stored int)) -> int =
     boxed tyob (stored un). un;
 
 boxFloatValue (n : float) -> Boxed (Stored float) =
-  let rep_Sfloat = unboxedinfo Stored @float (unboxedinfo float) in
+  let rep_Sfloat = repr_Stored @float (unboxedinfo float) in
   boxed @(Stored float)
   (reprSizeAlign @(Stored float) rep_Sfloat)
   (boxedinfo boxed @(Stored float) rep_Sfloat)
@@ -5935,7 +6127,7 @@ unboxFloatValue (n : Boxed (Stored float)) -> float =
     boxed tyob (stored un). un;
 
 boxBoolValue (n : bool) -> Boxed (Stored bool) =
-  let rep_Sbool = unboxedinfo Stored @bool (unboxedinfo bool) in
+  let rep_Sbool = repr_Stored @bool (unboxedinfo bool) in
   boxed @(Stored bool)
   (reprSizeAlign @(Stored bool) rep_Sbool)
   (boxedinfo boxed @(Stored bool) rep_Sbool)
@@ -5946,7 +6138,7 @@ unboxBoolValue (n : Boxed (Stored bool)) -> bool =
     boxed tyob (stored un). un;
 
 boxNoneValue (n : NoneType) -> Boxed (Stored NoneType) =
-  let rep_SNone = unboxedinfo Stored @NoneType (unboxedinfo NoneType) in
+  let rep_SNone = repr_Stored @NoneType (unboxedinfo NoneType) in
   boxed @(Stored NoneType)
   (reprSizeAlign @(Stored NoneType) rep_SNone)
   (boxedinfo boxed @(Stored NoneType) rep_SNone)
@@ -5983,7 +6175,7 @@ modI : int -> int -> int attribute(builtin);
 minI : int -> int -> int;
 maxI : int -> int -> int attribute(builtin);
 
-eqU : uint -> uint -> bool;
+eqU : uint -> uint -> bool attribute(builtin);
 neU : uint -> uint -> bool;
 ltU : uint -> uint -> bool;
 leU : uint -> uint -> bool;
@@ -6076,7 +6268,6 @@ subscript_out : forall n : intindex, a : bare.
 -- Promote an integer to a type index
 defineIntIndex : int -> SomeIInt;
 
-type pos_infty : intindex;
 type plus_i : intindex -> intindex -> intindex;
 type minus_i : intindex -> intindex -> intindex;
 type min_i : intindex -> intindex -> intindex;
@@ -6578,8 +6769,14 @@ internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
 -- Coercions
 
 -- Construct an identity coercion.  This function is safe.
-idCoercion : forall a : box. coerce @box a a attribute(builtin);
-idBareCoercion : forall a : bare. coerce @bare a a;
+idCoercion @(a : box) -> coerce @box a a attribute(inline, builtin) =
+  makeIdCoercion @a None;
+
+idBareCoercion @(a : bare) -> coerce @bare a a attribute(inline) =
+  makeIdBareCoercion @a None;
+
+makeIdCoercion : forall a : box. NoneType -> coerce @box a a;
+makeIdBareCoercion : forall a : bare. NoneType -> coerce @bare a a;
 
 -- The type functions 'index' and 'cartesianDomain' are inverses where
 -- they are defined.
@@ -7170,14 +7367,13 @@ Sequence_zipWith
   case sqA of sequence @(st_a : box) tyob state_a next_a.
   case sqB of sequence @(st_b : box) tyob state_b next_b.
 
-  let type st_c = Stored (st_a, st_b) in
-  let rep_st_c = unboxedinfo Stored @(st_a, st_b)
-                 (repr_UTuple_box_box @st_a @st_b) in
+  let type st_c = Tuple2 (StuckRef st_a) (StuckRef st_b) in
+  let rep_st_c = unboxedinfo Tuple2 @(StuckRef st_a) @(StuckRef st_b)
+                 (unboxedinfo StuckRef @st_a) (unboxedinfo StuckRef @st_b) in
   letfun
     go (state : Boxed st_c) -> StreamNext (Boxed st_c) (AsBox c) =
       -- Unpack the state
-      case state of [reprSizeAlign @st_c rep_st_c]
-        boxed tyob (stored (state_a, state_b)).
+      case unpack_Tuple2_box @st_a @st_b state of (state_a, state_b).
 
       -- Get next value of stream A
       case next_a state_a of {
@@ -7193,8 +7389,7 @@ Sequence_zipWith
                     (transformer (boxToBare @a repr_a value_a)
                                  (boxToBare @b repr_b value_b)) in
 	      let next_state : Boxed st_c =
-	            con_boxed @st_c rep_st_c
-                    (stored @(st_a, st_b) (next_state_a, next_state_b)) in
+                    pack_Tuple2_box @st_a @st_b next_state_a next_state_b in
 	      streamValue @(Boxed st_c) @(AsBox c) next_state value;
 
 	    streamEmpty.
@@ -7205,8 +7400,8 @@ Sequence_zipWith
 	  streamEmpty @(Boxed st_c) @(AsBox c)
       }
   in con_sequence @(AsBox c) @(Boxed st_c)
-       (con_boxed @st_c rep_st_c (stored @(st_a, st_b) (state_a, state_b)))
-       go;
+     (pack_Tuple2_box @st_a @st_b state_a state_b)
+     go;
 
 
 Sequence_zipWith3
@@ -7222,15 +7417,17 @@ Sequence_zipWith3
   case sqB of sequence @(st_b : box) tyob state_b next_b.
   case sqC of sequence @(st_c : box) tyob state_c next_c.
 
-  let type st_d = Stored (st_a, st_b, st_c) in
-  let rep_st_d = unboxedinfo Stored @(st_a, st_b, st_c)
-                 (repr_UTuple_box_box_box @st_a @st_b @st_c) in
-  
+  let type st_d = Tuple3 (StuckRef st_a) (StuckRef st_b) (StuckRef st_c) in
+  let rep_st_d = unboxedinfo Tuple3
+                 @(StuckRef st_a) @(StuckRef st_b) @(StuckRef st_c)
+                 (unboxedinfo StuckRef @st_a)
+                 (unboxedinfo StuckRef @st_b)
+                 (unboxedinfo StuckRef @st_c) in
+
   letfun
     go (state : Boxed st_d) -> StreamNext (Boxed st_d) (AsBox d) =
-      -- Unpack the state
-      case state of [reprSizeAlign @st_d rep_st_d]
-        boxed tyob (stored (state_a, state_b, state_c)).
+      case unpack_Tuple3_box @st_a @st_b @st_c state
+        of (state_a, state_b, state_c).
 
       -- Get next value of stream A
       case next_a state_a of {
@@ -7252,9 +7449,7 @@ Sequence_zipWith3
                          (boxToBare @b repr_b value_b)
                          (boxToBare @c repr_c value_c)) in
                   let next_state : Boxed st_d =
-                        con_boxed @st_d rep_st_d
-                        (stored @(st_a, st_b, st_c)
-                         (next_state_a, next_state_b, next_state_c)) in
+                        pack_Tuple3_box @st_a @st_b @st_c next_state_a next_state_b next_state_c in
                   streamValue @(Boxed st_d) @(AsBox d) next_state value;
 
                   streamEmpty.
@@ -7269,7 +7464,7 @@ Sequence_zipWith3
           streamEmpty @(Boxed st_d) @(AsBox d)
       }
   in con_sequence @(AsBox d) @(Boxed st_d)
-       (con_boxed @st_d rep_st_d (stored @(st_a, st_b, st_c) (state_a, state_b, state_c)))
+       (pack_Tuple3_box @st_a @st_b @st_c state_a state_b state_c)
        go;
 
 
@@ -7288,15 +7483,18 @@ Sequence_zipWith4
   case sqC of sequence @(st_c : box) tyob state_c next_c.
   case sqD of sequence @(st_d : box) tyob state_d next_d.
 
-  let type st_e = Stored (st_a, st_b, st_c, st_d) in
-  let rep_st_e = unboxedinfo Stored @(st_a, st_b, st_c, st_d)
-                 (repr_UTuple_box_box_box_box @st_a @st_b @st_c @st_d) in
+  let type st_e = Tuple4 (StuckRef st_a) (StuckRef st_b) (StuckRef st_c) (StuckRef st_d) in
+  let rep_st_e = unboxedinfo Tuple4
+                 @(StuckRef st_a) @(StuckRef st_b) @(StuckRef st_c) @(StuckRef st_d)
+                 (unboxedinfo StuckRef @st_a)
+                 (unboxedinfo StuckRef @st_b)
+                 (unboxedinfo StuckRef @st_c)
+                 (unboxedinfo StuckRef @st_d) in
   
   letfun
     go (state : Boxed st_e) -> StreamNext (Boxed st_e) (AsBox e) =
-      -- Unpack the state
-      case state of [reprSizeAlign @st_e rep_st_e]
-        boxed tyob (stored (state_a, state_b, state_c, state_d)).
+      case unpack_Tuple4_box @st_a @st_b @st_c @st_d state
+        of (state_a, state_b, state_c, state_d).
 
       -- Get next value of stream A
       case next_a state_a of {
@@ -7323,10 +7521,8 @@ Sequence_zipWith4
                              (boxToBare @c repr_c value_c)
                              (boxToBare @d repr_d value_d)) in
                       let next_state : Boxed st_e =
-                            con_boxed @st_e
-                            rep_st_e
-                            (stored @(st_a, st_b, st_c, st_d)
-                             (next_state_a, next_state_b, next_state_c, next_state_d)) in
+                            pack_Tuple4_box @st_a @st_b @st_c @st_d
+                            next_state_a next_state_b next_state_c next_state_d in
                       streamValue @(Boxed st_e) @(AsBox e) next_state value;
 
                       streamEmpty.
@@ -7345,8 +7541,8 @@ Sequence_zipWith4
           streamEmpty @(Boxed st_e) @(AsBox e)
       }
   in con_sequence @(AsBox e) @(Boxed st_e)
-       (con_boxed @st_e rep_st_e
-        (stored @(st_a, st_b, st_c, st_d) (state_a, state_b, state_c, state_d)))
+       (pack_Tuple4_box @st_a @st_b @st_c @st_d
+                            state_a state_b state_c state_d)
        go;
 
 -------------------------------------------------------------------------------
@@ -8693,7 +8889,7 @@ arr2D_build @(M N : intindex) @(a : bare)
   -> Store
   attribute(inline) =
 
-  let row_repr : Repr (arr N a) = repr_arr @N @a size_x rep in
+  let row_repr : Repr (arr N a) = unboxedinfo arr @N @a size_x rep in
   doall @M size_y
   (\ (y : int) -> Store.
      doall @N size_x
@@ -8714,9 +8910,9 @@ arr3D_build @(L M N : intindex) @(a : bare)
   -> Store
   attribute(inline) =
 
-  let row_repr : Repr (arr N a) = repr_arr @N @a size_x rep in
+  let row_repr : Repr (arr N a) = unboxedinfo arr @N @a size_x rep in
   let plane_repr : Repr (arr M (arr N a)) =
-        repr_arr @M @(arr N a) size_y row_repr in
+        unboxedinfo arr @M @(arr N a) size_y row_repr in
   doall @L size_z
   (\ (z : int) -> Store.
      doall @M size_y
@@ -9987,7 +10183,7 @@ Sequence_list_build @(a : bare)
   attribute(inline, inline_sequential) =
 
   let type acc = Stored (ListBuilder a) in
-  let repr_acc : Repr acc = unboxedinfo Stored @(ListBuilder a) (unboxedinfo ListBuilder @a) in
+  let repr_acc : Repr acc = repr_Stored @(ListBuilder a) (unboxedinfo ListBuilder @a) in
 
   -- Build a list by repeatedly appending to it
   append_build_list @a rep
@@ -10506,13 +10702,6 @@ data SomeIndexable (d a : box) : box
        t a
     )
 };
-
-indexableToView @(t : box -> box) @(a :box) (ix : Indexable2 t) (x : t a)
-  -> View2 (shape t) a attribute(inline) =
-  let type d = (shape t) in
-  let ixshape = ix_shape @t ix in
-  let ixat = ix_at @t ix in
-  con_view2 @d @a (ixshape @a x) (\ (i : AsBox (index d)) -> a. ixat @a x i) ;
 
 {-
 indexableView @(d : box) (sh : Shape2 d) -> Indexable2 (View2 d) =

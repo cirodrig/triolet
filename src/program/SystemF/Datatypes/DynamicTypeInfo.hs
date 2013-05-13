@@ -21,10 +21,6 @@ import qualified LowLevel.Syntax as L
 -------------------------------------------------------------------------------
 -- Dynamic type information
 
--- | Data types with a default, dummy value.  The dummy value is only used
---   for testing.
-class DefaultValue a where dummy :: a
-
 -- | A lookup table, indexed by type.
 --
 --   All types in a given table have a single kind, known to the user of
@@ -74,11 +70,11 @@ insertIntTypeInfo t s i =
   i {intTypeInfo = insertTypeAssocList t s $ intTypeInfo i}
 
 -- | Lookup dynamic size and alignment information for a value type
-lookupValTypeInfo :: (EvalMonad m, DefaultValue val, DefaultValue bare, DefaultValue int) =>
+lookupValTypeInfo :: (EvalMonad m) =>
                      DynTypeInfo val bare int -> Type -> m (Maybe val)
 lookupValTypeInfo layouts ty = lookupTypeAssocList ty $ valTypeInfo layouts
 
-lookupValTypeInfo' :: (EvalMonad m, DefaultValue val, DefaultValue bare, DefaultValue int) =>
+lookupValTypeInfo' :: (EvalMonad m) =>
                      DynTypeInfo val bare int -> Type -> m val
 lookupValTypeInfo' layouts ty = lookupValTypeInfo layouts ty >>= check
   where
@@ -86,11 +82,11 @@ lookupValTypeInfo' layouts ty = lookupValTypeInfo layouts ty >>= check
     check Nothing  = internalError "lookupValTypeInfo: Not found"
 
 -- | Lookup dynamic size and alignment information for a bare type
-lookupBareTypeInfo :: (EvalMonad m, DefaultValue val, DefaultValue bare, DefaultValue int) =>
+lookupBareTypeInfo :: (EvalMonad m) =>
                       DynTypeInfo val bare int -> Type -> m (Maybe bare)
 lookupBareTypeInfo layouts ty = lookupTypeAssocList ty $ bareTypeInfo layouts
 
-lookupBareTypeInfo' :: (EvalMonad m, DefaultValue val, DefaultValue bare, DefaultValue int) =>
+lookupBareTypeInfo' :: (EvalMonad m) =>
                        DynTypeInfo val bare int -> Type -> m bare
 lookupBareTypeInfo' layouts ty = lookupBareTypeInfo layouts ty >>= check
   where
@@ -98,11 +94,11 @@ lookupBareTypeInfo' layouts ty = lookupBareTypeInfo layouts ty >>= check
     check Nothing  = internalError "lookupBareTypeInfo': Not found"
 
 -- | Lookup dynamic value information for an integer type
-lookupIntTypeInfo :: (EvalMonad m, DefaultValue val, DefaultValue bare, DefaultValue int) =>
+lookupIntTypeInfo :: (EvalMonad m) =>
                      DynTypeInfo val bare int -> Type -> m (Maybe int)
 lookupIntTypeInfo layouts ty = lookupTypeAssocList ty $ intTypeInfo layouts
 
-lookupIntTypeInfo' :: (EvalMonad m, DefaultValue val, DefaultValue bare, DefaultValue int) =>
+lookupIntTypeInfo' :: (EvalMonad m) =>
                       DynTypeInfo val bare int -> Type -> m int
 lookupIntTypeInfo' layouts ty = lookupIntTypeInfo layouts ty >>= check
   where

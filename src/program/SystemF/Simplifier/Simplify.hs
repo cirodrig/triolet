@@ -54,7 +54,8 @@ import Common.Error
 import Common.Identifier
 import Common.MonadLogic
 import Common.Supply
-import SystemF.Datatypes.Code
+import qualified LowLevel.Syntax as LL
+import qualified SystemF.Datatypes.Code
 import SystemF.Datatypes.InfoCall
 import Type.Compare
 import qualified Type.Rename as Rename
@@ -140,6 +141,8 @@ data LRConstants =
   { -- | Variable ID supply
     lrIdSupply :: {-# UNPACK #-}!(Supply VarID)
     
+  , lrLLIdSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
+
     -- | Set of imported variable IDs, used to decide whether a variable was
     --   defined in the current module
   , lrImportedSet :: !IntSet.IntSet
@@ -228,6 +231,9 @@ instance ReprDictMonad LR where
 liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
   liftM Just $ runFreshVarM (lrIdSupply $ lrConstants env) m
+
+getLLVarIdentSupply :: LR (IdentSupply LL.Var)
+getLLVarIdentSupply = LR $ \env -> return (Just $ lrLLIdSupply $ lrConstants env)
 
 getRewriteRules :: LR RewriteRuleSet
 getRewriteRules = LR $ \env -> return (Just $ lrRewriteRules $ lrConstants env)
@@ -2204,12 +2210,14 @@ conFieldDicts con@(VarCon op ty_args ex_types) = do
   return $ sequence field_assocs
   where
     field_dict :: BaseKind -> Type -> LR (Maybe (BaseKind, Maybe ExpM))
-    field_dict BareK ty = liftTypeEvalM $
-      condM (deconVarAppType ty)
+    field_dict BareK ty =
+      condM (liftTypeEvalM $ deconVarAppType ty)
       [ do Just (op, args) <- it
-           Just data_type <- lift $ lookupDataType op
-           lift $ do (m_dict_exp, context) <-
-                       execGen $ callConstantUnboxedInfoFunction data_type args
+           Just data_type <- lift $ liftTypeEvalM $ lookupDataType op
+           lift $ do supply <- getLLVarIdentSupply
+                     (m_dict_exp, context) <-
+                       liftTypeEvalM $ SystemF.Datatypes.Code.execGen supply $
+                       callConstantUnboxedInfoFunction data_type args
                      return $ do dict_exp <- m_dict_exp
                                  return (BareK, Just $ context dict_exp)
       , return Nothing
@@ -3188,7 +3196,8 @@ rewriteLocalExpr :: SimplifierPhase
                  -> Module Mem
                  -> IO (Module Mem)
 rewriteLocalExpr phase ruleset mod =
-  withTheNewVarIdentSupply $ \var_supply -> do
+  withTheNewVarIdentSupply $ \var_supply ->
+  withTheLLVarIdentSupply $ \ll_var_supply -> do
     fuel <- readInitGlobalVarIO the_fuel
     i_tenv <- readInitGlobalVarIO the_memTypes
     tenv <- thawTypeEnv i_tenv
@@ -3203,6 +3212,7 @@ rewriteLocalExpr phase ruleset mod =
 
     let env_constants =
           LRConstants { lrIdSupply = var_supply
+                      , lrLLIdSupply = ll_var_supply
                       , lrImportedSet = IntSet.fromList
                                         [fromIdent $ varID $ definiendum def 
                                         | def <- modImports mod]

@@ -24,13 +24,13 @@ pprEntryPoints (EntryPoints _ _ dir _ exa ine inf glo) =
 
 pprVarLong :: Var -> Doc
 pprVarLong v =
-  let name_doc = text $ maybe "_" labelLocalNameAsString $ varName v
+  let name_doc = text $ maybe "_" showLabel $ varName v
       id_doc = text $ show $ fromIdent $ varID v
   in pprValueType (varType v) <+> name_doc <> text "'" <> id_doc
 
 pprVar :: Var -> Doc
 pprVar v =
-  let name_doc = text $ maybe "_" labelLocalNameAsString $ varName v
+  let name_doc = text $ maybe "_" showLabel $ varName v
       id_doc = text $ show $ fromIdent $ varID v
   in name_doc <> text "'" <> id_doc
 
@@ -172,6 +172,7 @@ pprInfixPrim prim =
      PrimShiftL _ _ -> Just $ text "<<"
      PrimShiftR _ _ -> Just $ text ">>"
      PrimAddP _ -> Just $ text "^+"
+     PrimSubP _ -> Just $ text "^-"
      PrimCmpF _ c -> Just $ comparison c
      PrimAddF _ -> Just $ text "+"
      PrimSubF _ -> Just $ text "-"
@@ -219,14 +220,15 @@ pprPrim prim =
            PrimOr -> "or_b"
            PrimNot -> "not_b"
            PrimAddP _  -> "ptradd"
-           PrimLoad Mutable _ _ -> "load"
-           PrimLoad Constant _ _ -> "load const"
-           PrimStore Mutable _ _ -> "store"
-           PrimStore Constant _ _ -> "store const"
+           PrimSubP _  -> "ptrsub"
+           PrimLoad m p _ -> "load" ++ pointer_kind p ++ mutability m
+           PrimStore m p _ -> "store" ++ pointer_kind p ++ mutability m
            PrimAAddZ _ _ -> "atomic_add"
            PrimCastToOwned -> "cast_ptr_own"
            PrimCastFromOwned -> "cast_own_ptr"
            PrimCastFromCursor -> "cast_from_cursor"
+           PrimCursorBase -> "cursor_base"
+           PrimCastPtrToInt sz -> "cast_ptr_int_" ++ size sz
            PrimGetFrameP -> "get_frame_ptr"
            PrimCastFToZ _ _ -> "cast_float_int"
            PrimCastZToF _ _ -> "cast_int_float"
@@ -249,6 +251,11 @@ pprPrim prim =
            _ -> empty
   in text name <+> ty
   where
+    mutability Mutable  = ""
+    mutability Constant = "_const"
+    pointer_kind OwnedPtr   = "_o"
+    pointer_kind PointerPtr = "_p"
+    pointer_kind CursorPtr  = "_c"
     unary_float op =
       case op
       of ExpI -> "fexp"

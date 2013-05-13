@@ -1,5 +1,6 @@
 
-module SystemF.Datatypes.Driver(computeDataTypeInfo)
+module SystemF.Datatypes.Driver
+       (computeDataTypeInfo, addLayoutVariablesToTypeEnvironment)
 where
 
 import Control.DeepSeq
@@ -8,6 +9,7 @@ import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
   
 import Common.Error
 import Common.Identifier
@@ -18,20 +20,29 @@ import Type.Type
 import Type.Environment
 import Type.Compare
 import Type.Eval
+import qualified LowLevel.Syntax as LL
 import SystemF.Syntax
 import SystemF.MemoryIR
 
 import SystemF.Datatypes.Structure
 import SystemF.Datatypes.TypeObject
 
+-- | Primitive value types.  These get special auto-generated definitions.
+primitiveValTypes :: [Var]
+primitiveValTypes = [intV, uintV, floatV]
+
 -- | Compute layout information for all algebraic data types in the
 --   given environment.  The type environment is modified in-place
---   by adding size parameter types and type info variables.
---   A list of type info definitions is returned.
-computeDataTypeInfo :: IdentSupply Var
+--   by adding layout information to data types and by adding 
+--   global serializer functions to the type environment.
+--
+--   Returns a list of all data types for which info was created and a
+--   list of global variable definitions.
+computeDataTypeInfo :: IdentSupply LL.Var
+                    -> IdentSupply Var
                     -> TypeEnv
-                    -> IO [GDef Mem]
-computeDataTypeInfo var_supply type_env =
+                    -> IO ([Var], [GDef Mem])
+computeDataTypeInfo ll_var_supply var_supply type_env =
   runTypeEvalM compute var_supply type_env
   where
     compute = do
@@ -48,24 +59,22 @@ computeDataTypeInfo var_supply type_env =
           liftM concat $ mapM define_info_var dtypes_needing_info
 
           -- Primitive types
-        , define_primitive_info_var intV
-        , define_primitive_info_var uintV
-        , define_primitive_info_var floatV
+        , liftM concat $ mapM define_primitive_info_var primitiveValTypes
         ]
-      return $ concat defss
+      return (dtypes_needing_info, concat defss)
 
     define_primitive_info_var data_type_con = do
       Just dtype <- lookupDataType data_type_con
-      definePrimitiveValInfo dtype
+      definePrimitiveValInfo ll_var_supply dtype
 
     -- Create definitions for the info variables
     define_info_var :: Var -> UnboxedTypeEvalM [GDef Mem]
     define_info_var data_type_con = do
       Just dtype <- lookupDataType data_type_con
       case dataTypeKind dtype of
-        ValK  -> valInfoDefinition dtype
-        BareK -> bareInfoDefinition dtype
-        BoxK  -> boxInfoDefinitions dtype
+        ValK  -> valInfoDefinition ll_var_supply dtype
+        BareK -> bareInfoDefinition ll_var_supply dtype
+        BoxK  -> boxInfoDefinitions ll_var_supply dtype
 
     -- Given a list of data type constructors, add all their info variables
     -- to the environment
@@ -75,7 +84,7 @@ computeDataTypeInfo var_supply type_env =
 
       -- For each data type, for each info variable, create a binding
       let bindings :: [Binder]
-          bindings = [ v ::: dataTypeInfoVarType dtype
+          bindings = [ v ::: infoConstructorType dtype
                      | m_dtype <- dtypes
                      , let Just dtype = m_dtype
                      , v <- layoutInfoVars $ dataTypeLayout' dtype
@@ -90,6 +99,10 @@ computeDataTypeInfo var_supply type_env =
  
 -- | Compute size parameters for an algebraic data type constructor, and
 --   save them in the type environment.
+--      
+--   Save the types of any newly created serializer and deserializer
+--   functions in the type environment.
+--   The function definitions are not created until later.
 --
 --   If a new info variable was created, return the data type constructor.
 setLayoutInformation :: DataType -> UnboxedTypeEvalM (Maybe Var)
@@ -121,14 +134,18 @@ createLayouts dtype size_param_types static_types =
     constructor_layouts = do
       -- Create an info constructor and field size computation code
       xs <- createConstructorTable createInfoVariable dtype
+      sers <- createConstructorTable createSerializerVariable dtype
+      dess <- createConstructorTable createDeserializerVariable dtype
       fs <- createConstructorTable createSizeVariable dtype
-      return $ boxedDataTypeLayout size_param_types static_types xs fs
+      return $ boxedDataTypeLayout size_param_types static_types xs sers dess fs
 
     -- Create one layout for the data type
     unboxed_layout = do
       i <- createInfoVariable (varName $ dataTypeCon dtype)
+      ser <- createSerializerVariable (varName $ dataTypeCon dtype)
+      des <- createDeserializerVariable (varName $ dataTypeCon dtype)
       fs <- createConstructorTable createSizeVariable dtype
-      return $ unboxedDataTypeLayout size_param_types static_types i fs
+      return $ unboxedDataTypeLayout size_param_types static_types i ser des fs
 
 -- | Create a lookup table indexed by constructors.
 createConstructorTable :: (Maybe Label -> UnboxedTypeEvalM a) -> DataType
@@ -154,4 +171,51 @@ createVariable str data_label = do
 
 createInfoVariable = createVariable "_info"
 createSizeVariable = createVariable "_size"
+createSerializerVariable = createVariable "_ser"
+createDeserializerVariable = createVariable "_des"
 
+-------------------------------------------------------------------------------
+
+-- | Add the types of layout-related functions to the environment for the
+--   given list of data types.  It should be the list that was returned by
+--   'computeDataTypeInfo'.
+--   The type environment is modified in-place.
+addLayoutVariablesToTypeEnvironment :: [Var] -> TypeEnv -> IO ()
+addLayoutVariablesToTypeEnvironment vs tenv = do
+  mapM_ add_generated_datatype vs
+  mapM_ add_primitive_datatype primitiveValTypes
+  where
+    add_primitive_datatype v = do
+      -- Look up the updated data type
+      Just dtype <- runTypeEnvM tenv $ lookupDataType v
+
+      -- Compute function types
+      let info_type = infoConstructorType dtype
+      insertGlobalType tenv (dataTypeUnboxedInfoVar dtype) info_type
+
+    add_generated_datatype v = do
+      -- Look up the updated data type
+      Just dtype <- runTypeEnvM tenv $ lookupDataType v
+          
+      -- Compute function types
+      let info_type = infoConstructorType dtype
+          ser_type = serializerType dtype
+          des_type = deserializerType dtype
+          data_constructors = dataTypeDataConstructors dtype
+
+      -- Process variables for each constructor of a boxed type
+      let constructor_layouts = forM_ data_constructors $ \dcon -> do
+            insertGlobalType tenv (dataTypeBoxedInfoVar dtype dcon) info_type
+            insertGlobalType tenv (dataTypeBoxedSerializerVar dtype dcon) ser_type
+            insertGlobalType tenv (dataTypeBoxedDeserializerVar dtype dcon) des_type
+
+      -- Only one of each variable for a bare type
+      let unboxed_layout = do
+            insertGlobalType tenv (dataTypeUnboxedInfoVar dtype) info_type
+            insertGlobalType tenv (dataTypeUnboxedSerializerVar dtype) ser_type
+            insertGlobalType tenv (dataTypeUnboxedDeserializerVar dtype) des_type
+          
+      case dataTypeKind dtype of
+        BoxK  -> constructor_layouts
+        BareK -> unboxed_layout
+        ValK  -> unboxed_layout

@@ -49,6 +49,7 @@ data Token =
   | DerefTok
   | PlusTok
   | MinusTok
+  | PointerMinusTok
   | PointerPlusTok
   | PercentTok
   | IntegerDivideTok
@@ -61,6 +62,7 @@ data Token =
   | WildTok
   | AlignofTok
   | AsTok
+  | BaseTok
   | BoolTok
   | CallTok
   | ConstTok
@@ -128,6 +130,7 @@ showToken AtTok = "at operator"
 showToken DerefTok = "exclamation mark"
 showToken PlusTok = "plus"
 showToken MinusTok = "minus"
+showToken PointerMinusTok = "'^-'"
 showToken PointerPlusTok = "'^+'"
 showToken PercentTok = "percent sign"
 showToken IntegerDivideTok = "integer division sign"
@@ -140,6 +143,7 @@ showToken NotTok = "boolean not"
 showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"
+showToken BaseTok = "'base'"
 showToken BoolTok = "'bool'"
 showToken CallTok = "'call'"
 showToken ConstTok = "'const'"

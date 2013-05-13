@@ -42,8 +42,7 @@ module LowLevel.Records where
 import Data.Word
 
 import Common.Error
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 
 -- | Tags indicating the run-time representation of a dynamically typed value.
 --
@@ -114,11 +113,13 @@ indexedIntDataRecord = constStaticRecord [RecordField finIndexedIntRecord]
 -- | A finite indexed int
 finIndexedIntRecord = constStaticRecord [PrimField nativeIntType]
 
--- | A structure containing size and alignment fields
+-- | A structure containing size, alignment, and pointerlessness fields.
+--   The @pointerlessness@ field is a Triolet bool.
 sizeAlignRecord :: StaticRecord
 sizeAlignRecord = constStaticRecord
                   [ PrimField nativeWordType -- Size
                   , PrimField nativeWordType -- Alignment
+                  , PrimField nativeWordType -- Pointerless (a boolean)
                   ]
 
 -- | A type object for boxed objects.  The fields are:
@@ -185,6 +186,31 @@ papRecord arg = constStaticRecord
 
 papRecord0 :: StaticRecord
 papRecord0 = papRecord UnitType
+
+-- | Run-time type info for a bare object.  These records are always
+--   constructed in memory.
+bareInfoRecord :: StaticRecord
+bareInfoRecord = constStaticRecord
+                 [ PrimField OwnedType -- Object header
+                 , RecordField sizeAlignRecord -- Size
+                 , PrimField (IntType Unsigned S8)  -- Is reference
+                 , PrimField OwnedType -- Serializer
+                 , PrimField OwnedType -- Deserializer
+                 ]
+
+valInfoRecord :: StaticRecord
+valInfoRecord = constStaticRecord
+                [ PrimField OwnedType -- Object header
+                , RecordField sizeAlignRecord -- size
+                ]
+
+-- | A lazily initialized global constant
+lazyRecord :: ValueType -> StaticRecord
+lazyRecord t = staticRecord
+               [ (Mutable, PrimField nativeWordType)  -- Status
+               , (Constant, PrimField PointerType)    -- Evaluator
+               , (Mutable, valueToFieldType t)        -- Data
+               ]
 
 -- | A Triolet list.
 listRecord :: StaticRecord

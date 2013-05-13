@@ -10,7 +10,8 @@ module LowLevel.InterfaceFile
         pprInterface,
         createModuleInterface,
         addInterfaceToModuleImports,
-        removeSelfImports)
+        removeSelfImports,
+        removeTrioletExports)
 where
 
 import Prelude hiding(mapM)
@@ -59,6 +60,11 @@ labelMap vs = Map.fromList $ map assoc vs
 labelMapRestriction :: LabelMap -> [Var] -> LabelMap
 labelMapRestriction m vars =
   Map.intersection m $ labelMap vars
+
+-- | Take the union of two 'LabelMap's.  Common keys must have the same
+--   value and the resulting map must be injective on IDs. 
+labelMapUnion :: LabelMap -> LabelMap -> LabelMap
+labelMapUnion = Map.union
 
 -- | Check whether the given externally visible variable's label
 --   is a key in the label map
@@ -235,7 +241,7 @@ renameExternNames mod = do
 
   -- Apply the renaming to the module
   withTheLLVarIdentSupply $ \ll_supply -> runFreshVarM ll_supply $ do
-    mod1 <- renameModule RenameNothing renaming mod
+    mod1 <- renameModuleGlobals RenameNothing renaming mod
     let mod2 = renameGlobalDefinitions renaming mod1
     return (renaming, mod2)
 
@@ -392,6 +398,7 @@ findRefsStm stm =
      SwitchE v alts ->
        mconcat (findRefsVal v : map (findRefsStm . snd) alts)
      ReturnE atom -> findRefsAtom atom
+     ThrowE v -> findRefsVal v
 
 findRefsFun f = findRefsStm (funBody f) `mappend`
                 findRefsMaybe findRefsEntryPoints (funEntryPoints f)
@@ -415,7 +422,12 @@ addInterfaceToModuleImports iface mod = do
       freshenInterface iface
 
   -- Identify variables defined in 'iface' and defined in 'mod'
+  let iface_import_vars = importListReferenceableVars $ ifaceImports rn_iface
   let iface_export_vars = importListReferenceableVars $ ifaceExports rn_iface
+  let iface_vars =
+        if not $ null $ iface_import_vars `intersect` iface_export_vars 
+        then internalError "addInterfaceToModuleExports"
+        else iface_import_vars ++ iface_export_vars
   let module_import_vars = importListReferenceableVars $ moduleImports mod
   let module_export_vars = moduleExportReferenceableVars mod
 
@@ -430,14 +442,13 @@ addInterfaceToModuleImports iface mod = do
               -- builtin variable IDs override
               -- the module's variable IDs, and either of these
               -- overrides the interface's variable IDs.
-              importListReferenceableVars (ifaceImports rn_iface) ++
-              iface_export_vars ++
-              module_import_vars ++
-              module_export_vars ++
+              iface_import_vars ++ iface_export_vars ++
+              module_import_vars ++ module_export_vars ++
               allBuiltins
         in labelMap vs
 
   -- Get 'LabelMap's of the exported variables
+  let iface_imports = labelMapRestriction visible_variables iface_import_vars
   let iface_exports = labelMapRestriction visible_variables iface_export_vars
   let mod_imports = labelMapRestriction visible_variables module_import_vars
   let mod_exports = labelMapRestriction visible_variables module_export_vars
@@ -456,9 +467,8 @@ addInterfaceToModuleImports iface mod = do
   -- Rename variables in the interface
   (rn_imports, rn_exports, interface_renaming) <-
     withTheLLVarIdentSupply $ \id_supply -> runFreshVarM id_supply $ do
-      renameInterface visible_variables filtered_iface
+      renameInterface visible_variables iface_vars filtered_iface
 
-  -- DEBUG
   when False $ do
     putStrLn "Renamed interface"
     putStrLn "** imports"
@@ -533,6 +543,18 @@ removeSelfImports mod =
       exp_var_map = labelMap exp_vars
   in return $ filterModule exp_var_map mod
 
+-- | Remove all exports of variables to Triolet.
+--
+--   This function is called when compiling Triolet.  It's kind of a hack
+--   because currently all functions are exportable, even though Triolet 
+--   files don't get linked together.
+removeTrioletExports :: Module -> IO Module
+removeTrioletExports mod =
+  return $ mod {moduleExports = filter not_triolet_export $ moduleExports mod}
+  where
+    not_triolet_export (_, TrioletExportSig) = False
+    not_triolet_export (_, _)                = True
+
 -- | Rename all variables in an interface.  This is done after an interface
 --   is loaded to eliminate ID collisions.
 freshenInterface :: Interface -> FreshVarM Interface
@@ -566,23 +588,17 @@ freshenInterface iface = do
 --   variables that the interface's symbols should be renamed to.
 --   The renaming that was applied to the interface is returned.
 --
---   Exported symbols are renamed to one of the given variables, if one has
---   the same label, or else to a new variable name.
---
---   Imported symbols are discarded if the variable name is found in the 
---   list of renamed variables.  Otherwise they are renamed to a new variable
---   name.
+--   Renaming occurs when merging an interface with a module.
+--   Some of the interface's variable definitions may have been filtered 
+--   out already.  A list of of all the interface's externally visible
+--   variables should be passed in as a parameter.
 renameInterface :: LabelMap     -- ^ The varible renaming to perform
+                -> [Var]        -- ^ All externally visible variables from 
+                                --   the interface
                 -> Interface    -- ^ Interface that should be renamed
                 -> FreshVarM ([Import], [Import], Renaming)
                 -- ^ Computes the new imports and exports
-renameInterface visible_variables iface = do
-  -- Get all external variables in the interface.  Remove duplicates.
-  let iface_extern_variables =
-        let imp_vars = importListReferenceableVars $ ifaceImports iface
-            exp_vars = importListReferenceableVars $ ifaceExports iface
-        in imp_vars ++ (exp_vars \\ imp_vars)
-
+renameInterface visible_variables iface_extern_variables iface = do
   -- Create a renaming for these variables
   new_e_vars <- mapM (renameExternallyVisibleVar visible_variables)
                 iface_extern_variables

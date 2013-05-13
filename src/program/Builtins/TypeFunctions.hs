@@ -297,7 +297,7 @@ cartMemTF bi = typeFunction 1 $ \[index_type] -> do
         return $ varApp (getBuiltin bi The_cartesianDomain) [index_type]
   case fromVarApp index_type' of
     Just (op, [arg_ty])
-      | isBuiltin bi The_Stored op -> do
+      | op == storedV -> do
            arg_ty' <- reduceToWhnf arg_ty
            case fromVarApp arg_ty' of
              Just (op, [])
@@ -317,7 +317,7 @@ cartMemTF bi = typeFunction 1 $ \[index_type] -> do
       ty' <- reduceToWhnf ty
       case fromVarApp ty' of
         Just (op, [arg_ty]) 
-          | isBuiltin bi The_Stored op -> do
+          | op == storedV -> do
               arg_ty' <- reduceToWhnf arg_ty
               return $! case arg_ty'
                         of VarT v -> v == intV
@@ -410,8 +410,8 @@ indexMemTF bi = typeFunction 1 compute_eliminator
     compute_eliminator ts =
       internalError "Error in type application when reducing a type function"
 
-    none_type = varApp (getBuiltin bi The_Stored) [VarT (getBuiltin bi The_NoneType)]
-    int_type = varApp (getBuiltin bi The_Stored) [intT]
+    none_type = varApp storedV [VarT (getBuiltin bi The_NoneType)]
+    int_type = varApp storedV [intT]
     int2_type = varApp (getBuiltin bi The_Tuple2)
                 [int_type, int_type]
     int3_type = varApp (getBuiltin bi The_Tuple3)
@@ -453,8 +453,8 @@ offsetMemTF bi = typeFunction 1 compute_eliminator
     compute_eliminator ts =
       internalError "Error in type application when reducing a type function"
 
-    none_type = varApp (getBuiltin bi The_Stored) [VarT (getBuiltin bi The_NoneType)]
-    int_type = varApp (getBuiltin bi The_Stored) [intT]
+    none_type = varApp storedV [VarT (getBuiltin bi The_NoneType)]
+    int_type = varApp storedV [intT]
 
 slicePureTF bi = typeFunction 1 compute_eliminator
   where
@@ -493,8 +493,7 @@ sliceMemTF bi = typeFunction 1 compute_eliminator
            | isBuiltin bi The_dim3 op -> return slice3_type
         _ -> return $ varApp (getBuiltin bi The_slice) [shape_arg']
 
-    none_type = varApp (getBuiltin bi The_Stored)
-                [VarT (getBuiltin bi The_NoneType)]
+    none_type = varApp storedV [VarT (getBuiltin bi The_NoneType)]
     slice_type = VarT (getBuiltin bi The_SliceObject)
     slice2_type = varApp (getBuiltin bi The_Tuple2)
                   [slice_type, slice_type]

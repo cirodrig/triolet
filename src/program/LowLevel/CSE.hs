@@ -92,6 +92,79 @@ withDefs defs m = CSET $ \a env ->
 
 -------------------------------------------------------------------------------
 
+-- | If a switch expression simply chooses among two alternative values,
+--   then replace it with select expressions.
+--
+--   Switch statements must have two branches, returning a value or
+--   calling the same function in each branch.  A select expression is
+--   inserted for each argument.
+--
+-- > switch(v) {
+-- >   case LIT: call V [x, y, z]
+-- >   case LIT: call V [x, 0, z]
+-- > }
+
+simplifySelectingSwitch :: Stm -> FreshVarM Stm
+simplifySelectingSwitch
+  exp@(SwitchE scr [(tag1, ReturnE atom1), (tag2, ReturnE atom2)]) =
+
+  case (atom1, atom2)
+  of (ValA xs, ValA ys) ->
+       let mk_atom zs = ReturnE (ValA zs)
+       in makeSelectors scr tag1 tag2 xs ys mk_atom
+
+     (CallA cc1 (VarV target1) xs, CallA cc2 (VarV target2) ys)
+       | cc1 == cc2 && target1 == target2 && length xs == length ys ->
+         let mk_atom zs = ReturnE $ CallA cc1 (VarV target1) zs
+         in makeSelectors scr tag1 tag2 xs ys mk_atom
+
+     _ ->
+       -- Cannot simplify
+       return exp
+
+simplifySelectingSwitch exp = return exp
+
+makeSelectors scrutinee tag1 tag2 values1 values2 mk_atom = do
+  condition <- newAnonymousVar (PrimType BoolType)
+  let test = booleanTestAtom scrutinee tag1
+  select_exp <- select_values (VarV condition) values1 values2
+                (\xs -> return $ mk_atom xs)
+  return $ LetE [condition] test select_exp
+  where
+    -- Create select operations for all values
+    select_values condition (x:xs) (y:ys) k =
+      select_value condition x y $ \z ->
+      select_values condition xs ys $ \zs -> k (z : zs)
+
+    select_values _ [] [] k = k []
+
+    -- Create a select operation, if needed
+    select_value :: Val -> Val -> Val -> (Val -> FreshVarM Stm) -> FreshVarM Stm
+    select_value condition x y k
+      | same x y  = k x
+      | otherwise = do
+          let ty = valType x
+          z <- newAnonymousVar ty
+          stm <- k (VarV z)
+          let atom = PrimA (PrimSelect ty) [condition, x, y]
+          return $ LetE [z] atom stm
+
+    same (VarV x)    (VarV y)    = x == y
+    same (LitV x)    (LitV y)    = x == y
+    same (RecV r xs) (RecV s ys) = r == s && and (zipWith same xs ys)
+    same _           _           = False
+
+-- | Create a boolean test that returns true iff @e@ is equal to
+--   the given literal
+booleanTestAtom e lit =
+  case lit
+  of BoolL True    -> ValA [e]
+     BoolL False   -> PrimA PrimNot [e]
+     IntL sgn sz n -> PrimA (PrimCmpZ sgn sz CmpEQ) [e, LitV lit]
+     FloatL sz n   -> PrimA (PrimCmpF sz CmpEQ) [e, LitV lit]
+
+-------------------------------------------------------------------------------
+
 findArity :: Monad m => Var -> CSET m (Maybe Int)
 findArity v = do m <- getArityMap
                  return (lookupArity v m)
@@ -131,8 +204,8 @@ csePrim prim args =
     arg_vals = map fst args
     rebuild_atom = PrimA prim arg_vals
 
-    update_for_store env (PrimStore Constant ptr_kind ty) args = 
-      case args
+    update_for_store env (PrimStore Constant ptr_kind ty) new_exprs =
+      case new_exprs
       of [base, off, val] ->
            case interpretStore env ptr_kind ty base off val 
            of Just env' -> putCSEEnv env'
@@ -311,7 +384,8 @@ cseStm statement =
     evaluate_switch alts scrutinee_value = do
       rt <- lift getReturnTypes
       alts' <- mapM (cse_alt rt) alts
-      return (SwitchE scrutinee_value alts')
+      let new_switch = SwitchE scrutinee_value alts'
+      lift $ lift $ simplifySelectingSwitch new_switch
       where
         cse_alt rt (lit, stm) = do
           stm' <- runCSEF $ evalCSE rt $ cseStm stm

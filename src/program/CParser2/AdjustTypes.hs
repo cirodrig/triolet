@@ -81,7 +81,7 @@ data SFInfo = SFInfo { sf_Init   :: !Var
 getSFInfo :: VariableNameTable -> SFInfo
 getSFInfo tbl =
   let v_Init   = initConV
-      v_Stored = lookupVariableByName tbl "Stored"
+      v_Stored = storedV
       v_Ref    = refV
       v_Boxed  = lookupVariableByName tbl "Boxed"
       v_AsBox  = lookupVariableByName tbl "AsBox"

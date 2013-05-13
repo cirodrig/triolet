@@ -62,7 +62,7 @@ testMemoryLayout var_supply ll_var_supply i_type_env = do
 testPhysicalLayout kind layout = do
   stm <- execBuild return_type $ do
     pl <- computeLayout emptyTypeInfo kind layout
-    SizeAlign s a <- memorySize pl
+    (SizeAlign s a _) <- memorySize pl
     return $ L.ReturnE $ L.ValA [s,a]
   liftIO $ print $ L.pprStm stm
   where
@@ -138,9 +138,18 @@ dummyLayoutInfo xs =
 
 -------------------------------------------------------------------------------
 
+-- | Convert a Triolet @SizeAlign@ or @SizeAlignVal@ to a 'SizeAlign'.
+--   Both Triolet data types are represented by the same record type.
+unpackSizeAlign :: L.Val -> GenM SizeAlign
 unpackSizeAlign e = do
-  [s, a] <- unpackRecord2 L.sizeAlignRecord e
-  return $ SizeAlign s a
+  [s, a, pf] <- unpackRecord2 L.sizeAlignRecord e
+  pf_bool <- primIntToBool pf   -- Convert Triolet @bool@ to boolean
+  return $ SizeAlign s a pf_bool
+
+packSizeAlign :: SizeAlign -> GenM L.Val
+packSizeAlign (SizeAlign s a pf_bool) = do
+  pf <- primBoolToInt (PrimType nativeWordType) pf_bool
+  packRecord L.sizeAlignRecord [s, a, pf]
 
 setupDynTypeInfo :: DataType -> [Type] -> [L.Val] -> GenM LLDynTypeInfo
 setupDynTypeInfo dtype ty_args size_params = do
@@ -156,7 +165,9 @@ setupDynTypeInfo dtype ty_args size_params = do
                          return $ insertValTypeInfo t sa type_info
          BareK     -> do sa <- unpackSizeAlign e
                          return $ insertBareTypeInfo t sa type_info
-         IntIndexK -> return $ insertIntTypeInfo t e type_info
+         IntIndexK -> if L.valType e /= PrimType nativeIntType
+                      then internalError "setupDynTypeInfo"
+                      else return $ insertIntTypeInfo t e type_info
 
 genCase :: DataType             -- ^ Data type to deconstruct
         -> [Type]               -- ^ Type parameters
@@ -258,24 +269,42 @@ mkConstructorFunction adt_type field_types mk_body =
 -------------------------------------------------------------------------------
 -- Type, constructor, and deconstructor code generation for value types
 
+fieldValueType' :: Bool -> LayoutField -> ValueType
+fieldValueType' variable_type (ValK, l) = layoutValueType variable_type l
+fieldValueType' variable_type (BoxK, _) = PrimType OwnedType
+fieldValueType' _  _         = internalError "fieldValueType: Unexpected kind"
+
 fieldValueType :: LayoutField -> ValueType
-fieldValueType (ValK, l) = layoutValueType l
-fieldValueType (BoxK, _) = PrimType OwnedType
-fieldValueType _         = internalError "fieldValueType: Unexpected kind"
+fieldValueType f = fieldValueType' True f
 
+-- | Get the type of a value that's used to construct a field.
+--   It's a value type, a boxed object reference type, or an initializer type.
+fieldInitializerType :: LayoutField -> ValueType
+fieldInitializerType (ValK,  l) = layoutValueType True l
+fieldInitializerType (BoxK,  _) = PrimType OwnedType
+fieldInitializerType (BareK, _) = PrimType OwnedType
+
+-- | Get the layout of an algebraic data type, held in a variable
 valueLayout :: AlgData LayoutField -> AlgValueType
-valueLayout adt = fmap fieldValueType adt
+valueLayout adt = fmap (fieldValueType' True) adt
 
--- | Get the 'ValueType' used to store data with layout 'Layout' in
---   a local variable.
+-- | Get the layout of an algebraic data type, held in memory
+storedValueLayout :: AlgData LayoutField -> AlgValueType
+storedValueLayout adt = fmap (fieldValueType' False) adt
+
+-- | Get the 'ValueType' used to store data with layout 'Layout'.
+--   The flag determines whether we're getting the in-variable
+--   or in-memory type.
 --
 --   We have @layoutValueType x == asValueType (valueTypeLayout x)@ for all
 --   @x@ on which the RHS is not _|_.
-layoutValueType :: Layout -> ValueType
-layoutValueType (PrimLayout pt)   = PrimType pt
-layoutValueType (BlockLayout _)   = internalError "layoutValueType: \
-                                                    \No value type"
-layoutValueType (DataLayout adt) = algDataValueType adt
+layoutValueType :: Bool -> Layout -> ValueType
+layoutValueType variable_type (PrimLayout pt) =
+  PrimType pt
+layoutValueType variable_type (BlockLayout _) =
+  internalError "layoutValueType: No value type"
+layoutValueType variable_type (DataLayout adt) =
+  algDataValueType variable_type adt
 
 disjunctRecordType :: AlgDisjunct ValueType -> Maybe StaticRecord
 disjunctRecordType dj =
@@ -284,7 +313,8 @@ disjunctRecordType dj =
      fs -> Just $ constStaticRecord $ map valueToFieldType fs
 
 disjunctType :: AlgDisjunct ValueType -> Maybe ValueType
-disjunctType dj = fmap RecordType $ disjunctRecordType dj
+disjunctType dj =
+  fmap RecordType $ disjunctRecordType dj
 
 disjunctTypes adt = catMaybes $ mapDisjuncts disjunctType adt
 
@@ -295,16 +325,18 @@ productRecordType adt
   | otherwise =
       internalError "productRecordType: Not a product type"
 
-productValueType :: AlgValueType -> ValueType
-productValueType adt = RecordType $ productRecordType adt
+productValueType :: Bool -> AlgValueType -> ValueType
+productValueType variable_type adt = RecordType $ productRecordType adt
 
-sumRecordType :: AlgValueType -> StaticRecord
-sumRecordType adt =
-  let Just tag_type = algDataVarTagType adt
+sumRecordType :: Bool -> AlgValueType -> StaticRecord
+sumRecordType variable_type adt =
+  let Just tag_type = if variable_type
+                      then algDataVarTagType adt
+                      else algDataMemTagType adt
       dj_types = disjunctTypes adt
   in constStaticRecord $ map valueToFieldType (tag_type : dj_types)
 
-sumValueType adt = RecordType $ sumRecordType adt
+sumValueType variable_type adt = RecordType $ sumRecordType variable_type adt
 
 -- | Get the index of each disjunct in a sum value.
 --   
@@ -318,15 +350,21 @@ disjunctIndices adt =
     assign_index (!next_index) (Just _) = (1 + next_index, Just next_index)
     assign_index next_index    Nothing  = (next_index, Nothing)
 
--- | Get the 'ValueType' used to store the given unboxed value type  
---   in a local variable.
-algDataValueType :: AlgData LayoutField -> ValueType
-algDataValueType adt = algDataValueType' $ valueLayout adt
+-- | Get the 'ValueType' corresponding to the given unboxed value type.
+--   If the given flag is true, get the type used to store it in a variable;
+--   otherwise, get the type used to store it in memory.
+algDataValueType :: Bool -> AlgData LayoutField -> ValueType
+algDataValueType variable_type adt =
+  algDataValueType' variable_type $ valueLayout adt
 
-algDataValueType' adt
-  | isEnumeration adt               = case algDataVarTagType adt of Just t -> t
-  | algDataNumConstructors adt == 1 = productValueType adt
-  | otherwise                       = sumValueType adt
+algDataValueType' variable_type adt
+  | isEnumeration adt =
+      let Just tag_type = if variable_type
+                          then algDataVarTagType adt 
+                          else algDataMemTagType adt
+      in tag_type
+  | algDataNumConstructors adt == 1 = productValueType variable_type adt
+  | otherwise                       = sumValueType variable_type adt
 
 {-
 -- | This function sets up the lambda function part of an eliminator term.
@@ -366,7 +404,7 @@ valueElimE adt return_types scrutinee k
   | otherwise =
       tagDispatch2 adt_type n scrutinee return_types k
   where
-    adt_type = algDataValueType' adt
+    adt_type = algDataValueType' True adt
     n = algDataNumConstructors adt
 
 valueIntroP :: AlgValueType -> IntroP L.Val
@@ -385,7 +423,7 @@ valueElimP adt scrutinee k =
 valueIntroS :: AlgValueType -> IntroS L.Val
 valueIntroS adt dj =
   checkDisjunct adt dj $
-  packRecord (sumRecordType adt) (tag_value : disjunct_values)
+  packRecord (sumRecordType True adt) (tag_value : disjunct_values)
   where
     con_index = algDisjunctConIndex dj
     Just tag_value = varTagInfo dj
@@ -406,7 +444,7 @@ valueIntroS adt dj =
 
 valueElimS :: AlgValueType -> [ValueType] -> ElimS L.Val
 valueElimS adt return_types scrutinee k = do
-  (tag_value : disjunct_values) <- unpackRecord2 (sumRecordType adt) scrutinee
+  (tag_value : disjunct_values) <- unpackRecord2 (sumRecordType True adt) scrutinee
   tagDispatch2 tag_type n tag_value return_types (call_cont disjunct_values)
   where
     Just tag_type = algDataVarTagType adt
@@ -449,7 +487,7 @@ valueIntro adt con_index fields
 --   unit value) and returns the constructed value.
 valueConstructor :: AlgValueType -> Int -> [L.Val] -> GenM L.Val
 valueConstructor adt con_index fields =
-  let adt_type = algDataValueType' adt
+  let adt_type = algDataValueType' True adt
       field_types = algDisjunctFields $ disjunct con_index Nothing adt
   in valueIntro adt con_index fields
 
@@ -597,11 +635,17 @@ storeValueType (DataLayout adt) ptr val = storeAlgValue adt ptr val
 
 -- | Load a value into a local variable
 loadAlgValue :: AlgData LayoutField -> L.Val -> GenM L.Val
-loadAlgValue adt ptr = do
-  mem_adt <- memoryLayout adt
-  memoryElim mem_adt adt_type read_value ptr
+loadAlgValue adt ptr
+  -- Read an enumeration's tag from memory.  This case avoids an unnecessary 
+  -- branch on the tag value.
+  | isEnumeration adt =
+      readEnumerationHeader adt ptr
+
+  | otherwise = do
+      mem_adt <- memoryLayout adt
+      memoryElim mem_adt adt_type read_value ptr
   where
-    adt_type = algDataValueType adt
+    adt_type = algDataValueType True adt
     val_adt = valueLayout adt
     read_value con_index Nothing fields = valueIntro val_adt con_index fields
 
@@ -609,7 +653,7 @@ loadAlgValue adt ptr = do
 storeAlgValue :: AlgData LayoutField -> L.Val -> L.Val -> GenM ()
 storeAlgValue adt ptr val
   | algDataBoxing adt == IsBoxed = internalError "storeAlgValue: Type is boxed"
-                                   
+
   -- Write an enumeration's tag to memory.  This case avoids an unnecessary 
   -- branch on the tag value.
   | isEnumeration adt =
@@ -659,7 +703,7 @@ memoryIntro adt con_index m_tyob fields =
        (h_offsets, offsets, size) <- disjunctLayout dj
        ptr <- createBoxedObject size h_offsets (algDisjunctHeader dj)
        write_fields offsets ptr
-       return ptr
+       emitAtom1 (PrimType OwnedType) $ L.PrimA L.PrimCastToOwned [ptr]
      NotBoxed -> do
        let !Nothing = m_tyob
        (h_offsets, offsetss, size) <- algUnboxedLayout adt
@@ -681,35 +725,63 @@ memoryElim adt return_type handlers scrutinee = do
   let m_tyob = case algDataBoxing adt
                of IsBoxed -> m_tag_value
                   NotBoxed -> Nothing
+  
+  let elim_product i = memoryElimP adt handlers scrutinee h_offsets off1 $
+                       disjunct i m_tyob adt
+
   case n_constructors of
     -- No tag
-    1 -> elim_product h_offsets off1 (disjunct 0 m_tyob adt)
+    1 -> elim_product 0
 
     -- Dispatch by tag
     _ -> do
       tag_word <- castTagToWord header_type m_tag_value
-      tagDispatch2 (PrimType nativeWordType) n_constructors tag_word [return_type] $ \i ->
-        elim_product h_offsets off1 (disjunct i m_tyob adt)
+      tagDispatch2 (PrimType nativeWordType)
+        n_constructors tag_word [return_type] elim_product
   where
     header_type = algDataHeaderType adt
     Just tag_type = memTagInfo header_type
     n_constructors = algDataNumConstructors adt
 
-    -- Read fields of a particular disjunct and pass them to a handler
-    elim_product h_offsets off1 dj = do
-      (_, offsets, _) <- disjunctLayout1 h_offsets off1 (algDisjunctFields dj)
+-- | Deconstruct an object in memory.  Assume the object's constructor index
+--   is the given index.
+memoryElimAtConstructor :: AlgObjectType -> Int
+                        -> (Maybe L.Val -> [L.Val] -> GenM a)
+                        -> L.Val -> GenM a
+memoryElimAtConstructor adt con_index handler scrutinee = do
+  -- Read the tag
+  (h_offsets, off1) <- headerLayout header_type
+  m_tag_value <- readHeaderValue header_type h_offsets scrutinee
+  let m_tyob = case algDataBoxing adt
+               of IsBoxed -> m_tag_value
+                  NotBoxed -> Nothing
 
-      -- If boxed, then extract the tag
-      let boxed_tag = case algDataBoxing adt
-                      of IsBoxed -> varTagInfo dj
-                         NotBoxed -> Nothing
+  -- Eliminate at the specified constructor
+  memoryElimP adt (\_ -> handler) scrutinee h_offsets off1 $
+    disjunct con_index m_tyob adt
+  where
+    header_type = algDataHeaderType adt
 
-      -- Read the fields
-      let fields = algDisjunctFields dj
-      values <- forM (zip fields offsets) $ \(field, offset) ->
-        readMemoryField scrutinee field offset
+-- | Read fields of a particular disjunct and pass them to a handler
+memoryElimP :: AlgObjectType
+            -> (Int -> Maybe L.Val -> [L.Val] -> GenM a)
+            -> L.Val
+            -> HeaderOffsets -> OffAlign -> AlgDisjunct MemoryField
+            -> GenM a
+memoryElimP adt handlers scrutinee h_offsets off1 dj = do
+  (_, offsets, _) <- disjunctLayout1 h_offsets off1 (algDisjunctFields dj)
 
-      handlers (algDisjunctConIndex dj) boxed_tag values
+  -- If boxed, then extract the tag
+  let boxed_tag = case algDataBoxing adt
+                  of IsBoxed -> varTagInfo dj
+                     NotBoxed -> Nothing
+
+  -- Read the fields
+  let fields = algDisjunctFields dj
+  values <- forM (zip fields offsets) $ \(field, offset) ->
+    readMemoryField scrutinee field offset
+
+  handlers (algDisjunctConIndex dj) boxed_tag values
 
 -- | Construct an object of the given data type from the given
 --   type object and field values.
@@ -764,7 +836,7 @@ memoryEliminator adt return_types scrutinee
 --   loaded or stored, once it has been placed in memory.
 memoryFieldType :: MemoryField -> ValueType
 memoryFieldType BoxedField    = PrimType OwnedType
-memoryFieldType (ValField l)  = layoutValueType l
+memoryFieldType (ValField l)  = layoutValueType False l
 memoryFieldType (BareField _) = PrimType PointerType
 
 readMemoryField :: L.Val -> MemoryField -> Off -> GenM L.Val
@@ -819,7 +891,7 @@ lowerType' var_supply (KindedType k ty) =
        -- Layout must be computable without relying on dynamic type information
        layout <- runGenMWithoutOutput var_supply $
                  computeLayout emptyTypeInfo ValK =<< computeStructure ty
-       return $! layoutValueType layout
+       return $! layoutValueType True layout
 
 lowerType :: IdentSupply L.Var -> Type -> UnboxedTypeEvalM ValueType
 lowerType var_supply ty = do

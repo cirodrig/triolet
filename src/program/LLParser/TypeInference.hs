@@ -617,6 +617,7 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
      AddOp -> arithmetic
      SubOp -> arithmetic
      PointerAddOp -> pointer
+     PointerSubOp -> pointer_diff
      AtomicAddOp -> atomic
      CmpEQOp -> comparison
      CmpNEOp -> comparison
@@ -684,6 +685,10 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
     pointer =
       pointerAddType x
       `checking` [single_parameter, pointer_check x, native_int_check y]
+
+    pointer_diff =
+      PrimT nativeIntType
+      `checking` [single_parameter, pointer_check x, pointer_check y]
 
     atomic =
       y `checking` [single_parameter, pointer_only_check x, primtype_check y]
@@ -810,6 +815,13 @@ resolveExpr expr =
                get_field_type (Field _ _ (Just cast_ty)) = cast_ty
        return (mkexp <$> base' <*> fld')
      DerefE {} -> error "Store expression not valid here"
+     BaseE e -> do
+       e' <- resolveExpr e
+       let mkexp x =
+             let t = expType x
+             in check (expectType CursorType "Argument of 'base' must be a cursor" t) $
+                TExp [PrimT OwnedType] (BaseE x)
+       return (mkexp <$> e')
      LoadE ty base -> do
        ty' <- resolveType ty
        base' <- resolveExpr base

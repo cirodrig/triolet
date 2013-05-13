@@ -3,10 +3,12 @@ module core.internal.structures;
 
 #include "rts.h"
 #include "prim.h"
+#include "debug.h"
 #include "memory_py.h"
 #include "apply_py.h"
 #include "structures.h"
 #include "list.h"
+#include "buffer.h"
 import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
@@ -499,11 +501,243 @@ data pointer int_info = InfoTableHeader {
 // This _must_ be statically allocated because it points to itself.
 data owned typeObject_typeObject = TypeObject_mem {
   typeObject_typeObject,
-  uint 0
+  uint 0,
+  typeObject_serialize,
+  typeObject_deserialize
 };
 
-// The type object for a function.
+function typeObject_serialize (owned obj, owned buf, unit dummy) -> unit {
+  _ = unit call putUint (obj @! TypeObject_mem.con_index, buf, nil);
+  _ = unit call putBoxedObject (obj @! TypeObject_mem.serializer, buf, nil);
+  _ = unit call putBoxedObject (obj @! TypeObject_mem.deserializer, buf, nil);
+
+  nil;
+};
+
+function typeObject_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
+  ReadResult(uint) {buffer2, con_index} =
+    ReadResult(uint) call getUint(buffer);
+  ReadResult(owned) {buffer3, serializer} =
+    ReadResult(owned) call getBoxedObject(buffer2);
+  ReadResult(owned) {buffer4, deserializer} =
+    ReadResult(owned) call getBoxedObject(buffer3);
+
+  // Construct a new object
+  p = pointer primcall triolet_alloc (sizeof TypeObject_mem);
+
+  p @! TypeObject_mem.header = type_object;
+  p @! TypeObject_mem.con_index = con_index;
+  p @! TypeObject_mem.serializer = serializer;
+  p @! TypeObject_mem.deserializer = deserializer;
+  ReadResult(owned) {buffer4, p as owned};
+};
+
+#if 0
+// The type object for bare type info.
+data owned typeObject_repr = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0,
+  repr_serialize,
+  repr_deserialize
+};
+
+function repr_serialize (owned obj, owned buffer, unit dummy) -> unit {
+  unit primcall exit (int -1);
+};
+
+function repr_deserialize (cursor buffer) -> ReadResult(owned) {
+  ReadResult(owned) primcall exit (int -1);
+};
+#endif
+
+// The type object for functions and PAPs.
 data owned triolet_typeObject_function = TypeObject_mem {
   typeObject_typeObject,
-  uint 0
+  uint 0,
+  function_serialize,
+  function_deserialize
+};
+
+#if INT_SIZE != 4
+# error "function_serialize and function_deserialize only support INT_SIZE == 4"
+#endif
+
+function function_serialize (owned obj, owned buffer, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 220);
+#endif
+  info_table = obj @! Function.info;
+
+  _ = unit call putPointer (info_table, buffer, dummy);
+
+  // Read info table to know where the captured variables are
+  arity = info_table @! FunInfo.arity as int;
+  captured = info_table @! FunInfo.captured as int;
+
+  // Get a pointer to the captured variable tags.
+  // The offset is the size of FunInfo plus the size of the parameter tags.
+  tags_ptr = info_table ^+ (sizeof FunInfo as int + arity);
+
+  typedef tags_type = const_array(value captured, uint8);
+
+  // Put each captured variable
+  (_, _) = while (int i = int 0,
+             cursor p = obj ^+ (sizeof Function as int)) (i < captured) {
+    tag = tags_ptr @! tags_type[i];
+    (item_size, item_align) = (uint, uint) primcall tag_sizealign(tag);
+    (this_p, next_p) =
+      (cursor, cursor) primcall advance_cursor(p, item_size, item_align);
+    _ = if (tag == BITS0TAG) {
+      nil;
+    }
+    else if (tag == BITS32TAG) {
+      unit call putUint(uint32 load this_p, buffer, nil);
+    }
+    else if (tag == BITS64TAG) {
+      // Put a uint64
+      _ = unit call putUint(uint32 load this_p, buffer, nil);
+      unit call putUint(uint32 load (this_p ^+ (sizeof uint32 as int)), buffer, nil);
+    }
+    else if (tag == BITSOWNEDTAG) {
+      unit call putBoxedObject(owned load this_p, buffer, nil);
+    }
+    else if (tag == BITSCURSORTAG) {
+      unit call putCursor(cursor load this_p, buffer, nil);
+    }
+    else {
+      () = () primcall exit(int -1);
+      nil;
+    };
+  
+    (i + int 1, next_p);
+  };
+
+  nil;
+};
+
+// Compute the space taken up by a properly aligned item
+procedure inline advance_size (uint off, uint item_size, uint item_align) -> uint {
+  off + ((uint 0 - off) % item_align) + item_size;
+};
+
+// Compute pointers to the begining and end of an item
+procedure inline advance_pointer
+  (pointer p, uint item_size, uint item_align) -> (pointer, pointer)
+{
+  off = (p ^- null) as uint;
+  start_off = (uint 0 - off) % item_align;
+  end_off = start_off + item_size;
+  (p ^+ (start_off as int), p ^+ (end_off as int));
+};
+
+// Compute pointers to the begining and end of an item
+procedure inline advance_cursor
+  (cursor p, uint item_size, uint item_align) -> (cursor, cursor)
+{
+  off = (p as pointer ^- null) as uint;
+  start_off = (uint 0 - off) % item_align;
+  end_off = start_off + item_size;
+  (p ^+ (start_off as int), p ^+ (end_off as int));
+};
+
+// Get the size and alignment described by a BitsTag
+procedure tag_sizealign (uint8 tag) -> (uint, uint) {
+  if (tag == BITS0TAG) { (uint 0, uint 1); }
+  else if (tag == BITS32TAG) { (sizeof uint32, alignof uint32); }
+  else if (tag == BITS64TAG) { (sizeof uint64, alignof uint64); }
+  else if (tag == BITSOWNEDTAG) { (sizeof owned, alignof owned); }
+  else if (tag == BITSCURSORTAG) { (sizeof cursor, alignof cursor); }
+  else {
+    () = () primcall exit(int -1);
+    (uint 0, uint 1);
+  };
+};
+
+function function_deserialize (owned type_obj, cursor buffer) -> ReadResult(owned) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 120);
+#endif
+  ReadResult(pointer) {buffer2, info_table} =
+    ReadResult(pointer) call getPointer (buffer);
+
+  // Read info table to know where the captured variables are
+  arity = info_table @! FunInfo.arity as int;
+  captured = info_table @! FunInfo.captured as int;
+
+  // Get a pointer to the captured variable tags.
+  // The offset is the size of FunInfo plus the size of the parameter tags.
+  tags_ptr = info_table ^+ (sizeof FunInfo as int + arity);
+
+  typedef tags_type = const_array(value captured, uint8);
+
+  // Compute size of captured variables
+  (_, captured_size) =
+    while (int i = int 0, uint size = uint 0) (i < captured) {
+
+    tag = tags_ptr @! tags_type[i];
+    (item_size, item_alignment) = (uint, uint) primcall tag_sizealign(tag);
+    size2 = uint primcall advance_size(size, item_size, item_alignment);
+    (i + int 1, size2);
+  };
+
+  // Allocate and initialize new function
+  obj = pointer primcall triolet_alloc ((sizeof Function + captured_size) as int);
+
+  obj @! Function.header = type_obj;
+  obj @! Function.info = info_table;
+  
+  // Read captured variables
+  (_, buffer3, _) = while (int i = int 0,
+             cursor buffer_cv = buffer2,
+             pointer p = obj ^+ (sizeof Function as int)) (i < captured) {
+    tag = tags_ptr @! tags_type[i];
+    (item_size, item_align) = (uint, uint) primcall tag_sizealign(tag);
+    (this_p, next_p) =
+      (pointer, pointer) primcall advance_pointer(p, item_size, item_align);
+
+    buffer2 =
+      if (tag == BITS0TAG) {
+        // Read nothing
+        buffer_cv;
+      }
+      else if (tag == BITS32TAG) {
+        // Get a uint32
+        ReadResult(uint32) {buffer2, n} =
+           ReadResult(uint32) call getUint(buffer_cv);
+        !this_p = n;
+        buffer2;
+      }
+      else if (tag == BITS64TAG) {
+        // Get a uint64
+        ReadResult(uint32) {buffer2, n1} =
+           ReadResult(uint32) call getUint(buffer_cv);
+        ReadResult(uint32) {buffer3, n2} =
+           ReadResult(uint32) call getUint(buffer2);
+        !this_p = n1;
+        !(this_p ^+ (sizeof uint32 as int)) = n2;
+        buffer3;
+      }
+      else if (tag == BITSOWNEDTAG) {
+        // Get an owned pointer
+        ReadResult(owned) {buffer2, n} =
+           ReadResult(owned) call getBoxedObject(buffer_cv);
+        !this_p = n;
+        buffer2;
+      }
+      else if (tag == BITSCURSORTAG) {
+        // Get a cursor
+        ReadResult(owned) {buffer2, n} =
+          ReadResult(owned) call getCursor(buffer_cv);
+        !this_p = n;
+        buffer2;
+      }
+      else {
+        () = () primcall exit(int -1);
+        buffer_cv;
+      };
+  
+    (i + int 1, buffer2, next_p);
+  };
+
+  ReadResult(owned) {buffer3, obj as owned};
 };

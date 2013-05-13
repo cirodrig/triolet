@@ -191,8 +191,8 @@ kindCoerce k1 k2 t =
     -- Conversion between kinds of proper types
     (VarT v1, VarT v2)
       | v1 == v2                   -> return t
-      | v1 == valV && v2 == bareV  -> apply (coreBuiltin The_Stored) t
-      | v1 == bareV && v2 == valV  -> unapply (coreBuiltin The_Stored) t
+      | v1 == valV && v2 == bareV  -> apply storedV t
+      | v1 == bareV && v2 == valV  -> unapply storedV t
       | v1 == bareV && v2 == initV -> apply initConV t
       | v1 == initV && v2 == bareV -> unapply initConV t
       | v1 == bareV && v2 == boxV  -> apply (coreBuiltin The_AsBox) t
@@ -377,7 +377,7 @@ kindCoerceExp rep t1 t2 expression = do
     (ValK, BareK) -> allocate_boxed_storage t2 =<< stored_con t1 expression
 
     -- Store into a new heap object
-    (ValK, BoxK) -> let bare_type = coreBuiltin The_Stored `varApp` [t1]
+    (ValK, BoxK) -> let bare_type = storedV `varApp` [t1]
                     in boxed_con bare_type =<< stored_con t1 expression
 
     -- Load from memory
@@ -390,7 +390,7 @@ kindCoerceExp rep t1 t2 expression = do
     (BareK, BoxK) -> convert_to_boxed t1 =<< copy t1 expression
 
     -- Store into a new heap object, then read its contents
-    (WriteK, ValK) -> let bare_type = coreBuiltin The_Stored `varApp` [t2]
+    (WriteK, ValK) -> let bare_type = storedV `varApp` [t2]
                       in stored_decon t2 =<<
                            allocate_boxed_storage bare_type expression
 
@@ -402,7 +402,7 @@ kindCoerceExp rep t1 t2 expression = do
                          convert_to_boxed bare_type expression
 
     -- Read contents of boxed object
-    (BoxK, ValK) -> let bare_type = coreBuiltin The_Stored `varApp` [t2]
+    (BoxK, ValK) -> let bare_type = storedV `varApp` [t2]
                     in stored_decon t2 =<< boxed_decon bare_type expression
 
     -- Copy contents of boxed object
@@ -416,7 +416,7 @@ kindCoerceExp rep t1 t2 expression = do
     exp_info = case expression of ExpM e -> mkExpInfo (getSourcePos e)
 
     stored_con val_type e = do
-      let con_inst = VarCon (coreBuiltin The_stored) [val_type] []
+      let con_inst = VarCon stored_conV [val_type] []
       return $ conE exp_info con_inst [] Nothing [e]
 
     boxed_con bare_type e = do
@@ -434,7 +434,7 @@ kindCoerceExp rep t1 t2 expression = do
 
     stored_decon val_type e = do
       x <- newAnonymousVar ObjectLevel
-      let decon = VarDeCon (coreBuiltin The_stored) [val_type] []
+      let decon = VarDeCon stored_conV [val_type] []
       return $ ExpM $ CaseE exp_info e []
         [AltM $ Alt decon Nothing [patM (x ::: val_type)] (varE' x)]
 

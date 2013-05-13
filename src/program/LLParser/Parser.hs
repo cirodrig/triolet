@@ -192,6 +192,7 @@ operators =
   , [ Prefix (unaryOp MinusTok NegateOp)]
   , [ Infix (binaryOp DerefPlusTok AtomicAddOp) AssocNone
     , Infix (binaryOp PointerPlusTok PointerAddOp) AssocLeft
+    , Infix (binaryOp PointerMinusTok PointerSubOp) AssocLeft
     , Infix (binaryOp PlusTok AddOp) AssocLeft
     , Infix (binaryOp MinusTok SubOp) AssocLeft]
   , [ Infix (binaryOp EqualTok CmpEQOp) AssocNone
@@ -243,7 +244,7 @@ castExpr = do
 -- Match expressions that start with an identifier or literal type.
 basicExpr :: P (Expr Parsed)
 basicExpr =
-  sizeof_expr <|> alignof_expr <|>
+  sizeof_expr <|> alignof_expr <|> base_expr <|>
   (identifier >>= basicExprWithIdentifier) <|>
   (parseType >>= basicExprWithType) <|>
   try (parenList parseType >>= basicExprWithTypes) <|>
@@ -255,6 +256,9 @@ basicExpr =
     alignof_expr = do
       match AlignofTok 
       fmap AlignofE parseType
+    base_expr = do
+      match BaseTok
+      fmap BaseE atomicExpr
 
 -- Parse an expression that began with an identifier 
 basicExprWithIdentifier :: String -> P (Expr Parsed)

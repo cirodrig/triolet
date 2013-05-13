@@ -126,6 +126,9 @@ data Prim =
                                 --   pointer.  The argument gives the type of
                                 --   the argument pointer.
                                 --   The result is a cursor or pointer.
+  | PrimSubP !PointerKind       -- ^ Find the difference of two pointers
+                                --   or cursors.
+                                --   The result is a native integer.
     -- | @PrimLoad mutability type base offset@ 
     -- 
     -- Load a value from a pointer at some byte offset.
@@ -156,6 +159,8 @@ data Prim =
   | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
                                 --   pointer.
   | PrimCastFromCursor          -- ^ Extract the interior reference from a cursor.
+  | PrimCursorBase              -- ^ Get the owned pointer from a cursor
+  | PrimCastPtrToInt !Size      -- ^ Cast a pointer to an unsigned integer
   | PrimGetFrameP               -- ^ Get the current function's frame pointer,
                                 --   pointing to the function's local data.
                                 --   Returns a pointer.  If there's no frame,
@@ -211,6 +216,7 @@ primReturnType prim =
      PrimCastToOwned          -> [PrimType OwnedType]
      PrimCastFromOwned        -> pointer
      PrimCastFromCursor       -> pointer
+     PrimCastPtrToInt sz      -> int Unsigned sz
      PrimGetFrameP            -> pointer
      PrimCastZToF _ sz        -> float sz
      PrimCastFToZ _ sz        -> int Signed sz
@@ -414,6 +420,10 @@ data FunBase a =
     -- | The function's entry points.  'ClosureCall' functions have
     --   entry points; other calling conventions don't.
     --
+    --   FIXME: the entry points should be part of the function definition,
+    --   not part of the function, because the variables in this 'EntryPoints' 
+    --   count as variable definitions.
+    --
     --   These names are used by closure conversion and in interface files. 
   , funEntryPoints :: !(Maybe EntryPoints)
 
@@ -510,6 +520,9 @@ instance Traversable Group where
   traverse f (Rec xs) = Rec <$> traverse f xs
   mapM f (NonRec x) = NonRec `liftM` f x
   mapM f (Rec xs) = Rec `liftM` mapM f xs
+
+mergeGroups :: [Group a] -> Group a
+mergeGroups gs = Rec $ concatMap groupMembers gs
 
 groupMembers :: Group a -> [a]
 groupMembers (NonRec x) = [x]
@@ -722,4 +735,4 @@ litType (FloatL sz _) = FloatType sz
 funType :: FunBase a -> FunctionType
 funType f =
   mkFunctionType (funConvention f) (map varType $ funParams f) (funReturnTypes f)
-  
+

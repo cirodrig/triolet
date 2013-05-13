@@ -1,0 +1,437 @@
+
+module core.internal.buffer;
+
+#include "rts.h"
+#include "debug.h"
+#include "prim.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "structures.h"
+#include "buffer.h"
+
+import procedure exit (int) -> ();
+
+#include "new_pyasm_records.h"
+
+/* Create a new buffer */
+procedure MkBuffer_create () -> owned {
+  p = pointer primcall triolet_alloc (sizeof MkBuffer);
+
+  p @! MkBuffer.buffer = pointer primcall triolet_alloc_nopointers (uint 1024);
+  p @! MkBuffer.buffer_capacity = uint 1024;
+  p @! MkBuffer.buffer_size = uint 0;
+  p @! MkBuffer.hashtable =
+    pointer primcall triolet_alloc (sizeof array (value int 32, owned));
+  p @! MkBuffer.hashtable_count =
+    pointer primcall triolet_alloc (sizeof array (value int 32, int));
+  p @! MkBuffer.ht_capacity = uint 32;
+  p @! MkBuffer.ht_size = uint 0;
+
+  p as owned;
+};
+
+/* Reallocate the buffer at a larger size. */
+procedure MkBuffer_reallocate(owned buf,
+                              uint size,
+                              uint old_capacity,
+                              uint new_capacity) -> () {
+  
+  typedef old_buffer_type =
+    bytes(value (old_capacity as int), value alignof pointer);
+  typedef new_buffer_type =
+    bytes(value (new_capacity as int), value alignof pointer);
+
+  // Create and populate new buffer; free old buffer
+  new_buffer = pointer primcall triolet_alloc (new_capacity as int);
+  old_buffer = buf @! MkBuffer.buffer;
+  () = () primcall memcpy (new_buffer, old_buffer, size as int);
+  () = () primcall triolet_dealloc (old_buffer);
+
+  // Update the buffer data structure
+  buf @! MkBuffer.buffer_capacity = new_capacity;
+  buf @! MkBuffer.buffer = new_buffer as owned;
+
+  ();
+};
+
+/* Allocate 'count' bytes in the buffer, expanding the buffer if necessary.
+ * Return a pointer to where the data should be written. */
+procedure inline MkBuffer_allocate(owned buf, uint count, uint align) -> pointer {
+  capacity = buf @! MkBuffer.buffer_capacity;
+  size = buf @! MkBuffer.buffer_size;
+  padding = (uint 0 - size) % align;
+  new_size = size + padding + count;
+
+  // Reallocate if necessary
+  () =
+    if (new_size > capacity) {
+      () = () primcall MkBuffer_reallocate(buf, size, capacity, capacity * uint 2);
+      capacity = buf @! MkBuffer.buffer_capacity;
+      ();
+    }
+    else {
+      ();
+    };
+
+  //() = () primcall triolet_db_int (int -9);
+  //() = () primcall triolet_db_int ((size + padding) as int);
+
+  // Save new size
+  buf @! MkBuffer.buffer_size = new_size;
+
+  // Return pointer to where data should be written
+  buf @! MkBuffer.buffer ^+ ((size + padding) as int);
+};
+
+function inline putInt (int n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 200);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof int, alignof int);
+  !dst = n;
+  nil;
+};
+
+function inline putUint (uint n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 201);
+  () = () primcall triolet_db_int(n as int);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof uint, alignof uint);
+  !dst = n;
+  nil;
+};
+
+function inline putUintAsUint8 (uint n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 202);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof uint8, alignof uint8);
+  !dst = n as uint8;
+  nil;
+};
+
+function inline putUintAsUint16 (uint n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 203);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof uint16, alignof uint16);
+  !dst = n as uint16;
+  nil;
+};
+
+function inline putFloat (float n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 204);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof float, alignof float);
+  !dst = n;
+  nil;
+};
+
+function inline putUnit (unit n, owned buf, unit dummy) -> unit {
+  // Buffer is unchanged
+  nil;
+};
+
+function inline putPointer (pointer n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 205);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof pointer, alignof pointer);
+  !dst = n;
+  nil;
+};
+
+function inline putCursor (cursor n, owned buf, unit dummy) -> unit {
+  obj = base n;
+  offset = n ^- (obj ^+ int 0);
+
+  _ = unit call putBoxedObject (obj, buf, dummy);
+  _ = unit call putUint (offset as uint, buf, dummy);
+  nil;
+};
+
+function inline putStoredInt (cursor c, owned buf, unit dummy) -> unit {
+  unit call putInt (int load c, buf, dummy);
+};
+
+function inline putStoredUint (cursor c, owned buf, unit dummy) -> unit {
+  unit call putUint (uint load c, buf, dummy);
+};
+
+function inline putStoredFloat (cursor c, owned buf, unit dummy) -> unit {
+  unit call putFloat (float load c, buf, dummy);
+};
+
+function inline putArrWithSerializer
+  (FinIndInt length, SA elem_size, owned put_elem, cursor arr,
+   owned buf, unit dummy) -> unit {
+
+  FinIndInt {n_elems} = length;
+  SA {size, align, pointerless} = elem_size;
+  typedef array_type =
+    array(value n_elems,
+          bytes(value (size as int), value (align as int)));
+
+  if (pointerless == uint 1) {
+    // Array contains no pointers; just use memcpy
+    array_size = sizeof array_type;
+    dst = pointer primcall MkBuffer_allocate(buf, array_size, align);
+    () = () primcall memcpy (dst, arr as pointer, array_size as int);
+    nil;
+  }
+  else {
+    // Copy elements individually
+    _ = while (int i = int 0) (i < n_elems) {
+      _ = unit call put_elem (arr @ array_type[i], buf, nil);
+      i + int 1;
+    };
+    nil;
+  };
+};
+
+function putBoxedObject (owned x, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 206);
+  () = () primcall triolet_db_pointer (x as pointer);
+#endif
+  if (x == typeObject_typeObject) {
+    unit call putUint (uint 1, buf, dummy);
+  }
+  else if (x == triolet_typeObject_function) {
+    unit call putUint (uint 2, buf, dummy);
+  }
+  else {
+    _ = unit call putUint (uint 0, buf, dummy);
+
+    // Write the object header, then serialize the object contents
+    type_object = owned load x;
+    _ = unit call putBoxedObject (type_object, buf, nil);
+    unit call (type_object @! TypeObject_mem.serializer) (x, buf, nil);
+  };
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
+/* Advance to a position that's aligned to a multiple of 'align', and advance
+ * past an object.  Return the positions at the beginning and end of the
+ * object. */
+procedure inline ReadBuffer_advance(cursor buffer, uint size, uint align)
+  -> (cursor, cursor)
+{
+  offset = (buffer as pointer ^- null) as uint;
+  padding = (uint 0 - offset) % align;
+  start = buffer ^+ (padding as int);
+  end = start ^+ (size as int);
+
+  //() = () primcall triolet_db_int (int -11);
+  //() = () primcall triolet_db_int (((start as pointer) ^- (base buffer as pointer)) as int);
+  (start, end);
+};
+
+function inline getInt (cursor buffer) -> ReadResult(int) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 100);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof int, alignof int);
+  n = int load start;
+  ReadResult(int) {end, n};
+};
+
+function inline getUint (cursor buffer) -> ReadResult(uint) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 101);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof uint, alignof uint);
+  n = uint load start;
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(n as int);
+#endif
+  ReadResult(uint) {end, n};
+};
+
+function inline getUint8AsUint (cursor buffer) -> ReadResult(uint) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 102);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof uint8, alignof uint8);
+  n = uint8 load start;
+  ReadResult(uint) {end, n as uint};
+};
+
+function inline getUint16AsUint (cursor buffer) -> ReadResult(uint) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 103);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof uint16, alignof uint16);
+  n = uint16 load start;
+  ReadResult(uint) {end, n as uint};
+};
+
+function inline getFloat (cursor buffer) -> ReadResult(float) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 104);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof float, alignof float);
+  n = float load start;
+  ReadResult(uint) {end, n};
+};
+
+function inline getUnit (cursor buffer) -> ReadResult(unit) {
+  // No change to buffer
+  ReadResult(unit) {buffer, nil};
+};
+
+function inline getPointer (cursor buffer) -> ReadResult(pointer) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 105);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof pointer, alignof pointer);
+  n = pointer load start;
+  ReadResult(pointer) {end, n};
+};
+
+function inline getCursor (cursor buffer) -> ReadResult(cursor) {
+  ReadResult(owned) {buffer2, obj} =
+    ReadResult(owned) call getBoxedObject (buffer);
+
+  // Read the offset from the buffer
+  ReadResult(uint) {buffer3, offset} =
+    ReadResult(uint) call getUint (buffer2);
+
+  ReadResult(cursor) {buffer3, obj ^+ (offset as int)};
+};
+
+function inline getStoredInt (cursor buffer) -> ReadResult(owned) {
+  ReadResult(int) {end, n} = ReadResult(int) call getInt(buffer);
+  letrec {
+    function write_result (pointer ret) -> unit {
+      !ret = n;
+      nil;
+    }
+  };
+
+  ReadResult(owned) {end, write_result};
+};
+
+function inline getStoredUint (cursor buffer) -> ReadResult(owned) {
+  ReadResult(uint) {end, n} = ReadResult(uint) call getUint(buffer);
+  letrec {
+    function write_result (pointer ret) -> unit {
+      !ret = n;
+      nil;
+    }
+  };
+
+  ReadResult(owned) {end, write_result};
+};
+
+function inline getStoredFloat (cursor buffer) -> ReadResult(owned) {
+  ReadResult(float) {end, n} = ReadResult(float) call getFloat(buffer);
+  letrec {
+    function write_result (pointer ret) -> unit {
+      !ret = n;
+      nil;
+    }
+  };
+
+  ReadResult(owned) {end, write_result};
+};
+
+function inline getArrWithSerializer
+  (FinIndInt length, SA elem_size, owned get_elem, cursor buffer)
+  -> ReadResult(owned) {
+
+  FinIndInt {n_elems} = length;
+  SA {size, align, pointerless} = elem_size;
+  typedef array_type =
+    array(value n_elems,
+          bytes(value (size as int), value (align as int)));
+  array_size = sizeof array_type;
+
+  if (pointerless == uint 1) {
+    // Array contains no pointers; just use memcpy
+    (start, end) =
+      (cursor, cursor) primcall ReadBuffer_advance(buffer, array_size, align);
+
+    letrec {
+      function write_result(pointer ret) -> unit {
+        () = () primcall memcpy (ret, start as pointer, array_size as int);
+        nil;
+      }
+    };
+    ReadResult(owned) {end, write_result};
+  }
+  else {
+    // Dumb solution: read the array into a temporary buffer, then copy
+    // to destination
+    tmp_data = pointer primcall triolet_alloc(sizeof Obj(array_type));
+
+    // FIXME: Write object header
+    tmp_data @! Obj(array_type).header = null as owned;
+    () = () primcall exit(int -1);
+
+    (_, buffer2) = while (int i = int 0, cursor b = buffer) (i < n_elems) {
+      ReadResult(owned) {b2, write_elem} = ReadResult(owned) call get_elem (b);
+      _ = unit call write_elem (tmp_data @ Obj(array_type).payload[i]);
+      (i + int 1, b2);
+    };
+    
+    letrec {
+      function write_result(pointer ret) -> unit {
+        () = () primcall memcpy (ret,
+                                 tmp_data @ Obj(array_type).payload,
+                                 array_size as int);
+        nil;
+      }
+    };
+    ReadResult(owned) {buffer2, write_result};
+  };
+};
+
+function getBoxedObject (cursor buffer) -> ReadResult(owned) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 106);
+#endif
+  // Get the control flag
+  ReadResult(uint) {buffer2, control} =
+    ReadResult(uint) call getUint (buffer);
+
+  if (control == uint 1) {
+    ReadResult(owned) {buffer2, typeObject_typeObject};
+  }
+  else if (control == uint 2) {
+    ReadResult(owned) {buffer2, triolet_typeObject_function};
+  }
+  else {
+    // Get the object's header, then the object
+    ReadResult(owned) {buffer3, type_object} =
+      ReadResult(owned) call getBoxedObject (buffer2);
+    ReadResult(owned) call (type_object @! TypeObject_mem.deserializer) (type_object, buffer3);
+  };
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
+/* Write 'x' to a buffer, then read it back */
+function testCopyViaBuffer (owned rep, owned x) -> owned
+{
+  b = owned primcall MkBuffer_create ();
+
+  // Serialize
+  _ = unit call putBoxedObject (x, b, nil);
+
+  // Deserialize
+  buffer1 = (b @! MkBuffer.buffer as owned) ^+ int 0;
+  () = () primcall triolet_db_pointer(buffer1 as pointer);
+  ReadResult(owned) {buffer2, y} =
+    ReadResult(owned) call getBoxedObject(buffer1);
+  y;
+}

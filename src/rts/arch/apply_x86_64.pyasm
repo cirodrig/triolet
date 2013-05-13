@@ -70,7 +70,7 @@ procedure apply_u_f (owned obj, unit _) -> owned {
   // Create a new PAP
   typedef pap_type = PAP(unit);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_u,
                             null, obj, arity, nil };
   new_pap = new_pap_ptr as owned;
 
@@ -84,7 +84,7 @@ procedure apply_u (owned obj, unit _, pointer ret) -> () {
   // Create a new PAP
   typedef pap_type = PAP(unit);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_u,
                             null, obj, arity, nil };
   new_pap = new_pap_ptr as owned;
 
@@ -101,7 +101,7 @@ procedure apply_p_f (owned obj, pointer arg) -> owned {
   // Create a new PAP
   typedef pap_type = PAP(pointer);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_p,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -115,7 +115,7 @@ procedure apply_p (owned obj, pointer arg, pointer ret) -> () {
   // Create a new PAP
   typedef pap_type = PAP(pointer);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_p,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -132,7 +132,7 @@ procedure apply_o_f (owned obj, owned arg) -> owned {
   // Create a new PAP
   typedef pap_type = PAP(owned);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_o,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -146,7 +146,7 @@ procedure apply_o (owned obj, owned arg, pointer ret) -> () {
   // Create a new PAP
   typedef pap_type = PAP(owned);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_o,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -163,7 +163,7 @@ procedure apply_c_f (owned obj, cursor arg) -> owned {
   // Create a new PAP
   typedef pap_type = PAP(cursor);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_c,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -177,7 +177,7 @@ procedure apply_c (owned obj, cursor arg, pointer ret) -> () {
   // Create a new PAP
   typedef pap_type = PAP(cursor);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_c,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -194,7 +194,7 @@ procedure apply_i32_f (owned obj, int32 arg) -> owned {
   // Create a new PAP
   typedef pap_type = PAP(int32);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_i32,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -208,7 +208,7 @@ procedure apply_i32 (owned obj, int32 arg, pointer ret) -> () {
   // Create a new PAP
   typedef pap_type = PAP(int32);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_i32,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -246,3 +246,221 @@ procedure apply_f32 (owned obj, float arg, pointer ret) -> () {
   // Evaluate if it's fully applied
   () primcall eval_pap(arity, new_pap, ret);
 };
+
+///////////////////////////////////////////////////////////////////////////////
+// Type objects
+
+data owned typeObject_PAP_u = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0,
+  PAP_u_serialize,
+  PAP_u_deserialize
+};
+
+function PAP_u_serialize (owned obj, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 210);
+#endif
+  typedef pap_type = PAP(unit);
+  _ = unit call putBoxedObject (obj @! pap_type.operator, buf, dummy);
+  _ = unit call putUint (obj @! pap_type.arity as uint, buf, dummy);
+  nil;
+};
+
+function PAP_u_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 110);
+#endif
+  typedef pap_type = PAP(unit);
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (buffer2);
+
+  p = pointer primcall triolet_alloc (sizeof pap_type);
+  p @! pap_type.header = type_object;
+  p @! pap_type.papTag = null;
+  p @! pap_type.operator = operator;
+  p @! pap_type.arity = arity as uint16;
+
+  ReadResult(owned) {buffer3, p as owned};
+};
+
+data owned typeObject_PAP_p = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0,
+  PAP_p_serialize,
+  PAP_p_deserialize
+};
+
+function PAP_p_serialize (owned obj, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 211);
+#endif
+  typedef pap_type = PAP(pointer);
+  _ = unit call putBoxedObject (obj @! pap_type.operator, buf, dummy);
+  _ = unit call putUint (obj @! pap_type.arity as uint, buf, dummy);
+  _ = unit call putPointer (obj @! pap_type.operand, buf, dummy);
+  nil;
+};
+
+function PAP_p_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 111);
+#endif
+  typedef pap_type = PAP(pointer);
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (buffer2);
+
+  ReadResult(pointer) {buffer4, operand} =
+    ReadResult(pointer) call getPointer (buffer3);
+
+  p = pointer primcall triolet_alloc (sizeof pap_type);
+  p @! pap_type.header = type_object;
+  p @! pap_type.papTag = null;
+  p @! pap_type.operator = operator;
+  p @! pap_type.arity = arity as uint16;
+  p @! pap_type.operand = operand;
+
+  ReadResult(owned) {buffer4, p as owned};
+};
+
+data owned typeObject_PAP_o = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0,
+  PAP_o_serialize,
+  PAP_o_deserialize
+};
+
+function PAP_o_serialize (owned obj, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 212);
+#endif
+  typedef pap_type = PAP(owned);
+  _ = unit call putBoxedObject (obj @! pap_type.operator, buf, dummy);
+  _ = unit call putUint (obj @! pap_type.arity as uint, buf, dummy);
+  _ = unit call putBoxedObject (obj @! pap_type.operand, buf, dummy);
+  nil;
+};
+
+function PAP_o_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 112);
+#endif
+  typedef pap_type = PAP(owned);
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (buffer2);
+
+  ReadResult(owned) {buffer4, operand} =
+    ReadResult(owned) call getBoxedObject (buffer3);
+
+  p = pointer primcall triolet_alloc (sizeof pap_type);
+  p @! pap_type.header = type_object;
+  p @! pap_type.papTag = null;
+  p @! pap_type.operator = operator;
+  p @! pap_type.arity = arity as uint16;
+  p @! pap_type.operand = operand;
+
+  ReadResult(owned) {buffer4, p as owned};
+};
+
+data owned typeObject_PAP_c = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0,
+  PAP_c_serialize,
+  PAP_c_deserialize
+};
+
+function PAP_c_serialize (owned obj, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 213);
+#endif
+  typedef pap_type = PAP(cursor);
+  _ = unit call putBoxedObject (obj @! pap_type.operator, buf, dummy);
+  _ = unit call putUint (obj @! pap_type.arity as uint, buf, dummy);
+  _ = unit call putCursor (obj @! pap_type.operand, buf, dummy);
+  nil;
+};
+
+function PAP_c_deserialize (owned type_object, cursor buffer) -> ReadResult(cursor) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 113);
+#endif
+  typedef pap_type = PAP(cursor);
+
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (buffer2);
+
+  ReadResult(cursor) {buffer4, operand} =
+    ReadResult(cursor) call getCursor (buffer3);
+
+  p = pointer primcall triolet_alloc (sizeof pap_type);
+  p @! pap_type.header = type_object;
+  p @! pap_type.papTag = null;
+  p @! pap_type.operator = operator;
+  p @! pap_type.arity = arity as uint16;
+  p @! pap_type.operand = operand;
+
+  ReadResult(owned) {buffer4, p as owned};
+};
+
+data owned typeObject_PAP_i32 = TypeObject_mem {
+  typeObject_typeObject,
+  uint 0,
+  PAP_i32_serialize,
+  PAP_i32_deserialize
+};
+
+function PAP_i32_serialize (owned obj, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 214);
+#endif
+  typedef pap_type = PAP(int32);
+  _ = unit call putBoxedObject (obj @! pap_type.operator, buf, dummy);
+  _ = unit call putUint (obj @! pap_type.arity as uint, buf, dummy);
+
+#if INT_SIZE != 4
+# error "Unexpected int size"
+#endif
+  _ = unit call putInt (obj @! pap_type.operand, buf, dummy);
+  nil;
+};
+
+function PAP_i32_deserialize (owned type_object, cursor buffer) -> ReadResult(cursor) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 114);
+#endif
+  typedef pap_type = PAP(int32);
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (buffer2);
+
+  ReadResult(int32) {buffer4, operand} =
+    ReadResult(int32) call getInt (buffer3);
+
+  p = pointer primcall triolet_alloc (sizeof pap_type);
+  p @! pap_type.header = type_object;
+  p @! pap_type.papTag = null;
+  p @! pap_type.operator = operator;
+  p @! pap_type.arity = arity as uint16;
+  p @! pap_type.operand = operand;
+
+  ReadResult(owned) {buffer4, p as owned};
+};
+
+/*
+extern data owned typeObject_PAP_i32;
+extern data owned typeObject_PAP_f32;
+*/

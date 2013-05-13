@@ -12,6 +12,7 @@ import Common.Identifier
 import Common.Label
 import Builtins.Builtins
 import Builtins.TypeFunctions
+import qualified LowLevel.Syntax as LL
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import Type.Var
@@ -29,9 +30,11 @@ import Globals
 predefinedVarDetails :: [(String, Var)]
 predefinedVarDetails =
   [(name v, v) | v <- [valV, boxV, bareV, outV, intindexV, initV,
-                       initConV, outPtrV, storeV, posInftyV, negInftyV,
-                       arrV, intV, uintV, floatV, isRefV,
-                       refV, isAReferenceV, notAReferenceV, ref_conV]]
+                       initConV, outPtrV,
+                       cursorV, storeV, posInftyV, negInftyV,
+                       storedV, arrV, intV, uintV, floatV, byteV,
+                       refV,
+                       stored_conV, ref_conV]]
   where
     name v =
       case varName v
@@ -47,13 +50,13 @@ predefinedVarDetails =
 --   and data type definitions.  The type environment contains specification
 --   types and memory types.  Also, create a module containing
 --   definitions of built-in functions and constants.
-parseCoreModule2 :: IdentSupply Var
+parseCoreModule2 :: IdentSupply LL.Var -> IdentSupply Var
                  -> IO (ITypeEnvBase FullyBoxedMode,
                         ITypeEnvBase SpecMode,
                         ITypeEnvBase UnboxedMode,
                         SystemF.Module SystemF.Mem,
                         Map.Map String Var)
-parseCoreModule2 ident_supply = do
+parseCoreModule2 ll_ident_supply ident_supply = do
   pathname <- getDataFileName ("symbols" </> "coremodule")
   input_file <- readFile pathname
 
@@ -67,5 +70,5 @@ parseCoreModule2 ident_supply = do
   resolved_ast <- resolveModule ident_supply resolve_env modname parsed_ast
 
   -- Convert to core expressions
-  createCoreModule ident_supply resolved_ast
+  createCoreModule ll_ident_supply ident_supply resolved_ast
 

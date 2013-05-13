@@ -26,6 +26,7 @@ module SystemF.MemoryIR
         varE, litE, appE, conE, boxedConE, unboxedConE, valConE, varAppE,
         varE', litE', appE', conE', boxedConE', unboxedConE', valConE', varAppE',
         trueE, falseE, noneE,
+        ifE',
         boxedDataInfo,
         staticValTypeInfo,
         unpackVarAppM, unpackDataConAppM, isDataConAppM,
@@ -160,6 +161,13 @@ boxedConE' = boxedConE defaultExpInfo
 unboxedConE' = unboxedConE defaultExpInfo
 valConE' = valConE defaultExpInfo
 varAppE' = varAppE defaultExpInfo
+
+ifE' cond iftrue iffalse = ExpM $ CaseE defaultExpInfo cond [] [t_alt, f_alt]
+  where
+    true_con = VarDeCon (coreBuiltin The_True) [] []
+    false_con = VarDeCon (coreBuiltin The_False) [] []
+    t_alt  = AltM $ Alt true_con Nothing [] iftrue
+    f_alt = AltM $ Alt false_con Nothing [] iffalse
 
 -- | Construct run-time type information for a boxed data constructor,
 --   given type arguments and size parameters

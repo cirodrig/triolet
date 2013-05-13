@@ -32,6 +32,7 @@ rules :-
 -- Keywords
 "alignof" / @notid	{ tok AlignofTok }
 "as" / @notid		{ tok AsTok }
+"base" / @notid		{ tok BaseTok }
 "bool" / @notid		{ tok BoolTok }
 "call" / @notid		{ tok CallTok }
 "const" / @notid	{ tok ConstTok }
@@ -98,6 +99,7 @@ rules :-
 "+" / @notsym		{ tok PlusTok }
 "-" / @notsym		{ tok MinusTok }
 "^+" / @notsym		{ tok PointerPlusTok }
+"^-" / @notsym		{ tok PointerMinusTok }
 "%" / @notsym		{ tok PercentTok }
 "%/" / @notsym		{ tok IntegerDivideTok }
 "/" / @notsym		{ tok DivideTok }

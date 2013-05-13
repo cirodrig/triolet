@@ -142,6 +142,7 @@ Executable triolet
     SystemF.Datatypes.DynamicTypeInfo
     SystemF.Datatypes.InfoCall
     SystemF.Datatypes.Layout
+    SystemF.Datatypes.Serialize
     SystemF.Datatypes.Size
     SystemF.Datatypes.Structure
     SystemF.Datatypes.TypeObject
@@ -197,10 +198,14 @@ Executable triolet
     LowLevel.Builtins
     LowLevel.BuiltinsTH
     LowLevel.CodeTypes
+    LowLevel.Cxx.AST
+    LowLevel.Cxx.Print
+    LowLevel.Cxx.Wrappers
     LowLevel.CSE
     LowLevel.InitializeBuiltins
     LowLevel.Inlining2
     LowLevel.InterfaceFile
+    LowLevel.Lint
     LowLevel.Build
     LowLevel.Closure.CCInfo
     LowLevel.Closure.Capture

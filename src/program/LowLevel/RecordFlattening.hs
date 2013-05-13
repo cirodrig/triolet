@@ -24,6 +24,7 @@ import Control.Monad.Reader hiding(mapM)
 import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Data.Traversable(mapM)
+import Debug.Trace
 
 import Common.Error
 import Common.MonadLogic

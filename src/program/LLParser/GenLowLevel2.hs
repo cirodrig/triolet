@@ -356,6 +356,10 @@ genExpr tenv expr =
        let ptr_kind = pointerKind addr
        let atom = LL.PrimA (LL.PrimLoad Mutable ptr_kind llty) [addr, nativeIntV 0]
        return $ GenAtom [llty] atom
+     BaseE arg -> do
+       c <- asVal =<< subexpr arg
+       let atom = LL.PrimA LL.PrimCursorBase [c]
+       return $ GenAtom [PrimType OwnedType] atom
      CallE returns op args -> do
        op' <- asVal =<< subexpr op
        args' <- mapM (asVal <=< subexpr) args
@@ -417,6 +421,7 @@ genBinaryOp op l_arg r_arg =
      CmpGEOp -> comparison LL.CmpGE
      AtomicAddOp -> atomic_int LL.PrimAAddZ
      PointerAddOp -> pointer_add
+     PointerSubOp -> pointer_sub
      AddOp -> arithmetic LL.PrimAddZ LL.PrimAddF
      SubOp -> arithmetic LL.PrimSubZ LL.PrimSubF
      MulOp -> arithmetic LL.PrimMulZ LL.PrimMulF
@@ -455,7 +460,14 @@ genBinaryOp op l_arg r_arg =
       let ptr_kind = pointerKind l_val
       let atom = LL.PrimA (LL.PrimAddP ptr_kind) [l_val, r_val]
       return $ GenAtom [PrimType $ LL.fromPointerKind $ LL.addPResultType ptr_kind] atom
-    
+
+    pointer_sub = do
+      l_val <- asVal l_arg
+      r_val <- asVal r_arg
+      let ptr_kind = pointerKind l_val
+      let atom = LL.PrimA (LL.PrimSubP ptr_kind) [l_val, r_val]
+      return $ GenAtom [PrimType nativeIntType] atom
+   
     arithmetic int_op float_op = do
       l_val <- asVal l_arg
       r_val <- asVal r_arg
@@ -513,6 +525,9 @@ genCast ty e =
        val <- asVal e
        success $ LL.PrimA LL.PrimCastFromCursor [val]
      (PointerType, PointerType) -> success_id
+     (IntType Unsigned sz, PointerType) -> do
+       val <- asVal e
+       success $ LL.PrimA (LL.PrimCastPtrToInt sz) [val]
      (IntType e_sgn e_sz, IntType g_sgn g_sz)
        | e_sz == g_sz && e_sgn == g_sgn -> success_id
        | otherwise -> do

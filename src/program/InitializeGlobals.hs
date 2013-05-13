@@ -43,8 +43,9 @@ loadBuiltins cl_globals = do
 
   -- Core IR initialization
   withTheNewVarIdentSupply $ \supply -> do
+   withTheLLVarIdentSupply $ \ll_supply -> do
     (sf_types, spec_types, mem_types, core_module, core_variables) <-
-      CParser2.Driver.parseCoreModule2 supply
+      CParser2.Driver.parseCoreModule2 ll_supply supply
     initializeGlobalVar the_systemFTypes (return sf_types)
     initializeGlobalVar the_specTypes (return spec_types)
     initializeGlobalVar the_memTypes (return mem_types)

@@ -4,12 +4,13 @@ module core.internal.apply_new;
 #include "rts.h"
 #include "memory_py.h"
 #include "structures.h"
+#include "buffer.h"
 #include "debug.h"
 
 import procedure exit (int) -> (); 
-import data pointer triolet_type_tag_pap_size "triolet_type_tag_pap_size";
+//import data pointer triolet_type_tag_pap_size "triolet_type_tag_pap_size";
 
-extern data pointer core.internal.apply_new.PAP_info;
+//extern data pointer core.internal.apply_new.PAP_info;
 
 #include "apply_py.h"
 

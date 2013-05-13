@@ -15,7 +15,7 @@ import procedure exit (int) -> ();
 
 // Allocate a list's contents array
 procedure inline allocate_list_contents (owned rep, int nelems) -> owned {
-  SA {elem_size, elem_align} = rep @! Repr_mem.sizealign;
+  SA {elem_size, elem_align, elem_pointerless} = rep @! Repr_mem.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
   typedef array_type = array(value nelems, elem_type);
 
@@ -28,7 +28,7 @@ procedure inline allocate_list_contents (owned rep, int nelems) -> owned {
 // The old list contents are
 // copied to the new list; the new contents are uninitialized.
 procedure list_grow (owned rep, owned old_contents, int old_size) -> (int, owned) {
-  SA {elem_size, elem_align} = rep @! Repr_mem.sizealign;
+  SA {elem_size, elem_align, elem_pointerless} = rep @! Repr_mem.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
 
   typedef old_array_type = array(value old_size, elem_type);
@@ -56,7 +56,7 @@ procedure list_grow (owned rep, owned old_contents, int old_size) -> (int, owned
 // the state.
 function inline append_build_list (owned rep, owned f, pointer ret) -> unit
 {
-  SA {elem_size, elem_align} = rep @! Repr_mem.sizealign;
+  SA {elem_size, elem_align, elem_pointerless} = rep @! Repr_mem.sizealign;
   typedef elem_type = bytes(value elem_size, value elem_align);
 
   letrec {
@@ -189,7 +189,7 @@ function inline appendScatter_initializer (SA sizealign, owned _, pointer ret) -
 
 function inline appendScatter_update_real (SA elt_sizealign, owned writer, unit _, pointer alist) -> unit
 {
-  SA {elt_size, elt_align} = elt_sizealign;
+  SA {elt_size, elt_align, elt_pointerless} = elt_sizealign;
   typedef elt = bytes(value elt_size, value elt_align);
 
   FinIndInt {n_elems} = alist @! AppendList.nelems;

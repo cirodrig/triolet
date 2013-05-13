@@ -455,6 +455,8 @@ genPrimOp prim args =
      -- should have been expanded into plain pointers
      PrimAddP PointerPtr ->
        case args of [ptr, off] -> offset ptr off
+     PrimSubP PointerPtr ->
+       case args of [x, y] -> diff x y
      PrimLoad _ PointerPtr (PrimType ty) ->
        -- Cast the pointer to the desired pointer type, then dereference
        case args
@@ -485,7 +487,12 @@ genPrimOp prim args =
      PrimCastFToZ from_size to_size ->
        case args
        of [val] ->
-            let decl = anonymousDecl $ variablePrimTypeDeclSpecs (IntType Signed to_size) 
+            let decl = anonymousDecl $ variablePrimTypeDeclSpecs (IntType Signed to_size)
+            in CCast decl val internalNode
+     PrimCastPtrToInt size ->
+       case args
+       of [val] ->
+            let decl = anonymousDecl $ variablePrimTypeDeclSpecs (IntType Unsigned size)
             in CCast decl val internalNode
      PrimGetFrameP ->
        CVar (internalIdent "frame_ptr") internalNode
@@ -987,4 +994,5 @@ cModuleHeader =
   \#include <math.h>\n\
   \typedef void *TrioletPtr;\n\
   \#define TRIOLET_OFF(base, offset) ((TrioletPtr)((char *)(base)+(offset)))\n\
+  \#define TRIOLET_DIFF(x, y) ((char *)(x)-(char*)(y))\n\
   \extern void triolet_exit(int) __attribute__((noreturn));\n"

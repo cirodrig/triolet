@@ -364,26 +364,26 @@ convertImport x@(ImportPrimFun {}) = [x]
 convertImport x@(ImportData {}) = [x]
 
 -- | Perform closure conversion.
---
---   FIXME: We must globally rename functions to avoid name collisions!
 closureConvert :: Module -> IO Module
 closureConvert mod =
   withTheLLVarIdentSupply $ \var_ids -> do
+    -- Rename functions so that function names are globally unique
+    rn_mod <- runFreshVarM var_ids $ renameModule RenameFunctions mod
+    
     -- Perform closure conversion
-    let imports = moduleImports mod
-        globals = moduleGlobals mod
+    let imports = moduleImports rn_mod
+        globals = moduleGlobals rn_mod
         global_vars = []
     defs' <- closureConvertTopLevel var_ids [] imports globals
 
     -- Expand imported functions into multiple imported entities
     let imports' = concatMap convertImport imports
 
-    -- Rename variables so that variable names are unique
-    -- within a top-level function
-    let mod' = mod {moduleImports = imports', moduleGlobals = defs'}
+    -- Rebuild the module.  Because closure conversion inserts references
+    -- to some special variables, definition groups must be merged.
+    let rn_mod' = rn_mod { moduleImports = imports'
+                         , moduleGlobals = [mergeGroups defs']}
 
-    runFreshVarM var_ids $ renameModule RenameParameters emptyRenaming mod'
-  where
-    rename_global_fun (GlobalFunDef fdef) =
-      liftM GlobalFunDef $ renameInFunDef RenameParameters fdef
-    rename_global_fun ddef@(GlobalDataDef _) = return ddef
+    -- Rename function parameters so that variable names are unique
+    -- within a top-level function
+    runFreshVarM var_ids $ renameModule RenameParameters rn_mod'

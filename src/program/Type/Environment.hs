@@ -37,19 +37,26 @@ module Type.Environment
         TypeEnv,
         BoxedTypeEnv,
         DataType(..),
+        dataTypeConIndex,
         dataTypeLayout',
         dataTypeUnboxedInfoVar,
+        dataTypeUnboxedSerializerVar,
+        dataTypeUnboxedDeserializerVar,
         dataTypeBoxedInfoVar,
+        dataTypeBoxedSerializerVar,
+        dataTypeBoxedDeserializerVar,
         layoutUnboxedInfoVar,
         layoutBoxedInfoVar,
         dataTypeFieldSizeVar,
         layoutInfoVars,
-        dataTypeInfoVarType,
         boxedDataTypeLayout,
         unboxedDataTypeLayout,
         DataTypeLayout(..),
         sizeParamType,
         infoType,
+        infoConstructorType,
+        serializerType,
+        deserializerType,
         infoTycon,
         dataTypeFullKind,
         DataConType(..),
@@ -104,6 +111,7 @@ import Control.DeepSeq
 import Control.Monad hiding(mapM)
 import Control.Monad.Reader hiding(mapM)
 import Control.Monad.Writer hiding(mapM)
+import Control.Monad.RWS hiding(mapM)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.HashTable as HT
@@ -206,6 +214,11 @@ instance TypeEnvMonad m => TypeEnvMonad (ReaderT r m) where
 
 instance (Monoid w, TypeEnvMonad m) => TypeEnvMonad (WriterT w m) where
   type EvalBoxingMode (WriterT w m) = EvalBoxingMode m
+  getTypeEnv = lift getTypeEnv
+  liftTypeEnvM m = lift (liftTypeEnvM m)
+
+instance (Monoid w, TypeEnvMonad m) => TypeEnvMonad (RWST r w s m) where
+  type EvalBoxingMode (RWST r w s m) = EvalBoxingMode m
   getTypeEnv = lift getTypeEnv
   liftTypeEnvM m = lift (liftTypeEnvM m)
 
@@ -383,46 +396,75 @@ instance NFData DataType where
     rnf c `seq` rnf p `seq` rnf l `seq` rnf k `seq` rnf b1 `seq`
     rnf b2 `seq` rnf cs
 
+dataTypeConIndex :: DataType -> Var -> Int
+dataTypeConIndex data_type c =
+  let Just i = findIndex (c ==) (dataTypeDataConstructors data_type)
+  in i
+
+
 dataTypeLayout' :: DataType -> DataTypeLayout
 dataTypeLayout' dtype =
   case dataTypeLayout dtype
   of Just l -> l
      Nothing -> traceShow (pprDataType dtype) $ internalError $ "dataTypeLayout': Layout is not set for " ++ show (dataTypeCon dtype)
 
--- | Get the info variable for an unboxed data type
-dataTypeUnboxedInfoVar :: DataType -> Var
+-- Get variables associated with an unboxed data type
+dataTypeUnboxedInfoVar,
+  dataTypeUnboxedSerializerVar,
+  dataTypeUnboxedDeserializerVar :: DataType -> Var
 dataTypeUnboxedInfoVar dtype = layoutUnboxedInfoVar $ dataTypeLayout' dtype
+dataTypeUnboxedSerializerVar dtype = layoutUnboxedSerializerVar $ dataTypeLayout' dtype
+dataTypeUnboxedDeserializerVar dtype = layoutUnboxedDeserializerVar $ dataTypeLayout' dtype
 
-layoutUnboxedInfoVar :: DataTypeLayout -> Var
-layoutUnboxedInfoVar (DataTypeLayout _ _ HasUnboxedInfo (UnboxedInfo i) _) = i
+layoutUnboxedInfoVar, layoutUnboxedSerializerVar,
+  layoutUnboxedDeserializerVar :: DataTypeLayout -> Var
+layoutUnboxedInfoVar (DataTypeLayout { layoutInfoType = HasUnboxedInfo
+                                     , layoutInfo = UnboxedInfo i}) = i
+
+layoutUnboxedSerializerVar (DataTypeLayout { layoutInfoType = HasUnboxedInfo
+                                           , layoutSerializer = UnboxedInfo i}) = i
+
+layoutUnboxedDeserializerVar (DataTypeLayout { layoutInfoType = HasUnboxedInfo
+                                             , layoutDeserializer = UnboxedInfo i}) = i
 
 -- | Get the info variable for a boxed data type's data constructor
-dataTypeBoxedInfoVar :: DataType -> Var -> Var
+dataTypeBoxedInfoVar, dataTypeBoxedSerializerVar, dataTypeBoxedDeserializerVar :: DataType -> Var -> Var
 dataTypeBoxedInfoVar dtype con = layoutBoxedInfoVar (dataTypeLayout' dtype) con
+dataTypeBoxedSerializerVar dtype con = layoutBoxedSerializerVar (dataTypeLayout' dtype) con
+dataTypeBoxedDeserializerVar dtype con = layoutBoxedDeserializerVar (dataTypeLayout' dtype) con
   
-layoutBoxedInfoVar :: DataTypeLayout -> Var -> Var
-layoutBoxedInfoVar (DataTypeLayout _ _ HasBoxedInfo (BoxedInfo assoc_list) _) con =
+layoutBoxedInfoVar, layoutBoxedSerializerVar, layoutBoxedDeserializerVar :: DataTypeLayout -> Var -> Var
+layoutBoxedInfoVar (DataTypeLayout {layoutInfoType = HasBoxedInfo 
+                                   , layoutInfo = BoxedInfo assoc_list}) con =
   let Just i = lookup con assoc_list in i
 
 layoutBoxedInfoVar dtype c =
   error $ "layoutBoxedInfoVar: Not boxed: " ++ show c
 
+layoutBoxedSerializerVar (DataTypeLayout { layoutInfoType = HasBoxedInfo 
+                                         , layoutSerializer = BoxedInfo assoc_list}) con =
+  let Just i = lookup con assoc_list in i
+
+layoutBoxedDeserializerVar (DataTypeLayout { layoutInfoType = HasBoxedInfo 
+                                           , layoutDeserializer = BoxedInfo assoc_list}) con =
+  let Just i = lookup con assoc_list in i
+
 -- | Get the field size variable for a data constructor
 dataTypeFieldSizeVar :: DataType -> Var -> Var
 dataTypeFieldSizeVar dtype con =
   case dataTypeLayout' dtype
-  of DataTypeLayout _ _ _ _ assoc_list ->
+  of DataTypeLayout {layoutFieldSizes = assoc_list} ->
        let Just i = lookup con assoc_list
        in i
 
 -- | Get all info variables from a 'layout'
 layoutInfoVars :: DataTypeLayout -> [Var]
-layoutInfoVars (DataTypeLayout _ _ info_type info _) =
+layoutInfoVars (DataTypeLayout {layoutInfoType = info_type, layoutInfo = info}) =
   case info_type
   of HasUnboxedInfo -> case info of UnboxedInfo i -> [i]
      HasBoxedInfo   -> case info of BoxedInfo xs  -> map snd xs
 
--- | Get the type of a data type's info type constructor function
+{- -- | Get the type of a data type's info type constructor function
 dataTypeInfoVarType :: DataType -> Type
 dataTypeInfoVarType dtype =
   let l = dataTypeLayout' dtype
@@ -436,11 +478,15 @@ infoConstructorType dtype layout =
   varApp info_tycon [VarT v | v ::: _ <- dataTypeParams dtype]
   where
     size_param_types = map sizeParamType $ layoutSizeParamTypes layout
-    info_tycon = infoTycon (dataTypeKind dtype)
+    info_tycon = infoTycon (dataTypeKind dtype) -}
 
 data DataTypeLayoutInfoType info where
   HasBoxedInfo :: DataTypeLayoutInfoType BoxedInfo
   HasUnboxedInfo :: DataTypeLayoutInfoType UnboxedInfo
+
+  -- | The layout follows special rules.  It's not represented by a global
+  --   function.
+  HasSpecialLayout :: DataTypeLayoutInfoType ()
 
 -- | Info variables associated with a boxed 'DataType'.
 --   The list is an association list from data constructor to info variable.
@@ -470,6 +516,14 @@ data DataTypeLayout = forall info.
     --   This constructor's type is given by 'layoutInfoType'.
   , layoutInfo :: !info
 
+    -- | Global functions that write an object of this data type to a buffer.
+    --   This is a, 'BoxedInfo', or 'UnboxedInfo'. 
+  , layoutSerializer :: !info
+
+    -- | Global functions that read an object of this data type from a buffer.
+    --   This is a, 'BoxedInfo', or 'UnboxedInfo'. 
+  , layoutDeserializer :: !info
+
     -- | A lookup table from constructors to
     --   functions for computing the sizes of data structure fields.
     --   These functions take size parameters and return a tuple of
@@ -477,17 +531,25 @@ data DataTypeLayout = forall info.
   , layoutFieldSizes :: [(Var, Var)]
   }
 
+instance NFData BoxedInfo where rnf (BoxedInfo x) = rnf x
+instance NFData UnboxedInfo where rnf (UnboxedInfo x) = rnf x
+
 instance NFData DataTypeLayout where
-  rnf (DataTypeLayout a b HasBoxedInfo (BoxedInfo d) e) =
-    rnf a `seq` rnf b `seq` rnf d `seq` rnf e
-  rnf (DataTypeLayout a b HasUnboxedInfo (UnboxedInfo d) e) =
-    rnf a `seq` rnf b `seq` rnf d `seq` rnf e
+  rnf (DataTypeLayout a b HasBoxedInfo d e f g) =
+    rnf a `seq` rnf b `seq` rnf d `seq` rnf e `seq` rnf f `seq` rnf g
+  rnf (DataTypeLayout a b HasUnboxedInfo d e f g) =
+    rnf a `seq` rnf b `seq` rnf d `seq` rnf e `seq` rnf f `seq` rnf g
 
-unboxedDataTypeLayout size_param static inf fsizes =
-  DataTypeLayout size_param static HasUnboxedInfo (UnboxedInfo inf) fsizes
+unboxedDataTypeLayout size_param static inf ser des fsizes =
+  DataTypeLayout size_param static HasUnboxedInfo
+  (UnboxedInfo inf) (UnboxedInfo ser) (UnboxedInfo des) fsizes
 
-boxedDataTypeLayout size_param static inf fsizes =
-  DataTypeLayout size_param static HasBoxedInfo (BoxedInfo inf) fsizes
+boxedDataTypeLayout size_param static inf ser des fsizes =
+  DataTypeLayout size_param static HasBoxedInfo
+  (BoxedInfo inf) (BoxedInfo ser) (BoxedInfo des) fsizes
+
+specialDataTypeLayout size_param static fsizes =
+  DataTypeLayout size_param static HasSpecialLayout () () () fsizes
 
 -- | Get the type holding size information for the given kind
 sizeParamType :: KindedType -> Type
@@ -502,9 +564,86 @@ sizeParamType (KindedType k ty) =
 infoType :: KindedType -> Type
 infoType (KindedType k ty) =
   case k
-  of ValK  -> valInfoT `AppT` ty
-     BareK -> bareInfoT `AppT` ty
-     BoxK -> boxInfoT `AppT` ty
+  of ValK      -> valInfoT `AppT` ty
+     BareK     -> bareInfoT `AppT` ty
+     BoxK      -> boxInfoT `AppT` ty
+     IntIndexK -> fiIntT `AppT` ty
+
+-- | Compute the core type of the given data type's info constructor function.
+--   Layout information must have been computed for the data type.
+--   It's not necessary for the info constructor function to exist.
+infoConstructorType :: DataType -> Type
+infoConstructorType dtype =
+  forallType typarams $ funType info_types info_type
+  where
+    typarams = dataTypeParams dtype
+    info_types = map infoType $ layoutSizeParamTypes $ dataTypeLayout' dtype
+    instantiated_data_type =
+      dataTypeCon dtype `varApp` map (VarT . binderVar) typarams
+    info_type = infoType $
+                KindedType (dataTypeKind dtype) instantiated_data_type
+
+-- | Compute the core type of the given data type's serializer function.
+--   Layout information must have been computed for the data type.
+--   It's not necessary for the serializer function to exist.
+serializerType :: DataType -> Type
+serializerType dtype =
+  case dataTypeKind dtype
+  of ValK  -> accept_stored_type
+     BareK -> accept_type
+     BoxK  -> accept_type
+  where
+    -- Construct a type of the form
+    --
+    -- > forall as. infoTypes -> T as -> OpaquePtr -> Store -> Store
+    accept_type =
+      forallType typarams $ funType info_types $
+      instantiated_data_type `FunT` buffer_updater_type
+
+    -- Like accept_type except that the data is wrapped in a 'Stored'
+    -- constructor
+    accept_stored_type =
+      forallType typarams $ funType info_types $
+      (storedT `AppT` instantiated_data_type) `FunT` buffer_updater_type
+
+    typarams = dataTypeParams dtype
+    info_types = map infoType $ layoutSizeParamTypes $ dataTypeLayout' dtype
+    instantiated_data_type =
+      dataTypeCon dtype `varApp` map (VarT . binderVar) typarams
+    buffer_updater_type = opaqueRefT `FunT` storeT` FunT` storeT
+
+-- | Compute the core type of the given data type's deserializer function.
+--   Layout information must have been computed for the data type.
+--   It's not necessary for the deserializer function to exist.
+deserializerType :: DataType -> Type
+deserializerType dtype =
+  case dataTypeKind dtype
+  of ValK  -> parametric_reader instantiated_stored_initializer_type
+     BareK -> parametric_reader instantiated_initializer_type
+     BoxK  -> forallType typarams $ funType info_types $
+              (boxInfoT `AppT` instantiated_type) `FunT`
+              buffer_reader_type instantiated_type
+  where
+    typarams = dataTypeParams dtype
+    info_types = map infoType $ layoutSizeParamTypes $ dataTypeLayout' dtype
+    instantiated_type =
+      dataTypeCon dtype `varApp` map (VarT . binderVar) typarams
+
+    instantiated_initializer_type =
+      (outPtrT `AppT` instantiated_type) `FunT` storeT
+
+    instantiated_stored_initializer_type =
+      (outPtrT `AppT` (storedT `AppT` instantiated_type)) `FunT` storeT      
+
+    -- > forall as. infoTypes -> MessageReader -> (MessageReader, t)
+    -- (t is boxed)
+    parametric_reader t =
+      forallType typarams $ funType info_types $ buffer_reader_type t
+
+    buffer_reader_type t =
+      message_type `FunT` (UTupleT [ValK, BoxK] `typeApp` [message_type, t])
+
+    message_type = cursorT `AppT` (storedT `AppT` byteT)
 
 -- | Get the type constructor that constructs info types for
 --   the given base kind
@@ -551,10 +690,7 @@ instance NFData DataConType where
 --   data constructors of the same type.  Indices are numbered starting from
 --   zero.
 dataConIndex :: DataConType -> Int
-dataConIndex con =
-  let c      = dataConCon con
-      Just i = findIndex (c ==) (dataTypeDataConstructors $ dataConType con)
-  in i
+dataConIndex con = dataTypeConIndex (dataConType con) (dataConCon con)
 
 dataConTyParams :: DataConType -> [Binder]
 dataConTyParams t = dataTypeParams $ dataConType t
@@ -666,17 +802,32 @@ mkWiredInTypeEnv = do
                -- (initV, varTypeAssignment kindT),
                -- (initConV, varTypeAssignment (bareT `FunT` initT)),
                (outPtrV, varTypeAssignment (bareT `FunT` outT)),
+               (cursorV, TyConTypeAssignment cursor_data_type),
                (storeV, TyConTypeAssignment store_data_type),
                (posInftyV, varTypeAssignment intindexT),
                (negInftyV, varTypeAssignment intindexT),
                (arrV, TyConTypeAssignment arr_data_type),
+               (storedV, TyConTypeAssignment stored_data_type),
                (intV, TyConTypeAssignment int_data_type),
                (uintV, TyConTypeAssignment uint_data_type),
                (floatV, TyConTypeAssignment float_data_type),
                (byteV, TyConTypeAssignment byte_data_type),
                (refV, TyConTypeAssignment ref_data_type),
                (ref_conV, DataConTypeAssignment ref_datacon_type),
-               (store_conV, DataConTypeAssignment store_datacon_type)]
+               (store_conV, DataConTypeAssignment store_datacon_type),
+               (stored_conV, DataConTypeAssignment stored_datacon_type)]
+
+    cursor_data_type =
+      DataType { dataTypeCon = cursorV
+               , dataTypeParams = [cursorTypeParameterV ::: bareT]
+               , dataTypeLayout = Just layout
+               , dataTypeKind = ValK
+               , dataTypeIsAbstract = True
+               , dataTypeIsAlgebraic = False
+               , dataTypeDataConstructors = []}
+      where
+        layout = unboxedDataTypeLayout [] []
+                 valInfo_cursorV putCursorV getCursorV []
 
     store_data_type =
       DataType { dataTypeCon = storeV
@@ -687,7 +838,8 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = True
                , dataTypeDataConstructors = [store_conV]}
       where
-        layout = unboxedDataTypeLayout [] [] valInfo_storeV []
+        layout = unboxedDataTypeLayout [] []
+                 valInfo_storeV putStoreV getStoreV []
 
     store_datacon_type =
       DataConType { dataConCon = store_conV
@@ -709,8 +861,28 @@ mkWiredInTypeEnv = do
                  [KindedType IntIndexK arrTypeParameter1T,
                   KindedType BareK arrTypeParameter2T]
                  []
-                 bareInfo_arrV
+                 bareInfo_arrV putArrV getArrV
                  []
+
+    stored_data_type =
+      DataType { dataTypeCon = storedV
+               , dataTypeParams = [(storedTypeParameterV ::: valT)]
+               , dataTypeLayout = Just layout
+               , dataTypeKind = BareK
+               , dataTypeIsAbstract = False
+               , dataTypeIsAlgebraic = True
+               , dataTypeDataConstructors = [stored_conV]}
+      where
+        layout = specialDataTypeLayout
+                 []
+                 [KindedType ValK (VarT storedTypeParameterV)]
+                 []
+
+    stored_datacon_type =
+      DataConType { dataConCon = stored_conV
+                  , dataConExTypes = []
+                  , dataConFields = [(VarT storedTypeParameterV, ValK)]
+                  , dataConType = stored_data_type}
 
     int_data_type =
       DataType { dataTypeCon = intV
@@ -721,7 +893,8 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        int_layout = unboxedDataTypeLayout [] [] valInfo_intV []
+        int_layout = unboxedDataTypeLayout [] []
+                     valInfo_intV putStoredIntV getStoredIntV []
 
     uint_data_type =
       DataType { dataTypeCon = uintV
@@ -732,7 +905,8 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        uint_layout = unboxedDataTypeLayout [] [] valInfo_uintV []
+        uint_layout = unboxedDataTypeLayout [] []
+                      valInfo_uintV putStoredUintV getStoredUintV []
 
     float_data_type =
       DataType { dataTypeCon = floatV
@@ -743,7 +917,8 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        float_layout = unboxedDataTypeLayout [] [] valInfo_floatV []
+        float_layout = unboxedDataTypeLayout [] []
+                       valInfo_floatV putStoredFloatV getStoredFloatV []
 
     byte_data_type =
       DataType { dataTypeCon = byteV
@@ -754,7 +929,8 @@ mkWiredInTypeEnv = do
                , dataTypeIsAlgebraic = False
                , dataTypeDataConstructors = []}
       where
-        byte_layout = unboxedDataTypeLayout [] [] valInfo_byteV []
+        byte_layout = unboxedDataTypeLayout [] []
+                      valInfo_byteV putByteV getByteV []
 
     ref_data_type =
       DataType { dataTypeCon = refV
@@ -766,7 +942,7 @@ mkWiredInTypeEnv = do
                , dataTypeDataConstructors = [ref_conV]}
       where
         ref_layout = unboxedDataTypeLayout
-                     [] [] bareInfo_refV
+                     [] [] bareInfo_refV putRefV getRefV
                      [(ref_conV, fieldInfo_refV)]
 
     ref_datacon_type =
@@ -1076,7 +1252,7 @@ isAdapterCon :: Var -> Bool
 isAdapterCon v = v `elem` adapters
   where
     adapters = [initConV,       -- Init
-                coreBuiltin The_Stored,
+                storedV,        -- Stored
                 refV,           -- Ref
                 coreBuiltin The_Boxed,
                 coreBuiltin The_AsBox,
@@ -1143,11 +1319,13 @@ specializeTypeEnv basekind_f kind_f type_f tybind_f (MTypeEnv m) = do
       return $ DataType con params' l' k'
         is_abstract is_algebraic ctors
 
-    layout (DataTypeLayout size_params fixed_types info_type info fields) =
+    layout (DataTypeLayout size_params fixed_types info_type info ser des fields) =
       DataTypeLayout <$> mapM kinded_type size_params
                      <*> mapM kinded_type fixed_types
                      <*> pure info_type
                      <*> pure info
+                     <*> pure ser
+                     <*> pure des
                      <*> pure fields
 
     kinded_type (KindedType k t) = KindedType <$> basekind_f k <*> type_f t
