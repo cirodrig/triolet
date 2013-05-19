@@ -6,7 +6,7 @@ module Type.Var
         VarID,
         pprVar,
         mkVar, mkAnonymousVar, mkClonedVar,
-        newVar, newAnonymousVar, newClonedVar,
+        newVar, newAnonymousVar, newClonedVar, newTaggedVar,
         FreshVarM,
         runFreshVarM)
 where
@@ -43,9 +43,7 @@ instance Show Var where
   show v =
     let name = case _varName v
                of Nothing -> "_"
-                  Just lab -> case labelLocalName lab
-                              of Left str -> str
-                                 Right (LocalID n) -> show n
+                  Just lab -> showLabel lab
     in name ++ "'" ++ show (fromIdent $ _varID v)
 
 instance HasLevel Var where
@@ -86,6 +84,14 @@ newClonedVar :: (Monad m, Supplies m VarID) => Var -> m Var
 newClonedVar v = do
   id <- fresh
   return $ mkClonedVar id v
+
+-- | Create a new variable that is like the given variable, but with a tag 
+--   added to its label.  Error if the variable has no label.
+newTaggedVar :: (Monad m, Supplies m VarID) => LabelTag -> Var -> m Var
+newTaggedVar tag v =
+  let lab = case varName v
+            of Just lab -> appendLabelTag tag lab
+  in newVar (Just lab) (getLevel v)
 
 pprVar :: Var -> Doc
 pprVar v = text (show v)

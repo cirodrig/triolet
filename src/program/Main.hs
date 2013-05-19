@@ -115,6 +115,12 @@ runTask GetBuiltins = do
   -- The module was loaded during initialization.
   readInitGlobalVarIO Globals.the_coreModule
 
+runTask CompileBuiltinsToPyonAsm = do
+  -- Lower the core module.
+  -- Most optimizations are skipped.
+  m <- readInitGlobalVarIO Globals.the_coreModule
+  SystemF.lowerModule True m
+
 runTask (CompilePyonMemToPyonAsm { compileMemInput = mod
                                  , compileFlags = cflags}) = do
   compilePyonMemToPyonAsm cflags mod
@@ -319,7 +325,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
 
   printTimes times
 
-  ll_mod <- SystemF.lowerModule repr_mod
+  ll_mod <- SystemF.lowerModule False repr_mod
   ll_mod <- LowLevel.removeTrioletExports ll_mod
   return ll_mod
 

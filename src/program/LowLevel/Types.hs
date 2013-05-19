@@ -4,6 +4,7 @@
 module LowLevel.Types where
 
 import Control.Applicative
+import Control.Monad
 import Data.Bits
 import Data.Binary
 

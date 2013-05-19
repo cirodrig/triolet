@@ -1009,8 +1009,8 @@ mkGlobalEntryPoints ftype label global_closure
     -- Closure-call functions cannot be externally visible
     internalError $
     "mkGlobalEntryPoints: Closure function has external name: " ++ show global_closure
-  | Just name <- varName global_closure,
-    labelTag name /= NormalLabel =
+  | Just name <- varName global_closure, 
+    any isEntryPointTag $ labelTags name =
     internalError $
     "mkGlobalEntryPoints: Invalid variable name"
   | otherwise = do
@@ -1024,7 +1024,7 @@ mkGlobalEntryPoints ftype label global_closure
     -- If the global closure is externally visible, the other entry points
     -- will also be externally visible
     make_entry_point tag =
-      let new_label = label {labelTag = tag}
+      let new_label = appendLabelTag tag label
       in if varIsExternal global_closure
          then newExternalVar new_label (PrimType PointerType)
          else newVar (Just new_label) (PrimType PointerType)
@@ -1044,8 +1044,8 @@ mkEntryPoints False ftype global_closure
     -- Closure-call functions cannot be externally visible
     internalError $
     "mkGlobalEntryPoints: Closure function has external name: " ++ show global_closure
-  | Just name <- varName global_closure,
-    labelTag name /= NormalLabel =
+  | Just label <- varName global_closure, 
+    any isEntryPointTag $ labelTags label =
     internalError $
     "mkGlobalEntryPoints: Invalid variable name"
   | otherwise = do
@@ -1060,9 +1060,7 @@ mkEntryPoints False ftype global_closure
     -- If the global closure is externally visible, the other entry points
     -- will also be externally visible
     make_entry_point m_label tag =
-      let new_label = case m_label
-                      of Nothing -> Nothing
-                         Just l -> Just $ l {labelTag = tag}
+      let new_label = fmap (appendLabelTag tag) m_label
       in if varIsExternal global_closure
          then let Just l = new_label 
               in newExternalVar l (PrimType PointerType)

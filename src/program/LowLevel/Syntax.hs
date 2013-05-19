@@ -288,6 +288,8 @@ data Var =
   , varType :: ValueType
   }
 
+instance HasLabel Var where getLabel = varName
+
 -- | Get a variable's mangled name.
 --
 -- An externally visible variable's mangled name consists of just its label.
@@ -327,7 +329,7 @@ mangledVarName is_local v
 
 instance Show Var where
   show v =
-    let name = maybe "_" (either id showLocalID . labelLocalName) $ varName v
+    let name = maybe "_" showLabel $ varName v
     in name ++ "'" ++ show (fromIdent $ varID v)
 
 instance Eq Var where

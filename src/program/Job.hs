@@ -317,6 +317,9 @@ data Task a where
 
   GetBuiltins :: Task (SystemF.Module SystemF.Mem)
 
+  -- Compile the builtin module
+  CompileBuiltinsToPyonAsm :: Task LowLevel.Module
+
   -- Compile a high-level, unoptimized module to a low-level module
   CompilePyonMemToPyonAsm
     { compileFlags :: CompileFlags

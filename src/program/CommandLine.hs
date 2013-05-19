@@ -316,7 +316,7 @@ compileBuiltinLibraryJob config Nothing = do
   return pass
 
 compileBuiltinLibraryJob config (Just output_path) = do
-  iface_files <- findInterfaceFiles
+  iface_files <- findInterfaceFiles False
   let ifile = writeFileFromPath $ ifacePath output_path
       outfile = writeFileFromPath output_path
   compileWithCFile config output_path $
@@ -349,7 +349,7 @@ compileObjectJob config (file_path, language) moutput_path = do
   -- Read and compile the file.  Decide where to put the temporary C file.
   case input_language of
     TrioletLanguage -> do
-      iface_files <- findInterfaceFiles
+      iface_files <- findInterfaceFiles True
       let infile = readFileFromPath file_path
           hfile = writeFileFromPath $ headerPath output_path
           hxxfile = writeFileFromPath $ hxxPath output_path
@@ -384,16 +384,20 @@ hxxPath output_path = dropExtension output_path ++ "_cxx.h"
 -- Exported Pyon interface goes here
 ifacePath output_path = replaceExtension output_path ".ti"
 
--- Get all interface files
-findInterfaceFiles = forM interface_files $ \fname -> do
+-- | Get all interface files
+--
+--   If @include_core@, then include the core module in the set of interface
+--   files.  Otherwise don't.
+findInterfaceFiles include_core = forM interface_files $ \fname -> do
   path <- getDataFileName ("interfaces" </> fname)
   return $ readFileFromPath path
   where
     -- These are the RTS interface files that were generated when
     -- the compiler was built
     interface_files =
-      ["memory_py.ti", "prim.ti", "structures.ti", "list.ti", "stream.ti",
-       "inplace.ti", "effects.ti"]
+      ["memory_py.ti", "prim.ti", "structures.ti", "list.ti",
+       "inplace.ti", "effects.ti", "buffer.ti", "lazy.ti"] ++ 
+      if include_core then ["coremodule.ti"] else []
    
 -- | Compile and generate an intermediate C file.
 -- If C files are kept, put the C file in the same location as the output, with
@@ -414,8 +418,9 @@ builtinLibraryCompilation :: CompileFlags -- ^ Command-line flags
                           -> WriteFile    -- ^ Output object file
                           -> Job ()
 builtinLibraryCompilation compile_flags iface_files cfile ifile outfile = do
-  high_level <- taskJob GetBuiltins
-  asm <- taskJob $ CompilePyonMemToPyonAsm compile_flags high_level
+  --high_level <- taskJob GetBuiltins
+  --asm <- taskJob $ CompilePyonMemToPyonAsm compile_flags high_level
+  asm <- taskJob CompileBuiltinsToPyonAsm
   ifaces <- mapM (taskJob . LoadIface) iface_files
   taskJob $ CompilePyonAsmToGenC asm ifaces (writeTempFile cfile) ifile writeNothing writeNothing
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile

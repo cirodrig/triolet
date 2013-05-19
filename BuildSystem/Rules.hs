@@ -300,11 +300,18 @@ moveDataFile lbi file_path = dst_path ?= Shake.copyFile' src_path dst_path
 moveDataFiles lbi = mconcat $ map (moveDataFile lbi) prebuiltDataFiles 
 
 -- | Move compiled library files into the build directory
-moveRtsDataFiles lbi =
-  (prefix </> "*.ti") Shake.*> \dst_path -> do
-    let src_file = dropPathPrefix prefix dst_path `replaceExtension` ".llt.ti"
-        src_path = rtsBuildDir lbi </> src_file
-    Shake.copyFile' src_path dst_path
+moveRtsDataFiles lbi = do
+  (prefix </> "coremodule.ti") Shake.*> \dst_path ->
+    let src_path = rtsBuildDir lbi </> "coremodule.ti"
+    in Shake.copyFile' src_path dst_path
+
+  -- For each .llt file
+  -- Copy 'build/rts/foo.llt.ti' to 'build/data/foo.ti'
+  forM rtsLltSourceFiles $ \llt_file ->
+    let dst_path = prefix </> llt_file `replaceExtension` ".ti"
+        src_path = rtsBuildDir lbi </> llt_file `addExtension` ".ti"
+    in dst_path ?= do
+      Shake.copyFile' src_path dst_path
   where
     prefix = dataBuildDir lbi </> "interfaces"
 
@@ -383,6 +390,19 @@ compileRtsLltFiles verb lbi econfig =
     target_patterns =
       [build_dir ++ "//*.llt.o", build_dir ++ "//*.llt.ti"]
 
+compileRtsCoreFile verb lbi econfig =
+  target_patterns Shake.*>> \[obj_path, _] -> do
+    Shake.need [trioletFile lbi] -- Need compiler
+    let triolet = trioletFile lbi
+        data_args = ["-B", dataBuildDir lbi]
+        args = data_args ++ ["--generate-builtin-library", "-o", obj_path]
+    runCommand (invokeString verb triolet args)
+  where
+    build_dir = rtsBuildDir lbi
+    target_patterns =
+      [build_dir </> "coremodule.o", build_dir </> "coremodule.ti"]
+  
+
 linkRts verb lbi econfig = rtsFile lbi ?= do
   Shake.need objects
 
@@ -451,6 +471,7 @@ generateShakeRules verb lbi econfig = do
     BuildSystem.Rules.compileRtsCFiles verb lbi econfig
     BuildSystem.Rules.compileRtsCxxFiles verb lbi econfig
     BuildSystem.Rules.compileRtsLltFiles verb lbi econfig
+    compileRtsCoreFile verb lbi econfig
     BuildSystem.Rules.linkRts verb lbi econfig
     BuildSystem.Rules.compileTestDriver verb lbi
     return ()

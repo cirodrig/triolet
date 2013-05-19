@@ -15,7 +15,9 @@ types as they are moved in and out of local varibables.
 -}
 
 {-# OPTIONS_GHC -auto-all #-}
-module SystemF.Datatypes.Serialize(createAllSerializers) where
+module SystemF.Datatypes.Serialize
+       (createAllSerializers, getAllSerializers)
+where
 
 import Prelude hiding(catch)
 
@@ -599,6 +601,10 @@ createSerializers data_type =
 -- to one another, and they probably could be refactored to share a common
 -- implementation.
 
+newSerializerVar v =
+  let Just lab = varName v
+  in L.newExternalVar lab (PrimType OwnedType)
+
 createBoxedTypeSerializers data_type =
   let params = dataTypeParams data_type
       param_types = map (VarT . binderVar) params
@@ -614,8 +620,8 @@ createBoxedTypeSerializers data_type =
      -- DEBUG
      liftIO $ putStrLn $ "Boxed type serializer " ++ show dcon_var
 
-     l_serializer <- L.newVar (varName serializer) (PrimType OwnedType)
-     l_deserializer <- L.newVar (varName deserializer) (PrimType OwnedType)
+     l_serializer <- newSerializerVar serializer
+     l_deserializer <- newSerializerVar deserializer
 
      -- Create serializer code
      -- Due to how the code is set up, the serializer and deserializer are 
@@ -671,8 +677,8 @@ createBareTypeSerializers data_type = do
   -- DEBUG
   liftIO $ putStrLn $ "Bare type serializer " ++ show (dataTypeCon data_type)
 
-  l_serializer <- L.newVar (varName serializer) (PrimType OwnedType)
-  l_deserializer <- L.newVar (varName deserializer) (PrimType OwnedType)
+  l_serializer <- newSerializerVar serializer
+  l_deserializer <- newSerializerVar deserializer
 
   -- Create serializer code
   -- Due to how the code is set up, the serializer and deserializer are 
@@ -739,8 +745,8 @@ createValTypeSerializers data_type = do
   -- really do something more visible to users.
   let serializable = null $ layoutStaticTypes $ dataTypeLayout' data_type
 
-  l_serializer <- L.newVar (varName serializer) (PrimType OwnedType)
-  l_deserializer <- L.newVar (varName deserializer) (PrimType OwnedType)
+  l_serializer <- newSerializerVar serializer
+  l_deserializer <- newSerializerVar deserializer
 
   -- Create serializer code
   -- Due to how the code is set up, the serializer and deserializer are 
@@ -796,6 +802,32 @@ createAllSerializers ll_ident_supply ident_supply tenv =
       dtypes <- liftTypeEvalM get_algebraic_data_types
       defs <- mapM createSerializers dtypes
       return $ concat defs
+
+    get_algebraic_data_types :: UnboxedTypeEvalM [DataType]
+    get_algebraic_data_types = do
+      i_type_env <- freezeTypeEnv
+      return $ filter dataTypeIsAlgebraic $ IntMap.elems $
+        getAllDataTypeConstructors i_type_env
+
+-- | Get a list of all serializers and their types
+getAllSerializers :: IdentSupply Var -> TypeEnv -> IO [(Var, Type)]
+getAllSerializers ident_supply tenv =
+  runTypeEvalM worker ident_supply tenv
+  where
+    worker = do
+      dtypes <- get_algebraic_data_types
+      return $ concat $ map serializers dtypes  
+
+    serializers dtype
+      | not $ dataTypeIsAlgebraic dtype = []
+      | dataTypeCon dtype == storedV = []
+      | dataTypeKind dtype == ValK || dataTypeKind dtype == BareK =
+          [(dataTypeUnboxedSerializerVar dtype, serializerType dtype),
+           (dataTypeUnboxedDeserializerVar dtype, deserializerType dtype)]
+      | dataTypeKind dtype == BoxK =
+          concat [[(dataTypeBoxedSerializerVar dtype c, serializerType dtype),
+                   (dataTypeBoxedDeserializerVar dtype c, deserializerType dtype)]
+                 | c <- dataTypeDataConstructors dtype]
 
     get_algebraic_data_types :: UnboxedTypeEvalM [DataType]
     get_algebraic_data_types = do

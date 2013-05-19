@@ -10,6 +10,7 @@ module LowLevel.InterfaceFile
         pprInterface,
         createModuleInterface,
         addInterfaceToModuleImports,
+        mergeWithBuiltinImports,
         removeSelfImports,
         removeTrioletExports)
 where
@@ -43,41 +44,9 @@ import LowLevel.Syntax
 import Export
 import Globals
 
--- | A lookup table from labels to variables.  This table is used for
---   unifying variables that have the same label
-type LabelMap = Map.Map Label Var
-
--- | Create a label map from a list of variables.
---   Order is important: if there are multiple variables with the same
---   label, the last one will be in the map.
-labelMap :: [Var] -> LabelMap
-labelMap vs = Map.fromList $ map assoc vs
-  where
-    assoc v = let !label = externVarName v in (label, v)
-
--- | Take the subset of the 'labelMap' whose labels match one of the given
---   variables
-labelMapRestriction :: LabelMap -> [Var] -> LabelMap
-labelMapRestriction m vars =
-  Map.intersection m $ labelMap vars
-
--- | Take the union of two 'LabelMap's.  Common keys must have the same
---   value and the resulting map must be injective on IDs. 
-labelMapUnion :: LabelMap -> LabelMap -> LabelMap
-labelMapUnion = Map.union
-
--- | Check whether the given externally visible variable's label
---   is a key in the label map
-labelMapContains :: LabelMap -> Var -> Bool
-labelMapContains m v =
-  let !label = externVarName v in label `Map.member` m
-
-labelMapDoesn'tContain :: LabelMap -> Var -> Bool
-labelMapDoesn'tContain m v = not $ labelMapContains m v
-
 -- | Rename a variable by looking up its label in the label map.
 --   If label is not found, create a fresh variable ID.
-renameExternallyVisibleVar :: LabelMap -> Var -> FreshVarM Var
+renameExternallyVisibleVar :: LabelMap Var -> Var -> FreshVarM Var
 renameExternallyVisibleVar m v =
   case Map.lookup lab m
   of Just v' -> return v'
@@ -133,6 +102,28 @@ mkImport pre_import = label `seq` -- Verify that label is valid
     label = case varName import_var
             of Just n  -> n
                Nothing -> internalError "mkImport: No label"
+
+-------------------------------------------------------------------------------
+-- Merging with builtins
+
+-- | Merge the given import list with the list of builtin imports.
+--   If there are label collisions, the builtin imports override the given
+--   import list.  Variable IDs must not conflict with the builtin imports.
+mergeWithBuiltinImports :: [Import] -> IO [Import]
+mergeWithBuiltinImports imps = do
+  let imp_vars = importListReferenceableVars imps
+      builtin_vars = importListReferenceableVars allBuiltinImports
+
+  let visible_variables = labelMap $ imp_vars ++ builtin_vars
+  let builtin_variables = labelMapRestriction visible_variables builtin_vars
+
+  -- Remove imports that are part of the built-in import set
+  let filtered_imps = filter unique imps
+        where
+          unique i = builtin_variables `labelMapDoesn'tContain` importVar i
+
+  -- Add the built-in imports
+  return $ allBuiltinImports ++ filtered_imps
 
 -------------------------------------------------------------------------------
 
@@ -504,7 +495,7 @@ checkRenamedInterfaceCollisions interface_imports module_imports =
 -- | Remove imports from the interface if they define any variables with
 --   the same label as a variable that's in the list.
 --   Verify that the exports don't define any such variables.
-filterInterface :: LabelMap -> LabelMap -> Interface -> Interface
+filterInterface :: LabelMap Var -> LabelMap Var -> Interface -> Interface
 filterInterface other_imports other_exports (Interface imports exports) =
   Interface (filter_imports imports) (check_exports exports)
   where
@@ -524,7 +515,7 @@ filterInterface other_imports other_exports (Interface imports exports) =
 
 -- | Remove imports from the module if they define a variable found in
 --   the list.
-filterModule :: LabelMap -> Module -> Module
+filterModule :: LabelMap Var -> Module -> Module
 filterModule label_map mod =
   mod {moduleImports = filter_imports $ moduleImports mod}
   where
@@ -592,7 +583,7 @@ freshenInterface iface = do
 --   Some of the interface's variable definitions may have been filtered 
 --   out already.  A list of of all the interface's externally visible
 --   variables should be passed in as a parameter.
-renameInterface :: LabelMap     -- ^ The varible renaming to perform
+renameInterface :: LabelMap Var -- ^ The varible renaming to perform
                 -> [Var]        -- ^ All externally visible variables from 
                                 --   the interface
                 -> Interface    -- ^ Interface that should be renamed

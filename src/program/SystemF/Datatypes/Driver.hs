@@ -141,18 +141,18 @@ createLayouts dtype size_param_types static_types =
 
     -- Create one layout for the data type
     unboxed_layout = do
-      i <- createInfoVariable (varName $ dataTypeCon dtype)
-      ser <- createSerializerVariable (varName $ dataTypeCon dtype)
-      des <- createDeserializerVariable (varName $ dataTypeCon dtype)
+      i <- createInfoVariable (dataTypeCon dtype)
+      ser <- createSerializerVariable (dataTypeCon dtype)
+      des <- createDeserializerVariable (dataTypeCon dtype)
       fs <- createConstructorTable createSizeVariable dtype
       return $ unboxedDataTypeLayout size_param_types static_types i ser des fs
 
 -- | Create a lookup table indexed by constructors.
-createConstructorTable :: (Maybe Label -> UnboxedTypeEvalM a) -> DataType
+createConstructorTable :: (Var -> UnboxedTypeEvalM a) -> DataType
                        -> UnboxedTypeEvalM [(Var, a)]
 createConstructorTable f dtype =
   forM (dataTypeDataConstructors dtype) $ \c -> do
-    i <- f $ varName c
+    i <- f c
     return (c, i)
 
 -- | Create a new variable whose name consists of the given label
@@ -169,10 +169,10 @@ createVariable str data_label = do
 
   newVar info_name ObjectLevel
 
-createInfoVariable = createVariable "_info"
-createSizeVariable = createVariable "_size"
-createSerializerVariable = createVariable "_ser"
-createDeserializerVariable = createVariable "_des"
+createInfoVariable v = createVariable "_info" $ varName v
+createSizeVariable v = createVariable "_size" $ varName v
+createSerializerVariable = newTaggedVar SerializerLabel
+createDeserializerVariable = newTaggedVar DeserializerLabel
 
 -------------------------------------------------------------------------------
 

@@ -157,7 +157,8 @@ rtsLltSourceFiles = ["apply_new.llt", "memory_py.llt", "effects.llt",
 -- | Object files that should be created in 'rtsBuildDir'
 rtsObjectFiles = ["apply_data.c.o", "memory.c.o", "debug.c.o", "hashtable.c.o",
                   "par_loops.cc.o"] ++
-                 [f <.> ".o" | f <- rtsLltSourceFiles]
+                 [f <.> ".o" | f <- rtsLltSourceFiles] ++
+                 ["coremodule.o"]
 
 -- | Data files that are not programmatically generated.
 --   These are installed before compiling the RTS.
@@ -175,7 +176,8 @@ dataFiles lbi = [rtsFile lbi] ++ data_files ++ interface_files
     data_files = [build_dir </> f | f <- prebuiltDataFiles]
     interface_files =
       [build_dir </> "interfaces" </> f `replaceExtension` ".ti"
-      | f <- rtsLltSourceFiles]
+      | f <- rtsLltSourceFiles] ++
+      [build_dir </> "interfaces" </> "coremodule.ti"]
 
 testDriverMain = "testdriver.hs"
 

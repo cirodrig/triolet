@@ -25,6 +25,7 @@ import Builtins.Builtins
 import LowLevel.Build
 import qualified LowLevel.Builtins as LL
 import qualified LowLevel.Intrinsics as LL
+import qualified LowLevel.InterfaceFile as LL
 import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
 import qualified LowLevel.Records as LL
@@ -52,6 +53,15 @@ import Type.Var
 import Globals
 import GlobalVar
 import Export
+
+-- | Information about a lowered, imported variable.
+--   This should really be designed better and absorbed into module imports.
+data LoweredImport = LoweredImport !Var !Type !ImportMethod !LL.Import
+
+lowLevelImport :: LoweredImport -> LL.Import
+lowLevelImport (LoweredImport _ _ _ i) = i
+
+type ImportMethod = VarTranslation
 
 {-
 -- | Compute the low-level representation of a variable or temporary value
@@ -97,11 +107,6 @@ assumeVar :: Bool -> Var -> Type -> (LL.Var -> Lower a) -> Lower a
 assumeVar is_exported v rt k = do
   new_v <- translateVariable is_exported v rt
   assumeTranslatedVariable v (Variable new_v) rt (k new_v)
-
-assumeTyParam :: TypeEnvMonad m => TyPat -> m a -> m a
-assumeTyParam (TyPat b) m = assumeBinder b m
-
-assumeTyParams ps m = foldr assumeTyParam m ps
 
 -------------------------------------------------------------------------------
 -- Lowering
@@ -437,7 +442,7 @@ lowerFun :: LL.Var -> FunM -> Lower LL.Fun
 lowerFun fun_name (FunM fun) 
   | null (funParams fun) = internalError "lowerFun"
   | otherwise =
-    assumeTyParams (funTyParams fun) $
+    assumeTyPats (funTyParams fun) $
     withMany lower_param (funParams fun) $ \params -> do
       return_type <- lowerLowerType $ funReturn fun
       genClosureFun fun_name params [return_type] $ lower_body (funBody fun)
@@ -519,7 +524,7 @@ lowerEntity (Lazy kind ll_ty ll_var) (FunEnt (FunM f))
   | not $ null (funParams f) =
       internalError "lowerEntity"
   | otherwise =
-      assumeTyParams (funTyParams f) $
+      assumeTyPats (funTyParams f) $
       lowerGlobalConstant ll_var kind ll_ty (funReturn f) (funBody f)
 
 lowerEntity (Lazy kind ll_ty ll_var) (DataEnt d) =
@@ -654,6 +659,44 @@ checkPredefined v = do
 
   return is_defined
 
+-- | Lower an imported variable definition.
+--   Produces a lowered import statement.
+lowerImport :: GDef Mem -> Lower (Maybe LoweredImport)
+lowerImport def@(Def v ann ent) = do
+  -- Filte out imports of predefined variables
+  is_defined <- checkPredefined v
+  if is_defined
+    then return Nothing
+    else do
+      lv <- translateGlobalDefiniendum def
+      let ty = entityType ent
+      lowered_import <-
+        if definesGlobalFunction ent
+        then externFunImport (translatedVar lv) (case ent of FunEnt f -> f)
+        else externLazyValueImport (translatedVar lv)
+      return $ Just $ LoweredImport v ty lv lowered_import
+
+externFunImport :: LL.Var -> FunM -> Lower LL.Import
+externFunImport v (FunM fun) = assumeTyPats (funTyParams fun) $ do
+  param_types <- mapM (lowerLowerType . patMType) $ funParams fun
+  return_type <- lowerLowerType $ funReturn fun
+  let function_type = LL.closureFunctionType param_types [return_type]
+  ep <- mkGlobalEntryPoints function_type (getLabel' v) v 
+  return $ LL.ImportClosureFun ep Nothing
+
+externLazyValueImport :: LL.Var -> Lower LL.Import
+externLazyValueImport v = return $ LL.ImportData v Nothing
+
+lowerImports :: [GDef Mem] -> Lower [LoweredImport]
+lowerImports defs = liftM catMaybes $ mapM lowerImport defs
+
+-- | Add imports to the environment
+assumeImports :: [LoweredImport] -> Lower a -> Lower a
+assumeImports imps m = foldr assume_import m imps
+  where
+    assume_import (LoweredImport v ty trans _) m =
+      assumeTranslatedVariable v trans ty m
+
 -- | Auto-generate serializer code and add it to the environment
 lowerSerializers :: Lower a -> Lower ([LL.GlobalDef], a)
 lowerSerializers m = do
@@ -674,12 +717,45 @@ lowerSerializers m = do
         Just ty <- lookupType v
         assumeTranslatedVariable v (Variable $ LL.globalDefiniendum ll_def) ty m
 
-lowerModule :: Module Mem -> IO LL.Module
-lowerModule (Module { modName = mod_name
+-- | Add serializers to the environment as imported functions
+importSerializers :: Lower (a, b) -> Lower ([LL.Import], a, b)
+importSerializers m = do
+  var_supply <- getVarSupply
+  tenv <- getTypeEnvironment
+  serializers <- liftIO $ getAllSerializers var_supply tenv
+  assume_serializers serializers m
+  where
+    assume_serializers (s:ss) m =
+      assume_serializer s $ assume_serializers ss m
+
+    assume_serializers [] m =
+      do {(defs, exports) <- m; return ([], defs, exports)}
+
+    assume_serializer (v, t) m = do
+      ll_v <- translateVariable True v t
+      (imps, defs, exports) <- assumeTranslatedVariable v (Variable ll_v) t m
+
+      -- Create an import
+      ll_function_type <- lowerFunctionType t
+      ep <- mkGlobalEntryPoints ll_function_type (getLabel' ll_v) ll_v
+      return (LL.ImportClosureFun ep Nothing : imps, defs, exports)
+
+-- When compiling the core module, lower serializer functions
+withSerializers True m = do
+  (serializers, (defs, exports)) <- lowerSerializers m
+  return ([], LL.Rec serializers : defs, exports)
+
+-- Otherwise, import serializer functions
+withSerializers False m = importSerializers m
+
+
+lowerModule :: Bool -> Module Mem -> IO LL.Module
+lowerModule is_coremodule 
+            (Module { modName = mod_name
                     , modImports = imports
                     , modDefs = globals
                     , modExports = exports}) = do
-  (serializers, (ll_functions, ll_export_sigs)) <-
+  (ll_imports, ll_functions, ll_export_sigs) <-
     withTheNewVarIdentSupply $ \var_supply ->
     withTheLLVarIdentSupply $ \ll_var_supply -> do
       i_global_types <- readInitGlobalVarIO the_memTypes
@@ -687,20 +763,32 @@ lowerModule (Module { modName = mod_name
       global_map <- readInitGlobalVarIO the_loweringMap
       env <- initializeLowerEnv ll_var_supply global_map
 
-      let all_defs = if True
+      let all_defs = if False
                      then Rec imports : globals -- DEBUG: also lower imports
                      else globals
 
       -- Create serializers and add them to the environment
-      let do_lowering = lowerSerializers $
-                        lowerModuleCode mod_name all_defs exports
+      let do_lowering = do
+            ll_imports <- lowerImports imports
+            (ser_imports, ll_functions, ll_export_sigs) <-
+              assumeImports ll_imports $ 
+              withSerializers is_coremodule $
+              lowerModuleCode mod_name all_defs exports
+            return (map lowLevelImport ll_imports ++ ser_imports,
+                    ll_functions,
+                    ll_export_sigs)
+
       runTypeEvalM (runLowering env do_lowering) var_supply global_types
 
   ll_name_supply <- newLocalIDSupply  
 
-  return $ LL.Module { LL.moduleModuleName = mod_name
-                     , LL.moduleNameSupply = ll_name_supply
-                     , LL.moduleImports = LL.allBuiltinImports
-                     , LL.moduleGlobals = LL.Rec serializers : ll_functions
-                     , LL.moduleExports = ll_export_sigs}
+  -- Combine builtin and generated imports
+  merged_imports <- LL.mergeWithBuiltinImports ll_imports
 
+  let ll_mod = LL.Module { LL.moduleModuleName = mod_name
+                         , LL.moduleNameSupply = ll_name_supply
+                         , LL.moduleImports = merged_imports
+                         , LL.moduleGlobals = ll_functions
+                         , LL.moduleExports = ll_export_sigs}
+
+  LL.removeSelfImports ll_mod

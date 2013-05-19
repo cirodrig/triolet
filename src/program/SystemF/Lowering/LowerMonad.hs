@@ -25,6 +25,7 @@ import qualified LowLevel.CodeTypes as LL
 import SystemF.Datatypes.Util
 import SystemF.Datatypes.Size
 import SystemF.Syntax
+import SystemF.MemoryIR
 import Type.Environment
 import Type.Eval
 import Type.Type
@@ -187,3 +188,10 @@ lowerLowerType :: Type -> Lower LL.ValueType
 lowerLowerType ty = Lower $ ReaderT $ \env -> do
   lowerType (llVarSupply env) ty
 
+lowerFunctionType :: Type -> Lower LL.FunctionType
+lowerFunctionType ty = do
+  (ty_params, params, ret) <- liftTypeEvalM $ deconForallFunType ty
+  assumeBinders ty_params $ do
+    param_types <- mapM lowerLowerType params
+    return_type <- lowerLowerType ret
+    return $ LL.closureFunctionType param_types [return_type]

@@ -954,7 +954,7 @@ valInfoDefinition :: IdentSupply LL.Var
                   -> DataType -> UnboxedTypeEvalM [GDef Mem]
 valInfoDefinition var_supply dtype = do
   ent <- typeInfoDefinition var_supply dtype build_info
-  let info_def = addInlineAttribute $ mkDef info_var ent
+  let info_def = addExportedAttribute $ addInlineAttribute $ mkDef info_var ent
   return [info_def]
   --size_defs <- sizeInfoDefinitions var_supply dtype
 
@@ -983,7 +983,7 @@ bareInfoDefinition :: IdentSupply LL.Var
                    -> DataType -> UnboxedTypeEvalM [GDef Mem]
 bareInfoDefinition var_supply dtype = do
   ent <- typeInfoDefinition var_supply dtype build_info
-  let info_def = addInlineAttribute $ mkDef info_var ent
+  let info_def = addExportedAttribute $ addInlineAttribute $ mkDef info_var ent
   return [info_def]
   --size_defs <- sizeInfoDefinitions var_supply dtype
   --return (info_def : size_defs)
@@ -1010,6 +1010,9 @@ addInlineAttribute d
     make_inlined d = d { defAnnInlineRequest = InlAggressively
                        , defAnnInlinePhase = InlSequential
                        }
+
+addExportedAttribute d =
+  modifyDefAnnotation (\a -> a {defAnnExported = True}) d
 
 boxInfoDefinitions :: IdentSupply LL.Var
                    -> DataType -> UnboxedTypeEvalM [GDef Mem]
@@ -1043,5 +1046,7 @@ boxInfoDefinitions var_supply dtype = do
     -- deconstruct them very often.
     add_attributes def
       | FunEnt (FunM f) <- definiens def, null $ funParams f =
-          modifyDefAnnotation (\d -> d {defAnnInlineRequest = InlNever}) def
-      | otherwise = def
+          modifyDefAnnotation (\d -> d {defAnnInlineRequest = InlNever,
+                                        defAnnExported = True}) def
+      | otherwise =
+          modifyDefAnnotation (\d -> d {defAnnExported = True}) def

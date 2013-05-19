@@ -24,7 +24,9 @@ Data-Files:
   interfaces/inplace.ti
   interfaces/structures.ti
   interfaces/list.ti
-  interfaces/stream.ti
+  interfaces/buffer.ti
+  interfaces/lazy.ti
+  interfaces/coremodule.ti
   libtrioletrts.so
 
 Executable triolet 
