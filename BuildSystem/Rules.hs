@@ -393,6 +393,8 @@ compileRtsLltFiles verb lbi econfig =
 compileRtsCoreFile verb lbi econfig =
   target_patterns Shake.*>> \[obj_path, _] -> do
     Shake.need [trioletFile lbi] -- Need compiler
+    Shake.need [dataBuildDir lbi </> "symbols/coremodule"] -- Need coremodule
+    Shake.need $ interfaceFiles lbi
     let triolet = trioletFile lbi
         data_args = ["-B", dataBuildDir lbi]
         args = data_args ++ ["--generate-builtin-library", "-o", obj_path]

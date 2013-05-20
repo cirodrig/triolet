@@ -179,6 +179,12 @@ dataFiles lbi = [rtsFile lbi] ++ data_files ++ interface_files
       | f <- rtsLltSourceFiles] ++
       [build_dir </> "interfaces" </> "coremodule.ti"]
 
+-- | All interface files that will be installed
+interfaceFiles lbi = [build_dir </> "interfaces" </> f `replaceExtension` ".ti"
+                     | f <- rtsLltSourceFiles]
+  where
+    build_dir = dataBuildDir lbi
+
 testDriverMain = "testdriver.hs"
 
 -- The list of non-main modules used by the test driver. 
