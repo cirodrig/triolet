@@ -1,0 +1,7 @@
+
+def f(n): return testCopyViaBuffer(n)
+
+export cplusplus "f_int" f : int -> int
+export cplusplus "f_list" f : list(int) -> list(int)
+export cplusplus "f_tuple" f : ((float, bool), (int, int, int), NoneType, int) -> ((float, bool), (int, int, int), NoneType, int)
+export cplusplus "f_array" f : array2(float) -> array2(float)

@@ -1,0 +1,8 @@
+TestConfig {
+  synopsis	 = "Serialization and deserialization of data",
+  trioletSources = ["ser.tri"],
+  lltrioletSources  = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cc"],
+  expectedResult = ShouldPrint "121\n1.5 1 -17 -19 -23 30\n-7 -11 -13\n0.5 1.0 1.5 2.0 2.5 3.0\n"
+}
