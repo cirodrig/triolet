@@ -18,6 +18,7 @@ $string = [^\"\\\n]			 -- Valid character in string
 @int = \-? @uint
 @float = $digit+\.$digit+
 @word = $alpha $ident*
+@wordtag = @word (\' $alpha )*
 @string = $string*
 @notid = [.\n] # $ident
 @notsym = [.\n] # $symbol
@@ -111,7 +112,7 @@ rules :-
 
 -- Other symbols
 \" @string \"		{ stringTok }
-@word			{ idTok }
+@wordtag		{ idTok }
 @float			{ floatTok }
 @int			{ intTok }
 

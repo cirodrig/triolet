@@ -50,12 +50,32 @@ match t = tokenPrim showT nextParsecPos match_token <?> showToken t
     match_token t' | t == tToken t' = Just ()
                    | otherwise      = Nothing
 
-identifier :: P String
-identifier = tokenPrim showT nextParsecPos get_identifier
+name :: P String
+name = tokenPrim showT nextParsecPos get_name
   where
-    get_identifier t = case tToken t
-                       of IdTok s -> Just s
-                          _ -> Nothing
+    get_name t =
+      case tToken t
+      of IdTok s [] -> Just s
+         _          -> Nothing
+
+identifier :: P Identifier
+identifier = do (n, tags) <- tokenPrim showT nextParsecPos get_identifier
+                tags' <- mapM convert_tag tags
+                return $ Identifier n tags'
+  where
+    get_identifier t =
+      case tToken t
+      of IdTok s tags -> Just (s, tags)
+         _            -> Nothing
+
+    convert_tag tag =
+      case stringLabelTag tag
+      of Just t | not $ isEntryPointTag t -> return t
+         _ -> fail $ "'" ++ tag ++ "' is not a valid tag"
+
+fromIdentifier :: Identifier -> P String
+fromIdentifier (Identifier name []) = return name
+fromIdentifier _ = mzero <?> "identifier"
 
 string :: P String
 string = tokenPrim showT nextParsecPos get_string
@@ -66,15 +86,24 @@ string = tokenPrim showT nextParsecPos get_string
 
 parseModuleName :: P ModuleName
 parseModuleName = do
-  components <- identifier `sepBy1` match DotTok
+  components <- name `sepBy1` match DotTok
   return $ ModuleName $ intercalate "." components
 
-fullyQualifiedName :: P (ModuleName, String)
+fullyQualifiedName :: P (ModuleName, Identifier)
 fullyQualifiedName = do
-  components <- identifier `sepBy1` match DotTok
-  unless (length components >= 2) $ fail "must provide a fully-qualified name"
-  let mod = ModuleName (intercalate "." $ init components)
-  return (mod, last components)
+  (dotted_prefix, end) <- dotname
+  when (null dotted_prefix) $ fail "must provide a fully-qualified name"
+  let mod = ModuleName (intercalate "." dotted_prefix)
+  return (mod, end)
+  where
+    dotname = go id
+      where
+        go hd =
+          let dotted_prefix = do n <- try (name <* match DotTok)
+                                 go (hd . (n:))
+              end = do i <- identifier
+                       return (hd [], i)
+          in dotted_prefix <|> end
 
 integer :: P Integer
 integer = tokenPrim showT nextParsecPos get_int
@@ -141,7 +170,8 @@ parseType = prim_type <|> record_type <?> "type"
                 , (PointerTok, PointerType)]
 
     record_type = do
-      rt <- fmap NamedT identifier
+      nm <- name
+      let rt = mkNamedT nm :: Type Parsed
       try (type_app rt) <|> return rt
       where
         type_app rt = do
@@ -173,7 +203,7 @@ fieldSpec = record_field <|> array_index <?> "field specifier"
   where
     record_field = do
       match DotTok
-      field_name <- identifier
+      field_name <- name
       return $ RecordFS field_name
     
     array_index = do
@@ -261,7 +291,7 @@ basicExpr =
       fmap BaseE atomicExpr
 
 -- Parse an expression that began with an identifier 
-basicExprWithIdentifier :: String -> P (Expr Parsed)
+basicExprWithIdentifier :: Identifier -> P (Expr Parsed)
 basicExprWithIdentifier id =
   try basicExprWithRecordType <|> varE
   where
@@ -270,8 +300,9 @@ basicExprWithIdentifier id =
     -- return type 
     basicExprWithRecordType = do
       args <- optionMaybe parseTypeArgs
-      let base_record_type = NamedT id
-          record_type =
+      id_name <- fromIdentifier id
+      let base_record_type = mkNamedT id_name
+      let record_type =
             case args
             of Nothing -> base_record_type
                Just ts -> AppT base_record_type ts
@@ -384,7 +415,7 @@ statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
     -- A 'typedef' statement
     typedef_stmt = do
       match TypedefTok
-      typename <- identifier
+      typename <- name
       match AssignTok
       ty <- parseType
       match SemiTok
@@ -439,21 +470,21 @@ parameters = parenList parameter
 
 -- | Parse a list of type parameters
 recordParameters :: P [String]
-recordParameters = parenList identifier
+recordParameters = parenList name
 
 recordDef :: P (RecordDef Parsed)
 recordDef = do
   match RecordTok
-  name <- identifier
+  nm <- name
   params <- option [] recordParameters
   fields <- braces $ fieldDef `sepEndBy` match SemiTok
-  return $ RecordDef name params fields
+  return $ mkRecordDef nm params fields
 
 mutability :: P Mutability
 mutability = (match ConstTok >> return Constant) <|> return Mutable
 
 fieldDef :: P (FieldDef Parsed)
-fieldDef = liftM3 FieldDef mutability parseType identifier
+fieldDef = liftM3 FieldDef mutability parseType name
 
 dataDef :: P (DataDef Parsed)
 dataDef = do
@@ -523,17 +554,17 @@ externDecl = extern_decl <|> import_decl
     extern_decl = match ExternTok >> parse_decl make_extern_decl
       where    
         make_extern_decl = do
-          (mod, name) <- fullyQualifiedName
+          (mod, name@(Identifier nm tags)) <- fullyQualifiedName
           c_name <- optionMaybe string
-          let label_ext = externLabel mod name c_name
+          let label_ext = externLabel mod nm tags c_name
           return $ \t -> ExternDecl t label_ext
     
     import_decl = match ImportTok >> parse_decl make_import_decl
       where
         make_import_decl = do
-          local_name <- identifier
-          c_name <- option local_name string
-          let label = externLabel builtinModuleName local_name (Just c_name)
+          local_name@(Identifier nm tags) <- identifier
+          c_name <- option nm string
+          let label = externLabel builtinModuleName nm tags (Just c_name)
           return $ \t -> ImportDecl t label local_name
 
     parse_decl :: P (ExternType Parsed -> ExternDecl Parsed)

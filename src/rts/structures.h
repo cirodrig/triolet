@@ -51,6 +51,65 @@ extern data owned core.internal.structures.repr_MaybeVal_int;
 extern data owned core.internal.structures.repr_MaybeVal_MaybeVal_int;
 #endif
 
+// Prebuilt representations for stored values.
+// These are lazy globals.
+extern data pointer coremodule.repr_int;
+extern data pointer coremodule.repr_float;
+extern data pointer coremodule.repr_bool;
+extern data pointer coremodule.repr_NoneType;
+
+extern function Builtin.repr_arr (FinIndInt, owned) -> owned;
+
+// Auto-generated functions or lazy globals
+extern function coremodule.Tuple2'T (owned, owned) -> owned;
+extern function coremodule.Tuple3'T (owned, owned, owned) -> owned;
+extern function coremodule.Tuple4'T (owned, owned, owned, owned) -> owned;
+extern data pointer coremodule.StuckRef'T;
+extern data pointer coremodule.list'T;
+extern data pointer coremodule.array1'T;
+extern data pointer coremodule.array2'T;
+extern data pointer coremodule.array3'T;
+extern data pointer coremodule.blist'T;
+extern data pointer coremodule.barray1'T;
+extern data pointer coremodule.barray2'T;
+extern data pointer coremodule.barray3'T;
+extern function coremodule.boxed'T (owned) -> owned;
+
+extern procedure core.internal.structures.triolet_typeObject_Stored_int
+  "triolet_typeObject_Stored_int" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_Stored_float
+  "triolet_typeObject_Stored_float" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_Stored_bool
+  "triolet_typeObject_Stored_bool" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_Stored_NoneType
+  "triolet_typeObject_Stored_NoneType" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_Tuple2
+  "triolet_typeObject_Tuple2" (owned, owned) -> owned;
+extern procedure core.internal.structures.triolet_typeObject_Tuple3
+  "triolet_typeObject_Tuple3" (owned, owned, owned) -> owned;
+extern procedure core.internal.structures.triolet_typeObject_Tuple4
+  "triolet_typeObject_Tuple4" (owned, owned, owned, owned) -> owned;
+extern procedure core.internal.structures.triolet_typeObject_StuckRef
+  "triolet_typeObject_StuckRef" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_list
+  "triolet_typeObject_list" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_array1
+  "triolet_typeObject_array1" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_array2
+  "triolet_typeObject_array2" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_array3
+  "triolet_typeObject_array3" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_blist
+  "triolet_typeObject_blist" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_barray1
+  "triolet_typeObject_barray1" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_barray2
+  "triolet_typeObject_barray2" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_barray3
+  "triolet_typeObject_barray3" () -> owned;
+extern procedure core.internal.structures.triolet_typeObject_boxed
+  "triolet_typeObject_boxed" (owned) -> owned;
+
 extern function core.internal.structures.typeObject_serialize
   (owned, owned, unit) -> unit;
 

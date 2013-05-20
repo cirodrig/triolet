@@ -4,7 +4,7 @@ extern data pointer core.internal.list.triolet_List_size "triolet_List_size";
 extern data pointer core.internal.list.triolet_List_alignment "triolet_List_alignment";
 
 extern procedure core.internal.list.triolet_List_initialize "triolet_List_initialize"
-  (int, uint, uint, pointer) -> ();
+  (int, owned, pointer) -> ();
 
 extern procedure core.internal.list.triolet_List_get_contents "triolet_List_get_contents"
   (pointer, uint, uint) -> owned;
@@ -24,7 +24,7 @@ extern data pointer core.internal.list.triolet_Array1_size "triolet_Array1_size"
 extern data pointer core.internal.list.triolet_Array1_alignment "triolet_Array1_alignment";
 
 extern procedure core.internal.list.triolet_Array1_initialize "triolet_Array1_initialize"
-  (int, int, int, uint, uint, pointer) -> ();
+  (int, int, int, owned, pointer) -> ();
 
 extern procedure core.internal.list.triolet_Array1_get_contents "triolet_Array1_get_contents"
   (pointer, uint, uint) -> owned;
@@ -36,7 +36,7 @@ extern data pointer core.internal.list.triolet_Array2_size "triolet_Array2_size"
 extern data pointer core.internal.list.triolet_Array2_alignment "triolet_Array2_alignment";
 
 extern procedure core.internal.list.triolet_Array2_initialize "triolet_Array2_initialize"
-  (int, int, int, int, int, int, uint, uint, pointer) -> ();
+  (int, int, int, int, int, int, owned, pointer) -> ();
 
 extern procedure core.internal.list.triolet_Array2_get_contents "triolet_Array2_get_contents"
   (pointer, uint, uint) -> owned;
@@ -48,7 +48,7 @@ extern data pointer core.internal.list.triolet_Array3_size "triolet_Array3_size"
 extern data pointer core.internal.list.triolet_Array3_alignment "triolet_Array3_alignment";
 
 extern procedure core.internal.list.triolet_Array3_initialize "triolet_Array3_initialize"
-  (int, int, int, int, int, int, int, int, int, uint, uint, pointer) -> ();
+  (int, int, int, int, int, int, int, int, int, owned, pointer) -> ();
 
 extern procedure core.internal.list.triolet_Array3_get_contents "triolet_Array3_get_contents"
   (pointer, uint, uint) -> owned;

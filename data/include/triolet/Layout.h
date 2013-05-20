@@ -80,15 +80,50 @@ namespace Triolet {
     return allocateObject(o, bare_type::getSize(), bare_type::getAlignment());
   }
 
+  /* Type info for various types */
+  extern "C" TriBoxPtr
+  triolet_typeObject_Stored_int(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_Stored_float(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_Stored_bool(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_Stored_NoneType(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_Tuple2(TriBoxPtr, TriBoxPtr);
+  extern "C" TriBoxPtr
+  triolet_typeObject_Tuple3(TriBoxPtr, TriBoxPtr, TriBoxPtr);
+  extern "C" TriBoxPtr
+  triolet_typeObject_Tuple4(TriBoxPtr, TriBoxPtr, TriBoxPtr, TriBoxPtr);
+  extern "C" TriBoxPtr
+  triolet_typeObject_StuckRef(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_list(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_array1(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_array2(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_array3(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_blist(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_barray1(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_barray2(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_barray3(void) __attribute__((pure));
+  extern "C" TriBoxPtr
+  triolet_typeObject_boxed(TriBoxPtr bare_type_object);
+
   /* Layout and member access of various data structures */
 # define TRIOLET_OBJECT_HEADER_SIZE (sizeof(void *))
   extern "C" const TrioletUInt triolet_List_size;
   extern "C" const TrioletUInt triolet_List_alignment;
   extern "C" void
   triolet_List_initialize(TrioletInt length,
-                       TrioletUInt elt_size,
-                       TrioletUInt elt_align,
-                       TriBarePtr ret);
+                          TriBoxPtr elt_repr,
+                          TriBarePtr ret);
   extern "C" TriBoxPtr
   triolet_List_get_contents(TriBarePtr list,
                          TrioletUInt elt_size,
@@ -111,11 +146,10 @@ namespace Triolet {
   extern "C" const TrioletUInt triolet_Array1_alignment;
   extern "C" void
   triolet_Array1_initialize(TrioletInt min,
-                         TrioletInt stride,
-                         TrioletInt size,
-                         TrioletUInt elt_size,
-                         TrioletUInt elt_align,
-                         TriBarePtr ret);
+                            TrioletInt stride,
+                            TrioletInt size,
+                            TriBoxPtr elt_repr,
+                            TriBarePtr ret);
   extern "C" TriBoxPtr
   triolet_Array1_get_contents(TriBarePtr array,
                            TrioletUInt elt_size,
@@ -138,8 +172,7 @@ namespace Triolet {
                          TrioletInt x_min,
                          TrioletInt x_stride,
                          TrioletInt x_size,
-                         TrioletUInt elt_size,
-                         TrioletUInt elt_align,
+                            TriBoxPtr elt_repr,
                          TriBarePtr ret);
   extern "C" TriBoxPtr
   triolet_Array2_get_contents(TriBarePtr array,
@@ -169,8 +202,7 @@ namespace Triolet {
                          TrioletInt x_min,
                          TrioletInt x_stride,
                          TrioletInt x_size,
-                         TrioletUInt elt_size,
-                         TrioletUInt elt_align,
+                            TriBoxPtr elt_repr,
                          TriBarePtr ret);
 
   extern "C" TriBoxPtr

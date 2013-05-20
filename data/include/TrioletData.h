@@ -113,6 +113,10 @@ namespace Triolet {
     typedef Boxed<bare_type> type;
   };
 
+  /* Helper for Incomplete<Stored<T> > */
+  template<typename T>
+  TriBoxPtr createValTypeInfo(void);
+
   /****************************************************************************/
   /* Incomplete objects */
 
@@ -195,6 +199,9 @@ namespace Triolet {
       // Create boxed object and initialize header
       parent = owner =
         triolet_alloc_boxed(bare_type::getSize(), bare_type::getAlignment());
+
+      *(TriBoxPtr *)parent =
+        triolet_typeObject_boxed(bare_type::createTypeInfo());
 
       // Get pointer to the bare object
       object = (TriBarePtr) ((char *)owner) + addPadding<bare_type>(sizeof(void *));
@@ -501,6 +508,9 @@ namespace Triolet {
     StuckRef(TriBoxPtr _parent, TriBarePtr _bare_data)
       : BareType(_parent, _bare_data) {}
 
+    static TriBoxPtr createTypeInfo(void) {
+      return triolet_typeObject_StuckRef();
+    }
     static unsigned int getSize(void) {return sizeof(TriBoxPtr);}
     static unsigned int getAlignment(void) {return __alignof__(TriBoxPtr);}
     static void copy(StuckRef<T> ref, Incomplete<StuckRef<T> >&incompleteRef)
@@ -599,8 +609,16 @@ namespace Triolet {
       Tuple<T1, T2, T3, T4>(void) : BareType() {}
       Tuple<T1, T2, T3, T4>(TriBoxPtr _parent, TriBarePtr _bare_data)
         : BareType(_parent, _bare_data) {}
-      
+
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) {
+        return triolet_typeObject_Tuple4(T1_Bare::createTypeInfo(),
+                                         T2_Bare::createTypeInfo(),
+                                         T3_Bare::createTypeInfo(),
+                                         T4_Bare::createTypeInfo());
+      }
+
       static unsigned int
       getSize() {
         int offset = 0;
@@ -788,6 +806,13 @@ namespace Triolet {
         : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) {
+        return triolet_typeObject_Tuple3(T1_Bare::createTypeInfo(),
+                                         T2_Bare::createTypeInfo(),
+                                         T3_Bare::createTypeInfo());
+      }
+
       static unsigned int 
       getSize() {
         int t1Size = addPadding<T2_Bare>(T1_Bare::getSize());
@@ -934,6 +959,12 @@ namespace Triolet {
         : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) {
+        return triolet_typeObject_Tuple2(T1_Bare::createTypeInfo(),
+                                         T2_Bare::createTypeInfo());
+      }
+
       static unsigned int 
       getSize() {
         int t1Size = addPadding<T2_Bare>(T1_Bare::getSize());
@@ -1031,6 +1062,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_list(); }
+
       static unsigned int 
       getSize() {
         return triolet_List_size;
@@ -1107,6 +1141,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_blist(); }
+
       static unsigned int 
       getSize() {
         return triolet_List_size;
@@ -1195,6 +1232,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_array1(); }
+
       static unsigned int 
       getSize() {
         return triolet_Array1_size;
@@ -1283,6 +1323,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_barray1(); }
+
       static unsigned int 
       getSize() {
         return triolet_Array1_size;
@@ -1382,6 +1425,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_array2(); }
+
       static unsigned int 
       getSize() {
         return triolet_Array2_size;
@@ -1484,6 +1530,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_barray2(); }
+
       static unsigned int 
       getSize() {
         return triolet_Array2_size;
@@ -1598,6 +1647,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_array3(); }
+
       static unsigned int 
       getSize() {
         return triolet_Array3_size;
@@ -1717,6 +1769,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) { }
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return triolet_typeObject_barray3(); }
+
       static unsigned int 
       getSize() {
         return triolet_Array3_size;
@@ -1810,6 +1865,30 @@ namespace Triolet {
 /*          Stored Classes: BareType versions of ValType classes              */
 /******************************************************************************/
 
+  template<>
+  TriBoxPtr createValTypeInfo<Int>(void)
+  {
+    return triolet_typeObject_Stored_int();
+  }
+
+  template<>
+  TriBoxPtr createValTypeInfo<Float>(void)
+  {
+    return triolet_typeObject_Stored_float();
+  }
+
+  template<>
+  TriBoxPtr createValTypeInfo<Bool>(void)
+  {
+    return triolet_typeObject_Stored_bool();
+  }
+
+  template<>
+  TriBoxPtr createValTypeInfo<NoneType>(void)
+  {
+    return triolet_typeObject_Stored_NoneType();
+  }
+
     template<typename T>
   class Stored : public BareType {
     public:
@@ -1829,6 +1908,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) {}
       
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return createValTypeInfo<T>(); }
+
       static unsigned int 
       getSize() __attribute__((const)) { return sizeof(typename T::type);}
       
@@ -1872,6 +1954,9 @@ namespace Triolet {
         : BareType(_parent, _bare_data) {}
 
       // Static Member Functions
+      static TriBoxPtr
+      createTypeInfo(void) { return createValTypeInfo<NoneType>(); }
+
       static unsigned int 
       getSize() __attribute__((const)) { return 0;}
       
@@ -1905,6 +1990,7 @@ namespace Triolet {
         : IncompleteSingleRef< StuckRef<T> >() {}
       Incomplete < StuckRef<T> >(TriBoxPtr _p, TriBarePtr _s)
         : IncompleteSingleRef< StuckRef<T> >(_p, _s) {}
+      
       void initialize(const typename StuckRef<T>::initializer&init =
                       typename StuckRef<T>::initializer())
       {
@@ -2095,9 +2181,8 @@ namespace Triolet {
                       typename List<T>::initializer()) {
         if (!init.is_dummy) {
           triolet_List_initialize(init.length,
-                               T_Bare::getSize(),
-                               T_Bare::getAlignment(),
-                               this->getObject());
+                                  T_Bare::createTypeInfo(),
+                                  this->getObject());
         }
       }
       void create(const typename List<T>::initializer& init =
@@ -2144,9 +2229,8 @@ namespace Triolet {
                       typename BList<T>::initializer()) {
         if(!init.is_dummy)
           triolet_List_initialize(init.length,
-                               sizeof(TriBoxPtr),
-                               __alignof__(TriBoxPtr),
-                               this->getObject());
+                                  triolet_typeObject_StuckRef(),
+                                  this->getObject());
       }
       void create(const typename BList<T>::initializer& init =
                   typename BList<T>::initializer())
@@ -2190,9 +2274,8 @@ namespace Triolet {
       {
         if (!init.is_dummy) {
           triolet_Array1_initialize(init.min, 1, init.end,
-                                 T_Bare::getSize(),
-                                 T_Bare::getAlignment(),
-                                 this->getObject());
+                                    T_Bare::createTypeInfo(),
+                                    this->getObject());
         }
       }
       void create(const typename Array1<T>::initializer &init =
@@ -2240,9 +2323,8 @@ namespace Triolet {
       {
         if (!init.is_dummy) {
           triolet_Array1_initialize(init.min, 1, init.end,
-                                 sizeof(TriBarePtr),
-                                 __alignof__(TriBarePtr),
-                                 this->getObject());
+                                    triolet_typeObject_StuckRef(),
+                                    this->getObject());
         }
       }
       void create(const typename BArray1<T>::initializer &init =
@@ -2290,10 +2372,9 @@ namespace Triolet {
       {
         if (!init.is_dummy) {
           triolet_Array2_initialize(init.ymin, 1, init.yend,
-                                 init.xmin, 1, init.xend,
-                                 T_Bare::getSize(),
-                                 T_Bare::getAlignment(),
-                                 this->getObject());
+                                    init.xmin, 1, init.xend,
+                                    T_Bare::createTypeInfo(),
+                                    this->getObject());
         }
       }
       void create(const typename Array2<T>::initializer &init =
@@ -2357,10 +2438,9 @@ namespace Triolet {
       {
         if (!init.is_dummy) {
           triolet_Array2_initialize(init.ymin, 1, init.yend,
-                                 init.xmin, 1, init.xend,
-                                 sizeof(TriBoxPtr),
-                                 __alignof__(TriBoxPtr),
-                                 this->getObject());
+                                    init.xmin, 1, init.xend,
+                                    triolet_typeObject_StuckRef(),
+                                    this->getObject());
         }
       }
       void create(const typename BArray2<T>::initializer &init =
@@ -2424,11 +2504,10 @@ namespace Triolet {
       {
         if (!init.is_dummy) {
           triolet_Array3_initialize(init.zmin, 1, init.zend,
-                                 init.ymin, 1, init.yend,
-                                 init.xmin, 1, init.xend,
-                                 T_Bare::getSize(),
-                                 T_Bare::getAlignment(),
-                                 this->getObject());
+                                    init.ymin, 1, init.yend,
+                                    init.xmin, 1, init.xend,
+                                    T_Bare::createTypeInfo(),
+                                    this->getObject());
         }
       }
       void create(const typename Array3<T>::initializer &init =
@@ -2506,11 +2585,10 @@ namespace Triolet {
       {
         if (!init.is_dummy) {
           triolet_Array3_initialize(init.zmin, 1, init.zend,
-                                 init.ymin, 1, init.yend,
-                                 init.xmin, 1, init.xend,
-                                 sizeof(TriBoxPtr),
-                                 __alignof__(TriBoxPtr),
-                                 this->getObject());
+                                    init.ymin, 1, init.yend,
+                                    init.xmin, 1, init.xend,
+                                    triolet_typeObject_StuckRef(),
+                                    this->getObject());
         }
       }
       void create(const typename BArray3<T>::initializer &init =
@@ -2780,7 +2858,8 @@ namespace Triolet {
     incomplete_t.create(init);
     Incomplete<T> incomplete2(parent, p);
 
-    /* Methods getSize, getAlignment, isPOD, copy */
+    /* abstract BareType methods */
+    TriBoxPtr type_info = T::createTypeInfo();
     unsigned int x1 = T::getSize();
     unsigned int x2 = T::getAlignment();
     bool b = T::isPOD();

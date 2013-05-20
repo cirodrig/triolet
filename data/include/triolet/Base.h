@@ -82,6 +82,7 @@ namespace Triolet {
     // initializer value
     static initializer defaultInitializer(void);
 
+    static TriBoxPtr createTypeInfo(void);
     static unsigned int getSize(void);
     static unsigned int getAlignment(void);
     static void copy(T, Incomplete<T>&);

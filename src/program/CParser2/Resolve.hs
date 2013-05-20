@@ -259,7 +259,7 @@ newRVarOrCon is_con shadow pos builtin_var lv parsed_name = do
     Nothing -> do
       modname <- getModuleName
       id <- fresh
-      let label = plainLabel modname parsed_name
+      let label = plainLabel modname parsed_name []
           v = ResolvedVar (mkVar id (Just label) lv)
       define v
       return v

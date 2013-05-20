@@ -139,8 +139,8 @@ createNewObjectVariable name = do
     (u_label, p_label) =
       if null name
       then (Nothing, Nothing)
-      else (Just $ plainLabel (ModuleName "trioletfile") name,
-            Just $ plainLabel (ModuleName "trioletfile") name)
+      else (Just $ plainLabel (ModuleName "trioletfile") name [],
+            Just $ plainLabel (ModuleName "trioletfile") name [])
 
 defineVar :: SSAVar -> Gen U.Variable
 defineVar v = do
@@ -153,7 +153,7 @@ defineTyVar v kind = do
   -- Create a type variable
   let lab = case varName v
             of "" -> Nothing
-               nm -> Just $ plainLabel (ModuleName "trioletfile") nm
+               nm -> Just $ plainLabel (ModuleName "trioletfile") nm []
   tyvar <- U.newTyVar lab kind
   modifyScope $ Map.insert v (TypeBinding tyvar)
   return tyvar

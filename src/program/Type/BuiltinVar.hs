@@ -76,7 +76,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
       define_variable source_name id meta_name level =
         let val_name = TH.mkName (source_name ++ "V")
             ty_name = TH.mkName (source_name ++ "T")
-            label = [| Just $ plainLabel builtinModuleName meta_name |]
+            label = [| Just $ plainLabel builtinModuleName meta_name [] |]
         in sequence
            [ TH.valD (TH.varP val_name)
              (TH.normalB [| mkVar (toIdent id) $label level |]) []

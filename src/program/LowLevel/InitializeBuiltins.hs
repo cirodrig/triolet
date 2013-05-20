@@ -42,7 +42,7 @@ initializePrimField :: IdentSupply Var -> BuiltinVarName -> FunctionType
 initializePrimField supply name fty =
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = externLabel mod nm ext_name
+        lab = externLabel mod nm [] ext_name
     v <- newExternalVar lab (PrimType PointerType)
     return (v, fty)
 
@@ -54,7 +54,7 @@ initializeClosureField supply name fty = do
   when (not $ ftIsClosure fty) $ print "initializeClosureField: Error"
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = externLabel mod nm ext_name
+        lab = externLabel mod nm [] ext_name
     v <- newExternalVar lab (PrimType OwnedType)
     ep <- mkGlobalEntryPoints fty lab v
     return (v, ep)
@@ -66,7 +66,7 @@ initializeVarField :: IdentSupply Var
 initializeVarField supply name ty =
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = externLabel mod nm ext_name
+        lab = externLabel mod nm [] ext_name
     newExternalVar lab ty
 
 {-

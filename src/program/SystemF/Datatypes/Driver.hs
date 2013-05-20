@@ -169,7 +169,7 @@ createVariable str data_label = do
 
   newVar info_name ObjectLevel
 
-createInfoVariable v = createVariable "_info" $ varName v
+createInfoVariable = newTaggedVar TypeInfoLabel
 createSizeVariable v = createVariable "_size" $ varName v
 createSerializerVariable = newTaggedVar SerializerLabel
 createDeserializerVariable = newTaggedVar DeserializerLabel

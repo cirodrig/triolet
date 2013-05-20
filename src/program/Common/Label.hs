@@ -8,6 +8,8 @@ module Common.Label
         builtinModuleName,
         LabelTag(..),
         isEntryPointTag,
+        labelTagString,
+        stringLabelTag,
         LocalID(..),
         newLocalIDSupply,
         showLocalID,
@@ -73,6 +75,9 @@ data LabelTag =
   | ExactEntryLabel
     -- | A global function inexact entry point.
   | InexactEntryLabel
+    -- | A type object constructor of a data type or data constructor.
+    --   The type object constructor isEither a function or a lazy global.
+  | TypeInfoLabel
     -- | A serializer function of a data type or data constructor
   | SerializerLabel
     -- | A deserializer function of a data type or data constructor
@@ -87,6 +92,7 @@ isEntryPointTag DirectEntryLabel  = True
 isEntryPointTag VectorEntryLabel  = True
 isEntryPointTag ExactEntryLabel   = True
 isEntryPointTag InexactEntryLabel = True
+isEntryPointTag TypeInfoLabel     = False
 isEntryPointTag SerializerLabel   = False
 isEntryPointTag DeserializerLabel = False
 
@@ -156,23 +162,23 @@ labelLocalNameAsString l =
   of Left s  -> s
      Right _ -> internalError "labelLocalNameAsString: Name is not a string"
 
--- | A label of a builtin Pyon variable
+-- | A label of a builtin Triolet variable
 builtinLabel :: String -> Label
-builtinLabel name = plainLabel builtinModuleName name
+builtinLabel name = plainLabel builtinModuleName name []
 
--- | A label of a regular Pyon variable
-plainLabel :: ModuleName -> String -> Label
-plainLabel mod name = Label mod (Left name) [] Nothing
+-- | A label of a regular Triolet variable
+plainLabel :: ModuleName -> String -> [LabelTag] -> Label
+plainLabel mod name tags = Label mod (Left name) tags Nothing
 
--- | A label of a Pyon variable with an external name
-externLabel :: ModuleName -> String -> Maybe String -> Label
-externLabel mod name ext_name =
-  Label mod (Left name) [] ext_name
+-- | A label of a Triolet variable with an external name
+externLabel :: ModuleName -> String -> [LabelTag] -> Maybe String -> Label
+externLabel mod name tags ext_name =
+  Label mod (Left name) tags ext_name
 
--- | A label of a Pyon variable with a local ID instead of a string name
-anonymousLabel :: ModuleName -> LocalID -> Maybe String -> Label
-anonymousLabel mod id ext_name =
-  Label mod (Right id) [] ext_name
+-- | A label of a Triolet variable with a local ID instead of a string name
+anonymousLabel :: ModuleName -> LocalID -> [LabelTag] -> Maybe String -> Label
+anonymousLabel mod id tags ext_name =
+  Label mod (Right id) tags ext_name
 
 -- | Create a label that is like the given label and can be attached to a
 --   different variable.  Anything that would cause a name conflict, such
@@ -203,8 +209,21 @@ labelTagString DirectEntryLabel  = "D"
 labelTagString VectorEntryLabel  = "V"
 labelTagString ExactEntryLabel   = "E"
 labelTagString InexactEntryLabel = "F"
+labelTagString TypeInfoLabel     = "T"
 labelTagString SerializerLabel   = "R"
 labelTagString DeserializerLabel = "S"
+
+-- | Get the 'LabelTag' encoded by a string 
+stringLabelTag :: String -> Maybe LabelTag
+stringLabelTag "I" = Just InfoTableLabel
+stringLabelTag "D" = Just DirectEntryLabel
+stringLabelTag "V" = Just VectorEntryLabel
+stringLabelTag "E" = Just ExactEntryLabel
+stringLabelTag "F" = Just InexactEntryLabel
+stringLabelTag "T" = Just TypeInfoLabel
+stringLabelTag "R" = Just SerializerLabel
+stringLabelTag "S" = Just DeserializerLabel
+stringLabelTag _   = Nothing
 
 -- | Mangle a label.
 mangleLabel :: Label -> String

@@ -204,7 +204,7 @@ data DictEntry =
 
 -- | A dictionary associates each source code name with a variable or record
 -- type.
-type Dict = Map.Map String DictEntry
+type Dict = Map.Map Identifier DictEntry
 
 emptyDict = Map.empty
 
@@ -320,7 +320,7 @@ enterNonRec m = NR $ \ctx env errs -> do
 
 -- | Add a definition to the current scope.  If the definition conflicts
 -- with an existing definition, an error is reported.
-defineEntity :: String -> DictEntry -> NR ()
+defineEntity :: Identifier -> DictEntry -> NR ()
 defineEntity name value = NR $ \ctx env errs ->
   case currentScope env
   of scope : scopes ->
@@ -329,7 +329,7 @@ defineEntity name value = NR $ \ctx env errs ->
             | name `Map.member` pd ->
                 -- The same name was defined repeatedly in a recursive
                 -- scope.  Report an error.
-                let error_message = "Name '" ++ name ++ "' is redefined"
+                let error_message = "Name '" ++ show name ++ "' is redefined"
                 in return ((), env, addError error_message errs)
             | otherwise ->
                 -- Add the definition to the partial dictionary.
@@ -346,7 +346,7 @@ defineEntity name value = NR $ \ctx env errs ->
 -- | Look up a name.  If the name is not found, then an error is reported, 
 -- the returned entry is undefined, and False is returned.  The returned
 -- entry and boolean value should be used lazily.
-lookupEntity :: String -> NR (DictEntry, Bool)
+lookupEntity :: Identifier -> NR (DictEntry, Bool)
 lookupEntity name = NR $ \_ env errs ->
   -- Ensure that the returned values are non-strict
   let (entry, is_defined, err) = lookup_name $ currentScope env
@@ -362,16 +362,16 @@ lookupEntity name = NR $ \_ env errs ->
             Nothing -> lookup_name scopes
     
     -- If the entire environment has been searched, then fail
-    lookup_name [] = (internalError ("lookupEntity: not found: " ++ name),
+    lookup_name [] = (internalError ("lookupEntity: not found: " ++ show name),
                       False,
-                      Just $ "Undefined name: '" ++ name ++ "'")
+                      Just $ "Undefined name: '" ++ show name ++ "'")
 
 -- | Create a new type synonym and add it to the environment.
 createTypeSynonym :: TypeName Parsed -> Type Typed -> NR (RecordName Typed)
 createTypeSynonym name value = do
   type_id <- fresh
   let synonym = TypeSynonym type_id value
-  defineEntity name (TypeEntry $ NamedT $ SynonymT synonym)
+  defineEntity (Identifier name []) (TypeEntry $ NamedT $ SynonymT synonym)
   return $ SynonymT synonym
 
 defineTypeParam :: TypeName Parsed -> NR ()
@@ -379,7 +379,7 @@ defineTypeParam name = NR $ \ctx env errs ->
   let index = nextTypeParameter env
       env' = env {nextTypeParameter = index + 1}
       define_type_param =
-        defineEntity name (TypeParameterEntry (TypeParameter index))
+        defineEntity (Identifier name []) (TypeParameterEntry (TypeParameter index))
   in runNR define_type_param ctx env' errs
 
 -- | Get the number of type parameters that are free at the current
@@ -393,10 +393,10 @@ getCurrentTypeArity = NR $ \ctx env errs ->
 --
 -- A module name may optionally be specified; if not given, it defaults to the
 -- current input file's module.
-createVar :: String -> ValueType -> NR LL.Var
-createVar name ty = do
+createVar :: Identifier -> ValueType -> NR LL.Var
+createVar (Identifier name tags) ty = do
   module_name <- getSourceModuleName
-  let label = plainLabel module_name name
+  let label = plainLabel module_name name tags
   LL.newVar (Just label) ty
 
 {-
@@ -428,25 +428,27 @@ createGlobalVar name ty = do
     -- Check if variable's unqualified name matches given name
     is_name v =
       case LL.varName v
-      of Just nm -> name == labelLocalNameAsString nm
+      of Just nm -> case name
+                    of Identifier s tags -> s == labelLocalNameAsString nm &&
+                                            tags == labelTags nm
          Nothing -> False
 
 -- | Add a variable definition to the environment
 defineVar :: LL.Var -> Type Typed -> NR ()
 defineVar v t =
   let name = case LL.varName v
-             of Just lab -> labelLocalNameAsString lab 
+             of Just lab -> Identifier (labelLocalNameAsString lab) (labelTags lab)
                 Nothing -> internalError "defineVar"
   in defineEntity name (VarEntry t v)
 
 -- | Process a definition of a name, creating a new variable.
-createAndDefineVar :: String -> Type Typed -> NR LL.Var
+createAndDefineVar :: VarName Parsed -> Type Typed -> NR LL.Var
 createAndDefineVar name ty = do
   v <- createVar name (convertToValueType ty)
   defineVar v ty
   return v
 
-lookupVar :: String -> NR (TypeParametric (Expr Typed))
+lookupVar :: Identifier -> NR (TypeParametric (Expr Typed))
 lookupVar name = do
   (entry, is_defined) <- lookupEntity name
   type_arity <- getCurrentTypeArity
@@ -455,8 +457,8 @@ lookupVar name = do
     then case entry
          of VarEntry _ _ -> Nothing
             TypeParameterEntry _ -> Nothing
-            _ -> Just $ "Not a variable: '" ++ name ++ "'"
-    else Just $ "Not defined: '" ++ name ++ "'"
+            _ -> Just $ "Not a variable: '" ++ show name ++ "'"
+    else Just $ "Not defined: '" ++ show name ++ "'"
   return (var_expr type_arity entry)
   where
     var_expr _          (VarEntry t v) = pure (TExp [t] (VarE v))
@@ -469,7 +471,7 @@ defineRecord :: RecordName Parsed
              -> [TypeParametric (FieldDef Typed)]
              -> NR ()
 defineRecord name nparams mk_fields = do
-  defineEntity name (TypeEntry record)
+  defineEntity (Identifier name []) (TypeEntry record)
   where
     record =
       if nparams == 0
@@ -553,7 +555,7 @@ convertToIntConstant expr =
 
 resolveTypeName :: RecordName Parsed -> NR ParametricType
 resolveTypeName nm = do 
-  (entry, is_defined) <- lookupEntity nm
+  (entry, is_defined) <- lookupEntity (Identifier nm [])
   type_arity <- getCurrentTypeArity
   throwErrorMaybe $
     if is_defined
@@ -1396,9 +1398,9 @@ typeInferModule module_path module_name externs defs = do
                fail "Errors detected while parsing input"
 
 predefinedScope = NonRecScope $
-                  Map.fromList [("array", template arraycon),
-                                ("const_array", template constarraycon),
-                                ("bytes", template bytescon)]
+                  Map.fromList [(Identifier "array" [], template arraycon),
+                                (Identifier "const_array" [], template constarraycon),
+                                (Identifier "bytes" [], template bytescon)]
   where
     template = TypeEntry . NamedT . TemplateT
     

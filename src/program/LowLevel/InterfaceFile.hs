@@ -215,7 +215,7 @@ createExternNames mod_name id_supply from_vars =
                  of Just label -> return label
                     Nothing -> do
                       local_id <- supplyValue id_supply
-                      return $ anonymousLabel mod_name local_id Nothing
+                      return $ anonymousLabel mod_name local_id [] Nothing
         new_v <- runFreshVarM ll_supply $ newExternalVar label (varType v)
         return (v, new_v)
 

@@ -18,12 +18,14 @@ module LLParser.LexCode
 where
 
 import Data.Char
+import Data.List
 import Data.Word
 import Common.SourcePos
 
 -- | A token produced by lexical analysis
 data Token =
-    IdTok !String
+    -- | An identifier with label tags
+    IdTok !String [String]
   | IntTok !Integer
   | FltTok !Double
   | StringTok !String
@@ -104,7 +106,7 @@ data Token =
     deriving(Eq)
 
 showToken :: Token -> String
-showToken (IdTok s) = show s
+showToken (IdTok s tags) = show $ intercalate "\'" (s : tags)
 showToken (IntTok n) = show n
 showToken (FltTok d) = show d
 showToken (StringTok s) = show s
@@ -256,7 +258,13 @@ token f = Action $ \scanner old_inp inp sc n ->
   T (inputPos old_inp) (f (inputString old_inp) n) : scanner inp sc
 
 idTok :: Action
-idTok = token $ \text n -> IdTok (take n text)
+idTok = token $ \text n -> interpret $ take n text
+  where
+    interpret s = let (s1:tags) = splits '\'' s in IdTok s1 tags
+
+    splits c s = case break (c ==) s
+                 of (s1, c' : s2) | c == c' -> s1 : splits c s2
+                    (s1, [])                -> [s1]
 
 intTok :: Action
 intTok = token $ \text n -> IntTok (read $ take n text)

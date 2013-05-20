@@ -602,7 +602,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       wrapped_fun <- createCMarshalingFunction c_export_sig fun_def
 
       -- Create function name.  Function is exported with the given name.
-      let label = externLabel module_name exported_name (Just exported_name)
+      let label = externLabel module_name exported_name [] (Just exported_name)
       v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
       return (LL.Def v wrapped_fun, CExportSig c_export_sig)
 
@@ -616,7 +616,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       -- Create a function name.  This isn't the name the user sees.
       -- The function with this name will be put into object code.  It will
       -- be called from some automatically generated C++ source code.
-      let label = plainLabel module_name exported_name
+      let label = plainLabel module_name exported_name []
       v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
       return (LL.Def v wrapped_fun, CXXExportSig cxx_export_sig)
 

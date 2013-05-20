@@ -19,7 +19,13 @@ type family VarName a :: *
 type instance Expr Parsed = BaseExpr Parsed
 type instance RecordName Parsed = String
 type instance TypeName Parsed = String
-type instance VarName Parsed = String
+type instance VarName Parsed = Identifier
+
+data Identifier = Identifier String [LabelTag]
+                deriving(Eq, Ord)
+
+instance Show Identifier where
+  show (Identifier s tags) = intercalate "\'" (s : map labelTagString tags)
 
 data BinOp =
     MulOp                       -- ^ '*'
@@ -42,6 +48,9 @@ data BinOp =
   deriving(Show)
 
 data UnaryOp = NegateOp | NotOp deriving(Show)
+
+mkNamedT :: String -> Type Parsed
+mkNamedT s = NamedT s
 
 -- | A data type, represented by a primitive type, a record type, or bytes.
 data Type a =
@@ -104,6 +113,9 @@ data Def a =
     RecordDefEnt !(RecordDef a)
   | DataDefEnt !(DataDef a)
   | FunctionDefEnt !(FunctionDef a)
+
+mkRecordDef :: String -> [String] -> [FieldDef Parsed] -> RecordDef Parsed
+mkRecordDef x y z = RecordDef x y z
 
 data RecordDef a =
   RecordDef

@@ -35,6 +35,12 @@ procedure force_Lazy(pointer p, uint size, uint align) -> () {
   };
 };
 
+procedure inline force_Lazy_owned (pointer lazy) -> owned
+{
+  () = () primcall force_Lazy(lazy, sizeof owned, alignof owned);
+  lazy @! Lazy(owned).payload;
+}
+
 #if 0
 // Create a type object for a lazy object
 procedure typeObject_Lazy (SA size, pointer lazy_obj) -> owned {

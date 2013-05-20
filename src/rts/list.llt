@@ -155,12 +155,17 @@ data pointer triolet_List_alignment = alignof List;
 // Allocate a boxed list with the given length.
 // The boolean parameter is true if the list contains POD data.
 procedure triolet_List_initialize
-  (int length, uint elt_size, uint elt_align, pointer ret) -> () {
-  typedef elt_type = bytes(value elt_size, value elt_align);
+  (int length, owned elt_repr, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_repr @! Repr_mem.sizealign.size,
+                           value elt_repr @! Repr_mem.sizealign.align);
   typedef array_type = array(value length, elt_type);
   ret @! List.nelems = FinIndInt {length};
-  ret @! List.contents =
-    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+
+  // Create list contents array
+  contents = pointer primcall triolet_alloc(sizeof Boxed(array_type));
+  contents @! Boxed(array_type).header =
+    owned call boxed'T (owned call repr_arr(FinIndInt{length}, elt_repr));
+  ret @! List.contents = contents as owned;
   ();
 };
 
@@ -190,16 +195,20 @@ data pointer triolet_Array1_size = sizeof Array1;
 data pointer triolet_Array1_alignment = alignof Array1;
 
 procedure triolet_Array1_initialize
-  (int min, int stride, int size, uint elt_size, uint elt_align,
+  (int min, int stride, int size, owned elt_repr,
    pointer ret) -> () {
-  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef elt_type = bytes(value elt_repr @! Repr_mem.sizealign.size,
+                           value elt_repr @! Repr_mem.sizealign.align);
   typedef array_type = array(value size, elt_type);
 
   ret @! Array1.first = min;
   ret @! Array1.stride = stride;
   ret @! Array1.size = FinIndInt {size};
-  ret @! Array1.contents =
-    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+
+  contents = pointer primcall triolet_alloc(sizeof Boxed(array_type));
+  contents @! Boxed(array_type).header =
+    owned call boxed'T (owned call repr_arr(FinIndInt{size}, elt_repr));
+  ret @! Array1.contents = contents as owned;
   ();
 };
 
@@ -222,8 +231,9 @@ data pointer triolet_Array2_alignment = alignof Array2;
 
 procedure triolet_Array2_initialize
   (int y_min, int y_stride, int y_size, int x_min, int x_stride, int x_size,
-   uint elt_size, uint elt_align, pointer ret) -> () {
-  typedef elt_type = bytes(value elt_size, value elt_align);
+   owned elt_repr, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_repr @! Repr_mem.sizealign.size,
+                           value elt_repr @! Repr_mem.sizealign.align);
   typedef array_type = array(value y_size, array(value x_size, elt_type));
 
   ret @! Array2.first_y = y_min;
@@ -232,8 +242,12 @@ procedure triolet_Array2_initialize
   ret @! Array2.first_x = x_min;
   ret @! Array2.stride_x = x_stride;
   ret @! Array2.size_x = FinIndInt {x_size};
-  ret @! Array2.contents =
-    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+  contents = pointer primcall triolet_alloc(sizeof Boxed(array_type));
+  array_repr = owned call repr_arr(FinIndInt{y_size},
+                                   owned call repr_arr(FinIndInt{x_size},
+                                                       elt_repr));
+  contents @! Boxed(array_type).header = owned call boxed'T (array_repr);
+  ret @! Array2.contents = contents as owned;
   ();
 };
 
@@ -262,8 +276,9 @@ procedure triolet_Array3_initialize
   (int z_min, int z_stride, int z_size,
    int y_min, int y_stride, int y_size,
    int x_min, int x_stride, int x_size,
-   uint elt_size, uint elt_align, pointer ret) -> () {
-  typedef elt_type = bytes(value elt_size, value elt_align);
+   owned elt_repr, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_repr @! Repr_mem.sizealign.size,
+                           value elt_repr @! Repr_mem.sizealign.align);
   typedef array_type = array(value z_size, array(value y_size, array(value x_size, elt_type)));
 
   ret @! Array3.first_z = z_min;
@@ -275,8 +290,13 @@ procedure triolet_Array3_initialize
   ret @! Array3.first_x = x_min;
   ret @! Array3.stride_x = x_stride;
   ret @! Array3.size_x = FinIndInt {x_size};
-  ret @! Array3.contents =
-    pointer primcall triolet_alloc(sizeof Boxed(array_type)) as owned;
+  contents = pointer primcall triolet_alloc(sizeof Boxed(array_type));
+  array_repr = owned call repr_arr(FinIndInt{z_size},
+                                   owned call repr_arr(FinIndInt{y_size},
+                                                       owned call repr_arr(FinIndInt{x_size},
+                                                                           elt_repr)));
+  contents @! Boxed(array_type).header = owned call boxed'T (array_repr);
+  ret @! Array3.contents = contents as owned;
   ();
 };
 

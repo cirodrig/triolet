@@ -7,6 +7,7 @@ module core.internal.structures;
 #include "memory_py.h"
 #include "apply_py.h"
 #include "structures.h"
+#include "lazy.h"
 #include "list.h"
 #include "buffer.h"
 import procedure exit (int) -> ();
@@ -497,6 +498,79 @@ data pointer int_info = InfoTableHeader {
 };
 #endif
 
+// Representation of Stored int
+procedure triolet_typeObject_Stored_int () -> owned {
+  owned primcall force_Lazy_owned(repr_int);
+};
+
+// Representation of Stored float
+procedure triolet_typeObject_Stored_float () -> owned {
+  owned primcall force_Lazy_owned(repr_float);
+};
+
+// Representation of Stored bool
+procedure triolet_typeObject_Stored_bool () -> owned {
+  owned primcall force_Lazy_owned(repr_bool);
+};
+
+// Representation of Stored NoneType
+procedure triolet_typeObject_Stored_NoneType () -> owned {
+  owned primcall force_Lazy_owned(repr_NoneType);
+};
+
+// Type object of (boxed t)
+procedure triolet_typeObject_boxed (owned bare_type_object) -> owned {
+  owned call boxed'T (bare_type_object);
+};
+
+procedure triolet_typeObject_Tuple2 (owned t1, owned t2) -> owned {
+  owned call Tuple2'T (t1, t2);
+};
+
+procedure triolet_typeObject_Tuple3 (owned t1, owned t2, owned t3) -> owned {
+  owned call Tuple3'T (t1, t2, t3);
+};
+
+procedure triolet_typeObject_Tuple4 (owned t1, owned t2, owned t3, owned t4) -> owned {
+  owned call Tuple4'T (t1, t2, t3, t4);
+};
+
+procedure triolet_typeObject_StuckRef () -> owned {
+  owned primcall force_Lazy_owned(StuckRef'T);
+};
+
+procedure triolet_typeObject_list () -> owned {
+  owned primcall force_Lazy_owned(list'T);
+};
+
+procedure triolet_typeObject_array1 () -> owned {
+  owned primcall force_Lazy_owned(array1'T);
+};
+
+procedure triolet_typeObject_array2 () -> owned {
+  owned primcall force_Lazy_owned(array2'T);
+};
+
+procedure triolet_typeObject_array3 () -> owned {
+  owned primcall force_Lazy_owned(array3'T);
+};
+
+procedure triolet_typeObject_blist () -> owned {
+  owned primcall force_Lazy_owned(blist'T);
+};
+
+procedure triolet_typeObject_barray1 () -> owned {
+  owned primcall force_Lazy_owned(barray1'T);
+};
+
+procedure triolet_typeObject_barray2 () -> owned {
+  owned primcall force_Lazy_owned(barray2'T);
+};
+
+procedure triolet_typeObject_barray3 () -> owned {
+  owned primcall force_Lazy_owned(barray3'T);
+};
+
 // The type object for a type object.
 // This _must_ be statically allocated because it points to itself.
 data owned typeObject_typeObject = TypeObject_mem {
@@ -741,3 +815,4 @@ function function_deserialize (owned type_obj, cursor buffer) -> ReadResult(owne
 
   ReadResult(owned) {buffer3, obj as owned};
 };
+
