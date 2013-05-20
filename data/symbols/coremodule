@@ -1851,7 +1851,7 @@ getStoredUint : MessageReader -> (MessageReader, Init (Stored uint)) attribute(b
 getStoredFloat : MessageReader -> (MessageReader, Init (Stored float)) attribute(builtin);
 
 getArrWithSerializer : forall n : intindex, a : bare.
-                       FIInt n -> SizeAlign a
+                       FIInt n -> Repr a
                     -> (MessageReader -> (MessageReader, Init a))
                     -> MessageReader -> (MessageReader, Init (arr n a));
 
@@ -2455,7 +2455,7 @@ repr_arr @(n : intindex) @(e : bare)
   (sizealign_arr @n @e size sa_e)
   (notAReference @(arr n e) (idCoercion @(Boxed (arr n e))))
   (putArr @n @e size repr_e)
-  (getArrWithSerializer @n @e size sa_e get);
+  (getArrWithSerializer @n @e size repr_e get);
 
 putArr @(n : intindex) @(e : bare) (size : FIInt n) (repr_e : Repr e)
   (x : arr n e) (buf : OpaqueRef) (s : Store) -> Store
@@ -2469,7 +2469,7 @@ getArr @(n : intindex) @(e : bare) (size : FIInt n) (repr_e : Repr e)
   attribute(inline, builtin) =
 
   case repr_e of repr tyob sa_e is_ref_e put get.
-  getArrWithSerializer @n @e size sa_e get buf;
+  getArrWithSerializer @n @e size repr_e get buf;
 
 repr_Stored @(a : val) (rep : ReprVal a)
   -> Repr (Stored a) attribute(inline, inline_postfinal, builtin) =

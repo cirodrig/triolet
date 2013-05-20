@@ -164,7 +164,7 @@ function inline putStoredFloat (cursor c, owned buf, unit dummy) -> unit {
   unit call putFloat (float load c, buf, dummy);
 };
 
-function inline putArrWithSerializer
+function putArrWithSerializer
   (FinIndInt length, SA elem_size, owned put_elem, cursor arr,
    owned buf, unit dummy) -> unit {
 
@@ -345,21 +345,23 @@ function inline getStoredFloat (cursor buffer) -> ReadResult(owned) {
   ReadResult(owned) {end, write_result};
 };
 
-function inline getArrWithSerializer
-  (FinIndInt length, SA elem_size, owned get_elem, cursor buffer)
+function getArrWithSerializer
+  (FinIndInt length, owned repr_e, owned get_elem, cursor buffer)
   -> ReadResult(owned) {
 
   FinIndInt {n_elems} = length;
-  SA {size, align, pointerless} = elem_size;
+  elem_size = repr_e @! Repr_mem.sizealign.size;
+  elem_align = repr_e @! Repr_mem.sizealign.align;
+  elem_pointerless = repr_e @! Repr_mem.sizealign.pointerless as bool;
   typedef array_type =
     array(value n_elems,
-          bytes(value (size as int), value (align as int)));
+          bytes(value (elem_size as int), value (elem_align as int)));
   array_size = sizeof array_type;
 
-  if (pointerless == uint 1) {
+  if (elem_pointerless) {
     // Array contains no pointers; just use memcpy
     (start, end) =
-      (cursor, cursor) primcall ReadBuffer_advance(buffer, array_size, align);
+      (cursor, cursor) primcall ReadBuffer_advance(buffer, array_size, elem_align);
 
     letrec {
       function write_result(pointer ret) -> unit {
@@ -374,9 +376,10 @@ function inline getArrWithSerializer
     // to destination
     tmp_data = pointer primcall triolet_alloc(sizeof Obj(array_type));
 
-    // FIXME: Write object header
-    tmp_data @! Obj(array_type).header = null as owned;
-    () = () primcall exit(int -1);
+    // Write object header
+    header = owned call boxed'T(owned call repr_arr (FinIndInt{n_elems},
+                                                     repr_e));
+    tmp_data @! Obj(array_type).header = header;
 
     (_, buffer2) = while (int i = int 0, cursor b = buffer) (i < n_elems) {
       ReadResult(owned) {b2, write_elem} = ReadResult(owned) call get_elem (b);

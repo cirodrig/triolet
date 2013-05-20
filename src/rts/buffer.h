@@ -3,7 +3,7 @@
 extern function core.internal.buffer.putArrWithSerializer
   (FinIndInt, SA, owned, cursor, owned, unit) -> unit;
 extern function core.internal.buffer.getArrWithSerializer
-  (FinIndInt, SA, owned, cursor) -> ReadResult(owned);
+  (FinIndInt, owned, owned, cursor) -> ReadResult(owned);
 
 extern function core.internal.buffer.putInt (int, owned, unit) -> unit;
 extern function core.internal.buffer.putUint (uint, owned, unit) -> unit;
