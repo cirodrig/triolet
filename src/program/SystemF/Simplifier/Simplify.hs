@@ -391,7 +391,7 @@ isInliningCandidate phase def = inlining_ok && phase_ok && code_growth_ok
           -- Does the function return a stream?
           let FunM function = definiens def
           in case fromVarApp $ funReturn function
-             of Just (op, _) | op `isCoreBuiltin` The_Stream1 -> True
+             of Just (op, _) | op `isCoreBuiltin` The_Stream -> True
                 _ -> False
 
     -- An arbitrary function size threshold.  Functions smaller than this

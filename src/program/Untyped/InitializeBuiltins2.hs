@@ -152,12 +152,12 @@ frontendType tc_map sf_type = do
                args' <- frontendTypes tc_map args
                return $ appTys op args'
 
-           -- Hack to translate @Stream1@ -> @iter list_dim@
+{-           -- Hack to translate @Stream1@ -> @iter list_dim@
            | op_var `isCoreBuiltin` The_Stream1 -> do
                let op = ConTy (builtinTyCon TheTC_iter) @@
                         ConTy (builtinTyCon TheTC_list_dim)
                args' <- frontendTypes tc_map args
-               return $ appTys op args'
+               return $ appTys op args'-}
 
          (op, args) -> do
            op' <- frontendType tc_map op
@@ -501,6 +501,7 @@ tyConInitializers =
       [ (TheTC_Repr,           The_Repr,             True,  reprClass)
       , (TheTC_Eq,             The_EqDict,           False, eqClass)
       , (TheTC_Ord,            The_OrdDict,          False, ordClass)
+      , (TheTC_Functor,        The_FunctorDict,      False, functorClass)
       , (TheTC_Traversable,    The_TraversableDict,  False, traversableClass)
       , (TheTC_Shape,          The_ShapeDict,        False, shapeClass)
       , (TheTC_Indexable,      The_IndexableDict,    False, indexableClass)
@@ -749,21 +750,34 @@ ordClass _ tc_map = do
 
   return [int_instance, float_instance, tuple2_instance]
 
+functorClass _ tc_map = do
+  view_instance <- polymorphic [Star] $ \ [sh] ->
+    let head = ConTy (builtinTyCon TheTC_view) @@ ConTy sh
+        body = MethodsInstance [coreBuiltin The_map_view]    
+    in return ([], Instance head body)
+  return [view_instance]
+
 traversableClass _ tc_map = do
   let instances1 = [monomorphicClassInstance head methods
                    | (head, methods) <- monomorphic_instances]
   iter_instance <- polymorphic [Star] $ \ [sh] ->
     let head = ConTy (builtinTyCon TheTC_iter) @@ ConTy sh
-        body = MethodsInstance [coreBuiltin The_TraversableDict_Stream_traverse,
-                                coreBuiltin The_TraversableDict_Stream_build]
+        body = MethodsInstance [coreBuiltin The_traverse_Stream,
+                                coreBuiltin The_build_Stream]
+    in return ([], Instance head body)
+  view_instance <- polymorphic [Star] $ \ [sh] ->
+    let head = ConTy (builtinTyCon TheTC_view) @@ ConTy sh
+        body = MethodsInstance [coreBuiltin The_traverse_view,
+                                coreBuiltin The_build_view]
     in return ([], Instance head body)
 
   return $ [iter_instance] ++ instances1
   where
     monomorphic_instances =
       [(ConTy $ builtinTyCon TheTC_list,
-        [coreBuiltin The_TraversableDict_list_traverse,
-         coreBuiltin The_TraversableDict_list_build]),
+        [coreBuiltin The_traverse_list,
+         coreBuiltin The_build_list])]
+      {-
        (ConTy $ builtinTyCon TheTC_blist,
         [coreBuiltin The_TraversableDict_blist_traverse,
          coreBuiltin The_TraversableDict_blist_build]),
@@ -796,7 +810,7 @@ traversableClass _ tc_map = do
          coreBuiltin The_TraversableDict_view_dim2_build]),
        (ConTy (builtinTyCon TheTC_view) @@ ConTy (builtinTyCon TheTC_dim3),
         [coreBuiltin The_TraversableDict_view_dim3_traverse,
-         coreBuiltin The_TraversableDict_view_dim3_build])]
+         coreBuiltin The_TraversableDict_view_dim3_build])]-}
 
 shapeClass _ tc_map = do
   let instances =
@@ -805,6 +819,8 @@ shapeClass _ tc_map = do
   return instances
   where
     monomorphic_instances =
+      []
+      {-
       [(ConTy (builtinTyCon TheTC_list_dim),
         [coreBuiltin The_ShapeDict_list_dim_member,
          coreBuiltin The_ShapeDict_list_dim_intersect,
@@ -854,7 +870,7 @@ shapeClass _ tc_map = do
          coreBuiltin The_ShapeDict_dim3_zipWith,
          coreBuiltin The_ShapeDict_dim3_zipWith3,
          coreBuiltin The_ShapeDict_dim3_zipWith4,
-         coreBuiltin The_ShapeDict_dim3_slice])]
+         coreBuiltin The_ShapeDict_dim3_slice])]-}
 
 indexableClass _ tc_map = do
   let instances =
@@ -864,12 +880,15 @@ indexableClass _ tc_map = do
     polymorphic [Star] $ \ [sh] ->
     let head = ConTy (builtinTyCon TheTC_view) @@ ConTy sh
         cst = [instancePredicate TheTC_Shape (ConTy sh)]
-        body = [coreBuiltin The_IndexableDict_view_at_point,
-                coreBuiltin The_IndexableDict_view_get_shape]
+        body = [coreBuiltin The_at_view,
+                coreBuiltin The_shape_view,
+                coreBuiltin The_slice_view]
     in return (cst, Instance head $ MethodsInstance body)
   return $ view_instance : instances
   where
     monomorphic_instances =
+      []
+      {-
       [(ConTy $ builtinTyCon TheTC_list,
         [coreBuiltin The_IndexableDict_list_at_point,
          coreBuiltin The_IndexableDict_list_get_shape]),
@@ -893,7 +912,7 @@ indexableClass _ tc_map = do
          coreBuiltin The_IndexableDict_barray2_get_shape]),
        (ConTy $ builtinTyCon TheTC_barray3,
         [coreBuiltin The_IndexableDict_barray3_at_point,
-         coreBuiltin The_IndexableDict_barray3_get_shape])]
+         coreBuiltin The_IndexableDict_barray3_get_shape])]-}
 
 additiveClass _ tc_map = do
   let instances =
@@ -1186,8 +1205,8 @@ varInitializers =
       , (TheV_head, The_head)
       , (TheV_tail, The_tail)
       , (TheV_list_dim, The_fun_list_dim)
-      , (TheV_map, The_fun_map)
-      , (TheV_filter, The_fun_filter)
+      , (TheV_map, The_map_Stream)
+      {-, (TheV_filter, The_fun_filter)
       , (TheV_reduce, The_fun_reduce)
       , (TheV_reduce1, The_fun_reduce1)
       , (TheV_sum, The_fun_sum)
@@ -1208,7 +1227,7 @@ varInitializers =
       , (TheV_outerproduct, The_outerproduct)
       , (TheV_displaceView, The_displaceView)
       , (TheV_multiplyView, The_multiplyView)
-      , (TheV_divideView, The_divideView)
+      , (TheV_divideView, The_divideView)-}
       , (TheV_testCopyViaBuffer, The_testCopyViaBuffer)
       {- Temporarily commented out while porting the library
       , (TheV_permute1D, The_permute1D)
@@ -1254,9 +1273,9 @@ varInitializers =
       , (TheV___rshift__, The_rshift)
       , (TheV___getitem__, The_safeIndex)
       , (TheV___getslice__, The_safeSlice)
-      , (TheV_do, The_Stream1_return)
-      , (TheV_guard, The_Stream1_guard)
-      , (TheV_iterBind, The_Stream1_bind)
+      , (TheV_do, The_unit_Stream)
+      , (TheV_guard, The_guard_Stream)
+      , (TheV_iterBind, The_bind_Stream)
       , (TheV_make_sliceObject, The_make_sliceObject)
       ]
 
@@ -1272,18 +1291,15 @@ varInitializers =
       , (TheV_iter,           TheTC_Traversable,     0, "iter")
       , (TheV_build,          TheTC_Traversable,     1, "build")
 
-      , (TheV_member,         TheTC_Shape,           0, "member")
-      , (TheV_intersection,   TheTC_Shape,           1, "intersection")
-      , (TheV_flatten,        TheTC_Shape,           2, "flatten")
-      , (TheV_generate,       TheTC_Shape,           3, "generate")
-      , (TheV_mapStream,      TheTC_Shape,           4, "mapIter")
-      , (TheV_zipWithStream,  TheTC_Shape,           5, "zipWithIter")
-      , (TheV_zipWith3Stream, TheTC_Shape,           6, "zipWith3Iter")
-      , (TheV_zipWith4Stream, TheTC_Shape,           7, "zipWith4Iter")
-      , (TheV_getSlice,       TheTC_Shape,           8, "getSlice")
+      , (TheV_intersection,   TheTC_Shape,           3, "intersection")
+      , (TheV_member,         TheTC_Shape,           4, "member")
+      , (TheV_flatten,        TheTC_Shape,           7, "flatten")
+      , (TheV_generate,       TheTC_Shape,           8, "generate")
+      , (TheV_zipWithStream,  TheTC_Shape,           9, "zipWithIter")
 
-      , (TheV_at_point,       TheTC_Indexable,       0, "at_point")
-      , (TheV_domain,         TheTC_Indexable,       1, "domain")
+      , (TheV_domain,         TheTC_Indexable,       0, "domain")
+      --, (TheV_at_point,       TheTC_Indexable,       1, "at_point")
+      --, (TheV_at_point,       TheTC_Indexable,       1, "at_point")
 
       , (TheV___add__,        TheTC_Additive,        0, "__add__")
       , (TheV___sub__,        TheTC_Additive,        1, "__sub__")

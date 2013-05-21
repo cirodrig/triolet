@@ -78,24 +78,24 @@ parLoopOperator v =
             coreBuiltin The_blocked_2d_reduce,
             coreBuiltin The_blocked_1d_reduceip,
             coreBuiltin The_blocked_doall,
-            coreBuiltin The_blocked_doall2,
-            coreBuiltin The_parallel_list_dim_reduce,
+            coreBuiltin The_blocked_doall2 --,
+            {-coreBuiltin The_parallel_list_dim_reduce,
             coreBuiltin The_parallel_dim1_reduce,
             coreBuiltin The_parallel_dim2_reduce,
             coreBuiltin The_parallel_list_dim_reduce1,
             coreBuiltin The_parallel_dim1_reduce1,
             coreBuiltin The_parallel_dim2_reduce1,
-            --coreBuiltin The_parallel_list_dim_scatter,
+            coreBuiltin The_parallel_list_dim_scatter,
             coreBuiltin The_Sequence_parallel_reduce,
-            coreBuiltin The_Sequence_parallel_build --,
-            --coreBuiltin The_Sequence_parallel_scatter
+            coreBuiltin The_Sequence_parallel_build,
+            coreBuiltin The_Sequence_parallel_scatter-}
            ] 
   
 otherLoopOperator v =
   v `elem` [coreBuiltin The_for,
-            coreBuiltin The_doall,
+            coreBuiltin The_doall -- ,
             --coreBuiltin The_histogram,
-            coreBuiltin The_fun_reduce,
+            {-coreBuiltin The_fun_reduce,
             coreBuiltin The_fun_reduce1,
             coreBuiltin The_TraversableDict_list_build,
             coreBuiltin The_primitive_list_dim_reduce,
@@ -103,7 +103,7 @@ otherLoopOperator v =
             coreBuiltin The_primitive_dim2_reduce,
             coreBuiltin The_primitive_list_dim_reduce1,
             coreBuiltin The_primitive_dim1_reduce1,
-            coreBuiltin The_primitive_dim2_reduce1 --,
+            coreBuiltin The_primitive_dim2_reduce1, -}
             --coreBuiltin The_primitive_list_dim_scatter
             ]
 
@@ -155,7 +155,7 @@ replaceWithParallelApp inf op_var ty_args args =
              _ -> False
 
     parallel_function_table =
-      [ (coreBuiltin The_primitive_list_dim_reduce,
+      [ {-(coreBuiltin The_primitive_list_dim_reduce,
          ReplaceWith $ coreBuiltin The_parallel_list_dim_reduce)
       , (coreBuiltin The_primitive_dim1_reduce,
          ReplaceWith $ coreBuiltin The_parallel_dim1_reduce)
@@ -176,9 +176,10 @@ replaceWithParallelApp inf op_var ty_args args =
       , (coreBuiltin The_Sequence_list_build,
          Rewrite rewriteSequenceBuildList)
       --, (coreBuiltin The_Sequence_scatter,
-        --Rewrite rewriteSequenceScatter)
+        Rewrite rewriteSequenceScatter)-}
       ]
 
+{-
 -- | Attempt to rewrite a reduction over a sequence.
 --
 --   Try to match the pattern @reduce (generate_bind d f) g@ and
@@ -243,6 +244,7 @@ rewriteSequenceScatter inf [t1, t2] (repr1 : repr2 : scatterer : source : other_
                            (coreBuiltin The_Sequence_parallel_scatter))
       [t1, t2]
       (repr1 : repr2 : range : scatterer : transformer : other_args)
+-}
 
 -------------------------------------------------------------------------------
 -- Traversal

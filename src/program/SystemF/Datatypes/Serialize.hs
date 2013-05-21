@@ -205,6 +205,7 @@ primTypeSerDes pt
   | pt == trioletUintType  = builtin L.the_fun_putUint L.the_fun_getUint
   | pt == trioletFloatType = builtin L.the_fun_putFloat L.the_fun_getFloat
   | pt == UnitType         = builtin L.the_fun_putUnit L.the_fun_getUnit
+  | pt == CursorType       = builtin L.the_fun_putCursor L.the_fun_getCursor
   | otherwise = internalError $ "primTypeSerDes: " ++ show pt
   where
     builtin s d =

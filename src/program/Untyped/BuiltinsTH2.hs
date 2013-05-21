@@ -17,7 +17,7 @@ frontendSourceTypes =
    "Scatter",
 
    -- Classes
-   "Repr", "Traversable", "Shape", "Indexable",
+   "Repr", "Functor", "Traversable", "Shape", "Indexable",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",
@@ -48,7 +48,7 @@ frontendSourceGlobals =
   , "head"
   , "tail"
   , "map"
-  , "filter"
+  {-, "filter"
   , "reduce"
   , "reduce1"
   , "sum"
@@ -69,7 +69,7 @@ frontendSourceGlobals =
   , "outerproduct"
   , "displaceView"
   , "multiplyView"
-  , "divideView"
+  , "divideView"-}
   , "testCopyViaBuffer"
   {-, "permute1D"
   , "boxedPermute1D"
@@ -161,8 +161,7 @@ frontendOtherGlobals =
     "safeIndex", "safeSlice",
     "member",
     "generate",
-    "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
-    "getSlice",
+    "zipWithStream",
     "at_point",
     "displaceDomain", "multiplyDomain", "divideDomain",
     "multiplyIndex", "divideIndex",

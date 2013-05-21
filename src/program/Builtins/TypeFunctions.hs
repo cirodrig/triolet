@@ -109,7 +109,7 @@ builtinTypeFunctions name_environment =
           , ("index", indexPureTF, idTF The_index 1, indexMemTF)
           , ("offset", offsetPureTF, idTF The_offset 1, offsetMemTF)
           , ("slice", slicePureTF, idTF The_slice 1, sliceMemTF)
-          , ("Stream", streamPureTF, idTF The_Stream 1, streamMemTF)
+          --, ("Stream", streamPureTF, idTF The_Stream 1, streamMemTF)
 
             -- Use the same function in mem and spec
           , ("AsBox", boxedPureTF, boxedMemTF, boxedMemTF)
@@ -242,8 +242,6 @@ shapePureTF bi = shapeLike bi $ \op args ->
            case args of [arg, _] -> liftM Just $ reduceToWhnf arg
        | isBuiltin bi The_view op ->
            case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-       | isBuiltin bi The_Stream1 op -> return_list_dim
-       | isBuiltin bi The_Sequence op -> return_list_dim
        | isBuiltin bi The_list op -> return_list_dim
        | isBuiltin bi The_array0 op -> return_dim0
        | isBuiltin bi The_array1 op -> return_dim1
@@ -340,8 +338,6 @@ shapeMemTF bi = shapeLike bi $ \op args ->
            case args of [shape, _] -> return_shape shape
        | isBuiltin bi The_view op ->
            case args of [shape, _] -> return_shape shape
-       | isBuiltin bi The_Stream1 op -> return_list_dim
-       | isBuiltin bi The_Sequence op -> return_list_dim
        | isBuiltin bi The_llist op -> return_list_dim
     _ -> return Nothing
   where
@@ -499,50 +495,6 @@ sliceMemTF bi = typeFunction 1 compute_eliminator
                   [slice_type, slice_type]
     slice3_type = varApp (getBuiltin bi The_Tuple3)
                   [slice_type, slice_type, slice_type]
-
-streamPureTF bi = typeFunction 1 compute_stream
-  where
-    compute_stream :: forall m. EvalMonad m => [Type] -> m Type
-    compute_stream (shape_arg : other_args) = do
-      -- Evaluate and inspect the shape argument
-      shape_arg' <- reduceToWhnf shape_arg
-      case fromVarApp shape_arg' of
-        Just (op, args')
-          | isBuiltin bi The_list_dim op ->
-            return_con The_Stream1 []
-          | isBuiltin bi The_dim0 op ||
-            isBuiltin bi The_dim1 op ||
-            isBuiltin bi The_dim2 op ||
-            isBuiltin bi The_dim3 op ->
-              return_con The_view [shape_arg']
-        _ -> return_con The_Stream [shape_arg']
-      where
-        return_con :: forall m. EvalMonad m =>
-                      BuiltinThing -> [Type] -> m Type
-        return_con con args =
-          return $ varApp (getBuiltin bi con) (args ++ other_args)
-
-streamMemTF bi = typeFunction 1 compute_stream
-  where
-    compute_stream :: forall m. EvalMonad m => [Type] -> m Type
-    compute_stream (shape_arg : other_args) = do
-      -- Evaluate and inspect the shape argument
-      shape_arg' <- reduceToWhnf shape_arg
-      case fromVarApp shape_arg' of
-        Just (op, args')
-          | isBuiltin bi The_list_dim op ->
-              return_con The_Stream1 []
-          | isBuiltin bi The_dim0 op ||
-            isBuiltin bi The_dim1 op ||
-            isBuiltin bi The_dim2 op ||
-            isBuiltin bi The_dim3 op ->
-              return_con The_view [shape_arg']
-        _ -> return_con The_Stream [shape_arg']
-      where
-        return_con :: forall m. EvalMonad m =>
-                      BuiltinThing -> [Type] -> m Type
-        return_con con args =
-          return $ varApp (getBuiltin bi con) (args ++ other_args)
 
 -- | The 'AsBox' data type should never appear in the pure type system
 boxedPureTF bi =

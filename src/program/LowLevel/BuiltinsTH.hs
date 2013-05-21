@@ -300,6 +300,8 @@ builtinFunctions =
      Left (closureFunctionType
            [PrimType UnitType, PrimType OwnedType, PrimType UnitType]
            [PrimType UnitType]))
+  , (CoreName module_buffer "putCursor",
+     Right [| SystemF.putCursorV |])
   , (CoreName module_buffer "putBoxedObject",
      Right [| SystemF.putBoxedObjectV |])
   , (CoreName module_buffer "putStoredInt",
@@ -324,6 +326,8 @@ builtinFunctions =
      Left (closureFunctionType
            [PrimType CursorType]
            [RecordType $ constStaticRecord [PrimField CursorType, PrimField UnitType]]))
+  , (CoreName module_buffer "getCursor",
+     Right [| SystemF.getCursorV |])
   , (CoreName module_buffer "getBoxedObject",
      Right [| SystemF.getBoxedObjectV |])
   , (CoreName module_buffer "getStoredInt",

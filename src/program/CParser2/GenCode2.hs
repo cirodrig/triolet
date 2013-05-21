@@ -447,7 +447,11 @@ instantiateCon :: SourcePos
                           [Type.Binder], Maybe Type.Type, [Type.Type])
 instantiateCon pos con inst_type ex_vars n_binders = do
   -- Type must be a data constructor application
-  Just (tycon, ty_args) <- liftTypeEvalM $ Type.Eval.deconVarAppType inst_type
+  decon_type <- liftTypeEvalM $ Type.Eval.deconVarAppType inst_type
+  (tycon, ty_args) <-
+    case decon_type
+    of Just x  -> return x
+       Nothing -> error $ show pos ++ ": Type is not a type application"
 
   -- 'con' must be a data constructor
   dcon_type <- do
