@@ -59,11 +59,16 @@ extern function core.internal.prim.div_float (float, float) -> float;
 
 extern function core.internal.prim.defineIntIndex (int) -> SomeIndInt;
 
+extern function core.internal.prim.fromCursor (cursor) -> cursor;
+
 extern function core.internal.prim.subscript
   (SA, cursor, int) -> cursor;
 
 extern function core.internal.prim.subscript_out
   (SA, pointer, int) -> pointer;
+
+extern function core.internal.prim.subarray
+  (SA, cursor, int) -> cursor;
 
 extern function core.internal.prim.min_ii
   (IndInt, IndInt) -> IndInt;
@@ -82,6 +87,8 @@ extern function core.internal.prim.not (uint) -> uint;
 extern function core.internal.prim.gcd (int, int) -> int;
 
 extern function core.internal.prim.extgcd_x (int, int) -> int;
+
+extern function core.internal.prim.getNumDistributedPlaces (unit) -> SomeIndInt;
 
 extern function core.internal.prim.doall
   (FinIndInt, owned) -> unit;

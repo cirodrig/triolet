@@ -71,7 +71,6 @@ concat_Seq (Seq s1 g1) (Seq s2 g2) =
            Done       -> Done
   in Seq (Left s1) g'
 
-
 unit_Seq :: a -> Seq a
 unit_Seq x =
   let f True  = Yield False x

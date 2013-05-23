@@ -380,10 +380,14 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_traceInt_box) |])
   , (CoreName module_prim "defineIntIndex",
      Right [| coreBuiltin (SystemF.The_defineIntIndex) |])
+  , (CoreName module_prim "fromCursor",
+     Right [| coreBuiltin (SystemF.The_fromCursor) |])
   , (CoreName module_prim "subscript",
      Right [| coreBuiltin (SystemF.The_subscript) |])
   , (CoreName module_prim "subscript_out",
      Right [| coreBuiltin (SystemF.The_subscript_out) |])
+  , (CoreName module_prim "subarray",
+     Right [| coreBuiltin (SystemF.The_subarray) |])
   , (CoreName module_prim "min_ii",
      Right [| coreBuiltin (SystemF.The_min_ii) |])
   , (CoreName module_prim "minus_ii",
@@ -394,6 +398,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_gcd) |])
   , (CoreName module_prim "extgcd_x",
      Right [| coreBuiltin (SystemF.The_extgcd_x) |])
+  , (CoreName module_prim "getNumDistributedPlaces",
+     Right [| coreBuiltin (SystemF.The_getNumDistributedPlaces) |])
 
   , (CoreName module_prim "doall",
      Right [| coreBuiltin (SystemF.The_doall) |])

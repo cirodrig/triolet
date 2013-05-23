@@ -235,6 +235,8 @@ function inline defineIntIndex (int n) -> SomeIndInt {
   SomeIndInt {FinIndInt {n}};
 };
 
+function inline fromCursor (cursor x) -> cursor { x; };
+
 // Get a pointer to an array element
 function inline subscript
  (SA sizealign, cursor ar, int index) -> cursor {
@@ -243,9 +245,18 @@ function inline subscript
    ar @ const_array(value int 0, elt_type)[index];
 };
 
-// Get a pointer to an array element.  Exactly the same as 'subscript'.
+// Get a pointer to an array element.  Exactly the same as 'subscript'
+// except for a different pointer type.
 function inline subscript_out
  (SA sizealign, pointer ar, int index) -> pointer {
+   SA {repr_size, repr_align, repr_pointerless} = sizealign;
+   typedef elt_type = bytes(value repr_size, value repr_align);
+   ar @ const_array(value int 0, elt_type)[index];
+};
+
+// Get a pointer to an array element.  Exactly the same as 'subscript'.
+function inline subarray
+ (SA sizealign, cursor ar, int index) -> cursor {
    SA {repr_size, repr_align, repr_pointerless} = sizealign;
    typedef elt_type = bytes(value repr_size, value repr_align);
    ar @ const_array(value int 0, elt_type)[index];
@@ -330,6 +341,11 @@ function extgcd_x (int x, int y) -> int {
     (x2, x, b, r);
   };
   lastx;
+};
+
+// Get the number of distributed-memory processing elements
+function inline getNumDistributedPlaces (unit dummy) -> SomeIndInt {
+  SomeIndInt {FinIndInt {int 1} };
 };
 
 function inline doall (FinIndInt ix, owned f) -> unit {

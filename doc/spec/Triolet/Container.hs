@@ -106,6 +106,7 @@ data Shape d =
   , sh_addOffset :: Offset d -> Offset d -> Offset d
   , sh_appOffset :: Offset d -> Index d -> Index d
   , sh_intersect :: d -> d -> d
+  , sh_member    :: Index d -> d -> Bool
   , sh_split     :: d -> Maybe (d, Offset d, d)
   , sh_peel      :: forall a r.
                     (a -> Stream ListDim a -> r) -> (() -> r)
@@ -247,11 +248,7 @@ build_List s =
   case s
   of SeqStream s -> from_seq s
      Splittable sh v -> from_seq (flattenSplittable sh v)
-     IxStream f ix ->
-       let View dom visit = map_View f $ someIndexableToView ix
-       in case dom
-          of ListDim (Just length) -> List length (build_arr1D visit length)
-             ListDim Nothing -> error "Unbounded stream"
+     IxStream f ix -> tabulate_List f ix
   where
     -- Implemented with a primitive array-appending function in Triolet;
     -- not defined in Haskell
@@ -431,9 +428,11 @@ viewToSeq (View d f) = Seq s g
           then Yield (s+1) (f s)
           else Done
 
+{-
 viewToStream :: Shape d -> View d a -> Stream d a
 viewToStream sh vw =
   IxStream id (SomeIndexable (indexable_View sh) vw)
+-}
 
 
 flattenSplittable :: Shape d -> View d (Stream ListDim a) -> Seq a
@@ -742,15 +741,46 @@ blockedReduce :: ((d, Offset d) -> Maybe ((d, Offset d), (d, Offset d)))
               -> a
 blockedReduce = undefined
 
+-- | Construct a list.  All list elements can be computed in parallel.
+tabulate_List :: (a -> b) -> SomeIndexable ListDim a -> List b
+tabulate_List f ix =
+  let View dom visit = map_View f $ someIndexableToView ix
+  in case dom
+     of ListDim (Just length) -> List length (build_arr1D visit length)
+        ListDim Nothing -> error "Unbounded stream"
 
-{- TODO: Find out what methods a Splittable has.
-   
+-- | Construct a list in parallel.  Same interface as 'tabulate_List'.
+tabulate_List_par :: (a -> b) -> SomeIndexable ListDim a -> List b
+tabulate_List_par f ix =
+  let parts = distribute shape_ListDim n_PROCESSORS ix
+      results = map (tabulate_List f) parts
+  in undefined
+  where
+    n_PROCESSORS = 4
+  
 
+-- | Split a 'SomeIndexable' into N approximately equal-size pieces.
+--   May produce fewer than N pieces if the object can't be split so much.
+distribute :: Shape d -> Int -> SomeIndexable d a
+           -> [(Offset d, SomeIndexable d a)]
+distribute sh n (SomeIndexable ix_dict x) =
+  let dom = ix_shape ix_dict x
+  in fill n 0 dom
+  where
+    fill_singleton offset dom =
+      [(offset, ix_slice ix_dict x dom offset)]
 
+    fill count offset dom =
+      case count
+      of 0 -> []
+         1 -> fill_singleton offset dom
+         n -> -- Split the domain
+           let lo_half = n `div` 2
+               hi_half = n - lo_half
+           in case sh_split dom
+              of Nothing ->
+                   fill_singleton offset dom
+                 Just (d1, hi_off, d2) ->
+                   fill lo_half offset d1 ++
+                   fill hi_half (sh_addOffest offset hi_off) d2
 
-type Shape (Array Int) = Dim1
-
-data Array1Section a = ArraySection Dim1 LinearMap (Array Int a)
-
-traverseArray1 :: Array Int a -> 
-  -}

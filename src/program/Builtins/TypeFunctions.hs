@@ -243,6 +243,7 @@ shapePureTF bi = shapeLike bi $ \op args ->
        | isBuiltin bi The_view op ->
            case args of [arg, _] -> liftM Just $ reduceToWhnf arg
        | isBuiltin bi The_list op -> return_list_dim
+       | isBuiltin bi The_ListSection op -> return_list_dim
        | isBuiltin bi The_array0 op -> return_dim0
        | isBuiltin bi The_array1 op -> return_dim1
        | isBuiltin bi The_array2 op -> return_dim2
@@ -351,6 +352,7 @@ shapeMemTF bi = shapeLike bi $ \op args ->
       case fromVarApp ty
       of Just (op, [_])
            | isBuiltin bi The_list op -> return_list_dim
+           | isBuiltin bi The_ListSection op -> return_list_dim
            | isBuiltin bi The_array0 op -> return_dim0
            | isBuiltin bi The_array1 op -> return_dim1
            | isBuiltin bi The_array2 op -> return_dim2
@@ -426,7 +428,7 @@ offsetPureTF bi = typeFunction 1 compute_eliminator
            | isBuiltin bi The_dim1 op -> return none_type
            | isBuiltin bi The_dim2 op -> return none_type
            | isBuiltin bi The_dim3 op -> return none_type
-        _ -> return $ varApp (getBuiltin bi The_index) [shape_arg']
+        _ -> return $ varApp (getBuiltin bi The_offset) [shape_arg']
 
     none_type = VarT (getBuiltin bi The_NoneType)
     int_type = intT
@@ -444,7 +446,7 @@ offsetMemTF bi = typeFunction 1 compute_eliminator
            | isBuiltin bi The_dim1 op -> return none_type
            | isBuiltin bi The_dim2 op -> return none_type
            | isBuiltin bi The_dim3 op -> return none_type
-        _ -> return $ varApp (getBuiltin bi The_index) [shape_arg']
+        _ -> return $ varApp (getBuiltin bi The_offset) [shape_arg']
 
     compute_eliminator ts =
       internalError "Error in type application when reducing a type function"
