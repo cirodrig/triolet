@@ -409,6 +409,12 @@ genUnaryOp op arg =
        of rt@[PrimType BoolType] -> do
             arg_val <- asVal arg
             return $ GenAtom rt $ LL.PrimA LL.PrimNot [arg_val]
+     ComplementOp ->
+       case returnType arg
+       of rt@[PrimType (IntType sgn sz)] -> do
+            arg_val <- asVal arg
+            let atom = LL.PrimA (LL.PrimComplZ sgn sz) [arg_val]
+            return $ GenAtom rt atom
 
 genBinaryOp :: BinOp -> GenExpr -> GenExpr -> G GenExpr
 genBinaryOp op l_arg r_arg = 

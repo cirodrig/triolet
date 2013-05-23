@@ -108,6 +108,7 @@ rules :-
 "!+" / @notsym		{ tok DerefPlusTok }
 "&&" / @notsym		{ tok AndTok }
 "||" / @notsym		{ tok OrTok }
+"~#" / @notsym		{ tok ComplementTok }
 "~" / @notsym		{ tok NotTok }
 
 -- Other symbols

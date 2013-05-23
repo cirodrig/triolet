@@ -62,36 +62,37 @@ instance Binary Prim where
        PrimAndZ x y      -> putWord8 009 >> put x >> put y
        PrimOrZ x y       -> putWord8 010 >> put x >> put y
        PrimXorZ x y      -> putWord8 011 >> put x >> put y
-       PrimShiftL x y    -> putWord8 012 >> put x >> put y
-       PrimShiftR x y    -> putWord8 013 >> put x >> put y
-       PrimCmpZ x y z    -> putWord8 014 >> put x >> put y >> put z
-       PrimCmpP x        -> putWord8 015 >> put x
-       PrimSelect t      -> putWord8 016 >> put t
-       PrimAnd           -> putWord8 017
-       PrimOr            -> putWord8 018
-       PrimNot           -> putWord8 019
-       PrimAddP t        -> putWord8 020 >> put t
-       PrimSubP t        -> putWord8 021 >> put t
-       PrimLoad m k t    -> putWord8 022 >> put m >> put k >> put t
-       PrimStore m k t   -> putWord8 023 >> put m >> put k >> put t
-       PrimAAddZ x y     -> putWord8 024 >> put x >> put y
-       PrimCastToOwned   -> putWord8 025
-       PrimCastFromOwned -> putWord8 026
-       PrimCastFromCursor -> putWord8 027
-       PrimCursorBase    -> putWord8 028
-       PrimCastPtrToInt s -> putWord8 029 >> put s
-       PrimGetFrameP     -> putWord8 030
-       PrimCastZToF x y  -> putWord8 031 >> put x >> put y
-       PrimCastFToZ x y  -> putWord8 032 >> put x >> put y
-       PrimCmpF x y      -> putWord8 033 >> put x >> put y
-       PrimAddF x        -> putWord8 034 >> put x
-       PrimSubF x        -> putWord8 035 >> put x
-       PrimMulF x        -> putWord8 036 >> put x
-       PrimModF x        -> putWord8 037 >> put x
-       PrimDivF x        -> putWord8 038 >> put x
-       PrimRoundF r x y z -> putWord8 039 >> put r >> put x >> put y >> put z
-       PrimPowF x        -> putWord8 040 >> put x
-       PrimUnaryF x y    -> putWord8 041 >> put x >> put y
+       PrimComplZ x y    -> putWord8 012 >> put x >> put y
+       PrimShiftL x y    -> putWord8 013 >> put x >> put y
+       PrimShiftR x y    -> putWord8 014 >> put x >> put y
+       PrimCmpZ x y z    -> putWord8 015 >> put x >> put y >> put z
+       PrimCmpP x        -> putWord8 016 >> put x
+       PrimSelect t      -> putWord8 017 >> put t
+       PrimAnd           -> putWord8 018
+       PrimOr            -> putWord8 019
+       PrimNot           -> putWord8 020
+       PrimAddP t        -> putWord8 021 >> put t
+       PrimSubP t        -> putWord8 022 >> put t
+       PrimLoad m k t    -> putWord8 023 >> put m >> put k >> put t
+       PrimStore m k t   -> putWord8 024 >> put m >> put k >> put t
+       PrimAAddZ x y     -> putWord8 025 >> put x >> put y
+       PrimCastToOwned   -> putWord8 026
+       PrimCastFromOwned -> putWord8 027
+       PrimCastFromCursor -> putWord8 028
+       PrimCursorBase    -> putWord8 029
+       PrimCastPtrToInt s -> putWord8 030 >> put s
+       PrimGetFrameP     -> putWord8 031
+       PrimCastZToF x y  -> putWord8 032 >> put x >> put y
+       PrimCastFToZ x y  -> putWord8 033 >> put x >> put y
+       PrimCmpF x y      -> putWord8 034 >> put x >> put y
+       PrimAddF x        -> putWord8 035 >> put x
+       PrimSubF x        -> putWord8 036 >> put x
+       PrimMulF x        -> putWord8 037 >> put x
+       PrimModF x        -> putWord8 038 >> put x
+       PrimDivF x        -> putWord8 039 >> put x
+       PrimRoundF r x y z -> putWord8 040 >> put r >> put x >> put y >> put z
+       PrimPowF x        -> putWord8 041 >> put x
+       PrimUnaryF x y    -> putWord8 042 >> put x >> put y
 
   get = getWord8 >>= pick
     where
@@ -107,36 +108,37 @@ instance Binary Prim where
       pick 009 = PrimAndZ <$> get <*> get
       pick 010 = PrimOrZ <$> get <*> get
       pick 011 = PrimXorZ <$> get <*> get
-      pick 012 = PrimShiftL <$> get <*> get
-      pick 013 = PrimShiftR <$> get <*> get
-      pick 014 = PrimCmpZ <$> get <*> get <*> get
-      pick 015 = PrimCmpP <$> get
-      pick 016 = PrimSelect <$> get
-      pick 017 = pure PrimAnd
-      pick 018 = pure PrimOr
-      pick 019 = pure PrimNot
-      pick 020 = PrimAddP <$> get
-      pick 021 = PrimSubP <$> get
-      pick 022 = PrimLoad <$> get <*> get <*> get
-      pick 023 = PrimStore <$> get <*> get <*> get
-      pick 024 = PrimAAddZ <$> get <*> get
-      pick 025 = pure PrimCastToOwned
-      pick 026 = pure PrimCastFromOwned
-      pick 027 = pure PrimCastFromCursor
-      pick 028 = pure PrimCursorBase
-      pick 029 = PrimCastPtrToInt <$> get
-      pick 030 = pure PrimGetFrameP
-      pick 031 = PrimCastZToF <$> get <*> get
-      pick 032 = PrimCastFToZ <$> get <*> get
-      pick 033 = PrimCmpF <$> get <*> get
-      pick 034 = PrimAddF <$> get
-      pick 035 = PrimSubF <$> get
-      pick 036 = PrimMulF <$> get
-      pick 037 = PrimModF <$> get
-      pick 038 = PrimDivF <$> get
-      pick 039 = PrimRoundF <$> get <*> get <*> get <*> get
-      pick 040 = PrimPowF <$> get
-      pick 041 = PrimUnaryF <$> get <*> get
+      pick 012 = PrimComplZ <$> get <*> get
+      pick 013 = PrimShiftL <$> get <*> get
+      pick 014 = PrimShiftR <$> get <*> get
+      pick 015 = PrimCmpZ <$> get <*> get <*> get
+      pick 016 = PrimCmpP <$> get
+      pick 017 = PrimSelect <$> get
+      pick 018 = pure PrimAnd
+      pick 019 = pure PrimOr
+      pick 020 = pure PrimNot
+      pick 021 = PrimAddP <$> get
+      pick 022 = PrimSubP <$> get
+      pick 023 = PrimLoad <$> get <*> get <*> get
+      pick 024 = PrimStore <$> get <*> get <*> get
+      pick 025 = PrimAAddZ <$> get <*> get
+      pick 026 = pure PrimCastToOwned
+      pick 027 = pure PrimCastFromOwned
+      pick 028 = pure PrimCastFromCursor
+      pick 029 = pure PrimCursorBase
+      pick 030 = PrimCastPtrToInt <$> get
+      pick 031 = pure PrimGetFrameP
+      pick 032 = PrimCastZToF <$> get <*> get
+      pick 033 = PrimCastFToZ <$> get <*> get
+      pick 034 = PrimCmpF <$> get <*> get
+      pick 035 = PrimAddF <$> get
+      pick 036 = PrimSubF <$> get
+      pick 037 = PrimMulF <$> get
+      pick 038 = PrimModF <$> get
+      pick 039 = PrimDivF <$> get
+      pick 040 = PrimRoundF <$> get <*> get <*> get <*> get
+      pick 041 = PrimPowF <$> get
+      pick 042 = PrimUnaryF <$> get <*> get
       pick _ = readError "Prim.get"
 
 instance Binary Lit where

@@ -211,6 +211,8 @@ pprPrim prim =
            PrimMinZ _ _ -> "min"
            PrimAndZ _ _ -> "and"
            PrimOrZ _ _  -> "or"
+           PrimXorZ _ _ -> "xor"
+           PrimComplZ _ _ -> "compl"
            PrimShiftL _ _ -> "shiftl"
            PrimShiftR _ _ -> "shiftr"
            PrimCmpZ _ _ c -> comparison c

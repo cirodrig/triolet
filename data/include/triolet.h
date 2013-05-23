@@ -27,10 +27,15 @@ typedef struct {
 #include "triolet_list.h"
 #include "triolet_matrix.h"
 
+extern int Triolet_is_initialized;
+extern void Triolet_init_real(void);
+
 static inline void Triolet_init(void) {
   /* N.B. the GC must be initialized from the main program, not from a library.
    * That is why this code is in a header file. */
   GC_INIT();
+
+  if (!Triolet_is_initialized) Triolet_init_real();
 }
 
 #ifdef __cplusplus

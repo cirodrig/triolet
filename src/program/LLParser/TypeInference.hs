@@ -721,6 +721,7 @@ getUnaryType op types = gut <$> types
     gut xs@(~[x]) =
       case op of NegateOp -> negate
                  NotOp -> notop
+                 ComplementOp -> complement
       where
         single_parameter =
           case xs of [_] -> Nothing
@@ -733,6 +734,9 @@ getUnaryType op types = gut <$> types
         number_check (PrimT (FloatType {})) = Nothing
         number_check _ = Just "Expecting integral or floating-point type"
         
+        integral_check (PrimT (IntType {})) = Nothing
+        integral_check _ = Just "Expecting integral type"
+
         bool_check (PrimT BoolType) = Nothing
         bool_check _ = Just "Expecting a boolean"
 
@@ -742,6 +746,9 @@ getUnaryType op types = gut <$> types
         
         notop =
           x `checking` [single_parameter, bool_check x]
+
+        complement =
+          x `checking` [single_parameter, integral_check x]
 
         negate =
           x `checking` [single_parameter, number_check x]

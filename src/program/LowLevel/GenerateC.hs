@@ -431,6 +431,7 @@ genPrimOp prim args =
      PrimAndZ _ _ -> binary CAndOp args
      PrimOrZ _ _ -> binary COrOp args
      PrimXorZ _ _ -> binary CXorOp args
+     PrimComplZ _ _ -> case args of [arg] -> CUnary CCompOp arg internalNode
      PrimShiftL _ _ -> binary CShlOp args
      PrimShiftR _ _ -> binary CShrOp args
      PrimCmpZ _ _ CmpEQ -> binary CEqOp args

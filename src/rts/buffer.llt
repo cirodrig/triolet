@@ -196,11 +196,18 @@ function putBoxedObject (owned x, owned buf, unit dummy) -> unit {
   () = () primcall triolet_db_int(int 206);
   () = () primcall triolet_db_pointer (x as pointer);
 #endif
-  if (x == typeObject_typeObject) {
-    unit call putUint (uint 1, buf, dummy);
+  // If it's a global object, serialize the object's location in the global
+  // memory area
+  global_offset = uint32 primcall triolet_global_pointer_offset (x as pointer);
+  if (global_offset != ~# uint32 0) {
+    _ = unit call putUint (uint 1, buf, dummy);
+    unit call putUint (global_offset as uint, buf, dummy);
   }
-  else if (x == triolet_typeObject_function) {
-    unit call putUint (uint 2, buf, dummy);
+
+  else if (x == typeObject_typeObject || x == triolet_typeObject_function) {
+    // Should not happen because these are globals.
+    () = () primcall exit(int -1);
+    nil;
   }
   else {
     _ = unit call putUint (uint 0, buf, dummy);
@@ -408,10 +415,11 @@ function getBoxedObject (cursor buffer) -> ReadResult(owned) {
     ReadResult(uint) call getUint (buffer);
 
   if (control == uint 1) {
-    ReadResult(owned) {buffer2, typeObject_typeObject};
-  }
-  else if (control == uint 2) {
-    ReadResult(owned) {buffer2, triolet_typeObject_function};
+    // This is a global offset; reconstruct its address
+    ReadResult(uint) {buffer3, global_offset} =
+      ReadResult(uint) call getUint (buffer2);
+    p = (pointer load Triolet_library_address_start) ^+ (global_offset as int);
+    ReadResult(owned) {buffer3, p as owned};
   }
   else {
     // Get the object's header, then the object

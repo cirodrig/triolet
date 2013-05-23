@@ -33,3 +33,8 @@ extern function core.internal.buffer.getBoxedObject (cursor) -> ReadResult(owned
 
 extern function core.internal.buffer.testCopyViaBuffer (owned, owned) -> owned;
 
+// Defined in memory_map.c
+extern data pointer builtin.Triolet_library_address_start
+  "Triolet_library_address_start";
+import procedure triolet_global_pointer_offset (pointer) -> uint32;
+

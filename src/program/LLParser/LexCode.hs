@@ -61,6 +61,7 @@ data Token =
   | AndTok
   | OrTok
   | NotTok
+  | ComplementTok
   | WildTok
   | AlignofTok
   | AsTok
@@ -142,6 +143,7 @@ showToken DerefPlusTok = "'!+'"
 showToken AndTok = "boolean and"
 showToken OrTok = "boolean or"
 showToken NotTok = "boolean not"
+showToken ComplementTok = "bitwise complement"
 showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"

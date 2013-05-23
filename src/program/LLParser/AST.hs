@@ -47,7 +47,7 @@ data BinOp =
   | OrOp                        -- ^ '||'
   deriving(Show)
 
-data UnaryOp = NegateOp | NotOp deriving(Show)
+data UnaryOp = NegateOp | NotOp | ComplementOp deriving(Show)
 
 mkNamedT :: String -> Type Parsed
 mkNamedT s = NamedT s
