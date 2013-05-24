@@ -291,7 +291,7 @@ void triolet_scan_memory_map(void)
 
     if (!parse_memory_map_entry(&entry, maps)) break;
 
-#if 1
+#if 0
     /* Print the memory map */
     printf("%llx-%llx %s\n",
            entry.start_addr, entry.end_addr, entry.filename);
@@ -305,7 +305,12 @@ void triolet_scan_memory_map(void)
     previous_entry_is_triolet_library = entry_is_triolet_library;
   } while(1);
 
-  printf("%llx-%llx\n", Triolet_library_address_start, Triolet_library_address_end);
+#if 0
+    /* Print the library address range inferred from the memory map */
+  printf("%llx-%llx\n",
+         (unsigned long long) Triolet_library_address_start,
+         (unsigned long long) Triolet_library_address_end);
+#endif
 
   fclose(maps);
 }

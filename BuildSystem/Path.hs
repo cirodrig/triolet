@@ -157,7 +157,7 @@ rtsLltSourceFiles = ["apply_new.llt", "memory_py.llt", "effects.llt",
 -- | Object files that should be created in 'rtsBuildDir'
 rtsObjectFiles = ["apply_data.c.o", "memory.c.o", "memory_map.c.o",
                   "init.c.o", "debug.c.o", "hashtable.c.o",
-                  "par_loops.cc.o"] ++
+                  "trioletmpi.c.o", "par_loops.cc.o"] ++
                  [f <.> ".o" | f <- rtsLltSourceFiles] ++
                  ["coremodule.o"]
 

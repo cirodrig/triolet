@@ -767,6 +767,10 @@ con_ixStream @(sh a b : box) (rep : ReprBox b) (f : b -> a) (v : SomeIndexable s
 -------------------------------------------------------------------------------
 -- Imperative computation support
 
+emptyStore : Store;
+
+seqStore : Store -> Store -> Store;
+
 -- A dummy token that we use to stand in for dependences due to
 -- imperative computation that is inserted by the compiler.
 --
@@ -3250,16 +3254,67 @@ zipWith_view @(d a b c : box)
 Indexable_view @(sh : box) (sh_shape : ShapeDict sh)
   -> IndexableDict (view sh) attribute(inline) =
 
-  -- TODO
-  except @(IndexableDict (view sh));
+  indexableDict @(view sh) (boxedinfo indexableDict @(view sh))
+  (Functor_view @sh)
+  (shape_view @sh sh_shape)
+  (at_view @sh sh_shape)
+  (slice_view @sh sh_shape);
 
 
-shape_view @(d a : box) (v : view d a) -> d attribute(inline) =
+shape_view @(d : box) (sh_shape : ShapeDict d)
+  -> forall a : box. view d a -> d attribute(inline) =
+  shape_view_real @d;
+
+
+shape_view_real @(d a : box) (v : view d a) -> d attribute(inline) =
   case v of mk_view tyob dv rest. dv;
 
 
-at_view @(d a : box) (v : view d a) (i : BoxIndex d) -> a attribute(inline) =
+at_view @(d : box) (sh_shape : ShapeDict d)
+  -> forall a : box. ReprBox a -> view d a -> BoxIndex d -> a
+  attribute(inline) =
+
+  \ @(a : box) (rep : ReprBox a) (x : view d a) (i : BoxIndex d) -> a.
+  at_view_real @d @a x i;
+
+
+at_view_real @(d a : box) (v : view d a) (i : BoxIndex d) -> a attribute(inline) =
   case v of mk_view tyob f g. g i;
+
+
+slice_view @(d : box) (sh_shape : ShapeDict d)
+  -> forall a : box. ReprBox a -> view d a -> d -> BoxOffset d -> SomeIndexable d a
+  attribute(inline) =
+
+  \ @(a : box) (rep : ReprBox a) (v : view d a) (dom : d) (off : BoxOffset d)
+    -> SomeIndexable d a.
+
+    case v of mk_view tyob input_dom f.
+
+    -- Add offset onto an index before viewing
+    letfun g (i : BoxIndex d) -> a = f (shAppOffset @d sh_shape off i) in
+
+    con_someIndexable @d @a @(view d) (idCoercion @d)
+    (Indexable_view2 @d sh_shape)
+    (con_view @d @a dom g);
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+Indexable_view2 @(sh : box) (sh_shape : ShapeDict sh)
+  -> IndexableDict (view sh) attribute(inline) =
+
+  indexableDict @(view sh) (boxedinfo indexableDict @(view sh))
+  (Functor_view @sh)
+  (shape_view @sh sh_shape)
+  (at_view @sh sh_shape)
+  (slice_view2 @sh sh_shape);
+
+
+slice_view2 @(d : box) (sh_shape : ShapeDict d)
+  -> forall a : box. ReprBox a -> view d a -> d -> BoxOffset d -> SomeIndexable d a
+  attribute(inline_never) =
+  slice_view @d sh_shape;
 
 
 Traversable_view @(sh : box) (sh_shape : ShapeDict sh)
@@ -3401,7 +3456,7 @@ build_list @(a : box) (rep : ReprBox a) (s : Stream list_dim a)
 tabulate_list @(a b : box)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (f : a -> b) (s : SomeIndexable list_dim a) -> Boxed (list (AsBare b))
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
 
   viewToList @b rep_b
   (map_view @list_dim @a @b
@@ -3412,20 +3467,158 @@ tabulate_list @(a b : box)
 tabulate_list_dist @(a b : box)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (f : a -> b) (s : SomeIndexable list_dim a) -> Boxed (list (AsBare b))
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
+
+  case s of someIndexable @t tyob t_has_list_shape indexable_dict container.
+
+  let original_domain =
+        coerce @(shape t) @list_dim (ix_shape @t indexable_dict @a container) in
+
+  let original_length : int =
+        case original_domain of mk_list_dim tyob m_length.
+        case m_length of {
+          justVal n.  n
+        ; nothingVal. except @int
+        } in
+
+  let type dist_result = Boxed (list (AsBare b)) in
+  let type dist_thunk = NoneType -> dist_result in
+
+  -- Each distributed task tabulates a sub-list
+  letfun
+    worker (si : SomeIndexable list_dim a) -> dist_thunk =
+      \ (dummy : NoneType) -> dist_result.
+      tabulate_list @a @b rep_a rep_b f si
+  in
+
+  let type dist_list_elt = Tuple2 (Stored int) (Ref dist_thunk) in
+
+  let rep_offset = repr_int in
+  let rep_fn = unboxedinfo Ref @dist_thunk in
+  let rep_list_elt =
+        unboxedinfo Tuple2 @(Stored int) @(Ref dist_thunk)
+        rep_offset rep_fn in
+  let sa_offset = reprSizeAlign @(Stored int) repr_int in
+  let sa_fn = reprSizeAlign @(Ref dist_thunk) rep_fn in
 
   -- Distribute into subdomains
   case getNumDistributedPlaces None of
     someIInt @(Nplaces : intindex) (nplaces : FIInt Nplaces).
-  let subdomains = distribute @Nplaces @list_dim @a
-                   rep_a ShapeDict_list_dim nplaces s in
+  case nplaces of fiInt nplaces_i.
 
-  -- Compute on each subdomain
+  let type distributed_size = 
+        Boxed (Tuple2 (StuckRef (Boxed (Stored int))) (StuckRef list_dim)) in
 
-  -- Assemble the results
-  except @(Boxed (list (AsBare b)));
+  let rep_distributed_size =
+        unboxedinfo Tuple2 @(StuckRef (Boxed (Stored int))) @(StuckRef list_dim)
+        (unboxedinfo StuckRef @(Boxed (Stored int)))
+        (unboxedinfo StuckRef @list_dim) in
+
+  let dist_sizes : view list_dim distributed_size =
+        distribute_list_dim nplaces_i original_domain in
+
+  -- Farm tasks
+  let rep_output_list = unboxedinfo StuckRef @dist_result in
+  let sa_output_list = reprSizeAlign @(StuckRef dist_result) rep_output_list in
+
+  letfun
+    create_thunk (sizes : distributed_size) -> dist_thunk =
+
+      -- Create a slice of the original object
+      case unpack_Tuple2_box @(Boxed (Stored int)) @list_dim sizes of
+        (off, dom).
+      let sliced_ob =
+            coerce @(SomeIndexable (shape t) a) @(SomeIndexable list_dim a)
+            (ix_slice @t indexable_dict @a rep_a container
+             (coerce @(list_dim) @(shape t) dom)
+             (coerce @(AsBox (offset list_dim)) @(AsBox (offset (shape t))) off)) in
+
+      -- Map 'f' over the slice and build a list
+      \ (dummy : NoneType) -> dist_result.
+          tabulate_list @a @b rep_a rep_b f sliced_ob
+  in
+
+  let rep_thunk_list = unboxedinfo list @(AsBare dist_thunk) in
+
+  let workers : Boxed (list (AsBare dist_thunk)) =
+        build_list @dist_thunk rep_fn
+        (traverse_view @list_dim ShapeDict_list_dim
+         @dist_thunk rep_fn
+         (map_view @list_dim @distributed_size @dist_thunk
+          rep_distributed_size rep_fn create_thunk dist_sizes)) in
+
+  case workers of
+    [reprSizeAlign @(list (AsBare dist_thunk))
+     (unboxedinfo list @(AsBare dist_thunk))]
+    boxed tyob (make_list @Nworkers worker_count worker_array).
+
+  let output_array_rep : Repr (arr Nworkers (StuckRef dist_result)) =
+        repr_arr @Nworkers @(StuckRef dist_result) worker_count
+        (unboxedinfo StuckRef @dist_result) in
+  let output_array_tyob =
+        boxedinfo stuckBox @(arr Nworkers (StuckRef dist_result)) output_array_rep in
+
+  let chunks : StuckBox (arr Nworkers (StuckRef dist_result)) =
+        farm @Nworkers @dist_result worker_count output_array_tyob worker_array in
+
+  -- Concatenate the chunks
+  case chunks of
+    [reprSizeAlign @(arr Nworkers (StuckRef dist_result)) output_array_rep]
+    stuckBox tyob chunk_array.
+
+  case dist_sizes of mk_view tyob dist_sizes_dom get_dist_size.
+
+  letfun
+    get_chunk_offset (i : int) -> int =
+      -- Get the offset that was computed previously
+      case unpack_Tuple2_box @(Boxed (Stored int)) @list_dim
+           (get_dist_size (boxIntValue i)) of
+        (off, dom).
+      unboxIntValue off
+  in
+
+  letfun
+    get_chunk_list (i : int) -> Boxed (list (AsBare b)) =
+      case subscript @Nworkers @(StuckRef dist_result)
+           sa_output_list chunk_array i of
+        stuckRef list_ref.
+      list_ref
+  in
+
+  case defineIntIndex original_length of someIInt @Nelems list_length.
+
+  let rep_output_array = repr_arr @Nelems @(AsBare b) list_length rep_b in
+  let sa_b = reprSizeAlign @(AsBare b) rep_b in
+
+  let rep_final_list = unboxedinfo list @(AsBare b) in
+  let sa_final_list = reprSizeAlign @(list (AsBare b)) rep_final_list in
+
+  con_boxed @(list (AsBare b)) rep_final_list
+  (make_list @(AsBare b) @Nelems list_length
+   (con_stuckBox @(arr Nelems (AsBare b)) rep_output_array
+    (\ (ret : OutPtr (arr Nelems (AsBare b))) -> Store.
+
+      -- Copy each chunk into the output array
+      doall @Nworkers worker_count
+      (\ (chunk_i : int) -> Store.
+
+        let off = get_chunk_offset chunk_i in
+        case get_chunk_list chunk_i of
+          [sa_final_list] boxed tyob (make_list @M chunk_size chunk_ayref).
+
+        let chunk_array_rep = repr_arr @M @(AsBare b) chunk_size rep_b in
+        case chunk_ayref of [reprSizeAlign @(arr M (AsBare b)) chunk_array_rep]
+          stuckBox tyob chunk_ay.
+
+        doall @M chunk_size
+        (\ (elem_i : int) -> Store.
+          copy @(AsBare b) rep_b
+          (subscript @M @(AsBare b) sa_b chunk_ay elem_i)
+          (subscript_out @Nelems @(AsBare b) sa_b ret (off +# elem_i)))))));
 
 
+-- Build a list from the contents of a view.  Used in the implementation of
+-- stream operations.
 viewToList @(a : box) (rep : ReprBox a) (vw : view list_dim a)
   -> Boxed (list (AsBare a)) attribute(inline) =
 
@@ -3449,6 +3642,26 @@ viewToList @(a : box) (rep : ReprBox a) (vw : view list_dim a)
 
   ; nothingVal.
       except @(Boxed (list (AsBare a)))
+  };
+
+
+distribute_list_dim (n : int) (d : list_dim)
+  -> view list_dim (Boxed (Tuple2 (StuckRef (Boxed (Stored int))) (StuckRef list_dim))) attribute(inline) =
+
+  case d of mk_list_dim tyob (m_size : MaybeVal int).
+  case m_size of {
+    justVal size.
+      con_view @list_dim @(Boxed (Tuple2 (StuckRef (Boxed (Stored int))) (StuckRef list_dim)))
+      (con_list_dim (justVal @int n))
+      (\ (i : (Boxed (Stored int))) -> Boxed (Tuple2 (StuckRef (Boxed (Stored int))) (StuckRef list_dim)).
+         let ui    = unboxIntValue i in
+         let start = (ui *# size)        //# n in
+         let end   = ((ui +# 1) *# size) //# n in
+         let off   = boxIntValue start in
+         let dom   = con_list_dim (justVal @int (end -# start)) in
+         pack_Tuple2_box @(Boxed (Stored int)) @list_dim off dom)
+  ; nothingVal.
+     except @(view list_dim (Boxed (Tuple2 (StuckRef (Boxed (Stored int))) (StuckRef list_dim))))
   };
 
 
@@ -3508,11 +3721,32 @@ at_ListSection @(a : box)
 
 
 slice_ListSection @(a : box)
-  (rep : ReprBox a) (s : Boxed (ListSection a)) (d : list_dim) (o : Boxed (Stored int))
+  (rep : ReprBox a)
+  (s : Boxed (ListSection a)) (d : list_dim) (o : Boxed (Stored int))
   -> SomeIndexable list_dim a =
 
-  -- TODO
-  except @(SomeIndexable list_dim a);
+  case s of [reprSizeAlign @(ListSection a) (unboxedinfo ListSection @a)]
+            boxed tyob (listSection @N size sec).
+
+  -- Take the subarray starting at offset o, with size d
+  let start = unboxIntValue o in
+  let length =
+        case d of mk_list_dim tyob m_n.
+        case m_n of {
+          justVal n. n
+        ; nothingVal. except @int
+        } in
+
+  case defineIntIndex length of someIInt @M slice_size.
+
+  let sliced_array : cursor (arr M (AsBare a)) =
+        subarray @N @M @(AsBare a) (reprSizeAlign @(AsBare a) rep)
+        (fromCursor @(arr N (AsBare a)) sec) start in
+
+  con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
+  (idCoercion @list_dim) Indexable_ListSection
+  (con_boxed @(ListSection a) (unboxedinfo ListSection @a)
+   (listSection @a @M slice_size sliced_array));
 
 
 traverse_ListSection @(a : box)
@@ -3530,6 +3764,96 @@ build_ListSection @(a : box)
 
   listToListSection @a rep (build_list @a rep s);
 
+
+llistLength @(a : box) (rep_a : ReprBox a) (l : llist (AsBare a)) -> int
+  attribute(inline) =
+
+  let sa = reprSizeAlign @(AsBare a) rep_a in
+
+  letfun
+    go (n : int) (l : llist (AsBare a)) -> int =
+      case l of [sa] {
+        cons tyob h t. go (n +# 1) t
+      ; nil tyob.      n
+      }
+  in go 0 l;
+
+
+-- Map over a linked list and write the results into an array.
+-- The given size must match the list size.
+llistToArrMapped @(N : intindex) @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b) (size : FIInt N)
+  (f : AsBare a -> OutPtr (AsBare b) -> Store)
+  (l : llist (AsBare a))
+  -> Boxed (arr N (AsBare b)) attribute(inline) =
+
+  let type a_bare = AsBare a in
+  let type b_bare = AsBare b in
+  let sa_a = reprSizeAlign @a_bare rep_a in
+  let sa_b = reprSizeAlign @b_bare rep_b in
+
+  let rep_array = repr_arr @N @b_bare size rep_b in
+
+  con_boxed @(arr N b_bare) rep_array
+  (\ (ret : OutPtr (arr N b_bare)) -> Store.
+
+     letfun
+       loop (i : int) (l : llist a_bare) (s : Store) -> Store =
+         case l of [sa_a] {
+           cons tyob h t.
+             let s2 =
+                   seqStore s (f h (subscript_out @N @b_bare sa_b ret i)) in
+             loop (i +# 1) t s2
+         ; nil tyob.
+             s
+         }
+     in loop 0 l emptyStore);
+
+
+-- TODO: Use streams
+map_llist @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b)
+  (l : llist (AsBare a))
+  -> llist (AsBare b) attribute(inline, inline_sequential) =
+
+  let type a_bare = AsBare a in
+  let type b_bare = AsBare b in
+  let sa_a = reprSizeAlign @a_bare rep_a in
+
+  letfun
+    loop (l : llist a_bare) -> llist b_bare =
+      case l of [sa_a] {
+        cons tyob h t.
+          con_cons @b_bare rep_b
+          (asbare @b_bare rep_b (f (bareToBox @a_bare rep_a h)))
+          (loop t)
+      ; nil tyob.
+          con_nil @b_bare rep_b
+      }
+  in
+  loop l;
+
+
+map_llist_bare @(a b : bare)
+  (rep_a : Repr a) (rep_b : Repr b)
+  (f : a -> Init b)
+  (l : llist a)
+  -> llist b attribute(inline) =
+
+  let sa_a = reprSizeAlign @a rep_a in
+
+  letfun
+    loop (l : llist a) -> llist b =
+      case l of [sa_a] {
+        cons tyob h t.
+          con_cons @b rep_b (f h) (loop t)
+      ; nil tyob.
+          con_nil @b rep_b
+      }
+  in
+  loop l;
+  
 
 {- REPLACED BY NEW STREAM CODE
 
@@ -10920,20 +11244,23 @@ REPLACED BY NEW STREAM CODE -}
 getNumDistributedPlaces : NoneType -> SomeIInt;
 
 
--- Distribute the given indexable object into up to n parts.
+-- Distribute the given indexable object into up to n parts, and apply
+-- a function to each part to crae a thunk.
 -- If the object cannot be split into n parts, the list will be shorter than n.
-distribute @(N : intindex) @(d : box) @(a : box)
+distribute @(N : intindex) @(d : box) @(a b : box)
   (rep : ReprBox a)
   (shape_dict : ShapeDict d) (n : FIInt N) (dat : SomeIndexable d a)
-  -> llist (Tuple2 (offset d) (AsBare (SomeIndexable d a))) =
+  (f : SomeIndexable d a -> NoneType -> b)
+  -> llist (Tuple2 (offset d) (AsBare (NoneType -> b)))
+  attribute(inline) =
 
-  let type list_elt = Tuple2 (offset d) (AsBare (SomeIndexable d a)) in
+  let type list_elt = Tuple2 (offset d) (AsBare (NoneType -> b)) in
 
   let rep_offset = shRepOffset @d shape_dict in
-  let rep_SomeIndexable = unboxedinfo Ref @(SomeIndexable d a) in
+  let rep_fn = unboxedinfo Ref @(NoneType -> b) in
   let rep_list_elt =
-        unboxedinfo Tuple2 @(offset d) @(Ref (SomeIndexable d a))
-        rep_offset rep_SomeIndexable in
+        unboxedinfo Tuple2 @(offset d) @(Ref (NoneType -> b))
+        rep_offset rep_fn in
   let sa_list_elt = reprSizeAlign @list_elt rep_list_elt in
 
   case dat of someIndexable @t tyob co indexable_dict x.
@@ -10944,14 +11271,15 @@ distribute @(N : intindex) @(d : box) @(a : box)
 
       let dom_ = coerce @d @(shape t) dom in
       let off_ = coerce @(AsBox (offset d)) @(AsBox (offset (shape t))) off in
+      let sliced_object =
+            coerce @(SomeIndexable (shape t) a) @(SomeIndexable d a)
+            (ix_slice @t indexable_dict @a rep x dom_ off_) in
       let list_head =
-            tuple2 @(offset d) @(Ref (SomeIndexable d a))
+            tuple2 @(offset d) @(Ref (NoneType -> b))
             (reprSizeAlign @(offset d) rep_offset)
-            (reprSizeAlign @(Ref (SomeIndexable d a)) rep_SomeIndexable)
+            (reprSizeAlign @(Ref (NoneType -> b)) rep_fn)
             (asbare @(offset d) rep_offset off)
-            (ref @(SomeIndexable d a)
-             (coerce @(SomeIndexable (shape t) a) @(SomeIndexable d a)
-              (ix_slice @t indexable_dict @a rep x dom_ off_))) in
+            (ref @(NoneType -> b) (f sliced_object)) in
 
       con_cons @list_elt rep_list_elt list_head tl
 
@@ -11004,6 +11332,13 @@ sequential_doall @(n : intindex)
      attribute(inline, inline_sequential) =
 
      doall @n count f;
+
+-- A distributed doall loop
+farm : forall N : intindex, a : box.
+       FIInt N
+    -> TypeObject (StuckBox (arr N (StuckRef a)))
+    -> StuckBox (arr N (Ref (NoneType -> a)))
+    -> StuckBox (arr N (StuckRef a));
 
 -- Sequential loop
 for @(N : intindex) @(acc : bare)

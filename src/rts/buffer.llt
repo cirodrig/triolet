@@ -204,11 +204,26 @@ function putBoxedObject (owned x, owned buf, unit dummy) -> unit {
     unit call putUint (global_offset as uint, buf, dummy);
   }
 
+#if 1
   else if (x == typeObject_typeObject || x == triolet_typeObject_function) {
-    // Should not happen because these are globals.
+    // Sanity check: must not happen, because these are global variables.
     () = () primcall exit(int -1);
     nil;
   }
+
+#else
+
+  else if (x == typeObject_typeObject) {
+    // FIXME: Should never happen.  This variable should be global, thus
+    // subsumed by the case for global objects.
+    unit call putUint (uint 3, buf, dummy);
+  }
+  else if (x == triolet_typeObject_function) {
+    // FIXME: Should never happen.  This variable should be global, thus
+    // subsumed by the case for global objects.
+    unit call putUint (uint 2, buf, dummy);
+  }
+#endif
   else {
     _ = unit call putUint (uint 0, buf, dummy);
 
@@ -421,6 +436,19 @@ function getBoxedObject (cursor buffer) -> ReadResult(owned) {
     p = (pointer load Triolet_library_address_start) ^+ (global_offset as int);
     ReadResult(owned) {buffer3, p as owned};
   }
+
+#if 0
+  else if (control == uint 3) {
+    // FIXME: Should never happen.  This variable should be global, thus
+    // subsumed by the case for global objects.
+    ReadResult(owned) {buffer2, typeObject_typeObject};
+  }
+  else if (control == uint 2) {
+    // FIXME: Should never happen.  This variable should be global, thus
+    // subsumed by the case for global objects.
+    ReadResult(owned) {buffer2, triolet_typeObject_function};
+  }
+#endif
   else {
     // Get the object's header, then the object
     ReadResult(owned) {buffer3, type_object} =
@@ -431,6 +459,14 @@ function getBoxedObject (cursor buffer) -> ReadResult(owned) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// Write 'x' to a new buffer
+function serializeBoxedObject(owned x) -> (uint, pointer)
+{
+  b = owned primcall MkBuffer_create ();
+  _ = unit call putBoxedObject (x, b, nil);
+  (b @! MkBuffer.buffer_size, b @! MkBuffer.buffer);
+};
+
 /* Write 'x' to a buffer, then read it back */
 function testCopyViaBuffer (owned rep, owned x) -> owned
 {
@@ -440,6 +476,7 @@ function testCopyViaBuffer (owned rep, owned x) -> owned
   _ = unit call putBoxedObject (x, b, nil);
 
   // Deserialize
+  // FIXME: buffer doesn't have an object header like it should
   buffer1 = (b @! MkBuffer.buffer as owned) ^+ int 0;
   () = () primcall triolet_db_pointer(buffer1 as pointer);
   ReadResult(owned) {buffer2, y} =

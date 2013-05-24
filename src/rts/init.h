@@ -4,6 +4,6 @@
 
 extern int Triolet_is_initialized;
 
-extern void Triolet_init_real(void);
+extern void Triolet_init_real(int *argc, char ***argv);
 
 #endif

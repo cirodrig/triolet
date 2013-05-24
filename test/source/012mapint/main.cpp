@@ -6,9 +6,9 @@ using namespace Triolet;
 
 TrioletInt input_array[] = {2,0,3,0,4,8,1,5,4,2,4,7,8,6,8};
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   int i;
   List<Int> l = CreateIntList(15, input_array);
   List<Int> l2 = listadd1(l);

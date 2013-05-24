@@ -112,6 +112,8 @@ lowerIntrinsicOp v
          fin_indexed_int_constant 1)
       , (coreBuiltin The_emptyEffTok,
          empty_eff_tok)
+      , (coreBuiltin The_emptyStore,
+         empty_eff_tok)
       , (coreBuiltin The_deadRef,
          dead_reference)
       , (coreBuiltin The_deadBox,

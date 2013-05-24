@@ -31,6 +31,8 @@ extern function core.internal.buffer.getStoredUint (cursor) -> ReadResult(owned)
 extern function core.internal.buffer.getStoredFloat (cursor) -> ReadResult(owned);
 extern function core.internal.buffer.getBoxedObject (cursor) -> ReadResult(owned);
 
+extern function core.internal.buffer.serializeBoxedObject(owned) -> (uint, pointer);
+
 extern function core.internal.buffer.testCopyViaBuffer (owned, owned) -> owned;
 
 // Defined in memory_map.c

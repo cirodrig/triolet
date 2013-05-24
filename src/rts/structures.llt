@@ -645,8 +645,8 @@ function function_serialize (owned obj, owned buffer, unit dummy) -> unit {
   _ = unit call putPointer (info_table, buffer, dummy);
 
   // Read info table to know where the captured variables are
-  arity = info_table @! FunInfo.arity as int;
-  captured = info_table @! FunInfo.captured as int;
+  arity = (info_table @! FunInfo.arity) as int;
+  captured = (info_table @! FunInfo.captured) as int;
 
   // Get a pointer to the captured variable tags.
   // The offset is the size of FunInfo plus the size of the parameter tags.
@@ -735,8 +735,8 @@ function function_deserialize (owned type_obj, cursor buffer) -> ReadResult(owne
     ReadResult(pointer) call getPointer (buffer);
 
   // Read info table to know where the captured variables are
-  arity = info_table @! FunInfo.arity as int;
-  captured = info_table @! FunInfo.captured as int;
+  arity = (info_table @! FunInfo.arity) as int;
+  captured = (info_table @! FunInfo.captured) as int;
 
   // Get a pointer to the captured variable tags.
   // The offset is the size of FunInfo plus the size of the parameter tags.

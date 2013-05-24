@@ -78,7 +78,8 @@ parLoopOperator v =
             coreBuiltin The_blocked_2d_reduce,
             coreBuiltin The_blocked_1d_reduceip,
             coreBuiltin The_blocked_doall,
-            coreBuiltin The_blocked_doall2 --,
+            coreBuiltin The_blocked_doall2,
+            coreBuiltin The_tabulate_list_dist
             {-coreBuiltin The_parallel_list_dim_reduce,
             coreBuiltin The_parallel_dim1_reduce,
             coreBuiltin The_parallel_dim2_reduce,
@@ -93,7 +94,8 @@ parLoopOperator v =
   
 otherLoopOperator v =
   v `elem` [coreBuiltin The_for,
-            coreBuiltin The_doall -- ,
+            coreBuiltin The_doall, 
+            coreBuiltin The_tabulate_list-- ,
             --coreBuiltin The_histogram,
             {-coreBuiltin The_fun_reduce,
             coreBuiltin The_fun_reduce1,
@@ -155,7 +157,9 @@ replaceWithParallelApp inf op_var ty_args args =
              _ -> False
 
     parallel_function_table =
-      [ {-(coreBuiltin The_primitive_list_dim_reduce,
+      [ (coreBuiltin The_tabulate_list, 
+         ReplaceWith $ coreBuiltin The_tabulate_list_dist)
+        {-(coreBuiltin The_primitive_list_dim_reduce,
          ReplaceWith $ coreBuiltin The_parallel_list_dim_reduce)
       , (coreBuiltin The_primitive_dim1_reduce,
          ReplaceWith $ coreBuiltin The_parallel_dim1_reduce)

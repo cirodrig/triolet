@@ -28,14 +28,14 @@ typedef struct {
 #include "triolet_matrix.h"
 
 extern int Triolet_is_initialized;
-extern void Triolet_init_real(void);
+extern void Triolet_init_real(int *argc, char ***argv);
 
-static inline void Triolet_init(void) {
+static inline void Triolet_init(int *argc, char ***argv) {
   /* N.B. the GC must be initialized from the main program, not from a library.
    * That is why this code is in a header file. */
   GC_INIT();
 
-  if (!Triolet_is_initialized) Triolet_init_real();
+  if (!Triolet_is_initialized) Triolet_init_real(argc, argv);
 }
 
 #ifdef __cplusplus

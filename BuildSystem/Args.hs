@@ -58,18 +58,22 @@ rtsCcArgs is_cxx econfig exe lbi =
 
 ifTBB econfig t f = if configTBB econfig then t else f
 
+ifMPI econfig t f = if configMPI econfig then t else f
+
 -- | Argumetns to the low-level Triolet compiler when compiling the RTS
-rtsLltArgs econfig lbi = rts_include_paths ++ rts_tbb
+rtsLltArgs econfig lbi = rts_include_paths ++ rts_tbb ++ rts_mpi
   where
     rts_include_paths = prefixIncludePaths $ rtsIncludePaths lbi
     rts_tbb = ifTBB econfig ["-DUSE_TBB"] []
+    rts_mpi = ifMPI econfig ["-DUSE_MPI"] []
 
 -- | Target-specific compilation flags for C, C++, and llt code. 
-targetCompileFlags econfig = target_paths ++ target_tbb
+targetCompileFlags econfig = target_paths ++ target_tbb ++ target_mpi
   where
     target_paths = prefixIncludePaths $ configTargetIncludeDirs econfig
 
     target_tbb = ifTBB econfig ["-DUSE_TBB"] []
+    target_mpi = ifMPI econfig ["-DUSE_MPI"] []
 
 targetLinkFlags econfig = "-g" :
                           prefixLibraryPaths target_lib_paths ++
@@ -78,7 +82,9 @@ targetLinkFlags econfig = "-g" :
     -- Search paths for libraries
     target_lib_paths = configTargetLibDirs econfig ++ configCxxLibDirs econfig
     -- Libraries to link against
-    target_libs = ifTBB econfig ["tbb"] [] ++ ["gc", "c", "m", "stdc++"]
+    target_libs = ifTBB econfig ["tbb"] [] ++
+                  ifMPI econfig ["mpi"] [] ++
+                  ["gc", "c", "m", "stdc++"]
 
 -- | GHC arguments to use while building the test driver
 testDriverGhcArgs lbi = directories ++ search_paths
@@ -95,11 +101,18 @@ testDriverGhcArgs lbi = directories ++ search_paths
 --   so paths are converted to absolute paths.
 unitTestCOpts base_path econfig exe lbi =
   let build_info = buildInfo exe
-      includes = prefixIncludePaths $ map (base_path </>) $ Distribution.PackageDescription.includeDirs build_info
+      include_paths =
+        -- [dataBuildDir lbi </> "include"] ++
+        map (base_path </>)
+        (Distribution.PackageDescription.includeDirs build_info)
+      includes = prefixIncludePaths include_paths
       -- TODO: Actually determine whether m32 flag is needed
   in includes
 
-unitTestLinkOpts base_path econfig exe lbi = [] :: [String]
+unitTestLinkOpts base_path econfig exe lbi = 
+  let build_info = buildInfo exe
+      libdirs = [] :: [String] -- prefixLibraryPaths [dataBuildDir lbi]
+  in libdirs
 
 -- | Get flags for installed package documentation.  These are used to create
 -- links when building the documentation.

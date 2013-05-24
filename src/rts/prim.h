@@ -88,13 +88,31 @@ extern function core.internal.prim.gcd (int, int) -> int;
 
 extern function core.internal.prim.extgcd_x (int, int) -> int;
 
-extern function core.internal.prim.getNumDistributedPlaces (unit) -> SomeIndInt;
-
 extern function core.internal.prim.doall
   (FinIndInt, owned) -> unit;
 
 extern function core.internal.prim.for
   (owned, FinIndInt, pointer, owned, pointer) -> unit;
+
+///////////////////////////////////////////////////////////////////////////////
+// MPI
+
+extern function core.internal.prim.getNumDistributedPlaces
+  (unit) -> SomeIndInt;
+
+import procedure triolet_get_num_distributed_places () -> int32;
+
+import procedure triolet_MPITask_launch(int32, pointer) -> pointer;
+import procedure triolet_MPITask_wait(pointer, pointer) -> owned;
+
+extern function core.internal.prim.farm (FinIndInt, owned, owned) -> owned;
+
+extern procedure core.internal.prim.triolet_deserialize "triolet_deserialize"
+  (uint32, pointer) -> owned;
+
+
+extern procedure core.internal.prim.triolet_run_task "triolet_run_task"
+  (int32, pointer, pointer) -> int32;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Blocked 1D reduction

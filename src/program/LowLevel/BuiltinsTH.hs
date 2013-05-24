@@ -341,6 +341,8 @@ builtinFunctions =
   , (CoreName module_buffer "testCopyViaBuffer",
      Right [| coreBuiltin SystemF.The_testCopyViaBuffer |])
     
+  , (CoreName module_effects "seqStore",
+     Right [| coreBuiltin (SystemF.The_seqStore) |])
   , (CoreName module_effects "seqEffTok",
      Right [| coreBuiltin (SystemF.The_seqEffTok) |])
   , (CoreName module_effects "toEffTok",
@@ -401,6 +403,8 @@ builtinFunctions =
   , (CoreName module_prim "getNumDistributedPlaces",
      Right [| coreBuiltin (SystemF.The_getNumDistributedPlaces) |])
 
+  , (CoreName module_prim "farm",
+     Right [| coreBuiltin (SystemF.The_farm) |])
   , (CoreName module_prim "doall",
      Right [| coreBuiltin (SystemF.The_doall) |])
   --, (CoreName module_prim "for",

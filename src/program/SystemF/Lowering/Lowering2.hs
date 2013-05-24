@@ -698,7 +698,7 @@ assumeImports imps m = foldr assume_import m imps
       assumeTranslatedVariable v trans ty m
 
 -- | Auto-generate serializer code and add it to the environment
-lowerSerializers :: Lower a -> Lower ([LL.GlobalDef], a)
+lowerSerializers :: Lower a -> Lower ([LL.GlobalDef], [(LL.Var, ExportSig)], a)
 lowerSerializers m = do
   serializers <- do
     var_supply <- getVarSupply
@@ -707,8 +707,10 @@ lowerSerializers m = do
     liftIO $ createAllSerializers ll_var_supply var_supply tenv
 
   x <- assume_serializers serializers m
-  return (map snd serializers, x)
+  return (map snd serializers, map mk_export serializers, x)
   where
+    mk_export (_, d) = (LL.globalDefiniendum d, TrioletExportSig)
+
     assume_serializers ss m = foldr assume_serializer m ss
     assume_serializer (v, ll_def) m = do
       is_defined <- checkPredefined v
@@ -742,8 +744,8 @@ importSerializers m = do
 
 -- When compiling the core module, lower serializer functions
 withSerializers True m = do
-  (serializers, (defs, exports)) <- lowerSerializers m
-  return ([], LL.Rec serializers : defs, exports)
+  (serializers, serializer_exports, (defs, exports)) <- lowerSerializers m
+  return ([], LL.Rec serializers : defs, serializer_exports ++ exports)
 
 -- Otherwise, import serializer functions
 withSerializers False m = importSerializers m

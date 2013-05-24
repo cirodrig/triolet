@@ -9,6 +9,10 @@ module core.internal.effects;
 #include "structures.h"
 #include "new_pyasm_records.h"
 
+function inline seqStore (unit _, unit _) -> unit {
+  nil;
+};
+
 // Effect tokens are dummy objects.  We do not actually read or write them,
 // but we need functions that pretend to read and write them to resepct
 // dependences.

@@ -36,11 +36,13 @@ data ExtraConfigFlags =
   , configHostArchFlags :: [String]
     -- | Whether TBB is enabled
   , configTBB :: Bool
+    -- | Whether MPI is enabled
+  , configMPI :: Bool
   }
   deriving (Read, Show)
 
 defaultExtraConfigFlags :: ExtraConfigFlags
-defaultExtraConfigFlags = ExtraConfigFlags [] [] [] [] False
+defaultExtraConfigFlags = ExtraConfigFlags [] [] [] [] False False
 
 -- Write custom configure information to a file
 writeExtraConfigFile :: ExtraConfigFlags -> IO ()
@@ -73,6 +75,7 @@ readArgument flags (Argument key mval) =
       [ ("target-include-dir", reqArg readTargetIncludeDir)
       , ("target-lib-dir", reqArg readTargetLibDir)
       , ("enable-tbb", noArg readEnableTBB)
+      , ("enable-mpi", noArg readEnableMPI)
       ]
 
 reqArg f _ (Just arg) flags = f arg flags
@@ -91,6 +94,9 @@ readTargetLibDir arg flags =
 
 readEnableTBB flags =
   return $ flags {configTBB = True}
+
+readEnableMPI flags =
+  return $ flags {configMPI = True}
 
 -- | An argument is either a key or a key-value pair
 data Argument = Argument String (Maybe String)

@@ -559,9 +559,11 @@ genVarRef fun = do
   info <- lift $ lookupCCInfo fun
   case info of
     Nothing -> return (VarV fun)
-    Just cc | not $ ccIsClosure cc ->
-      -- Cannot reference procedures except as the callee of a primcall
-      internalError "genVarRef: Invalid procedure reference"
+    Just cc | not (ccIsClosure cc) ->
+      -- If a function was converted to a procedure, it cannot be referenced.
+      -- It can only be used as the callee of a primcall (which wouldn't be
+      -- seen by this function).
+      internalError $ "genVarRef: Invalid procedure reference of " ++ show fun
     Just cc | not $ ccWantClosure cc ->
       -- A closure record was not created for this function
       internalError "genVarRef: Did not generate a closure"

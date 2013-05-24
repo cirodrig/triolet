@@ -5,6 +5,7 @@ module core.internal.prim;
 #include "memory_py.h"
 #include "apply_py.h"
 #include "prim.h"
+#include "buffer.h"
 #include "structures.h"
 #include "debug.h"
 
@@ -343,9 +344,11 @@ function extgcd_x (int x, int y) -> int {
   lastx;
 };
 
-// Get the number of distributed-memory processing elements
+// Get the number of distributed-memory processing elements.
+// Implemented in C code/
 function inline getNumDistributedPlaces (unit dummy) -> SomeIndInt {
-  SomeIndInt {FinIndInt {int 1} };
+  n = int32 primcall triolet_get_num_distributed_places ();
+  SomeIndInt {FinIndInt {n as int} };
 };
 
 function inline doall (FinIndInt ix, owned f) -> unit {
@@ -355,6 +358,121 @@ function inline doall (FinIndInt ix, owned f) -> unit {
     n + int 1;
   };
   nil;
+};
+
+#if 1
+
+function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
+  FinIndInt {n} = ntasks;
+
+  // Error if number of tasks is less than 1
+  _ = if (n < int 1) {
+    () = () primcall exit(int -1);
+    int 0;
+  } else { int 0; };
+
+  typedef boxed_array = Boxed(array(value n, owned));
+
+  // Create temporary array to hold running tasks
+  typedef running_task_array = array(value n, pointer);
+
+  // Launch all tasks but the last
+  running_tasks = pointer primcall triolet_alloc (sizeof running_task_array);
+  _ = while (int i = int 0) (i < n - int 1) {
+    (length, buf) =
+      (uint, pointer) call serializeBoxedObject(tasks @! boxed_array.member[i]);
+
+    running_tasks @! running_task_array[i] =
+      pointer primcall triolet_MPITask_launch (length, buf);
+    i + int 1;
+  };
+
+  // Run the last task on this processor
+  local_result = owned call (tasks @! boxed_array.member[n - int 1]) (nil);
+
+  // Collect results
+  results = pointer primcall triolet_alloc (sizeof boxed_array);
+  results @! boxed_array.header = rep_output;
+
+  _ = while (int i = int 0) (i < n - int 1) {
+    running_task = running_tasks @! running_task_array[i];
+    results @! boxed_array.member[i] =
+      owned primcall triolet_MPITask_wait (running_task);
+    i + int 1;
+  };
+
+  results @! boxed_array.member[n - int 1] = local_result;
+
+  results as owned;
+};
+
+#else
+// Single-core sequential 'farm' for debugging
+
+function farm (FinIndInt ntasks, owned type_obj, owned tasks) -> owned {
+  FinIndInt {n} = ntasks;
+
+  // Error if number of tasks is less than 1
+  _ = if (n < int 1) {
+    () = () primcall exit(int -1);
+    int 0;
+  } else { int 0; };
+
+  typedef boxed_array = Boxed(array(value n, owned));
+
+  // Collect results
+  results = pointer primcall triolet_alloc (sizeof boxed_array);
+  results @! boxed_array.header = type_obj;
+
+  _ = while (int i = int 0) (i < n) {
+    // Copy input and output to test buffer code
+    f_copy = owned call testCopyViaBuffer (null as owned, tasks @! boxed_array.member[i]);
+    x = owned call f_copy (nil);
+    x_copy = owned call testCopyViaBuffer (null as owned, x);
+    results @! boxed_array.member[i] = x_copy;
+    i + int 1;
+  };
+
+  results as owned;
+};
+
+#endif
+
+procedure triolet_deserialize (uint32 length, pointer dat) -> owned {
+  // FIXME: This buffer doesn't follow the memory layout rules for
+  // boxed objects
+  buffer_cursor = (dat as owned) ^+ int 0;
+
+  ReadResult(owned) {_, x} =
+    ReadResult(owned) call getBoxedObject(buffer_cursor);
+
+  x;
+};
+
+// Given a serialized function of type @NoneType -> a@ for some boxed type a,
+// call the function, serialize the result, and call use_result on the
+// serialized result.
+procedure triolet_run_task (int32 length, pointer dat, pointer use_result)
+  -> int32 {
+  // FIXME: This buffer doesn't follow the memory layout rules for
+  // boxed objects
+  buffer_cursor = (dat as owned) ^+ int 0;
+
+  // Deserialize the function
+  ReadResult(owned) {_, f} =
+    ReadResult(owned) call getBoxedObject(buffer_cursor);
+
+  // Call the function
+  r = owned call f (nil);
+
+  // Serialize the result
+  (length, result_buffer) =
+    (uint, pointer) call serializeBoxedObject(r);
+
+  // Use the result
+  () = () primcall use_result (length, result_buffer);
+
+  int32 0;
 };
 
 // A parallel reduction.  The iteration space is partitioned at run time
