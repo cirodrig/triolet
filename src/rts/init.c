@@ -22,6 +22,9 @@ extern void Triolet_init_real(int *argc, char ***argv)
   sleep(12);
 #endif
 
+#ifdef USE_MPI
   triolet_MPITask_setup(argc, argv);
+#endif
+
   Triolet_is_initialized = 1;
 }

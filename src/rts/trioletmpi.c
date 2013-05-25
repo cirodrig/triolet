@@ -1,4 +1,6 @@
 
+#ifdef USE_MPI
+
 #include <inttypes.h>
 #include <mpi.h>
 #include <stdio.h>
@@ -268,3 +270,4 @@ int32_t triolet_get_num_distributed_places(void)
   return numProcs;
 }
 
+#endif  /* USE_MPI */

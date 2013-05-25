@@ -68,10 +68,12 @@ rtsLltArgs econfig lbi = rts_include_paths ++ rts_tbb ++ rts_mpi
     rts_mpi = ifMPI econfig ["-DUSE_MPI"] []
 
 -- | Target-specific compilation flags for C, C++, and llt code. 
-targetCompileFlags econfig = target_paths ++ target_tbb ++ target_mpi
+targetCompileFlags econfig = target_paths ++ target_os ++ target_tbb ++ target_mpi
   where
     target_paths = prefixIncludePaths $ configTargetIncludeDirs econfig
-
+    target_os = case configTargetOS econfig
+                of Linux  -> ["-DOS_LINUX"]
+                   Darwin -> ["-DOS_DARWIN"]
     target_tbb = ifTBB econfig ["-DUSE_TBB"] []
     target_mpi = ifMPI econfig ["-DUSE_MPI"] []
 

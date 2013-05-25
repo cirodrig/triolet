@@ -135,20 +135,23 @@ doTest pkg_desc lbi _ flags = do
 doConf orig_conf build_info flags = do
   lbi <- orig_conf build_info flags
   
+  -- Get information about host architecture
   -- Query search paths from g++
   search_paths <- rawSystemStdout verb "g++" ["-print-search-dirs"]
   lib_paths <- extractGxxLibraryPaths verb search_paths
-
-  -- Identify extra C/C++ host compile flags
   host_compile_flags <- identifyHostCFlags verb
 
   -- Extract extra flags from command line
   custom_flags0 <- case readExtraConfigFlags $ configConfigureArgs flags
                    of Left err -> die err
                       Right x  -> return x
+
+  -- Get information about target architecture 
+  target_os <- identifyTargetOS verb
   let custom_flags1 =
         custom_flags0 { configCxxLibDirs = lib_paths
-                      , configHostArchFlags = host_compile_flags}
+                      , configHostArchFlags = host_compile_flags
+                      , configTargetOS = target_os}
 
   -- Save the GC install prefix to a file
   writeExtraConfigFile custom_flags1

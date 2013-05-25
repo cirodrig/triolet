@@ -15,10 +15,14 @@ import Distribution.Simple.Utils
 import Distribution.Verbosity
 import System.FilePath
 import System.Directory
+import qualified System.Info
 import System.IO
 
 -- Path where we put extra configuration data
 extraConfigPath = "dist" </> "extra-config"
+
+data OperatingSystem = UnknownOS | Linux | Darwin
+                     deriving(Read, Show)
 
 data ExtraConfigFlags =
   ExtraConfigFlags
@@ -34,6 +38,8 @@ data ExtraConfigFlags =
     --   On some systems, the \"-m32\" flag is required to be
     --   compatible with GHC output.
   , configHostArchFlags :: [String]
+    -- | The operating system family on which target code runs
+  , configTargetOS :: OperatingSystem
     -- | Whether TBB is enabled
   , configTBB :: Bool
     -- | Whether MPI is enabled
@@ -42,7 +48,7 @@ data ExtraConfigFlags =
   deriving (Read, Show)
 
 defaultExtraConfigFlags :: ExtraConfigFlags
-defaultExtraConfigFlags = ExtraConfigFlags [] [] [] [] False False
+defaultExtraConfigFlags = ExtraConfigFlags [] [] [] [] UnknownOS False False
 
 -- Write custom configure information to a file
 writeExtraConfigFile :: ExtraConfigFlags -> IO ()
@@ -145,6 +151,20 @@ extractGxxLibraryPaths verb search_dirs =
           when (not e) $
             info verb $ "Dropping non-existent C++ search path " ++ path
           return e
+
+-- | Identify the target operating system
+identifyTargetOS verb =
+  -- Get the host OS, assume it's same as target OS
+  case choose_os System.Info.os of
+    Just os -> do
+      info verb $ "Using " ++ System.Info.os ++ " as target operating system"
+      return os
+    Nothing ->
+      die "Cannot identify target operating system"
+  where
+    choose_os "darwin" = Just Darwin
+    choose_os "linux"  = Just Linux
+    choose_os _        = Nothing
 
 -- | Identify compiler flags needed to compile host C/C++ code
 identifyHostCFlags verb = do

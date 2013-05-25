@@ -347,8 +347,13 @@ function extgcd_x (int x, int y) -> int {
 // Get the number of distributed-memory processing elements.
 // Implemented in C code/
 function inline getNumDistributedPlaces (unit dummy) -> SomeIndInt {
+
+#ifdef USE_MPI
   n = int32 primcall triolet_get_num_distributed_places ();
   SomeIndInt {FinIndInt {n as int} };
+#else
+  SomeIndInt {FinIndInt {int 1} }; // Only one distributed execution place
+#endif // USE_MPI
 };
 
 function inline doall (FinIndInt ix, owned f) -> unit {
@@ -360,7 +365,7 @@ function inline doall (FinIndInt ix, owned f) -> unit {
   nil;
 };
 
-#if 1
+#ifdef USE_MPI
 
 function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
   FinIndInt {n} = ntasks;
@@ -406,7 +411,8 @@ function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
   results as owned;
 };
 
-#else
+#else // !USE_MPI
+
 // Single-core sequential 'farm' for debugging
 
 function farm (FinIndInt ntasks, owned type_obj, owned tasks) -> owned {
@@ -436,7 +442,7 @@ function farm (FinIndInt ntasks, owned type_obj, owned tasks) -> owned {
   results as owned;
 };
 
-#endif
+#endif // USE_MPI
 
 procedure triolet_deserialize (uint32 length, pointer dat) -> owned {
   // FIXME: This buffer doesn't follow the memory layout rules for
