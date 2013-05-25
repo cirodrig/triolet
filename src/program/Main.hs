@@ -49,13 +49,12 @@ import qualified LowLevel.DeadCode as LowLevel
 import qualified LowLevel.ReferenceTracking as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
-import qualified LowLevel.GenerateCXXHeader as LowLevel
 import qualified LowLevel.Inlining2
 import qualified LowLevel.Lint as LowLevel
 import qualified LowLevel.JoinPoints as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LowLevel.NormalizeTail as LowLevel
-import qualified LowLevel.Cxx.Wrappers
+import qualified LowLevel.Cxx.Wrappers as LowLevel
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
@@ -435,8 +434,7 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
     Nothing -> return ()
 
   when (LowLevel.hasCXXExports ll_mod) $ do
-    writeFileAsString hxx_file (LowLevel.Cxx.Wrappers.cxxHeader ll_mod)
-    --writeFileWithHandle hxx_file (LowLevel.writeCxxHeader ll_mod)
+    writeFileAsString hxx_file (LowLevel.cxxHeader ll_mod)
 
 -- | Compile a C file to produce an object file.
 compileCFile c_fname o_fname = do

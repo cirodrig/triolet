@@ -62,10 +62,6 @@ Executable triolet
   Main-Is:	Main.hs
   C-Sources:
     cutils/Pool.c
-    CxxInterface/Signature.c
-    CxxInterface/CxxWrapperGeneratorTypes.c
-    CxxInterface/CxxWrapperGeneratorPrint.c
-    CxxInterface/CxxWrapperGenerator.c
   Other-Modules:
     Paths_triolet
     Machine
@@ -108,7 +104,6 @@ Executable triolet
     Language.Python.Common.LexerUtils
     Language.Python.Version3.Parser.Parser
     Language.Python.Version3.Parser.Lexer
-    CxxInterface.SignatureHS
     Parser.Control
     Parser.Dataflow
     Parser.Driver
@@ -223,7 +218,6 @@ Executable triolet
     LowLevel.GenerateC
     LowLevel.GenerateCCode
     LowLevel.GenerateCHeader
-    LowLevel.GenerateCXXHeader
     LowLevel.GenerateCUtils
     LowLevel.Intrinsics
     LowLevel.JoinPoints
