@@ -65,7 +65,11 @@ procedure inline MkBuffer_allocate(owned buf, uint count, uint align) -> pointer
   // Reallocate if necessary
   () =
     if (new_size > capacity) {
-      () = () primcall MkBuffer_reallocate(buf, size, capacity, capacity * uint 2);
+      // Compute a new capacity that's larger than 'new_size'
+      new_capacity = while (uint c = capacity * uint 2) (new_size > c) {
+        c * uint 2;
+      };
+      () = () primcall MkBuffer_reallocate(buf, size, capacity, new_capacity);
       capacity = buf @! MkBuffer.buffer_capacity;
       ();
     }
