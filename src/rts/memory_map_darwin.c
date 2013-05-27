@@ -1,5 +1,5 @@
 
-#ifdef USE_DARWIN
+#ifdef OS_DARWIN
 
 #include <ctype.h>
 #include <inttypes.h>
