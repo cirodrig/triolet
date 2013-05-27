@@ -1873,8 +1873,9 @@ rwCopyApp inf [ty] args = debug $
 rwCopyApp1 inf ty size src m_dst = do
   whnf_type <- reduceToWhnf ty
   case fromVarApp whnf_type of
-    {- Just (op, [val_type]) | op `isCoreBuiltin` The_Stored ->
-      copyStoredValue inf val_type repr src m_dst -}
+    Just (op, [val_type]) | op == storedV ->
+      -- Specialize to deconstruct the argument and construct the result
+      copyStoredValue inf val_type size src m_dst
     _ -> do
       (size', size_value) <- rwExp False size
       (src', src_value) <- rwExp False src
@@ -1919,33 +1920,32 @@ rwCopyApp1 inf ty size src m_dst = do
   where
     copy_op = varE inf blockcopyV
 
-{-
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
 --
---   Eventually, we should be able to inline the 'copy' method to avoid this
---   special-case rewrite
+-- > case x of stored y. stored y
 copyStoredValue inf val_type repr arg m_dst = do
   tmpvar <- newAnonymousVar ObjectLevel
   arg' <- applySubstitution arg
   m_dst' <- mapM applySubstitution m_dst
 
   let -- Construct a stored value
-      stored_con = VarCon (coreBuiltin The_stored) [val_type] []
-      value = conE inf stored_con [ExpM $ VarE inf tmpvar]
+      stored_con = VarCon stored_conV [val_type] []
+      value = conE inf stored_con [] Nothing [ExpM $ VarE inf tmpvar]
       result_value = case m_dst'
                      of Nothing  -> value
                         Just dst -> appE inf value [] [dst]
 
       -- Deconstruct the original value
-      stored_decon = VarDeCon (coreBuiltin The_stored) [val_type] []
+      stored_decon = VarDeCon stored_conV [val_type] []
       alt = AltM $ Alt { altCon = stored_decon
+                       , altTyObject = Nothing
                        , altParams = [setPatMDmd (Dmd OnceSafe Used) $
                                       patM (tmpvar ::: val_type)]
                        , altBody = result_value}
-      new_expr = ExpM $ CaseE inf arg' [alt]
+      new_expr = ExpM $ CaseE inf arg' [] [alt]
   
   -- Try to simplify the new expression further
-  rwExp False $ deferEmptySubstitution new_expr -}
+  rwExp False $ deferEmptySubstitution new_expr
 
 rwIntEqApp inf [] [arg1, arg2] = do
   -- Evaluate arguments
