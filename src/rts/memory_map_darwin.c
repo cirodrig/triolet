@@ -1,4 +1,6 @@
 
+#ifdef USE_DARWIN
+
 #include <ctype.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -118,3 +120,5 @@ triolet_scan_memory_map_darwin(void)
   _dyld_register_func_for_add_image(scan_image);
   scanning_images = 0;
 }
+
+#endif
