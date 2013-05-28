@@ -2072,7 +2072,9 @@ rwLetrec is_stream_arg inf defs body = do
     -- If the function is nonrecursive and used exactly once, the function is
     -- unconditionally pre-inlined.
     -- Wrapper functions are always pre-inlined.
+    -- FIXME: Should use the same code as 'isInliningCandidate'
     NonRec def | have_fuel &&
+                 defAnnInlineRequest (defAnnotation def) /= InlNever &&
                  (defIsWrapper def ||
                   usesSuggestInlining def && phasePermitsInlining phase def) -> do
       consumeFuel
