@@ -177,7 +177,9 @@ scanTailCall tbl callees_ref op n_args = do
   md <- lookupFun tbl op
   case md of
     Just d | n_args == arity d -> modifyIORef callees_ref (insert op)
-    _                          -> return ()
+
+    -- Otherwise, the callee is not a candidate for a join point
+    _                          -> makeRoot tbl op
   
 scanAtom tbl atom =
   case atom
