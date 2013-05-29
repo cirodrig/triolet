@@ -376,6 +376,8 @@ builtinFunctions =
      Right [| coreBuiltin SystemF.The_makeIdCoercion |])
   , (CoreName module_prim "makeIdBareCoercion",
      Right [| coreBuiltin SystemF.The_makeIdBareCoercion |])
+  , (CoreName module_prim "preserve",
+     Right [| coreBuiltin SystemF.The_preserve |])
   , (CoreName module_prim "traceInt_int",
      Right [| coreBuiltin (SystemF.The_traceInt_int) |])
   , (CoreName module_prim "traceInt_box",

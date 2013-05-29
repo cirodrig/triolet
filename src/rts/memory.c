@@ -55,3 +55,11 @@ triolet_alloc_boxed(uint32_t size, uint32_t alignment)
 
   return ptr;
 }
+
+// Do nothing.
+// This function is inscrutable to the Triolet backend optimizer to
+// selectively inhibit optimization.
+TrioletPtr triolet_preserve(TrioletPtr p)
+{
+  return p;
+}

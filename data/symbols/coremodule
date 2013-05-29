@@ -3745,8 +3745,9 @@ slice_ListSection @(a : box)
 
   con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
   (idCoercion @list_dim) Indexable_ListSection
-  (con_boxed @(ListSection a) (unboxedinfo ListSection @a)
-   (listSection @a @M slice_size sliced_array));
+  (preserve @(Boxed (ListSection a))
+   (con_boxed @(ListSection a) (unboxedinfo ListSection @a)
+    (listSection @a @M slice_size sliced_array)));
 
 
 traverse_ListSection @(a : box)
@@ -9807,6 +9808,9 @@ deadBox : forall a : box. a;
 -- A dummy referenced object that is used as a placeholder for a dead value.
 deadRef : forall a : bare. Init a;
 
+-- Do nothing to a boxed value.
+-- This function is used for selectively inhibiting optimizations.
+preserve : forall a : box. a -> a;
 
 fun_isNothing @(a : box)
   (rep : Repr (AsBare a)) (x : Boxed (Maybe (AsBare a)))

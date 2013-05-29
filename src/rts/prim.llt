@@ -22,6 +22,10 @@ function inline makeIdBareCoercion (unit _) -> unit {
   nil;
 };
 
+function inline preserve (owned x) -> owned {
+  owned primcall triolet_preserve(x);
+};
+
 // Print an int.  Return another int.
 function inline traceInt_int (int t, int n) -> int {
   () = () primcall triolet_db_int (t as int32);

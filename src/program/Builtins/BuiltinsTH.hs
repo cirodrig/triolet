@@ -736,6 +736,7 @@ builtinVariableNames =
   , "unsafeMakeCoercion"
   , "unsafeMakeBareCoercion"
   , "unsafeMakeViewCoercion"
+  , "preserve"
   , "traceInt_int"
   , "traceInt_box"
   , "testCopyViaBuffer"
