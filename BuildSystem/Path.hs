@@ -150,7 +150,7 @@ trioletCFiles :: LocalBuildInfo -> [FilePath]
 trioletCFiles lbi = cSources $ buildInfo $ getTrioletExe lbi
 
 -- | Low-level Triolet library source files
-rtsLltSourceFiles = ["apply_new.llt", "memory_py.llt", "effects.llt",
+rtsLltSourceFiles = ["apply_new.llt", "memory_py.llt",
                      "prim.llt", "inplace.llt", "structures.llt",
                      "list.llt", "buffer.llt", "lazy.llt"]
 

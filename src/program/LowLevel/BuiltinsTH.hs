@@ -171,7 +171,6 @@ module_memory_py = ModuleName "core.internal.memory_py"
 module_stream = ModuleName "core.internal.stream"
 module_structures = ModuleName "core.internal.structures"
 module_buffer = ModuleName "core.internal.buffer"
-module_effects = ModuleName "core.internal.effects"
 module_inplace = ModuleName "core.internal.inplace"
 module_complex = ModuleName "core.internal.complex"
 module_list = ModuleName "core.internal.list"
@@ -341,7 +340,7 @@ builtinFunctions =
   , (CoreName module_buffer "testCopyViaBuffer",
      Right [| coreBuiltin SystemF.The_testCopyViaBuffer |])
     
-  , (CoreName module_effects "seqStore",
+  , (CoreName module_prim "seqStore",
      Right [| coreBuiltin (SystemF.The_seqStore) |])
   {-, (CoreName module_structures "repr_arr",
      Right [| SystemF.coreBuiltin SystemF.The_repr_arr |])-}

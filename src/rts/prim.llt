@@ -13,6 +13,12 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+// Combine two stores.  This does nothing, since stores
+// are just unit values.
+function inline seqStore (unit _, unit _) -> unit {
+  nil;
+};
+
 // Create an identity coercion
 function inline makeIdCoercion (unit _) -> unit {
   nil;

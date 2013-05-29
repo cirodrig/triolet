@@ -1,4 +1,6 @@
 
+extern function core.internal.prim.seqStore (unit, unit) -> (unit);
+
 extern function core.internal.prim.makeIdCoercion (unit) -> unit;
 extern function core.internal.prim.makeIdBareCoercion (unit) -> unit;
 
