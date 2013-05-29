@@ -771,35 +771,6 @@ emptyStore : Store;
 
 seqStore : Store -> Store -> Store;
 
--- A dummy token that we use to stand in for dependences due to
--- imperative computation that is inserted by the compiler.
---
--- We take advantage of the fact that EffTok is a unit value, and therefore
--- it is not accessed by load or store instructions when reading or writing it,
--- and therefore we can safely masquerade NULL pointers as EffTok references.
-data EffTok : val
-  attribute(abstract)
-{
-  -- We never use the constructor 'effTok' in code, because it could be
-  -- optimized away.  We don't want the optimizer to mess with this data type
-  -- because it stands in for real dependences.
-  -- Instead, use 'emptyEffTok' to produce an EffTok value.
-  effTok ();
-};
-
--- An empty side effect.
--- This function is translated specially when converting from Core to LowLevel.
-emptyEffTok : EffTok;
-
--- Translate to a side effect.
--- This function is translated specially when converting from Core to LowLevel.
-toEffTok : forall a : bare. Store -> EffTok;
-
--- Perform two side-effecting operations in sequence.
-seqEffTok : EffTok -> EffTok -> EffTok;
-
-fromEffTok : forall a : bare. EffTok -> Store;
-
 -- An opaque reference to mutable data.
 data OpaqueRef : box
   attribute(abstract, nonalgebraic, builtin)
@@ -856,8 +827,8 @@ data Scatter (r i : bare) : box
 {
   mk_scatter @(s : bare) @(iniF updF : box)
   (Repr s,
-   iniF -> OutPtr s -> EffTok,                -- Initializer
-   updF -> i -> EffTok -> OutPtr s -> EffTok, -- Updater
+   iniF -> OutPtr s -> Store,                -- Initializer
+   updF -> i -> Store -> OutPtr s -> Store, -- Updater
    s -> s -> Init s,                          -- Combining function
    UpdateInPlaceFinalizer s r,                -- Final value constructor
    i -> updF,                                 -- Update function
@@ -869,22 +840,22 @@ data Scatter (r i : bare) : box
 -- These functions are implemented in low-level code.
 intUpdateInPlace_initializer : (NoneType -> int)
                             -> OutPtr (Stored int)
-                            -> EffTok;
-intUpdateInPlace_updater : (int -> int) -> EffTok
+                            -> Store;
+intUpdateInPlace_updater : (int -> int) -> Store
                         -> OutPtr (Stored int)
-                        -> EffTok;
+                        -> Store;
 floatUpdateInPlace_initializer : (NoneType -> float)
                               -> OutPtr (Stored float)
-                              -> EffTok;
-floatUpdateInPlace_updater : (float -> float) -> EffTok
+                              -> Store;
+floatUpdateInPlace_updater : (float -> float) -> Store
                           -> OutPtr (Stored float)
-                          -> EffTok;
+                          -> Store;
 boolUpdateInPlace_initializer : (NoneType -> bool)
                               -> OutPtr (Stored bool)
-                              -> EffTok;
-boolUpdateInPlace_updater : (bool -> bool) -> EffTok
+                              -> Store;
+boolUpdateInPlace_updater : (bool -> bool) -> Store
                           -> OutPtr (Stored bool)
-                          -> EffTok;
+                          -> Store;
 
 -- TEMPORARILY COMMENTED OUT FOR DEVELOPMENT
 {-
@@ -1123,9 +1094,9 @@ boxedScatter @(a b : box) (rep : Repr (AsBare b))
 
 boxedScatter_updater : forall a : box.
                        (a -> a)
-                    -> EffTok
+                    -> Store
                     -> OutPtr (StuckRef a)
-                    -> EffTok;
+                    -> Store;
 
 {-
 
@@ -1205,36 +1176,33 @@ appendScatter_concatenate @(a : bare)
    (\ (ret : OutPtr (arr P a)) -> Store.
 
       -- Copy data from l1 and l2 into the output
-      fromEffTok @(arr P a)
-      (seqEffTok
-       (toEffTok @(arr P a)
-        (sequential_doall @Np count1
+      seqStore
+       (sequential_doall @Np count1
          (\ (i : int) -> Store.
             -- Copy l1 into the beginning of the list
             copy @a rep
             (subscript @N @a sizealign arr1 i)
-            (subscript_out @P @a sizealign ret i))))
-       (toEffTok @(arr P a)
-        (sequential_doall @Mp count2
+            (subscript_out @P @a sizealign ret i)))
+       (sequential_doall @Mp count2
          (\ (i : int) -> Store.
             -- Copy l2 into the end of the list
             copy @a rep
             (subscript @M @a sizealign arr2 i)
-            (subscript_out @P @a sizealign ret (i +# n1))))))))
+            (subscript_out @P @a sizealign ret (i +# n1)))))))
   ret;
 
 -}
 
 appendScatter_initializer : forall a : bare.
                             SizeAlign a -> (NoneType -> NoneType)
-                         -> OutPtr (append_list a) -> EffTok;
+                         -> OutPtr (append_list a) -> Store;
 
 appendScatter_update_real : forall a : bare.
                         SizeAlign a
                      -> (OutPtr a -> Store)
-                     -> EffTok
+                     -> Store
                      -> OutPtr (append_list a)
-                     -> EffTok;
+                     -> Store;
 
 {-
 
@@ -2241,13 +2209,12 @@ PBTree_flatten @(a : bare)
       let ind : int = new_ind in
       case t of {
         pbEmpty tyob.
-          fromEffTok @a emptyEffTok
+          emptyStore
 
       ; pbBranch tyob e_i ta tb.
           let ta_sz : int = PBTree_size @a ta in
-          fromEffTok @a
-          (seqEffTok (toEffTok @a (storeTreeVal new_ind ta ret_p))
-                     (toEffTok @a (storeTreeVal (new_ind +# ta_sz) tb ret_p)))
+          seqStore (storeTreeVal new_ind ta ret_p)
+                   (storeTreeVal (new_ind +# ta_sz) tb ret_p)
 
       ; pbLeaf tyob tree_list.
           case tree_list of make_list @m (tree_list_dim : FIInt m) list_sb.
@@ -8645,12 +8612,11 @@ Sequence_permute1D @(a : bare)
 
              -- Store it
              case acc of stored (u_acc : EffTok).
-             let new_acc : EffTok =
-                   seqEffTok u_acc
-                   (toEffTok @a
-                    (copy @a rep val
-                     (subscript_out @N @a (reprSizeAlign @a rep) ret real_index))) in
-             stored @EffTok new_acc eff_ret)
+             let new_acc : Store =
+                   seqStore u_acc
+                   (copy @a rep val
+                    (subscript_out @N @a (reprSizeAlign @a rep) ret real_index)) in
+             stored @Store new_acc eff_ret)
           eff_tok_in s) of
       boxed eff_tok_out.
 

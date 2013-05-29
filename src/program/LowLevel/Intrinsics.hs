@@ -110,8 +110,6 @@ lowerIntrinsicOp v
          fin_indexed_int_constant 0)
       , (coreBuiltin The_one_fii,
          fin_indexed_int_constant 1)
-      , (coreBuiltin The_emptyEffTok,
-         empty_eff_tok)
       , (coreBuiltin The_emptyStore,
          empty_eff_tok)
       , (coreBuiltin The_deadRef,
@@ -128,8 +126,6 @@ lowerIntrinsicOp v
          sizealign_float)
       , (coreBuiltin The_sizealign_NoneType,
          sizealign_NoneType)
-      , (coreBuiltin The_sizealign_EffTok,
-         sizealign_EffTok)
       , (coreBuiltin The_sizealign_Ref,
          sizealign_Ref)
       , (coreBuiltin The_sizealign_StuckRef,
@@ -265,7 +261,6 @@ sizealign_int [] = return [sizeAlignValue trioletIntType]
 sizealign_uint [] = return [sizeAlignValue trioletUintType]
 sizealign_float [] = return [sizeAlignValue trioletFloatType]
 sizealign_NoneType [] = return [sizeAlignValue trioletNoneType]
-sizealign_EffTok [] = return [sizeAlignValue UnitType]
 sizealign_Ref [] = return [sizeAlignValue ref_record]
   where ref_record = mutableStaticRecord [PrimField OwnedType]
 sizealign_StuckRef [] = return [sizeAlignValue ref_record]

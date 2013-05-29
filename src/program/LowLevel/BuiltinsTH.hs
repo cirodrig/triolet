@@ -343,12 +343,6 @@ builtinFunctions =
     
   , (CoreName module_effects "seqStore",
      Right [| coreBuiltin (SystemF.The_seqStore) |])
-  , (CoreName module_effects "seqEffTok",
-     Right [| coreBuiltin (SystemF.The_seqEffTok) |])
-  , (CoreName module_effects "toEffTok",
-     Right [| coreBuiltin (SystemF.The_toEffTok) |])
-  , (CoreName module_effects "fromEffTok",
-     Right [| coreBuiltin (SystemF.The_fromEffTok) |])
   {-, (CoreName module_structures "repr_arr",
      Right [| SystemF.coreBuiltin SystemF.The_repr_arr |])-}
   --, (CoreName module_structures "repr_Referenced",
@@ -535,8 +529,6 @@ builtinGlobals =
      Right [| SystemF.coreBuiltin SystemF.The_repr_Stream |])
   , (CoreName module_structures "repr_EmptyReference",
      Right [| SystemF.coreBuiltin SystemF.The_repr_EmptyReference |])
-  , (CoreName module_structures "repr_EffTok",
-     Right [| SystemF.coreBuiltin SystemF.The_repr_EffTok |])
   , (CoreName module_structures "repr_int",
      Right [| coreBuiltin (SystemF.The_repr_int) |] )
   , (CoreName module_structures "repr_uint",

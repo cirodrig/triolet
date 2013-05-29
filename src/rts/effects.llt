@@ -13,21 +13,3 @@ function inline seqStore (unit _, unit _) -> unit {
   nil;
 };
 
-// Effect tokens are dummy objects.  We do not actually read or write them,
-// but we need functions that pretend to read and write them to resepct
-// dependences.
-
-// Consume two side effect tokens and produce a new side effect token.
-// This function served a useful function in the Mem stage, but is a
-// no-op in the LowLevel stage.
-function inline seqEffTok (unit _, unit _) -> unit {
-  nil;
-};
-
-function inline toEffTok (unit x) -> unit {
-  x;
-};
-
-function inline fromEffTok (unit x) -> unit {
-  x;
-};
