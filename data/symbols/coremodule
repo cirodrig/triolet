@@ -3767,11 +3767,11 @@ tabulate_list_dist @(a b : box)
   let type dist_thunk = NoneType -> dist_result in
 
   -- Each distributed task tabulates a sub-list
-  letfun
+{-  letfun
     worker (si : SomeIndexable list_dim a) -> dist_thunk =
       \ (dummy : NoneType) -> dist_result.
       tabulate_list @a @b rep_a rep_b f si
-  in
+  in-}
 
   let type dist_list_elt = Tuple2 (Stored int) (Ref dist_thunk) in
 
@@ -3798,7 +3798,7 @@ tabulate_list_dist @(a b : box)
   let rep_output_list = unboxedinfo StuckRef @dist_result in
   let sa_output_list = reprSizeAlign @(StuckRef dist_result) rep_output_list in
 
-  letfun
+{-  letfun
     create_thunk (sizes : distributed_size) -> dist_thunk =
 
       -- Create a slice of the original object
@@ -3812,16 +3812,26 @@ tabulate_list_dist @(a b : box)
       -- Map 'f' over the slice and build a list
       \ (dummy : NoneType) -> dist_result.
           tabulate_list @a @b rep_a rep_b f sliced_ob
-  in
+  in-}
 
   let rep_thunk_list = unboxedinfo list @(AsBare dist_thunk) in
 
-  let workers : Boxed (list (AsBare dist_thunk)) =
+{-  let workers : Boxed (list (AsBare dist_thunk)) =
         build_list @dist_thunk rep_fn
         (traverse_view @list_dim ShapeDict_list_dim
          @dist_thunk rep_fn
          (map_view @list_dim @distributed_size @dist_thunk
-          rep_distributed_size rep_fn create_thunk dist_sizes)) in
+          rep_distributed_size rep_fn create_thunk dist_sizes)) in-}
+
+  letfun
+    worker (si : SomeIndexable list_dim a) -> dist_result =
+      tabulate_list @a @b rep_a rep_b f si
+  in
+
+  let workers : Boxed (list (AsBare dist_thunk)) =
+        distribute_Indexable @list_dim @a @dist_result
+        ShapeDict_list_dim rep_a (unboxedinfo list @(AsBare b))
+        dist_sizes s worker in
 
   case workers of
     [reprSizeAlign @(list (AsBare dist_thunk))
@@ -3895,6 +3905,41 @@ tabulate_list_dist @(a b : box)
 -- Number of distributed processing elements
 getNumDistributedPlaces : NoneType -> SomeIInt;
 
+
+-- Create a list of thunks, where each thunk applies 'f' to a piece of the
+-- given SomeIndexable
+distribute_Indexable @(d : box) @(a b : box)
+  (sh : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (distributed_sizes : view list_dim (Subdomain d))
+  (si : SomeIndexable d a)
+  (f : SomeIndexable d a -> b)
+  -> Boxed (list (AsBare (NoneType -> b)))
+  attribute(inline) =
+
+  case si of someIndexable @t tyob t_has_shape_d indexable_dict container.
+
+  letfun
+    apply (subdom : Subdomain d) -> NoneType -> b =
+
+      -- Create a slice of the original object
+      case subdom of subdomain tyob off dom.
+      let sliced_ob =
+            coerce @(SomeIndexable (shape t) a) @(SomeIndexable d a)
+            (ix_slice @t indexable_dict @a rep_a container
+             (coerce @d @(shape t) dom)
+             (coerce @(AsBox (offset d)) @(AsBox (offset (shape t))) off)) in
+
+      -- Return a thunk that applies 'f' to the slice
+      \ (dummy : NoneType) -> b. f sliced_ob
+
+  in
+
+  let rep_fun = repr_Box @(NoneType -> b) in
+
+  build_list @(NoneType -> b) rep_fun
+  (traverse_view_real @list_dim @(NoneType -> b) ShapeDict_list_dim rep_fun
+   (map_view @list_dim @(Subdomain d) @(NoneType -> b)
+    (repr_Box @(Subdomain d)) rep_fun apply distributed_sizes));
   
 
 {- REPLACED BY NEW STREAM CODE
