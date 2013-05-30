@@ -412,7 +412,7 @@ typeCheckAlternative pos scr_type alt@(AltM (Alt con m_ty_param fields body)) = 
     zipWithM_ check_arg field_types (zip [1..] fields)
 
     -- Add fields to enironment
-    assumeAndAnnotatePats fields $ do
+    assumeAndAnnotatePats (maybeToList m_ty_param ++ fields) $ do
 
       -- Infer the body
       ret_type <- tcExp body
