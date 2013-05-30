@@ -385,6 +385,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_subscript_out) |])
   , (CoreName module_prim "subarray",
      Right [| coreBuiltin (SystemF.The_subarray) |])
+  , (CoreName module_prim "subarray_out",
+     Right [| coreBuiltin (SystemF.The_subarray_out) |])
   , (CoreName module_prim "min_ii",
      Right [| coreBuiltin (SystemF.The_min_ii) |])
   , (CoreName module_prim "minus_ii",

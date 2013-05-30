@@ -273,6 +273,14 @@ function inline subarray
    ar @ const_array(value int 0, elt_type)[index];
 };
 
+// Get a pointer to an array element.  Exactly the same as 'subscript'.
+function inline subarray_out
+ (SA sizealign, pointer ar, int index) -> pointer {
+   SA {repr_size, repr_align, repr_pointerless} = sizealign;
+   typedef elt_type = bytes(value repr_size, value repr_align);
+   ar @ const_array(value int 0, elt_type)[index];
+};
+
 function inline min_ii (IndInt x, IndInt y) -> IndInt {
   IndInt {x_fin, IndIntData {FinIndInt {x_data}}} = x;
   IndInt {y_fin, IndIntData {FinIndInt {y_data}}} = y;

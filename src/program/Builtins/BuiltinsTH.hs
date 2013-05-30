@@ -907,6 +907,7 @@ builtinVariableNames =
   , "subscript"
   , "subscript_out"
   , "subarray"
+  , "subarray_out"
   , "getNumDistributedPlaces"
   , "farm"
   , "doall"

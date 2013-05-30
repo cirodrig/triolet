@@ -74,6 +74,9 @@ extern function core.internal.prim.subscript_out
 extern function core.internal.prim.subarray
   (SA, cursor, int) -> cursor;
 
+extern function core.internal.prim.subarray_out
+  (SA, pointer, int) -> pointer;
+
 extern function core.internal.prim.min_ii
   (IndInt, IndInt) -> IndInt;
 

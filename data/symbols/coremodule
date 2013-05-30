@@ -3766,13 +3766,6 @@ tabulate_list_dist @(a b : box)
   let type dist_result = Boxed (list (AsBare b)) in
   let type dist_thunk = NoneType -> dist_result in
 
-  -- Each distributed task tabulates a sub-list
-{-  letfun
-    worker (si : SomeIndexable list_dim a) -> dist_thunk =
-      \ (dummy : NoneType) -> dist_result.
-      tabulate_list @a @b rep_a rep_b f si
-  in-}
-
   let type dist_list_elt = Tuple2 (Stored int) (Ref dist_thunk) in
 
   let rep_offset = repr_int in
@@ -3795,33 +3788,9 @@ tabulate_list_dist @(a b : box)
         splitN_list_dim nplaces_i original_domain in
 
   -- Farm tasks
+  -- Each distributed task tabulates a sub-list
   let rep_output_list = unboxedinfo StuckRef @dist_result in
   let sa_output_list = reprSizeAlign @(StuckRef dist_result) rep_output_list in
-
-{-  letfun
-    create_thunk (sizes : distributed_size) -> dist_thunk =
-
-      -- Create a slice of the original object
-      case sizes of subdomain tyob off dom.
-      let sliced_ob =
-            coerce @(SomeIndexable (shape t) a) @(SomeIndexable list_dim a)
-            (ix_slice @t indexable_dict @a rep_a container
-             (coerce @(list_dim) @(shape t) dom)
-             (coerce @(AsBox (offset list_dim)) @(AsBox (offset (shape t))) off)) in
-
-      -- Map 'f' over the slice and build a list
-      \ (dummy : NoneType) -> dist_result.
-          tabulate_list @a @b rep_a rep_b f sliced_ob
-  in-}
-
-  let rep_thunk_list = unboxedinfo list @(AsBare dist_thunk) in
-
-{-  let workers : Boxed (list (AsBare dist_thunk)) =
-        build_list @dist_thunk rep_fn
-        (traverse_view @list_dim ShapeDict_list_dim
-         @dist_thunk rep_fn
-         (map_view @list_dim @distributed_size @dist_thunk
-          rep_distributed_size rep_fn create_thunk dist_sizes)) in-}
 
   letfun
     worker (si : SomeIndexable list_dim a) -> dist_result =
@@ -3852,6 +3821,7 @@ tabulate_list_dist @(a b : box)
     [reprSizeAlign @(arr Nworkers (StuckRef dist_result)) output_array_rep]
     stuckBox tyob chunk_array.
 
+
   case dist_sizes of mk_view tyob dist_sizes_dom get_dist_size.
 
   letfun
@@ -3868,6 +3838,10 @@ tabulate_list_dist @(a b : box)
         stuckRef list_ref.
       list_ref
   in
+
+  concatenate_with_offsets @b @Nelems @Nworkers
+  rep_b list_length worker_count get_chunk_offset get_chunk_list;
+{-
 
   let rep_output_array = repr_arr @Nelems @(AsBare b) list_length rep_b in
   let sa_b = reprSizeAlign @(AsBare b) rep_b in
@@ -3896,7 +3870,7 @@ tabulate_list_dist @(a b : box)
         (\ (elem_i : int) -> Store.
           copy @(AsBare b) rep_b
           (subscript @M @(AsBare b) sa_b chunk_ay elem_i)
-          (subscript_out @Nelems @(AsBare b) sa_b ret (off +# elem_i)))))));
+          (subscript_out @Nelems @(AsBare b) sa_b ret (off +# elem_i)))))));-}
 
 
 -------------------------------------------------------------------------------
@@ -3940,6 +3914,47 @@ distribute_Indexable @(d : box) @(a b : box)
   (traverse_view_real @list_dim @(NoneType -> b) ShapeDict_list_dim rep_fun
    (map_view @list_dim @(Subdomain d) @(NoneType -> b)
     (repr_Box @(Subdomain d)) rep_fun apply distributed_sizes));
+
+
+-- Concatenate a collection of lists, where the list offsets and output size 
+-- are known.  The offsets and lists must have the same length, and the offsets
+-- must be correct, else memory corruption will occur.
+concatenate_with_offsets @(a : box) @(Nelems Nworkers : intindex)
+  (rep : ReprBox a)
+  (elem_count : FIInt Nelems)
+  (worker_count : FIInt Nworkers)
+  (get_offset : int -> int)
+  (get_list : int -> Boxed (list (AsBare a)))
+  -> Boxed (list (AsBare a))
+  attribute(inline) =
+
+  let rep_list = unboxedinfo list @(AsBare a) in
+  let sa_list = reprSizeAlign @(list (AsBare a)) rep_list in
+
+  let type output_arr = arr Nelems (AsBare a) in
+  let rep_output_arr = repr_arr @Nelems @(AsBare a) elem_count rep in
+  let sa_a = reprSizeAlign @(AsBare a) rep in
+
+  con_boxed @(list (AsBare a)) rep_list
+  (make_list @(AsBare a) @Nelems elem_count
+   (con_stuckBox @output_arr rep_output_arr
+    (\ (ret : OutPtr output_arr) -> Store.
+
+      -- For each chunk, in parallel
+      doall @Nworkers worker_count
+      (\ (chunk_i : int) -> Store.
+
+        let off = get_offset chunk_i in
+        case get_list chunk_i of
+          [sa_list] boxed tyob (make_list @M chunk_count chunk_ayref).
+
+        let chunk_arr_rep = repr_arr @M @(AsBare a) chunk_count rep in
+        case chunk_ayref of [reprSizeAlign @(arr M (AsBare a)) chunk_arr_rep]
+          stuckBox tyob chunk_ay.
+
+        -- Copy this chunk to the output array
+        copy @(arr M (AsBare a)) chunk_arr_rep chunk_ay
+        (subarray_out @Nelems @M @(AsBare a) sa_a ret off)))));
   
 
 {- REPLACED BY NEW STREAM CODE
@@ -7371,6 +7386,12 @@ subscript_out : forall n : intindex, a : bare.
              -> int
              -> OutPtr a;
 
+-- Like subscript_out, but returns a subarray
+subarray_out : forall n n2 : intindex, a : bare.
+               SizeAlign a
+            -> OutPtr (arr n a)
+            -> int
+            -> OutPtr (arr n2 a);
 
 -------------------------------------------------------------------------------
 -- integer index arithmetic
