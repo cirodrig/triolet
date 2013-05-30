@@ -3764,65 +3764,33 @@ tabulate_list_dist @(a b : box)
   case list_dimToFIInt original_domain of someIInt @Nelems list_length.
 
   let type dist_result = Boxed (list (AsBare b)) in
-  let type dist_thunk = NoneType -> dist_result in
-
-  let type dist_list_elt = Tuple2 (Stored int) (Ref dist_thunk) in
-
-  let rep_offset = repr_int in
-  let rep_fn = unboxedinfo Ref @dist_thunk in
-  let rep_list_elt =
-        unboxedinfo Tuple2 @(Stored int) @(Ref dist_thunk)
-        rep_offset rep_fn in
-  let sa_offset = reprSizeAlign @(Stored int) repr_int in
-  let sa_fn = reprSizeAlign @(Ref dist_thunk) rep_fn in
-
-  -- Distribute into subdomains
-  case getNumDistributedPlaces None of
-    someIInt @(Nplaces : intindex) (nplaces : FIInt Nplaces).
-  case nplaces of fiInt nplaces_i.
-
-  let type distributed_size = Subdomain list_dim in
-  let rep_distributed_size = repr_Box @distributed_size in
-
-  let dist_sizes : view list_dim distributed_size =
-        splitN_list_dim nplaces_i original_domain in
-
-  -- Farm tasks
-  -- Each distributed task tabulates a sub-list
-  let rep_output_list = unboxedinfo StuckRef @dist_result in
-  let sa_output_list = reprSizeAlign @(StuckRef dist_result) rep_output_list in
 
   letfun
     worker (si : SomeIndexable list_dim a) -> dist_result =
       tabulate_list @a @b rep_a rep_b f si
   in
 
-  let workers : Boxed (list (AsBare dist_thunk)) =
-        distribute_Indexable @list_dim @a @dist_result
-        ShapeDict_list_dim rep_a (unboxedinfo list @(AsBare b))
-        dist_sizes s worker in
+  case farm_SomeIndexable @list_dim @a @dist_result
+       ShapeDict_list_dim rep_a (unboxedinfo list @(AsBare b)) worker s of
+    (dist_sizes, chunks).
 
-  case workers of
-    [reprSizeAlign @(list (AsBare dist_thunk))
-     (unboxedinfo list @(AsBare dist_thunk))]
-    boxed tyob (make_list @Nworkers worker_count worker_array).
+  case chunks of
+    [reprSizeAlign @(list (StuckRef dist_result)) (unboxedinfo list @(StuckRef dist_result))]
+    boxed tyob (make_list @Nworkers worker_count chunks).
 
   let output_array_rep : Repr (arr Nworkers (StuckRef dist_result)) =
         repr_arr @Nworkers @(StuckRef dist_result) worker_count
         (unboxedinfo StuckRef @dist_result) in
-  let output_array_tyob =
-        boxedinfo stuckBox @(arr Nworkers (StuckRef dist_result)) output_array_rep in
-
-  let chunks : StuckBox (arr Nworkers (StuckRef dist_result)) =
-        farm @Nworkers @dist_result worker_count output_array_tyob worker_array in
 
   -- Concatenate the chunks
   case chunks of
     [reprSizeAlign @(arr Nworkers (StuckRef dist_result)) output_array_rep]
     stuckBox tyob chunk_array.
 
-
   case dist_sizes of mk_view tyob dist_sizes_dom get_dist_size.
+
+  let rep_output_list = unboxedinfo StuckRef @dist_result in
+  let sa_output_list = reprSizeAlign @(StuckRef dist_result) rep_output_list in
 
   letfun
     get_chunk_offset (i : int) -> int =
@@ -3841,43 +3809,100 @@ tabulate_list_dist @(a b : box)
 
   concatenate_with_offsets @b @Nelems @Nworkers
   rep_b list_length worker_count get_chunk_offset get_chunk_list;
-{-
 
-  let rep_output_array = repr_arr @Nelems @(AsBare b) list_length rep_b in
-  let sa_b = reprSizeAlign @(AsBare b) rep_b in
 
-  let rep_final_list = unboxedinfo list @(AsBare b) in
-  let sa_final_list = reprSizeAlign @(list (AsBare b)) rep_final_list in
+reduce_loop_dist @(d : box) @(a b : box)
+  (sh : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (reduce_slice : SomeIndexable d a -> b -> b)
+  (reduce_elem : b -> b -> b)
+  (z : b)
+  (input : SomeIndexable d a)
+  -> b
+  attribute(inline) =
 
-  con_boxed @(list (AsBare b)) rep_final_list
-  (make_list @(AsBare b) @Nelems list_length
-   (con_stuckBox @(arr Nelems (AsBare b)) rep_output_array
-    (\ (ret : OutPtr (arr Nelems (AsBare b))) -> Store.
+  case input of someIndexable @t tyob t_has_shape_d indexable_dict container.
 
-      -- Copy each chunk into the output array
-      doall @Nworkers worker_count
-      (\ (chunk_i : int) -> Store.
+  let original_domain =
+        coerce @(shape t) @d (ix_shape @t indexable_dict @a container) in
 
-        let off = get_chunk_offset chunk_i in
-        case get_chunk_list chunk_i of
-          [sa_final_list] boxed tyob (make_list @M chunk_size chunk_ayref).
+  -- Distribute into subdomains
+  case getNumDistributedPlaces None of
+    someIInt @(Nplaces : intindex) (nplaces : FIInt Nplaces).
+  case nplaces of fiInt nplaces_i.
 
-        let chunk_array_rep = repr_arr @M @(AsBare b) chunk_size rep_b in
-        case chunk_ayref of [reprSizeAlign @(arr M (AsBare b)) chunk_array_rep]
-          stuckBox tyob chunk_ay.
+  let dist_sizes : view list_dim (Subdomain d) =
+        shSplitN @d sh nplaces_i original_domain in
 
-        doall @M chunk_size
-        (\ (elem_i : int) -> Store.
-          copy @(AsBare b) rep_b
-          (subscript @M @(AsBare b) sa_b chunk_ay elem_i)
-          (subscript_out @Nelems @(AsBare b) sa_b ret (off +# elem_i)))))));-}
+  letfun
+    worker (chunk : SomeIndexable d a) -> b =
+      reduce_slice chunk z
+  in
 
+  except @b;
 
 -------------------------------------------------------------------------------
 -- Distributed computation helper functions
 
 -- Number of distributed processing elements
 getNumDistributedPlaces : NoneType -> SomeIInt;
+
+
+-- Distribute the elements of a 'SomeIndexable' and map a function over them
+farm_SomeIndexable @(d : box) @(a b : box)
+  (sh_dict : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (worker : SomeIndexable d a -> b)
+  (s : SomeIndexable d a)
+  -> (view list_dim (Subdomain d), Boxed (list (StuckRef b)))
+  attribute(inline) =
+
+  case s of someIndexable @t tyob t_has_shape_d indexable_dict container.
+
+  let original_domain =
+        coerce @(shape t) @d (ix_shape @t indexable_dict @a container) in
+
+  let type dist_thunk = NoneType -> b in
+
+  -- Distribute into subdomains
+  case getNumDistributedPlaces None of
+    someIInt @(Nplaces : intindex) (nplaces : FIInt Nplaces).
+  case nplaces of fiInt nplaces_i.
+
+  let dist_sizes : view list_dim (Subdomain d) =
+        shSplitN @d sh_dict nplaces_i original_domain in
+
+  -- Farm tasks
+  -- Each distributed task tabulates a sub-list
+  let rep_output_list = unboxedinfo StuckRef @b in
+  let sa_output_list = reprSizeAlign @(StuckRef b) rep_output_list in
+
+  let workers : Boxed (list (AsBare dist_thunk)) =
+        distribute_Indexable @d @a @b
+        sh_dict rep_a rep_b dist_sizes s worker in
+
+  case workers of
+    [reprSizeAlign @(list (AsBare dist_thunk))
+     (unboxedinfo list @(AsBare dist_thunk))]
+    boxed tyob (make_list @Nworkers worker_count worker_array).
+
+  let output_array_rep : Repr (arr Nworkers (StuckRef b)) =
+        repr_arr @Nworkers @(StuckRef b) worker_count
+        (unboxedinfo StuckRef @b) in
+  let output_array_tyob =
+        boxedinfo stuckBox @(arr Nworkers (StuckRef b)) output_array_rep in
+
+  let chunks : StuckBox (arr Nworkers (StuckRef b)) =
+        farm @Nworkers @b worker_count output_array_tyob worker_array in
+
+  -- Concatenate the chunks
+  case chunks of
+    [reprSizeAlign @(arr Nworkers (StuckRef b)) output_array_rep]
+    stuckBox tyob chunk_array.
+
+  let results =
+        con_boxed @(list (StuckRef b)) (unboxedinfo list @(StuckRef b))
+        (make_list @(StuckRef b) @Nworkers worker_count chunks)
+
+  in (dist_sizes, results);
 
 
 -- Create a list of thunks, where each thunk applies 'f' to a piece of the
