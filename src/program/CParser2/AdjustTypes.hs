@@ -163,7 +163,7 @@ specToSFType ctx expect_boxed ty =
              AllT b body -> AllT <$> specToSFBinder b <*> boxed_type body
              AnyT k -> AnyT <$> specToSFKind k
              IntT n -> not_boxed $ pure ty
-             UTupleT _ -> Nothing
+             UTupleT ks -> pure $ UTupleT [BoxK | _ <- ks]
              CoT k  -> not_boxed $ CoT <$> specToSFKind k
   where
     -- Return something that is not a boxed type.

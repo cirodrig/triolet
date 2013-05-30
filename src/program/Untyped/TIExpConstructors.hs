@@ -291,7 +291,7 @@ mkCaseOfDict pos cls ty constraint methods dict
           dict_type = DelayedType $ do t <- case ty_arg of DelayedType m -> m
                                        return $ SF.varApp dict_con [t]
           superclass_types = map mkPredicate constraint
-          method_types = map (mkTyScheme . clmSignature) methods
+          method_types = map (mkClassMethodBinder ty_arg) methods
 
       -- Create variables to bind to each field
       dict_vars <- forM superclass_types $ \_ -> SF.newAnonymousVar SF.ObjectLevel
@@ -307,6 +307,17 @@ mkCaseOfDict pos cls ty constraint methods dict
             [TIAlt decon (Just dict_type) field_patterns body]
 
       return (mk_expr, dict_vars, method_vars)
+
+-- | Create the type of an instantiated class method
+mkClassMethodBinder :: TIType -> ClassMethod -> TIType
+mkClassMethodBinder ty_arg cm = 
+  case cm
+  of ClassMethod scm -> mkTyScheme scm
+     AbstractClassMethod ty -> DelayedType $ do
+       -- Instantiate by applying the method's type to the
+       -- class parameter's type
+       sf_ty_arg <- case ty_arg of DelayedType t -> t
+       return $ SF.AppT ty sf_ty_arg
 
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> SF.Var -> [TIExp]
         -> TIExp

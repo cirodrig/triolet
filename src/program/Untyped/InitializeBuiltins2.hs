@@ -267,7 +267,8 @@ frontendTyScheme tc_map sf_type =
 data ClassSigField =
     CSP Predicate               -- ^ Field type is a predicate
   | CSM TyScheme                -- ^ Field type is a type scheme
-  | CSX                         -- ^ Unrecognized field type
+  | CSX SF.Type                 -- ^ Unrecognized field type; may mention the
+                                --   class's parameter variables
 
 -- | Create a class signature from a class dictionary's type constructor 
 --   and data constructor.  The class must not be abstract.
@@ -279,10 +280,8 @@ frontendClassSignature tc_map dcon_type =
 
     -- Convert fields to predicates and types
     field_types <- mapM (convert_field tc_map') $ SF.dataConFields dcon_type
-    (constraint, methods) <- MaybeT $ return $ split_fields field_types
-
-    let method_list = map ClassMethod methods
-    return $ Qualified params' constraint method_list
+    let (constraint, methods) = split_fields field_types
+    return $ Qualified params' constraint methods
   where
     data_type = SF.dataConType dcon_type
     sf_params = SF.dataTypeParams data_type
@@ -290,21 +289,26 @@ frontendClassSignature tc_map dcon_type =
     convert_field tc_map (t, _) =
       (CSP `liftM` frontendPredicate tc_map t) `mplus`
       (CSM `liftM` frontendTyScheme tc_map t) `mplus`
-      (return CSX)
+      (return $ CSX t)
 
     -- Split a list of field types into predicates and field types.
     -- Predicates must precede field types.
-    split_fields :: [ClassSigField] -> Maybe (Constraint, [TyScheme])
+    split_fields :: [ClassSigField] -> (Constraint, [ClassMethod])
     split_fields fs = get_predicates id fs
       where
         get_predicates ps (CSP p : fs) = get_predicates (ps . (p:)) fs
-        get_predicates ps fs = do
-          methods <- get_fields id fs
-          return (ps [], methods)
+        get_predicates ps fs =
+          let methods = get_fields id fs
+          in (ps [], methods)
 
-        get_fields ts (CSM t : fs) = get_fields (ts . (t:)) fs
-        get_fields ts (_ : _)      = Nothing
-        get_fields ts []           = Just (ts [])
+        get_fields ts (CSM t : fs) = get_fields (ts . (ClassMethod t:)) fs
+        get_fields ts (CSX t : fs) = get_fields (ts . (abstract_method t:)) fs
+        get_fields ts []           = (ts [])
+
+        -- Create an abstract class method from the given System F type.
+        abstract_method t =
+          let parametric_type = foldr SF.LamT t sf_params 
+          in AbstractClassMethod parametric_type
 
 -- | Create a signature for an abstract class.  The signature has no
 --   constraints or methods.
@@ -467,6 +471,8 @@ tyConInitializers =
       , (TheTC_bool,             Right The_bool)
       , (TheTC_NoneType,         Right The_NoneType)
       , (TheTC_SliceObject,      Right The_SliceObject)
+      , (TheTC_SomeIndexable,    Right The_SomeIndexable)
+      , (TheTC_Subdomain,        Right The_Subdomain)
       , (TheTC_StuckRef,         Right The_StuckRef)
       , (TheTC_iter,             Right The_Stream)
       , (TheTC_list,             Right The_list)
@@ -494,6 +500,7 @@ tyConInitializers =
       [ (TheTC_shape,            The_shape,            shapeTyFamily)
       , (TheTC_index,            The_index,            indexTyFamily)
       , (TheTC_slice,            The_slice,            sliceTyFamily)
+      , (TheTC_offset,           The_offset,           offsetTyFamily)
       , (TheTC_cartesianDomain,  The_cartesianDomain,  cartesianTyFamily)
       ]
 
@@ -517,7 +524,7 @@ tyConInitializers =
 dataTypeConstructors :: [BuiltinTyCon]
 dataTypeConstructors = [c | (c, _, TyConInitializer) <- tyConInitializers]
 
-shapeTyFamily, indexTyFamily, sliceTyFamily, cartesianTyFamily ::
+shapeTyFamily, indexTyFamily, sliceTyFamily, offsetTyFamily, cartesianTyFamily ::
   TyConMap -> InitM (Instances TyFamilyInstance)
 
 shapeTyFamily tc_map = do
@@ -574,6 +581,19 @@ sliceTyFamily tc_map = do
              (The_dim1, slice),
              (The_dim2, tuple2),
              (The_dim3, tuple3)]
+
+offsetTyFamily tc_map = do
+  let instances = [let container = lookupBuiltinCon x tc_map
+                   in return $ Instance container $ TyFamilyInstance shape
+                  | (x, shape) <- insts]
+  return instances
+  where
+    int = lookupBuiltinVar SF.intV tc_map
+    none = lookupBuiltinCon The_NoneType tc_map
+    insts = [(The_list_dim, int),
+             (The_dim1, none),
+             (The_dim2, none),
+             (The_dim3, none)]
 
 cartesianTyFamily tc_map = do
   let instances = [let shape = lookupBuiltinCon x tc_map
@@ -755,7 +775,11 @@ functorClass _ tc_map = do
     let head = ConTy (builtinTyCon TheTC_view) @@ ConTy sh
         body = MethodsInstance [coreBuiltin The_map_view]    
     in return ([], Instance head body)
-  return [view_instance]
+  iter_instance <- polymorphic [Star] $ \ [sh] ->
+    let head = ConTy (builtinTyCon TheTC_iter) @@ ConTy sh
+        body = MethodsInstance [coreBuiltin The_map_Stream]
+    in return ([], Instance head body)
+  return [view_instance, iter_instance]
 
 traversableClass _ tc_map = do
   let instances1 = [monomorphicClassInstance head methods
@@ -819,19 +843,22 @@ shapeClass _ tc_map = do
   return instances
   where
     monomorphic_instances =
-      []
-      {-
       [(ConTy (builtinTyCon TheTC_list_dim),
-        [coreBuiltin The_ShapeDict_list_dim_member,
-         coreBuiltin The_ShapeDict_list_dim_intersect,
-         coreBuiltin The_ShapeDict_list_dim_flatten,
-         coreBuiltin The_ShapeDict_list_dim_generate,
-         coreBuiltin The_ShapeDict_list_dim_map,
-         coreBuiltin The_ShapeDict_list_dim_zipWith,
-         coreBuiltin The_ShapeDict_list_dim_zipWith3,
-         coreBuiltin The_ShapeDict_list_dim_zipWith4,
-         coreBuiltin The_ShapeDict_list_dim_slice]),
-       (ConTy (builtinTyCon TheTC_dim0),
+        [coreBuiltin The_noOffset_list_dim,
+         coreBuiltin The_addOffset_list_dim,
+         coreBuiltin The_appOffset_list_dim,
+         coreBuiltin The_intersect_list_dim,
+         coreBuiltin The_member_list_dim,
+         coreBuiltin The_slice_list_dim,
+         coreBuiltin The_split_list_dim,
+         coreBuiltin The_splitN_list_dim,
+         coreBuiltin The_peel_list_dim,
+         coreBuiltin The_flatten_list_dim,
+         coreBuiltin The_generate_list_dim,
+         coreBuiltin The_zipWith_list_dim,
+         coreBuiltin The_fold_list_dim,
+         coreBuiltin The_foreach_list_dim])]
+       {-(ConTy (builtinTyCon TheTC_dim0),
         [coreBuiltin The_ShapeDict_dim0_member,
          coreBuiltin The_ShapeDict_dim0_intersect,
          coreBuiltin The_ShapeDict_dim0_flatten,
@@ -1158,16 +1185,23 @@ mkTypeClassBinding tc_map tycon abstract mk_instances = do
 
   -- Look up the type class type constructor, dictionary constructor,
   -- and type object constructor
-  Just data_type <- SF.lookupDataType sf_var
+  m_data_type <- SF.lookupDataType sf_var
+  let Just data_type = m_data_type
   let [dict_var] = SF.dataTypeDataConstructors data_type
   let tyobj_var = SF.dataTypeBoxedInfoVar data_type dict_var
+  let error_message =
+        "Unable to create signature for type class " ++ show (SF.dataTypeCon data_type)
             
   signature <-
     if abstract
     then abstractClassSignature tc_map data_type
-    else do Just dcon_type <- SF.lookupDataCon dict_var
-            frontendClassSignature tc_map dcon_type
-  instances <- mk_instances
+    else do m_data_con <- SF.lookupDataCon dict_var
+            tenv <- SF.freezeTypeEnv
+            let Just dcon_type = m_data_con
+            errorOnFailure error_message $
+              frontendClassSignature tc_map dcon_type
+  instances <- errorOnFailure "Unable to create type class instances"
+               mk_instances
   return $ TyClsAss $ Class sf_var dict_var tyobj_var abstract signature instances
 
 -------------------------------------------------------------------------------
@@ -1205,15 +1239,14 @@ varInitializers =
       , (TheV_head, The_head)
       , (TheV_tail, The_tail)
       , (TheV_list_dim, The_fun_list_dim)
-      , (TheV_map, The_map_Stream)
+      , (TheV_reduce, The_reduce)
+      , (TheV_reduce1, The_reduce1)
+      , (TheV_zip, The_zip)
+      , (TheV_count, The_count)
       {-, (TheV_filter, The_fun_filter)
-      , (TheV_reduce, The_fun_reduce)
-      , (TheV_reduce1, The_fun_reduce1)
       , (TheV_sum, The_fun_sum)
-      , (TheV_zip, The_fun_zip)
       , (TheV_zip3, The_fun_zip3)
       , (TheV_zip4, The_fun_zip4)
-      , (TheV_count, The_count)
       , (TheV_range, The_range)
       , (TheV_arrayRange, The_arrayRange)
       , (TheV_chain, The_chain)
@@ -1287,15 +1320,17 @@ varInitializers =
       , (TheV___le__,         TheTC_Ord,             1, "__le__")
       , (TheV___gt__,         TheTC_Ord,             2, "__gt__")
       , (TheV___ge__,         TheTC_Ord,             3, "__ge__")
+        
+      , (TheV_map,            TheTC_Functor,         0, "map")
 
       , (TheV_iter,           TheTC_Traversable,     0, "iter")
       , (TheV_build,          TheTC_Traversable,     1, "build")
 
       , (TheV_intersection,   TheTC_Shape,           3, "intersection")
       , (TheV_member,         TheTC_Shape,           4, "member")
-      , (TheV_flatten,        TheTC_Shape,           7, "flatten")
-      , (TheV_generate,       TheTC_Shape,           8, "generate")
-      , (TheV_zipWithStream,  TheTC_Shape,           9, "zipWithIter")
+      , (TheV_flatten,        TheTC_Shape,           9, "flatten")
+      , (TheV_generate,       TheTC_Shape,           10, "generate")
+      , (TheV_zipWithStream,  TheTC_Shape,           11, "zipWithIter")
 
       , (TheV_domain,         TheTC_Indexable,       0, "domain")
       --, (TheV_at_point,       TheTC_Indexable,       1, "at_point")
@@ -1372,11 +1407,12 @@ createMethod tc_map t_bindings frontend_thing name cls_tycon index = do
     -- Use the class's type parameters, but remove the class's context.
     make_signature (Qualified [cls_typaram] _ methods)
       | index < 0 || index > length methods =
-          internalError "createVars: Index out of bounds"
-      | otherwise =
-          let method_signature = clmSignature $ methods !! index
-              constraint = [instancePredicate cls_tycon (ConTy cls_typaram)]
+          internalError "createMethod: Index out of bounds"
+      | ClassMethod method_signature <- methods !! index =
+          let constraint = [instancePredicate cls_tycon (ConTy cls_typaram)]
           in Qualified [cls_typaram] constraint method_signature
+      | otherwise =
+          internalError "createMethod: Method is abstract"
 
 translateVariable :: TyConMap -> SF.TypeEnv -> BuiltinVar -> BuiltinThing
                   -> InitM (BuiltinVar, Variable, ValueBinding)

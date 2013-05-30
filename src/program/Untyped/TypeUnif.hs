@@ -330,6 +330,12 @@ instance CTerm () where
   freeC () = return Set.empty
   substituteC _ () = return ()
 
+instance CTerm a => CTerm (Maybe a) where
+  freeC Nothing  = return Set.empty
+  freeC (Just x) = freeC x
+  substituteC subst Nothing  = return Nothing
+  substituteC subst (Just x) = Just `liftM` substituteC subst x
+
 instance CTerm a => CTerm [a] where
   freeC xs = Set.unions `liftM` mapM freeC xs
   substituteC subst xs = mapM (substituteC subst) xs
@@ -397,8 +403,10 @@ instance CTerm Predicate where
 
 instance CTerm ClassMethod where
   freeC (ClassMethod sig) = freeC sig
+  freeC (AbstractClassMethod _) = return $ Set.empty
   substituteC subst (ClassMethod sig) =
     ClassMethod `liftM` substituteC subst sig
+  substituteC subst cm@(AbstractClassMethod _) = return cm
 
 instance CTerm ClassInstance where
   freeC (AbstractClassInstance _ ts) = freeC ts
@@ -534,7 +542,11 @@ pprClassMethods :: NormalizeContext HMType m => [ClassMethod] -> Ppr m Doc
 pprClassMethods ms = fmap (braces . vcat . punctuate comma) $
                      mapM pprClassMethod ms
 
-pprClassMethod (ClassMethod scm) = pprQualified pprType scm
+pprClassMethod (ClassMethod scm) =
+  pprQualified pprType scm
+
+pprClassMethod (AbstractClassMethod t) =
+  return (text "abstract" <+> SF.pprType t)
 
 pprClassInstance (AbstractClassInstance v ts) = do
   ts' <- mapM (prType Nothing app_prec) ts

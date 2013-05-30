@@ -234,7 +234,9 @@ instantiateMethod pos cls_tycon method_index = do
 
   -- Instantiate the method
   let method_var = method_vars !! method_index
-      method_scheme = clmSignature $ methods !! method_index
+      method_scheme = case methods !! method_index
+                      of ClassMethod scm -> scm
+                         _ -> internalError "instantiateMethod"
 
   InstanceValue m_inst_types m_inst_dicts repr ty <-
     instantiate (\_ t -> t) method_scheme

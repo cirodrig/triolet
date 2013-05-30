@@ -12,7 +12,7 @@ frontendSourceTypes =
    "blist", "barray1", "barray2", "barray3",
    "Maybe", "intset", "llist",
    "shape", "list_dim", "dim0", "dim1", "dim2", "dim3",
-   "index", "slice", "cartesianDomain",
+   "index", "slice", "offset", "cartesianDomain",
    "view",
    "Scatter",
 
@@ -27,7 +27,7 @@ frontendSourceTypes =
 -- | Predefined data types not visible to the Triolet parser
 frontendOtherTypes :: [String]
 frontendOtherTypes =
-  ["SliceObject", "StuckRef"]
+  ["SliceObject", "SomeIndexable", "Subdomain", "StuckRef"]
 
 -- | All predefined global functions recognized by the Triolet parser
 frontendSourceGlobals :: [String]
@@ -48,15 +48,15 @@ frontendSourceGlobals =
   , "head"
   , "tail"
   , "map"
-  {-, "filter"
   , "reduce"
   , "reduce1"
-  , "sum"
+  {-, "filter"
+  , "sum"-}
   , "zip"
-  , "zip3"
-  , "zip4"
+  {-, "zip3"
+  , "zip4"-}
   , "count"
-  , "range"
+  {-, "range"
   , "arrayRange"
   , "chain"
   , "singletonIter"

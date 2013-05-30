@@ -419,14 +419,18 @@ instance Eq Class where (==) = (==) `on` clsTyCon
 
 -- | A class method type signature.
 data ClassMethod =
-  ClassMethod
-  { -- | The method's type scheme.
-    -- The class's parameter variables and the class constraint itself are not
-    -- part of the type scheme.
-    clmSignature :: TyScheme
-  --  -- | The variable that represents this method in source code 
-  -- , clmVariable :: Variable
-  }
+    ClassMethod
+    { -- | The method's type scheme.
+      -- The class's parameter variables and the class constraint itself are not
+      -- part of the type scheme.
+      clmSignature :: TyScheme
+    }
+  | AbstractClassMethod
+    { -- | The method's System F type.
+      --
+      --   This type is parameterized over the class's parameter variables.
+      clmAbstractSignature :: SF.Type
+    }
 
 data Instance a =
   Instance
