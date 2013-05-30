@@ -256,6 +256,8 @@ instance Show TypeCheckError where
          formatBadAppError True pos ty k
        BadApp pos ty t ->
          formatBadAppError False pos ty t
+       EscapeError pos v ->
+         formatEscapeError pos v
        MiscError pos message ->
          formatMiscError pos message
        UninhabitedError pos lv ty ->
@@ -287,6 +289,11 @@ formatBadAppError is_type_arg pos actual arg_type = let
                 else text "is applied to an argument of type"
           in description <+> pprType arg_type <> comma
   in intro $$ oper $$ arg $$ err_msg
+
+formatEscapeError :: SourcePos -> Var -> Doc
+formatEscapeError pos v =
+  let intro = text "Error at" <+> text (show pos)
+  in intro $$ text "Type variable" <+> text (show v) <+> text "escapes"
 
 formatMiscError pos message =
   text "Error at" <+> text (show pos) $$ message
