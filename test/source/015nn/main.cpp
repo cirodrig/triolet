@@ -7,9 +7,9 @@ float inp_array[] = {0.764, -0.07, -0.972, 0.993, -0.447, 0.221};
 
 using namespace Triolet;
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   List<Float> ref_list = CreateFloatList(5, ref_array);
   List<Float> inp_list = CreateFloatList(6, inp_array);
   List<Int> nn_list = nearest(ref_list, inp_list);

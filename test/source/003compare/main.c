@@ -1,9 +1,9 @@
 
 #include "compare_interface.h"
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   int x1_true  = compare(1, 1, 0.5, 0.5);
   int x2_false = compare(1, 1, 0.5, 1.5);
   int x3_false = compare(1, 1, 0.5, -0.5);

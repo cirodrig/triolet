@@ -8,8 +8,8 @@ int testlist_out[3];
 float testarray_in[2][3] = { {0.5, 1, 1.5}, {2, 2.5, 3} };
 float testarray_out[2][3];
 
-int main() {
-  Triolet_init();
+int main(int argc, char **argv) {
+  Triolet_init(&argc, &argv);
 
   // Int
   {

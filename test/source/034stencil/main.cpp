@@ -39,9 +39,9 @@ Array2<Float> make_array2(int height, int width, float *data)
   return arr.freeze();
 }
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   Array2<Float> mat1 = make_array2(DIMY, DIMX, arr);
   Array2<Float> mat2 = heat(mat1);

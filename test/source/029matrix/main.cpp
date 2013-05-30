@@ -11,10 +11,10 @@ float data[] = {
   1.5, 2.5, 3.5,
   0.0, 1.0, 2.0};
 
-int main()
+int main(int argc, char **argv)
 {
   float data2[9];
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   Array2<Float> mat;
   {

@@ -25,9 +25,9 @@ void InitializeRow(Incomplete<List<Tuple<Int, Float> > > row,
   };
 }
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   Incomplete<SparseMatrix> i_sparse_matrix;
   Incomplete<Array1<Float> > i_vector;

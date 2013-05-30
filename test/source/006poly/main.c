@@ -2,9 +2,9 @@
 #include <stdio.h>
 #include "poly_interface.h"
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   float e = 2.71828;
   float p = 3.14159;

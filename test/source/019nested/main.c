@@ -6,9 +6,9 @@
 TrioletFloat xs[] = {5.7, 0.5, 0.8, 2.4, 2.2, 3.4};
 TrioletFloat ys[] = {5.9, 2.3, 4.3, 3.8, 3.4, 2.3};
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   TrioletList *pxs = triolet_List_Float_FromArray(6, xs);
   TrioletList *pys = triolet_List_Float_FromArray(6, ys);
 

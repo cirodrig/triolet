@@ -42,8 +42,8 @@ TrioletFloat z_coords[10] = {
   0.6533732220189118
 };
 
-int main() {
-  Triolet_init();
+int main(int argc,  char **argv) {
+  Triolet_init(&argc, &argv);
   TrioletList *x_list = triolet_List_Float_FromArray(10, x_coords);
   TrioletList *y_list = triolet_List_Float_FromArray(10, y_coords);
   TrioletList *z_list = triolet_List_Float_FromArray(10, z_coords);

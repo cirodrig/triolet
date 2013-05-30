@@ -15,9 +15,9 @@ int expect_outs4[] = {-39, 21, 0, 4, 2};
 
 using namespace Triolet;
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   List<Int> pxs = CreateIntList(5, xs);
   List<Int> pys = CreateIntList(6, ys);
   List<Int> pzs = CreateIntList(6, zs);

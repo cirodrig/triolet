@@ -15,9 +15,9 @@ int arr[] = {
 
 using namespace Triolet;
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   Array2<Int> mat;
   {

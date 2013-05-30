@@ -8,9 +8,9 @@ float input_array[] =
   {0.75, 2.0, 2.5, 1.3, -0.1,
    0, 3, 0.4, 1, 2};
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   List<Float> l = CreateFloatList(10, input_array);
   Int ix = min_float(l);
 

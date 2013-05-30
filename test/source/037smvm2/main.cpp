@@ -47,9 +47,9 @@ SparseMatrix CreateMatrix(void)
   return matrix.freeze();
  }
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   SparseMatrix sparse_matrix = CreateMatrix();
   Incomplete<Array1<Float> > i_vector;

@@ -6,9 +6,9 @@
 
 int data[] = {30, 47, 31, 33, 2, 41, 25};
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   TrioletList *lst = triolet_List_Int_FromArray(7, data);
   int sum = parity(lst);

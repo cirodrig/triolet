@@ -16,8 +16,8 @@ int numbers[] = {
 int indices[] =
   {0,1,2,3,0,1,2,3,0,1,2,3};
 
-int main() {
-  Triolet_init();
+int main(int argc, char **argv) {
+  Triolet_init(&argc, &argv);
   List<Int> t_numbers = CreateIntList(12, numbers);
   List<Int> t_columns = CreateIntList(12, indices);
   List<Bool> divs = divisibility_check(t_numbers, t_columns);

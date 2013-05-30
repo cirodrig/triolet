@@ -6,9 +6,9 @@
 
 using namespace Triolet;
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   Array1<Int> arr = histo(100);
 
   int i;

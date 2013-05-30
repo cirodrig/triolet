@@ -41,9 +41,9 @@ Array2<Float> marshalArray(int ysize, int xsize, float *arr)
   return mk_arr.freeze();
 }
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   Array2<Float> mat1 = marshalArray(DIM1, DIM2, arr1);
   Array2<Float> mat2 = marshalArray(DIM2, DIM3, arr2);

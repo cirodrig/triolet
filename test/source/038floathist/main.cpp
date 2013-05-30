@@ -48,9 +48,9 @@ List<TriInput> make_inputs(void) {
   return mk_list.freeze();
 }
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   List<TriInput> arr = make_inputs();
   Array2<Float> result = f(arr);
 

@@ -46,9 +46,9 @@ void from_matrix(int height, int width, float *data, BArray2<Float> mat) {
       *data++ = (Float) mat.at(y, x);
 }
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   BArray2<Float> mat1 = make_matrix(DIM1, DIM2, arr1);
   BArray2<Float> mat2 = make_matrix(DIM2, DIM3, arr2);

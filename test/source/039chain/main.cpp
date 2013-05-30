@@ -4,9 +4,9 @@
 
 using namespace Triolet;
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   List<Int> l = f(121, 169);
   int i;

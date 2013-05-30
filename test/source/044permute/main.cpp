@@ -21,8 +21,8 @@ make_list(void)
   return mk_list.freeze();
 }
 
-int main() {
-  Triolet_init();
+int main(int argc, char **argv) {
+  Triolet_init(&argc, &argv);
   List<Tuple<Int, Int> > l = make_list();
   Array1<Int> a = foo(l);
 

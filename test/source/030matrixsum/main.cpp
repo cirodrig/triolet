@@ -11,9 +11,9 @@ int data[] = {
   0, 1, 2,
   -3, -2, -1};
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
 
   Array2<Int> mat;
   {

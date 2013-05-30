@@ -2,9 +2,9 @@
 #include <stdio.h>
 #include "remainder_interface.h"
 
-int main()
+int main(int argc, char **argv)
 {
-  Triolet_init();
+  Triolet_init(&argc, &argv);
   TrioletInt n = remainder_int(667, 37);
   TrioletFloat f = remainder_float(71.707, 32.45);
 
