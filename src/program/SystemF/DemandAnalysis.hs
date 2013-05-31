@@ -396,6 +396,7 @@ dmdCaseE dmd inf scrutinee sps alts = do
   -- eliminate the entire case statement
   case alts' of
     [AltM alt'] | null (deConExTypes $ altCon alt') &&
+                  maybe True isDeadPattern (altTyObject alt') &&
                   all isDeadPattern (altParams alt') ->
       return $ altBody alt'
     _ -> do
