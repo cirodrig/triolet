@@ -458,10 +458,10 @@ pprContext show_body (ApplyContext {_ctxContext = c, _ctxBody = b}) =
         ty_ob_doc = maybe empty (brackets . pprPat) ty_ob
         sps_doc = brackets $ sep $ punctuate comma $ map pprExp sps
         decon_doc =
-          hang (sep [pprPatternMatch decon pats, sps_doc] <+> text "=") 4
+          hang (sep [pprPatternMatch decon ty_ob pats, sps_doc] <+> text "=") 4
           (pprExp scr)
         exception (AltBinders decon ty_ob pats) =
-          text "except if" <+> pprPatternMatch decon pats
+          text "except if" <+> pprPatternMatch decon ty_ob pats
 
     show_context (LetfunCtx _ defs) =
       text "letrec" <+> pprFDefGroup defs

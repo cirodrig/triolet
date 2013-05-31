@@ -206,23 +206,24 @@ pprExpPrecFlags flags (ExpM expression) =
       in hang op_doc appIndent (sep visible_args_doc)
 
 pprAltPatternFlags flags alt =
-  pprPatternMatchFlags flags (altCon alt) (altParams alt)
+  pprPatternMatchFlags flags (altCon alt) (altTyObject alt) (altParams alt)
 
-pprPatternMatch decon params =
-  pprPatternMatchFlags defaultPprFlags decon params
+pprPatternMatch decon tyob_param params =
+  pprPatternMatchFlags defaultPprFlags decon tyob_param params
 
-pprPatternMatchFlags f (VarDeCon con ty_args ex_types) params =
+pprPatternMatchFlags f (VarDeCon con ty_args ex_types) tyob_param params =
   let con_doc = pprVar con
       args_doc = pprTyArgs ty_args
       ex_types_doc = pprExTypeBinders ex_types
+      tyob_param_doc = maybe empty (brackets . pprPatFlags True f) tyob_param
       params_doc = map (parens . pprPatFlags True f) params
       visible_args_doc =
         if showInferableTypes f
-        then args_doc ++ ex_types_doc ++ params_doc
-        else ex_types_doc ++ params_doc
+        then args_doc ++ ex_types_doc ++ [tyob_param_doc] ++ params_doc
+        else ex_types_doc ++ [tyob_param_doc] ++ params_doc
   in hang con_doc appIndent (sep visible_args_doc)
 
-pprPatternMatchFlags f (TupleDeCon _) params =
+pprPatternMatchFlags f (TupleDeCon _) tyob_param params =
   pprParenList (map (pprPatFlags True f) params)
 
 pprAlt altm = pprAltFlags defaultPprFlags altm
