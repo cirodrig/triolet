@@ -2962,7 +2962,9 @@ makeBranchContinuation inf m_return_param alt = do
 
   -- Create dummy parameter if there are no other parameters
   m_dummy_param <-
-    if null (altParams $ fromAltSM alt) && isNothing m_return_param'
+    if null (altParams $ fromAltSM alt) &&
+       isNothing (altTyObject $ fromAltSM alt) &&
+       isNothing m_return_param'
     then do
       field_var <- newAnonymousVar ObjectLevel
       return $ Just $ PatSM $ patM (field_var ::: VarT (coreBuiltin The_NoneType))
@@ -3016,6 +3018,7 @@ constructBranchContinuationFunction
     -- These will become the parameters and body of the returned function
     ex_types = deConExTypes $ altCon alt
     params = maybeToList m_dummy_param ++
+             maybeToList (altTyObject alt) ++
              altParams alt ++
              maybeToList m_return_param
     body = altBody alt
@@ -3039,11 +3042,12 @@ constructBranchContinuationAlt
 
   -- Construct the new case alternative
   let call_ty_args = map (VarT . binderVar) $ deConExTypes decon'
+      tyob_arg = fmap (\p -> ExpM $ VarE inf (patMVar p)) tyob_param'
       decon_args = [ExpM $ VarE inf (patMVar p) | p <- params']
       dummy_arg = case m_dummy_param
                   of Nothing -> []
                      Just _ -> [noneE inf]
-      call_args = dummy_arg ++ decon_args ++ maybeToList m_return_arg
+      call_args = dummy_arg ++ maybeToList tyob_arg ++ decon_args ++ maybeToList m_return_arg
       call = ExpM $ AppE inf (ExpM $ VarE inf callee) call_ty_args call_args
   return $ AltM $ Alt decon' tyob_param' params' call
   where
