@@ -115,7 +115,7 @@ otherLoopOperator v =
 useRewriteRules :: ExpInfo -> Var -> [Type] -> [ExpM] -> LRW (Maybe ExpM)
 useRewriteRules inf op_var ty_args args = LRW $ ReaderT $ \env ->
   rewriteApp parallelizingRewrites (varSupply env) (typeEnv env)
-  inf op_var ty_args (map deferEmptySubstitution args)
+  inf op_var ty_args args
 
 data Rewrite =
     ReplaceWith Var

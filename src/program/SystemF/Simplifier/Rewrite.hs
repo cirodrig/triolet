@@ -409,13 +409,11 @@ sequentializingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
 rewriteApp :: RewriteRuleSet
            -> IdentSupply Var
            -> TypeEnv
-           -> ExpInfo -> Var -> [Type] -> [ExpSM]
+           -> ExpInfo -> Var -> [Type] -> [ExpM]
            -> IO (Maybe ExpM)
 rewriteApp ruleset id_supply tenv inf op_var ty_args args =
   case Map.lookup op_var $ rewriteRules ruleset
-  of Just rw -> let do_rewrite = do
-                      subst_args <- mapM applySubstitution args
-                      trace_rewrite subst_args $ rw inf ty_args subst_args
+  of Just rw -> let do_rewrite = trace_rewrite args $ rw inf ty_args args
                 in runRW do_rewrite id_supply tenv
      Nothing -> return Nothing
   where

@@ -534,6 +534,7 @@ makeExpValue (ExpM expression) =
      LitE inf l -> return $ valueCode $ LitAV l
      _ -> return topCode
 
+rewriteAppInSimplifier :: ExpInfo -> Var -> [Type] -> [ExpM] -> LR (Maybe ExpM)
 rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
   x <- rewriteApp (lrRewriteRules $ lrConstants env)
        -- (intIndexEnv $ lrDictEnv env)
@@ -1744,36 +1745,20 @@ rwAppWithOperator' is_stream_arg inf op op_val ty_args args =
 
             | otherwise -> do
                 -- Try to apply a rewrite rule
-                rewritten <- rewriteAppInSimplifier inf op_var ty_args args
+                (args', arg_values) <- rwExps is_stream_app args
+                rewritten <- rewriteAppInSimplifier inf op_var ty_args args'
                 case rewritten of
                   Just new_expr -> do
                     consumeFuel     -- A term has been rewritten
                     rwExp is_stream_arg $ deferEmptySubstitution new_expr
 
                   Nothing ->
-                    try_rewrite_stream_expression
-          _ -> try_rewrite_stream_expression
+                    rebuild_app args' arg_values
+          _ -> unknown_app
   where
     -- If out of fuel, then don't simplify this expression.  Process arguments.
     -- Operator is already processed.
     use_fuel m = useFuel' unknown_app m
-
-    -- Perform stream transformations.
-    -- However, if this application is a subexpression of another
-    -- stream expression, skip this step.  The entire nested 
-    -- expression will be processed when the outermost application
-    -- is processed.
-    try_rewrite_stream_expression
-      | not is_stream_arg && is_stream_app = do
-          (args', arg_values) <- rwExps is_stream_app args
-          m_stream_exp <- interpretStreamInSimplifier inf op ty_args args'
-          case m_stream_exp of
-            Just stream_exp -> do
-              consumeFuel
-              return (stream_exp, topCode)
-            Nothing -> rebuild_app args' arg_values
-
-      | otherwise = unknown_app
 
     -- No simplifications are applicable to this term
     unknown_app = do
