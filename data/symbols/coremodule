@@ -8539,50 +8539,6 @@ make_sliceObject
 -------------------------------------------------------------------------------
 -- Stream consumers
 
-build_list_dim_list @(a : bare)
-  (rep : Repr a) (vw : view list_dim (AsBox a)) (ret : OutPtr (list a))
-  -> Store
-  attribute(inline, inline_dimensionality) =
-  case vw of mk_view tyob (mk_list_dim tyob2 m_size) f.
-  case m_size of {
-    justVal (size : int).
-      -- Finite view
-      case defineIntIndex size of someIInt @(N : intindex) (sz : FIInt N).
-      let rep_array = unboxedinfo arr @N @a sz rep in
-      make_list @a @N sz
-      (con_stuckBox @(arr N a) rep_array
-       (arr1D_build @N @a rep sz
-        (\ (i : int) (ret : OutPtr a) -> Store.
-           asbare @a rep (f (boxIntValue i)) ret)))
-      ret
-
-  ; nothingVal.
-      -- Infinte views can't be turned into lists
-      except @Store
-  };
-
-
-build_dim1_array @(a : bare)
-  (rep : Repr a)
-  (vw : view dim1 (AsBox a))
-  (ret : OutPtr (array1 a))
-  -> Store
-  attribute(inline, inline_dimensionality) =
-
-  case vw of mk_view tyob (dom : dim1) f.
-  case dim1ToArraySize dom of arraySize @(N : intindex) lb stride size.
-
-  let linear_map : LinearMap = linearMap stride lb in
-
-  mk_array1 @a @N lb stride size
-  (con_stuckBox @(arr N a) (unboxedinfo arr @N @a size rep)
-   (arr1D_build @N @a rep size
-    (\ (i : int) (ret : OutPtr a) -> Store.
-        -- Compute the logical index corresponding to array index 'i'
-        let logical_i : int = evalLM i linear_map in
-        asbare @a rep (f (boxIntValue logical_i)) ret)))
-   ret;
-
 {-
 reduce_list_dim @(a : bare)
   (rep : Repr a)
@@ -8615,7 +8571,6 @@ reduce1_list_dim @(a : bare)
   in
 
   primitive_list_dim_reduce1 @a rep dom gen2 f;
--}
 
 
 reduce_dim1 : forall a : bare.
@@ -8633,8 +8588,6 @@ reduce1_dim1 : forall a : bare.
   -> (a -> a -> Init a)
   -> view dim1 (AsBox a)
   -> Init a;
-
-{-
 
 scatter_list_dim @(i r : bare)
   (repr_i : Repr i)
@@ -8788,7 +8741,7 @@ fold_list_dim @(a acc : bare)
      case ix of stored u_ix.
      f x (boxToBare @a repr_a (g (boxIntValue u_ix))) ret)
   init
-  ret;-}
+  ret;
 
 fold_dim1 : forall a acc : bare.
             Repr a -> Repr acc
@@ -8819,7 +8772,7 @@ fold_dim2 : forall a acc : bare.
          -> acc
          -> view dim2 (AsBox a)
          -> Init acc;
-
+-}
 
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionary-like internal methods

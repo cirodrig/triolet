@@ -839,22 +839,6 @@ builtinVariableNames =
   , "Sequence_parallel_build"
   , "Sequence_parallel_scatter"-}
 
-    -- Fold-like functions
-  , "build_dim1_array"
-  , "build_list_dim_list"
-  , "reduce_list_dim"
-  , "reduce_dim1"
-  , "reduce_dim2"
-  , "reduce1_list_dim"
-  , "reduce1_dim1"
-  , "reduce1_dim2"
-  , "scatter_list_dim"
-  , "scatter_dim1"
-  , "scatter_dim2"
-  , "fold_dim1"
-  , "fold_dim2"
-  , "llist_fold"
-
     -- Primitive functions
   , "primitive_list_dim_chain"
   , "primitive_list_dim_reduce"
