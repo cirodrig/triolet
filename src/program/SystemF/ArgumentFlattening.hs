@@ -627,7 +627,7 @@ packParameterWrite' pat flat_arg =
         _ ->
           return src
     
-    copy_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_copy)
+    copy_op = ExpM $ VarE defaultExpInfo (coreBuiltin The_blockcopy)
 
 -- | Pack a parameter, so that the result is readable
 packParametersRead :: FlatArgs -> AF (ExpM -> ExpM)
