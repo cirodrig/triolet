@@ -225,7 +225,7 @@ procedure apply_f32_f (owned obj, float arg) -> owned {
   // Create a new PAP
   typedef pap_type = PAP(float);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_f32,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
@@ -239,7 +239,7 @@ procedure apply_f32 (owned obj, float arg, pointer ret) -> () {
   // Create a new PAP
   typedef pap_type = PAP(float);
   new_pap_ptr = pointer primcall triolet_alloc (sizeof pap_type);
-  !new_pap_ptr = pap_type { null as owned,  // FIXME: object header
+  !new_pap_ptr = pap_type { typeObject_PAP_f32,
                             null, obj, arity, arg };
   new_pap = new_pap_ptr as owned;
 
