@@ -383,6 +383,7 @@ indexPureTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_chain_dim op -> return bool_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return int_type
            | isBuiltin bi The_dim2 op -> return int2_type
@@ -391,6 +392,7 @@ indexPureTF bi = typeFunction 1 compute_eliminator
 
     none_type = VarT (getBuiltin bi The_NoneType)
     int_type = intT
+    bool_type = VarT (getBuiltin bi The_bool)
     int2_type = varApp (getBuiltin bi The_Tuple2) [int_type, int_type]
     int3_type = varApp (getBuiltin bi The_Tuple3) [int_type, int_type, int_type]
 
@@ -403,6 +405,7 @@ indexMemTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_chain_dim op -> return bool_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return int_type
            | isBuiltin bi The_dim2 op -> return int2_type
@@ -414,6 +417,7 @@ indexMemTF bi = typeFunction 1 compute_eliminator
 
     none_type = varApp storedV [VarT (getBuiltin bi The_NoneType)]
     int_type = varApp storedV [intT]
+    bool_type = varApp storedV [VarT (getBuiltin bi The_bool)]
     int2_type = varApp (getBuiltin bi The_Tuple2)
                 [int_type, int_type]
     int3_type = varApp (getBuiltin bi The_Tuple3)
@@ -428,6 +432,7 @@ offsetPureTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_chain_dim op -> return none_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return none_type
            | isBuiltin bi The_dim2 op -> return none_type
@@ -446,6 +451,7 @@ offsetMemTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_chain_dim op -> return none_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return none_type
            | isBuiltin bi The_dim2 op -> return none_type
@@ -467,6 +473,7 @@ slicePureTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return slice_type
+           | isBuiltin bi The_chain_dim op -> return chain_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return slice_type
            | isBuiltin bi The_dim2 op -> return slice2_type
@@ -475,6 +482,7 @@ slicePureTF bi = typeFunction 1 compute_eliminator
 
     none_type = VarT (getBuiltin bi The_NoneType)
     slice_type = VarT (getBuiltin bi The_SliceObject)
+    chain_type = VarT (getBuiltin bi The_chain_dim)
     slice2_type = varApp (getBuiltin bi The_Tuple2)
                   [slice_type, slice_type]
     slice3_type = varApp (getBuiltin bi The_Tuple3)
@@ -489,6 +497,7 @@ sliceMemTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return slice_type
+           | isBuiltin bi The_chain_dim op -> reduceToWhnf chain_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return slice_type
            | isBuiltin bi The_dim2 op -> return slice2_type
@@ -497,6 +506,8 @@ sliceMemTF bi = typeFunction 1 compute_eliminator
 
     none_type = varApp storedV [VarT (getBuiltin bi The_NoneType)]
     slice_type = VarT (getBuiltin bi The_SliceObject)
+    chain_type = VarT (getBuiltin bi The_AsBare) `AppT`
+                 VarT (getBuiltin bi The_chain_dim)
     slice2_type = varApp (getBuiltin bi The_Tuple2)
                   [slice_type, slice_type]
     slice3_type = varApp (getBuiltin bi The_Tuple3)

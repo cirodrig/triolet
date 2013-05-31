@@ -365,12 +365,11 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (coreBuiltin The_modI, rwModInt)
             ]
 
-    exprs = [] --(coreBuiltin The_count, count_expr)]
+    exprs = [(coreBuiltin The_count, count_expr)]
     
     -- Turn 'count' into a call to 'count_helper'
-    {-count_expr =
-      mkVarAppE (coreBuiltin The_count_helper) []
-      [return $ valConE' (VarCon (coreBuiltin The_None) [] []) []]-}
+    count_expr =
+      mkVarAppE (coreBuiltin The_count_helper) [] [return (noneE defaultExpInfo)]
 
     int0_expr = return $ litE' $ IntL 0 intT
     int1_expr = return $ litE' $ IntL 1 intT

@@ -572,7 +572,7 @@ data ShapeDict (d : box) : box
    int -> d -> view list_dim (Subdomain d),
    -- peel
    forall a r : box.
-   (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
+   Repr (AsBare a) -> (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
    view d (Stream list_dim a) -> r,
    -- flatten
    forall a : box. Stream d a -> Stream list_dim a,
@@ -666,7 +666,7 @@ shSplitN @(d : box) (sh : ShapeDict d)
 
 shPeel @(d : box) (sh : ShapeDict d)
    -> forall a r : box.
-      (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
+      ReprBox a -> (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
       view d (Stream list_dim a) -> r attribute(inline) =
 
     case sh of shapeDict tyob rep_i rep_o rep_s
@@ -2506,6 +2506,19 @@ dim1ToArraySize (shp : dim1) -> ArraySize attribute(inline) =
 -- Get the stream shape corresponding to a container
 type shape : (box -> box) -> box;
 
+-- The domain of nonempty subsets of {0, 1}.  Used for concatenating lists.
+-- The field is an integer in the range 0--3.
+-- 0 \in mk_chain_dim n <-> n & 1 /= 0
+-- 1 \in mk_chain_dim n <-> n & 2 /= 0
+data chain_dim : box
+{
+  mk_chain_dim (int);
+};
+
+con_chain_dim (n : int) -> chain_dim attribute(inline) =
+  mk_chain_dim (boxedinfo mk_chain_dim) n;
+
+
 -- The shape of a list stream.
 -- 'Nothing' is an infinite stream; otherwise the shape is the length.
 data list_dim : box
@@ -3363,12 +3376,24 @@ streamToSequence @(a : box)
 
 
 streamToSequence2 @(a : box)
+  (s : Stream list_dim a) -> Seq a attribute(inline) =
+
+  case s of {
+    seqStream tyob co sq. sq
+  ; splittableStream @d2 tyob co shape_dict vw.
+      flattenSplittable2 @d2 @a shape_dict vw
+  ; ixStream @b tyob rep f si.
+      map_Seq @b @a f (viewToSeq @b (someIndexableToView @list_dim @b rep si))
+  };
+
+
+streamToSequence3 @(a : box)
   (s : Stream list_dim a) -> Seq a attribute(inline_never) =
 
   case s of {
     seqStream tyob co sq. sq
   ; splittableStream @d2 tyob co shape_dict vw.
-      flattenSplittable @d2 @a shape_dict vw
+      flattenSplittable2 @d2 @a shape_dict vw
   ; ixStream @b tyob rep f si.
       map_Seq @b @a f (viewToSeq @b (someIndexableToView @list_dim @b rep si))
   };
@@ -3387,6 +3412,100 @@ flattenSplittable @(d a : box)
 
   bind_Seq @(BoxIndex d) @a view_indices
   (\ (x : BoxIndex d) -> Seq a. streamToSequence2 @a (g x));
+
+
+flattenSplittable2 @(d a : box)
+  (sh : ShapeDict d) (vw : view d (Stream list_dim a))
+  -> Seq a attribute(inline) =
+
+  case vw of mk_view tyob dom g.
+
+  -- Traverse all indices in the view's domain
+  let view_indices : Seq (BoxIndex d) =
+        streamToSequence3 @(BoxIndex d)
+        (shFlatten @d sh @(BoxIndex d) (indices @d sh dom)) in
+
+  bind_Seq @(BoxIndex d) @a view_indices
+  (\ (x : BoxIndex d) -> Seq a. streamToSequence3 @a (g x));
+
+
+peel_Stream @(a r : box)
+  (rep_a : ReprBox a)
+  (value_k : a -> Stream list_dim a -> r)
+  (empty_k : NoneType -> r)
+  (s : Stream list_dim a)
+  -> r attribute(inline) =
+
+  case s of {
+    seqStream tyob co sq.
+      let rep_ref_a = unboxedinfo StuckRef @a in
+      let rep_seq = unboxedinfo Ref @(Seq a) in
+      let rep_tuple = unboxedinfo Tuple2 @(StuckRef a) @(Ref (Seq a))
+                      rep_ref_a rep_seq in
+      let rep_maybe = unboxedinfo Maybe @(Tuple2 (StuckRef a) (Ref (Seq a))) rep_tuple in
+      case peel_Seq @a sq of
+        [reprSizeAlign @(Maybe (Tuple2 (StuckRef a) (Ref (Seq a)))) rep_maybe]
+        boxed boxed_tyob peel_result.
+      case peel_result of
+         [reprSizeAlign @(Tuple2 (StuckRef a) (Ref (Seq a))) rep_tuple] {
+        just ([reprSizeAlign @(StuckRef a) rep_ref_a,
+               reprSizeAlign @(Ref (Seq a)) rep_seq]
+              tuple2 (stuckRef x) (ref sq2)).
+          value_k x (seqStream @list_dim @a tyob co sq2)
+      ; nothing.
+          empty_k None
+      }
+  ; splittableStream @d tyob co sh vw.
+      shPeel @d sh @a @r rep_a value_k empty_k vw
+
+  ; ixStream @b tyob rep_b f si.
+      peel_view_list_dim @a @r rep_a value_k empty_k
+      (map_view @list_dim @b @a rep_b rep_a f
+       (someIndexableToView @list_dim @b rep_b si))
+  };
+
+
+take_one_list_dim (x : list_dim)
+  -> MaybeVal (list_dim,) attribute(inline, inline_final) =
+
+  let rep_ref = unboxedinfo Ref @list_dim in
+  let sa_ref = reprSizeAlign @(Ref list_dim) rep_ref in
+  let rep_maybe = unboxedinfo Maybe @(Ref list_dim) rep_ref in
+
+  case x of mk_list_dim tyob m_bound.
+  case m_bound of {
+    justVal n.
+      if n ==# 0
+      then nothingVal @(list_dim,)
+      else justVal @(list_dim,) (mk_list_dim tyob (justVal @int (n -# 1)),)
+
+  ; nothingVal.
+      justVal @(list_dim,) (mk_list_dim tyob (nothingVal @int),)
+  };
+
+
+peel_view_list_dim @(a r : box)
+  (rep_a : ReprBox a)
+  (value_k : a -> Stream list_dim a -> r)
+  (empty_k : NoneType -> r)
+  (vw : view list_dim a)
+  -> r attribute(inline) =
+
+  case vw of mk_view tyob dom visit.
+
+  -- Reduce the list domain's size by 1
+  case take_one_list_dim dom of {
+    justVal (dom2,).
+      letfun
+        visit2 (i : Boxed (Stored int)) -> a =
+          visit (boxIntValue (1 +# unboxIntValue i))
+       in
+       value_k (visit (boxIntValue 0))
+       (traverse_view_real @list_dim @a ShapeDict_list_dim rep_a
+        (con_view @list_dim @a dom2 visit2))
+  ; nothingVal.
+      empty_k None
+  };
 
 
 -------------------------------------------------------------------------------
@@ -3980,6 +4099,12 @@ map_llist_bare @(a b : bare)
 
 -------------------------------------------------------------------------------
 -- Additional stream functions
+
+
+chain @(a : box) (s1 s2 : Stream list_dim a) -> Stream list_dim a =
+
+  -- TODO
+  except @(Stream list_dim a);
 
 -- FIXME: handle recursive fucntions properly
 reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
@@ -5084,13 +5209,45 @@ splitN_list_dim (n : int) (d : list_dim)
 
 
 peel_list_dim @(a r : box)
-  (k : a -> Stream list_dim a -> r) -- Success continuation
-  (f : NoneType -> r)               -- Failure
+  (rep_a : ReprBox a)
+  (value_k : a -> Stream list_dim a -> r) -- Success continuation
+  (empty_k : NoneType -> r)               -- Failure
   (vw : view list_dim (Stream list_dim a))
   -> r attribute(inline, inline_sequential) =
 
-  -- TODO
-  except @r;
+  case vw of mk_view tyob (mk_list_dim tyob2 m_bound) visit.
+
+  letfun
+    search (i : int) -> r =
+      -- Loop bound check
+      if case m_bound of {justVal n. i <# n; nothingVal. True}
+      then letfun {
+             found_value (value : a) (s : Stream list_dim a) -> r =
+
+               -- Get the rest of this chunk of the stream
+               let new_dom =
+                     case m_bound of {
+                       nothingVal. con_list_dim (nothingVal @int)
+                     ; justVal n. con_list_dim (justVal @int (n -# i))
+                     } in
+               let remainder_input =
+                     con_splittableStream @a @list_dim ShapeDict_list_dim
+                     (con_view @list_dim @(Stream list_dim a) new_dom
+                      (\ (j : Boxed (Stored int)) -> Stream list_dim a.
+                         visit (boxIntValue (i +# unboxIntValue j)))) in
+
+               let remainder = chain @a s remainder_input in
+
+               value_k value remainder
+
+           ; not_found (dummy : NoneType) -> r = search (i +# 1)
+           } in
+
+           peel_Stream @a @r rep_a found_value not_found (visit (boxIntValue i))
+
+      else empty_k None
+  in
+  search 0;
 
 
 flatten_list_dim @(a : box) (s : Stream list_dim a)
@@ -5119,7 +5276,7 @@ zipWith_list_dim @(a b c : box)
   (f : a -> b -> c)
   (s1 : Stream list_dim a)
   (s2 : Stream list_dim b)
-  -> Stream list_dim c attribute(inline, inline_sequential) =
+  -> Stream list_dim c attribute(inline) =
 
   letfun
     zip_using_sequences (dummy : NoneType) -> Stream list_dim c =
@@ -5158,205 +5315,6 @@ zipWith_list_dim @(a b c : box)
     ; splittableStream @d2 tyob co sh2 vw. zip_using_sequences None
   };
 
-{-ShapeDict_list_dim_zipWith @(a b c : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b)) (repr_c : Repr (AsBare c))
-  (transformer : a -> b -> c)
-  (sA : Stream list_dim a)
-  (sB : Stream list_dim b)
-  -> Stream list_dim c attribute(inline) =
-
-  letfun
-    bare_transformer
-      (x : AsBare a) (y : AsBare b) (ret : OutPtr (AsBare c)) -> Store
-      attribute(inline) =
-      asbare @(AsBare c) repr_c
-      (transformer (bareToBox @(AsBare a) repr_a x)
-                   (bareToBox @(AsBare b) repr_b y)) ret
-  in
-
-  case sA of {
-    sequenceStream tyob (sqA : Sequence a).
-      let sqB = Stream1ToSequence @b repr_b sB in
-      con_sequenceStream @c
-      (Sequence_zipWith @(AsBare a) @(AsBare b) @(AsBare c)
-       repr_a repr_b repr_c bare_transformer sqA sqB)
-
-  ; viewStream tyob (vwA : view list_dim a).
-      case sB of {
-        sequenceStream tyob (sqB : Sequence b).
-          con_sequenceStream @c
-          (Sequence_zipWith @(AsBare a) @(AsBare b) @(AsBare c)
-           repr_a repr_b repr_c bare_transformer
-           (viewToSequence @(AsBare a) repr_a vwA) sqB)
-      ; viewStream tyob (vwB : view list_dim b).
-          con_viewStream @c
-          (view_zipWith @list_dim
-           ShapeDict_list_dim
-           @a @b @c repr_a repr_b repr_c transformer vwA vwB)
-    }
-  };
-
-ShapeDict_list_dim_zipWith3 @(a b c d : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d))
-  (transformer : a -> b -> c -> d)
-  (sA : Stream list_dim a)
-  (sB : Stream list_dim b)
-  (sC : Stream list_dim c)
-  -> Stream list_dim d attribute(inline) =
-
-  letfun
-    bare_transformer
-      (x : AsBare a) (y : AsBare b) (z : AsBare c)
-      (ret : OutPtr (AsBare d)) -> Store
-      attribute(inline) =
-      asbare @(AsBare d) repr_d
-      (transformer (bareToBox @(AsBare a) repr_a x)
-                   (bareToBox @(AsBare b) repr_b y)
-                   (bareToBox @(AsBare c) repr_c z)) ret
-  in
-
-  case sA of {
-    sequenceStream tyob (sqA : Sequence a).
-      let sqB = Stream1ToSequence @b repr_b sB in
-      let sqC = Stream1ToSequence @c repr_c sC in
-      con_sequenceStream @d
-      (Sequence_zipWith3 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d)
-      repr_a repr_b repr_c repr_d
-       bare_transformer sqA sqB sqC)
-
-  ; viewStream tyob (vwA : view list_dim a).
-      case sB of {
-        sequenceStream tyob (sqB : Sequence b).
-          let sqC = Stream1ToSequence @c repr_c sC in
-          con_sequenceStream @d
-          (Sequence_zipWith3 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d)
-           repr_a repr_b repr_c repr_d bare_transformer
-           (viewToSequence @(AsBare a) repr_a vwA) sqB sqC)
-
-      ; viewStream tyob (vwB : view list_dim b).
-          case sC of {
-            sequenceStream tyob (sqC : Sequence c).
-              con_sequenceStream @d
-              (Sequence_zipWith3 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d)
-               repr_a repr_b repr_c repr_d bare_transformer
-               (viewToSequence @(AsBare a) repr_a vwA)
-               (viewToSequence @(AsBare b) repr_b vwB)
-               sqC)
-
-          ; viewStream tyob (vwC : view list_dim c).
-              con_viewStream @d
-              (view_zipWith3 @list_dim
-               ShapeDict_list_dim
-               @a @b @c @d repr_a repr_b repr_c repr_d
-               transformer vwA vwB vwC)
-          }
-      }
-  };
-
-
-ShapeDict_list_dim_zipWith4 @(a b c d e : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d)) (repr_e : Repr (AsBare e))
-  (transformer : a -> b -> c -> d -> e)
-  (sA : Stream list_dim a)
-  (sB : Stream list_dim b)
-  (sC : Stream list_dim c)
-  (sD : Stream list_dim d)
-  -> Stream list_dim e attribute(inline) =
-
-  letfun
-    bare_transformer
-      (x : AsBare a) (y : AsBare b) (z : AsBare c) (w : AsBare d)
-      (ret : OutPtr (AsBare e)) -> Store
-      attribute(inline) =
-      asbare @(AsBare e) repr_e
-      (transformer (bareToBox @(AsBare a) repr_a x)
-                   (bareToBox @(AsBare b) repr_b y)
-                   (bareToBox @(AsBare c) repr_c z)
-                   (bareToBox @(AsBare d) repr_d w)) ret
-  in
-  case sA of {
-    sequenceStream tyob (sqA : Sequence a).
-      let sqB = Stream1ToSequence @b repr_b sB in
-      let sqC = Stream1ToSequence @c repr_c sC in
-      let sqD = Stream1ToSequence @d repr_d sD in
-      con_sequenceStream @e
-      (Sequence_zipWith4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) @(AsBare e)
-       repr_a repr_b repr_c repr_d repr_e
-       bare_transformer sqA sqB sqC sqD)
-
-  ; viewStream tyob (vwA : view list_dim a).
-      case sB of {
-        sequenceStream tyob (sqB : Sequence b).
-          let sqC = Stream1ToSequence @c repr_c sC in
-          let sqD = Stream1ToSequence @d repr_d sD in
-          con_sequenceStream @e
-          (Sequence_zipWith4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) @(AsBare e)
-           repr_a repr_b repr_c repr_d repr_e bare_transformer
-           (viewToSequence @(AsBare a) repr_a vwA) sqB sqC sqD)
-
-      ; viewStream tyob (vwB : view list_dim b).
-          case sC of {
-            sequenceStream tyob (sqC : Sequence c).
-              let sqD = Stream1ToSequence @d repr_d sD in
-              con_sequenceStream @e
-              (Sequence_zipWith4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) @(AsBare e)
-               repr_a repr_b repr_c repr_d repr_e bare_transformer
-               (viewToSequence @(AsBare a) repr_a vwA)
-               (viewToSequence @(AsBare b) repr_b vwB)
-               sqC sqD)
-
-          ; viewStream tyob (vwC : view list_dim c).
-              case sD of {
-                sequenceStream tyob (sqD : Sequence d).
-                  con_sequenceStream @e
-                  (Sequence_zipWith4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) @(AsBare e)
-                   repr_a repr_b repr_c repr_d repr_e bare_transformer
-                   (viewToSequence @(AsBare a) repr_a vwA)
-                   (viewToSequence @(AsBare b) repr_b vwB)
-                   (viewToSequence @(AsBare c) repr_c vwC)
-                   sqD)
-              ; viewStream tyob (vwD : view list_dim d).
-                  con_viewStream @e
-                  (view_zipWith4 @list_dim
-                   ShapeDict_list_dim @a @b @c @d @e
-                   repr_a repr_b repr_c repr_d repr_e
-                   transformer vwA vwB vwC vwD)
-              }
-          }
-      }
-  };
-
-
-ShapeDict_list_dim_slice @(t : box -> box) @(a : box)
-  (is_dim1 : coerce @box (shape t) list_dim)
-  (indexable : IndexableDict t)
-  (rep : Repr (AsBare a))
-  (container : t a)
-  (slice_argument : AsBox (slice list_dim))
-  -> view list_dim a attribute(inline) =
-  case indexable of indexableDict tyob at_index get_shape.
-
-  -- Compute parameters of the sliced list
-  case slice_argument of [reprSizeAlign @SliceObject (unboxedinfo SliceObject)]
-    boxed tyob u_slice_argument.
-  case internalApplyListSlice u_slice_argument
-       (coerce @(shape t) @list_dim (get_shape @a container)) of
-    (view_domain : list_dim, view_map : LinearMap).
-
-  view_generate @list_dim
-  ShapeDict_list_dim @a rep view_domain
-  (\ (i : Boxed (Stored int)) -> a.
-
-    -- Compute the index in the original object that holds the value at 'i'
-    let source_index : int = evalLM (unboxIntValue i) view_map in
-    let s_index =
-          coerce @(AsBox (index list_dim)) @(AsBox (index (shape t)))
-          (boxIntValue source_index) in
-
-    -- Retrieve the value
-    at_index @a rep container s_index);-}
 
 fold_list_dim @(a acc : box)
   (rep_a : ReprBox a)
@@ -5374,6 +5332,168 @@ foreach_list_dim @(acc : box)
   (dom : list_dim)
   (off : BoxOffset list_dim)
   (combine : BoxIndex list_dim -> acc -> acc)
+  (init : acc)
+  -> acc =
+
+  -- TODO
+  except @acc;
+
+
+ShapeDict_chain_dim : ShapeDict chain_dim =
+  shapeDict @chain_dim (boxedinfo shapeDict @chain_dim)
+  repr_bool
+  repr_NoneType
+  (repr_Box @chain_dim)
+  noOffset_chain_dim
+  addOffset_chain_dim
+  appOffset_chain_dim
+  intersect_chain_dim
+  member_chain_dim
+  slice_chain_dim
+  split_chain_dim
+  splitN_chain_dim
+  peel_chain_dim
+  flatten_chain_dim
+  generate_chain_dim
+  zipWith_chain_dim
+  fold_chain_dim
+  foreach_chain_dim;
+
+
+noOffset_chain_dim : Boxed (Stored NoneType) attribute(inline) =
+  boxNoneValue None;
+
+
+addOffset_chain_dim (x y : Boxed (Stored NoneType))
+  -> Boxed (Stored NoneType) attribute(inline) = x;
+
+
+appOffset_chain_dim (x : Boxed (Stored NoneType)) (y : Boxed (Stored bool))
+  -> Boxed (Stored bool) attribute(inline) = y;
+
+
+intersect_chain_dim (d1 d2 : chain_dim)
+  -> chain_dim attribute(inline, inline_final) =
+  case d1 of mk_chain_dim tyob n1.
+  case d2 of mk_chain_dim tyob n2.
+  mk_chain_dim tyob (oper_BITWISEAND n1 n2);
+
+
+member_chain_dim (i : Boxed (Stored bool)) (d : chain_dim)
+  -> bool attribute(inline, inline_sequential) =
+
+  -- Test either the first or second bit of the number
+  let test_bit = if unboxBoolValue i then 2 else 1 in
+  case d of mk_chain_dim tyob n.
+
+  -- It's a member if the selected bit of n is set
+  oper_BITWISEAND n test_bit /=# 0;
+
+
+slice_chain_dim (sl dom : chain_dim)
+  -> (Boxed (Stored NoneType), chain_dim)
+  attribute(inline, inline_sequential) =
+  (boxNoneValue None, intersect_chain_dim sl dom);
+
+
+split_chain_dim (dom : chain_dim)
+  -> MaybeVal (chain_dim, Boxed (Stored NoneType), chain_dim) =
+
+  -- TODO
+  except @(MaybeVal (chain_dim, Boxed (Stored NoneType), chain_dim));
+
+
+splitN_chain_dim (n : int) (dom : chain_dim)
+  -> view list_dim (Subdomain chain_dim) =
+
+  -- TODO
+  except @(view list_dim (Subdomain chain_dim));
+
+
+peel_chain_dim @(a r : box)
+  (rep_a : ReprBox a)
+  (value_k : a -> Stream list_dim a -> r) -- Success continuation
+  (empty_k : NoneType -> r)               -- Failure
+  (vw : view chain_dim (Stream list_dim a))
+  -> r attribute(inline, inline_sequential) =
+
+  -- TODO
+  except @r;
+
+
+flatten_chain_dim @(a : box) (s : Stream chain_dim a)
+  -> Stream list_dim a attribute(inline) =
+
+  -- TODO
+  except @(Stream list_dim a);
+
+
+generate_chain_dim @(a : box)
+  (rep_a : ReprBox a)
+  (off : BoxOffset chain_dim) (dom : chain_dim) (g : BoxIndex chain_dim -> a)
+  -> Stream chain_dim a
+  attribute(inline) =
+
+  -- TODO
+  except @(Stream chain_dim a);
+
+
+zipWith_chain_dim @(a b c : box)
+  (rep_a : ReprBox a)
+  (rep_b : ReprBox b)
+  (rep_c : ReprBox c)
+  (f : a -> b -> c)
+  (s1 : Stream chain_dim a)
+  (s2 : Stream chain_dim b)
+  -> Stream chain_dim c attribute(inline, inline_sequential) =
+
+  -- TODO
+  except @(Stream chain_dim c);
+
+
+fold_chain_dim @(a acc : box)
+  (rep_a : ReprBox a)
+  (rep_acc : ReprBox acc)
+  (combine : a -> acc -> acc)
+  (s : Stream chain_dim a)
+  (init : acc)
+  -> acc
+  attribute(inline) =
+
+  case s of {
+    ixStream @b tyob rep_b f (someIndexable @t tyob2 co ix_dict container).
+      case coerce @(shape t) @chain_dim (ix_shape @t ix_dict @b container) of
+        mk_chain_dim tyob domain_int.
+
+      letfun
+        eval (ix : bool) (x : acc) -> acc =
+
+          let coerced_index =
+                coerce @(BoxIndex chain_dim) @(BoxIndex (shape t)) (boxBoolValue ix) in
+          let y = ix_at @t ix_dict @b rep_b container coerced_index in
+          combine (f y) x
+      in
+
+      -- Enumerate the elements of the domain
+      let tmp1 =
+            if oper_BITWISEAND domain_int 1 /=# 0
+            then eval False init
+            else init in
+
+      if oper_BITWISEAND domain_int 2 /=# 0
+      then eval True tmp1
+      else tmp1
+
+    -- Only the ixStream constructor is possible
+  ; seqStream tyob co sq. except @acc
+  ; splittableStream @sh tyob co ix si. except @acc
+  };
+
+
+foreach_chain_dim @(acc : box)
+  (dom : chain_dim)
+  (off : BoxOffset chain_dim)
+  (combine : BoxIndex chain_dim -> acc -> acc)
   (init : acc)
   -> acc =
 
@@ -9494,8 +9614,17 @@ reduce1 @(t : box -> box) @(a : box)
   (rep : ReprBox a)
   (f : a -> a -> a) (x : t a) -> a attribute(inline) =
 
-  -- TODO
-  except @a;
+  case traversable of traversableDict tyob traverse build.
+
+  let flat_stream = shFlatten @(shape t) sh @a (traverse @a rep x) in
+
+  peel_Stream @a @a rep
+  (\ (init : a) (s : Stream list_dim a) -> a.
+     reduce_Stream @list_dim @a ShapeDict_list_dim rep f init s)
+  (\ (dummy : NoneType) -> a.
+     -- Error: input is empty
+     except @a)
+  flat_stream;
 
 -- Get a stream of the indices of each element of the domain
 indices @(d : box) (sh : ShapeDict d) (dom : d)
@@ -12178,16 +12307,19 @@ concat_Seq @(a : box) (sq1 : Seq a) (sq2 : Seq a)
   in
   con_seq @a @concat_state (con_left @st1 @st2 s1) g;
 
-peel_Seq @(a : box) (rep : Repr (AsBare a)) (sq : Seq a)
-  -> Boxed (Maybe (Tuple2 (AsBare a) (Ref (Seq a))))
+peel_Seq @(a : box) (sq : Seq a)
+  -> Boxed (Maybe (Tuple2 (StuckRef a) (Ref (Seq a))))
   attribute(inline, inline_final) =
 
   case sq of seq @s tyob state generator.
 
-  let type peeled = Tuple2 (AsBare a) (Ref (Seq a)) in
+  let a_info = unboxedinfo StuckRef @a in
+  let a_sa = reprSizeAlign @(StuckRef a) a_info in
   let ref_info = unboxedinfo Ref @(Seq a) in
-  let peeled_info = unboxedinfo Tuple2 @(AsBare a) @(Ref (Seq a))
-                    rep ref_info in
+  let ref_sa = reprSizeAlign @(Ref (Seq a)) ref_info in
+  let peeled_info = unboxedinfo Tuple2 @(StuckRef a) @(Ref (Seq a))
+                    a_info ref_info in
+  let type peeled = Tuple2 (StuckRef a) (Ref (Seq a)) in
   let maybe_info = unboxedinfo Maybe @peeled peeled_info in
 
   letfun
@@ -12197,10 +12329,8 @@ peel_Seq @(a : box) (rep : Repr (AsBare a)) (sq : Seq a)
         seqYield new_state x.
           con_boxed @(Maybe peeled) maybe_info
           (just @peeled (reprSizeAlign @peeled peeled_info)
-           (tuple2 @(AsBare a) @(Ref (Seq a))
-            (reprSizeAlign @(AsBare a) rep)
-            (reprSizeAlign @(Ref (Seq a)) ref_info)
-            (asbare @(AsBare a) rep x)
+           (tuple2 @(StuckRef a) @(Ref (Seq a)) a_sa ref_sa
+            (stuckRef @a x)
             (ref @(Seq a) (con_seq @a @s new_state generator))))
 
       ; seqSkip new_state. peel new_state

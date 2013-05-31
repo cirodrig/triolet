@@ -66,6 +66,7 @@ builtinTypeNames =
     -- Shape-related types
   , "shape"
   , "list_dim"
+  , "chain_dim"
   , "dim0"
   , "dim1"
   , "dim2"
@@ -101,6 +102,7 @@ builtinTypeNames =
 --   This list overlaps with the list of builtin types.
 builtinTypeNamesForTypeFunctions =
   [ "NoneType"
+  , "bool"
   , "Tuple2"
   , "Tuple3"
   , "SliceObject"
@@ -116,6 +118,7 @@ builtinTypeNamesForTypeFunctions =
   , "array"
   , "shape"
   , "list_dim"
+  , "chain_dim"
   , "dim0"
   , "dim1"
   , "dim2"
@@ -196,6 +199,7 @@ builtinVariableNames =
   , "nil"
   , "mk_view"
   , "mk_list_dim"
+  , "mk_chain_dim"
   , "mk_dim0"
   , "mk_dim1"
   , "mk_dim2"
