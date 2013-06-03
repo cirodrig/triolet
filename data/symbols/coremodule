@@ -9579,6 +9579,37 @@ reduce1 @(t : box -> box) @(a : box)
      except @a)
   flat_stream;
 
+
+sum @(t : box -> box) @(a : box)
+  (sh : ShapeDict (shape t))
+  (traversable : TraversableDict t)
+  (rep : ReprBox a)
+  (additive : AdditiveDict a)
+  (x : t a) -> a attribute(inline) =
+
+  case additive of additiveDict tyob add sub neg zero.
+  reduce @t @a sh traversable rep add zero x;
+
+
+filter @(t : box -> box) @(a : box)
+  (has_list_dim : coerce @box (shape t) list_dim)
+  (traversable : TraversableDict t)
+  (rep : ReprBox a)
+  (test : a -> Boxed (Stored bool))
+  (x : t a)
+  -> t a attribute(inline) =
+
+  case traversable of traversableDict tyob traverse build.
+
+  let s_in = coerce @(Stream (shape t) a) @(Stream list_dim a)
+             (traverse @a rep x) in
+
+  let s_out = coerce @(Stream list_dim a) @(Stream (shape t) a)
+              (filter_Stream @a test s_in) in
+
+  build @a rep s_out;
+
+
 -- Get a stream of the indices of each element of the domain
 indices @(d : box) (sh : ShapeDict d) (dom : d)
   -> Stream d (BoxIndex d) attribute(inline) =
@@ -9614,6 +9645,139 @@ zip @(s t : box -> box) @(a b : box)
      (asbare @(AsBare b) rep_b y)))
   (traverse_s @a rep_a x)
   (coerce @(Stream (shape t) b) @(Stream (shape s) b) (traverse_t @b rep_b y));
+
+
+zip3 @(s t u : box -> box) @(a b c : box)
+  (same_shape1 : coerce @box (shape s) (shape t))
+  (same_shape2 : coerce @box (shape s) (shape u))
+  (sh : ShapeDict (shape s))
+  (traversable_s : TraversableDict s)
+  (traversable_t : TraversableDict t)
+  (traversable_u : TraversableDict u)
+  (rep_a : ReprBox a)
+  (rep_b : ReprBox b)
+  (rep_c : ReprBox c)
+  (x : s a)
+  (y : t b)
+  (z : u c)
+  -> Stream (shape s) (Boxed (Tuple3 (AsBare a) (AsBare b) (AsBare c)))
+  attribute(inline) =
+
+  case traversable_s of traversableDict tyob traverse_s build_s.
+  case traversable_t of traversableDict tyob traverse_t build_t.
+  case traversable_u of traversableDict tyob traverse_u build_u.
+
+  let type tuple_xy = Boxed (Tuple2 (AsBare a) (AsBare b)) in
+  let rep_tuple_xy = unboxedinfo Tuple2 @(AsBare a) @(AsBare b) rep_a rep_b in
+
+  let type tuple_xyz = Boxed (Tuple3 (AsBare a) (AsBare b) (AsBare c)) in
+  let rep_tuple_xyz = unboxedinfo Tuple3 @(AsBare a) @(AsBare b) @(AsBare c) rep_a rep_b rep_c in
+
+  let sa_a = reprSizeAlign @(AsBare a) rep_a in
+  let sa_b = reprSizeAlign @(AsBare b) rep_b in
+  let sa_c = reprSizeAlign @(AsBare c) rep_c in
+
+  let s_xy : Stream (shape s) tuple_xy =
+      shZipWith @(shape s) sh @a @b @tuple_xy rep_a rep_b rep_tuple_xy
+      (\ (x : a) (y : b) -> tuple_xy.
+        con_boxed @(Tuple2 (AsBare a) (AsBare b)) rep_tuple_xy
+        (tuple2 @(AsBare a) @(AsBare b) sa_a sa_b
+         (asbare @(AsBare a) rep_a x)
+         (asbare @(AsBare b) rep_b y)))
+      (traverse_s @a rep_a x)
+      (coerce @(Stream (shape t) b) @(Stream (shape s) b) (traverse_t @b rep_b y)) in
+
+  shZipWith @(shape s) sh @tuple_xy @c @tuple_xyz rep_tuple_xy rep_c rep_tuple_xyz
+  (\ (xy : tuple_xy) (z : c) -> tuple_xyz.
+     case xy of [reprSizeAlign @(Tuple2 (AsBare a) (AsBare b)) rep_tuple_xy]
+                boxed tyob ([sa_a, sa_b] tuple2 x y).
+
+     con_boxed @(Tuple3 (AsBare a) (AsBare b) (AsBare c)) rep_tuple_xyz
+     (tuple3 @(AsBare a) @(AsBare b) @(AsBare c) sa_a sa_b sa_c
+      (copy @(AsBare a) rep_a x)
+      (copy @(AsBare b) rep_b y)
+      (asbare @(AsBare c) rep_c z)))
+  s_xy
+  (coerce @(Stream (shape u) c) @(Stream (shape s) c) (traverse_u @c rep_c z));
+
+
+zip4 @(s t u v : box -> box) @(a b c d : box)
+  (same_shape1 : coerce @box (shape s) (shape t))
+  (same_shape2 : coerce @box (shape s) (shape u))
+  (same_shape3 : coerce @box (shape s) (shape v))
+  (sh : ShapeDict (shape s))
+  (traversable_s : TraversableDict s)
+  (traversable_t : TraversableDict t)
+  (traversable_u : TraversableDict u)
+  (traversable_v : TraversableDict v)
+  (rep_a : ReprBox a)
+  (rep_b : ReprBox b)
+  (rep_c : ReprBox c)
+  (rep_d : ReprBox d)
+  (x : s a)
+  (y : t b)
+  (z : u c)
+  (w : v d)
+  -> Stream (shape s) (Boxed (Tuple4 (AsBare a) (AsBare b) (AsBare c) (AsBare d)))
+  attribute(inline) =
+
+  case traversable_s of traversableDict tyob traverse_s build_s.
+  case traversable_t of traversableDict tyob traverse_t build_t.
+  case traversable_u of traversableDict tyob traverse_u build_u.
+  case traversable_v of traversableDict tyob traverse_v build_v.
+
+  let type tuple_xy = Boxed (Tuple2 (AsBare a) (AsBare b)) in
+  let rep_tuple_xy = unboxedinfo Tuple2 @(AsBare a) @(AsBare b) rep_a rep_b in
+
+  let type tuple_zw = Boxed (Tuple2 (AsBare c) (AsBare d)) in
+  let rep_tuple_zw = unboxedinfo Tuple2 @(AsBare c) @(AsBare d) rep_c rep_d in
+
+  let type tuple_xyzw = Boxed (Tuple4 (AsBare a) (AsBare b) (AsBare c) (AsBare d)) in
+  let rep_tuple_xyzw = unboxedinfo Tuple4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d)
+                       rep_a rep_b rep_c rep_d in
+
+  let sa_a = reprSizeAlign @(AsBare a) rep_a in
+  let sa_b = reprSizeAlign @(AsBare b) rep_b in
+  let sa_c = reprSizeAlign @(AsBare c) rep_c in
+  let sa_d = reprSizeAlign @(AsBare d) rep_d in
+
+  let s_xy : Stream (shape s) tuple_xy =
+      shZipWith @(shape s) sh @a @b @tuple_xy rep_a rep_b rep_tuple_xy
+      (\ (x : a) (y : b) -> tuple_xy.
+        con_boxed @(Tuple2 (AsBare a) (AsBare b)) rep_tuple_xy
+        (tuple2 @(AsBare a) @(AsBare b) sa_a sa_b
+         (asbare @(AsBare a) rep_a x)
+         (asbare @(AsBare b) rep_b y)))
+      (traverse_s @a rep_a x)
+      (coerce @(Stream (shape t) b) @(Stream (shape s) b) (traverse_t @b rep_b y)) in
+
+  let s_zw : Stream (shape s) tuple_zw =
+      shZipWith @(shape s) sh @c @d @tuple_zw rep_c rep_d rep_tuple_zw
+      (\ (z : c) (w : d) -> tuple_zw.
+        con_boxed @(Tuple2 (AsBare c) (AsBare d)) rep_tuple_zw
+        (tuple2 @(AsBare c) @(AsBare d) sa_c sa_d
+         (asbare @(AsBare c) rep_c z)
+         (asbare @(AsBare d) rep_d w)))
+      (coerce @(Stream (shape u) c) @(Stream (shape s) c) (traverse_u @c rep_c z))
+      (coerce @(Stream (shape v) d) @(Stream (shape s) d) (traverse_v @d rep_d w)) in
+
+  shZipWith @(shape s) sh @tuple_xy @tuple_zw @tuple_xyzw
+  rep_tuple_xy rep_tuple_zw rep_tuple_xyzw
+  (\ (xy : tuple_xy) (zw : tuple_zw) -> tuple_xyzw.
+     case xy of [reprSizeAlign @(Tuple2 (AsBare a) (AsBare b)) rep_tuple_xy]
+                boxed tyob ([sa_a, sa_b] tuple2 x y).
+     case zw of [reprSizeAlign @(Tuple2 (AsBare c) (AsBare d)) rep_tuple_zw]
+                boxed tyob ([sa_c, sa_d] tuple2 z w).
+
+     con_boxed @(Tuple4 (AsBare a) (AsBare b) (AsBare c) (AsBare d))
+     rep_tuple_xyzw
+     (tuple4 @(AsBare a) @(AsBare b) @(AsBare c) @(AsBare d) sa_a sa_b sa_c sa_d
+      (copy @(AsBare a) rep_a x)
+      (copy @(AsBare b) rep_b y)
+      (copy @(AsBare c) rep_c z)
+      (copy @(AsBare d) rep_d w)))
+  s_xy
+  s_zw;
 
 
 count : Stream list_dim (Boxed (Stored int)) = count_helper None;
@@ -12443,6 +12607,13 @@ guard_Stream @(a : box) (condition : bool) (s : Stream list_dim a)
 
   -- TODO: Use implementation from Stream Fusion paper section 5
   if condition then s else empty_Stream @a;
+
+
+filter_Stream @(a : box) (test : a -> Boxed (Stored bool)) (s : Stream list_dim a)
+  -> Stream list_dim a attribute(inline) =
+
+  -- TODO
+  except @(Stream list_dim a);
 
 
 bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)

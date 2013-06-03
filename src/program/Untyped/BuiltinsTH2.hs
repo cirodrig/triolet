@@ -50,11 +50,11 @@ frontendSourceGlobals =
   , "map"
   , "reduce"
   , "reduce1"
-  {-, "filter"
-  , "sum"-}
+  , "filter"
+  , "sum"
   , "zip"
-  {-, "zip3"
-  , "zip4"-}
+  , "zip3"
+  , "zip4"
   , "count"
   {-, "range"
   , "arrayRange"
