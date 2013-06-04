@@ -76,6 +76,10 @@ data Indexable t =
     -- | Get the subset of an indexable object specified by
     --   the given domain.  Assume the given domain is a subset.
   , ix_slice :: forall a. t a -> Domain t -> Offset (Domain t) -> SomeIndexable (Domain t) a
+
+    -- | Wrap the object so that it is not deconstructed by the optimizer.
+    --   This can result in better optimization.
+  , ix_preserveHint :: forall a. t a -> t a
   }
 
 -- | An arbitrary 'Indexable'
@@ -87,6 +91,9 @@ data SomeIndexable d a where
 
 someIndexableToView :: SomeIndexable d a -> View d a
 someIndexableToView (SomeIndexable ix x) = indexableToView ix x
+
+someIndexableToStream :: Shape d -> SomeIndexable d a -> Stream d a
+someIndexableToStream sh si = traverse_View sh $ someIndexableToView si
 
 data Traversable t =
   Traversable
@@ -107,7 +114,10 @@ data Shape d =
   , sh_appOffset :: Offset d -> Index d -> Index d
   , sh_intersect :: d -> d -> d
   , sh_member    :: Index d -> d -> Bool
+    -- | Split into 2 pieces
   , sh_split     :: d -> Maybe (d, Offset d, d)
+    -- | Split into N pieces
+  , sh_splitN    :: Int -> d -> View ListDim (Offset d, d)
   , sh_peel      :: forall a r.
                     (a -> Stream ListDim a -> r) -> (() -> r)
                  -> View d (Stream ListDim a) -> r
@@ -143,6 +153,7 @@ indexable_View sh =
   , ix_shape   = shape_View
   , ix_at      = at_View
   , ix_slice   = slice_View sh
+  , ix_preserveHint = id
   }
 
 shape_View :: View d a -> d
@@ -186,6 +197,9 @@ zipWith_View :: Shape d -> (a -> b -> c) -> View d a -> View d b -> View d c
 zipWith_View shape_dict f (View d1 g1) (View d2 g2) =
   View (sh_intersect shape_dict d1 d2) (\x -> f (g1 x) (g2 x))
 
+singleton_View :: a -> View ListDim a
+singleton_View x = View (ListDim (Just 1)) (\_ -> x)
+
 -------------------------------------------------------------------------------
 -- Low-level array operations
 
@@ -220,6 +234,7 @@ indexable_List =
   , ix_shape = shape_List
   , ix_at = at_List
   , ix_slice = slice_List
+  , ix_preserveHint = id
   }
 
 shape_List :: List a -> ListDim
@@ -271,7 +286,7 @@ map_ListSection f sec =
 indexable_ListSection :: Indexable ListSection
 indexable_ListSection =
   Indexable funct_ListSection shape_ListSection
-            at_ListSection slice_ListSection
+            at_ListSection slice_ListSection preserve
 
 shape_ListSection :: ListSection a -> ListDim
 shape_ListSection (ListSection _ _ length) = ListDim (Just length)
@@ -316,6 +331,7 @@ indexable_Array1 =
   , ix_shape = array1_shape
   , ix_at = array1_at
   , ix_slice = array1_slice
+  , ix_preserveHint = id
   }
 
 array1_shape arr =
@@ -358,6 +374,7 @@ indexable_Array1Section =
   , ix_shape = array1Section_shape
   , ix_at = array1Section_at
   , ix_slice = array1Section_slice
+  , ix_preserveHint = preserve
   }
 
 array1Section_shape (Array1Section dom _) = dom
@@ -374,46 +391,79 @@ array1Section_slice (Array1Section _ arr) dom () =
 -- | A zipped indexable.
 --
 --   Both sub-indexables must have the same domain.
-data Zip2Indexable d a where
-  Zip2Indexable :: (a -> b -> c)
-                -> SomeIndexable d a
-                -> SomeIndexable d b
-                -> Zip2Indexable d c
+data Zip2Indexable s t d a where
+  Zip2Indexable :: (Domain s ~ d, Domain t ~ d) =>
+                   (a -> b -> c)
+                -> s a
+                -> t b
+                -> Zip2Indexable s t d c
 
-type instance Domain (Zip2Indexable d) = d
+type instance Domain (Zip2Indexable s t d) = d
 
-zip2Indexable :: Shape d -> (a -> b -> c)
-              -> SomeIndexable d a -> SomeIndexable d b -> Zip2Indexable d c
-zip2Indexable sh f (SomeIndexable ix1 i1) (SomeIndexable ix2 i2) =
+-- | Zip two indexables.  They must have exactly the same domain.
+zipSameDomainIndexables :: Shape d -> (a -> b -> c)
+                        -> SomeIndexable d a -> SomeIndexable d b
+                        -> SomeIndexable d c
+zipSameDomainIndexables sh f (SomeIndexable ix1 i1) (SomeIndexable ix2 i2) =
+  let ix = indexable_Zip2Indexable sh ix1 ix2
+  in SomeIndexable ix (Zip2Indexable f i1 i2)
+
+
+-- | Slice two objects and construct a 'Zip2Indexable' from them.
+--   After slicing, the two objects must have the same domain; this is not 
+--   checked.
+sliceAndZipIndexables :: (Domain s ~ d, Domain t ~ d) =>
+                         Shape d -> Indexable s -> Indexable t
+                      -> (a -> b -> c)
+                      -> s a -> t b -> d -> Offset d
+                      -> SomeIndexable d c
+sliceAndZipIndexables sh ix1 ix2 f i1 i2 dom off =
+  zipSameDomainIndexables sh f (ix_slice ix1 i1 dom off) (ix_slice ix2 i2 dom off)
+  
+zip2Indexable :: (Domain s ~ d, Domain t ~ d) =>
+                 Shape d -> Indexable s -> Indexable t 
+              -> (a -> b -> c)
+              -> s a -> t b -> SomeIndexable d c
+zip2Indexable sh ix1 ix2 f i1 i2 =
   let dom = sh_intersect sh (ix_shape ix1 i1) (ix_shape ix2 i2)
       off = sh_noOffset sh
-  in Zip2Indexable f (ix_slice ix1 i1 dom off) (ix_slice ix2 i2 dom off)
+  in sliceAndZipIndexables sh ix1 ix2 f i1 i2 dom off
 
 map_Zip2Indexable f (Zip2Indexable g i1 i2) =
   Zip2Indexable (\x y -> f (g x y)) i1 i2
 
 funct_Zip2Indexable = Funct map_Zip2Indexable
 
-indexable_Zip2Indexable :: Indexable (Zip2Indexable d)
-indexable_Zip2Indexable =
+indexable_Zip2Indexable :: (Domain s ~ d, Domain t ~ d) =>
+                           Shape d -> Indexable s -> Indexable t
+                        -> Indexable (Zip2Indexable s t d)
+indexable_Zip2Indexable sh ix1 ix2 =
   Indexable 
   { ix_functor = funct_Zip2Indexable
-  , ix_shape   = zip2Indexable_shape
-  , ix_at      = zip2Indexable_at
-  , ix_slice   = zip2Indexable_slice
+  , ix_shape   = zip2Indexable_shape ix1 ix2
+  , ix_at      = zip2Indexable_at ix1 ix2
+  , ix_slice   = zip2Indexable_slice sh ix1 ix2
+  , ix_preserveHint = zip2Indexable_preserveHint sh ix1 ix2
   }
 
-zip2Indexable_shape :: Zip2Indexable d a -> d
-zip2Indexable_shape (Zip2Indexable _ (SomeIndexable ix1 x) _) = ix_shape ix1 x
-  
-zip2Indexable_at :: Zip2Indexable d a -> Index d -> a
-zip2Indexable_at (Zip2Indexable f (SomeIndexable ix1 x) (SomeIndexable ix2 y)) i =
+zip2Indexable_shape :: Indexable s -> Indexable t -> Zip2Indexable s t d a -> d
+zip2Indexable_shape ix1 ix2 (Zip2Indexable _ x _) = ix_shape ix1 x
+
+zip2Indexable_at :: Indexable s -> Indexable t ->
+                    Zip2Indexable s t d a -> Index d -> a
+zip2Indexable_at ix1 ix2 (Zip2Indexable f x y) i =
   f (ix_at ix1 x i) (ix_at ix2 y i)
 
-zip2Indexable_slice :: Zip2Indexable d a -> d -> Offset d -> SomeIndexable d a
-zip2Indexable_slice (Zip2Indexable f (SomeIndexable ix1 x) (SomeIndexable ix2 y)) dom off =
-  SomeIndexable indexable_Zip2Indexable $
-  Zip2Indexable f (ix_slice ix1 x dom off) (ix_slice ix2 y dom off)
+zip2Indexable_slice :: Shape d -> Indexable s -> Indexable t ->
+                       Zip2Indexable s t d a -> d -> Offset d
+                    -> SomeIndexable d a
+zip2Indexable_slice sh ix1 ix2 (Zip2Indexable f x y) dom off =
+  sliceAndZipIndexables sh ix1 ix2 f x y dom off
+
+zip2Indexable_preserveHint :: Shape d -> Indexable s -> Indexable t ->
+                              Zip2Indexable s t d a -> Zip2Indexable s t d a
+zip2Indexable_preserveHint sh ix1 ix2 (Zip2Indexable f x y) =
+  Zip2Indexable f (ix_preserveHint ix1 x) (ix_preserveHint ix2 y)
 
 -------------------------------------------------------------------------------
 -- Sequences
@@ -458,7 +508,9 @@ shape_ListDim =
   , sh_addOffset = addOffset_ListDim 
   , sh_appOffset = appOffset_ListDim
   , sh_intersect = intersect_ListDim 
+  , sh_member = member_ListDim
   , sh_split = split_ListDim 
+  , sh_splitN = splitN_ListDim
   , sh_peel = peel_ListDim 
   , sh_flatten = flatten_ListDim
   , sh_generate = generate_ListDim 
@@ -479,12 +531,28 @@ intersect_ListDim (ListDim bound1) (ListDim bound2) =
                 of Nothing -> ListDim (Just b1)
                    Just b2 -> ListDim (Just (min b1 b2))
 
+member_ListDim i (ListDim b) =
+  case b
+  of Nothing -> i >= 0
+     Just u  -> i >= 0 && i < u
+
 split_ListDim :: ListDim -> Maybe (ListDim, Int, ListDim)
 split_ListDim (ListDim Nothing) = Nothing
 split_ListDim (ListDim (Just n))
   | n <= 1    = Nothing
   | otherwise = let m = n `div` 2
                 in Just (ListDim (Just m), m, ListDim (Just (n - m)))
+
+splitN_ListDim :: Int -> ListDim -> View ListDim (Int, ListDim)
+splitN_ListDim n dom = 
+  case dom
+  of ListDim Nothing  -> singleton_View (0, dom)
+     ListDim (Just b) ->
+       let get_i i =
+             let start = (i * b)     `div` n
+                 end   = ((i+1) * b) `div` n
+             in (start, ListDim (Just (end - start)))
+       in View (ListDim (Just n)) get_i
 
 -- | Remove one value from a ListDim 
 peelListDim :: ListDim -> Maybe ListDim
@@ -514,7 +582,7 @@ peelStream val_k emp_k s =
           of Nothing -> emp_k ()
              Just dom' ->
                let visit' i = visit (1+i)
-               in val_k (visit 0) (viewToStream shape_ListDim (View dom' visit'))
+               in val_k (visit 0) (traverse_View shape_ListDim (View dom' visit'))
 
 peel_ListDim :: forall a r.
                 (a -> Stream ListDim a -> r)
@@ -545,7 +613,7 @@ flatten_ListDim x = x
 
 generate_ListDim :: Int -> ListDim -> (Int -> a) -> Stream ListDim a 
 generate_ListDim off dom g =
-  viewToStream shape_ListDim (View dom (\x -> g (off + x)))
+  traverse_View shape_ListDim (View dom (\x -> g (off + x)))
 
 map_ListDim :: (a -> b) -> Stream ListDim a -> Stream ListDim b
 map_ListDim f s = 
@@ -560,22 +628,22 @@ zipWith_ListDim :: forall a b c.
                 -> Stream ListDim a -> Stream ListDim b -> Stream ListDim c
 zipWith_ListDim f s t =
   case s
-  of SeqStream s1 -> k1 s1
-     Splittable sh vw -> k1 (flattenSplittable sh vw)
-     IxStream f1 i1 ->
+  of IxStream f1 i1 ->
        case t
-       of SeqStream s2 -> k2 f1 i1 s2
-          Splittable sh vw -> k2 f1 i1 (flattenSplittable sh vw)
-          IxStream f2 i2 ->
+       of IxStream f2 i2 ->
             let tup x y = (x, y) 
                 f' (x, y) = f (f1 x) (f2 y)
-            in IxStream f' $ SomeIndexable indexable_Zip2Indexable (zip2Indexable shape_ListDim tup i1 i2)
+            in case i1 
+               of SomeIndexable ix1 c1 ->
+                    case i2
+                    of SomeIndexable ix2 c2 ->
+                         IxStream f' $
+                         zip2Indexable shape_ListDim ix1 ix2 tup c1 c2
+          _ -> use_sequences ()
+     _ -> use_sequences ()
   where
-    k1 s1 = SeqStream $ zipWith_Seq f s1 (asSequence t)
-    k2 :: (a' -> a) -> SomeIndexable ListDim a' -> Seq b -> Stream ListDim c
-    k2 f1 i1 s2 =
-      let sq1 = map_Seq f1 $ viewToSeq $ someIndexableToView i1
-      in SeqStream $ zipWith_Seq f sq1 s2
+    use_sequences () =
+      SeqStream $ zipWith_Seq f (asSequence s) (asSequence t)
 
 fold_ListDim :: (a -> acc -> acc) -> Stream ListDim a -> acc -> acc
 {-# INLINE fold_ListDim #-}
@@ -641,7 +709,7 @@ asSequence (IxStream f i) = map_Seq f $ viewToSeq $ someIndexableToView i
 unit :: a -> Stream ListDim a
 unit x = IxStream id $
          SomeIndexable (indexable_View shape_ListDim) $
-         View (ListDim (Just 1)) (\_ -> x)
+         singleton_View x
 
 empty :: Stream ListDim a
 empty = IxStream id $
@@ -661,6 +729,86 @@ bind s k =
        let dom = ix_shape ix x
            f i = k $ transform (ix_at ix x i)
        in Splittable shape_ListDim $ View dom f
+
+-- RECURSIVE
+reduce_Stream :: forall d a. Shape d -> (a -> a -> a) -> a -> Stream d a -> a
+reduce_Stream sh f z s =
+  case s
+  of SeqStream sq ->
+       fold_Seq f sq z
+
+     Splittable (sh_local :: Shape d') (vw :: View d' (Stream ListDim a)) ->
+       let reduce_chunk :: SomeIndexable d' (Stream ListDim a) -> a -> a 
+           reduce_chunk si x =
+             let y = reduce_Stream sh f z $
+                     Splittable sh_local (someIndexableToView si)
+             in f x y
+       in reduce sh_local reduce_chunk f z $  
+          SomeIndexable (indexable_View sh_local) vw
+
+     IxStream g si ->
+       let reduce_chunk si x =
+             let y = reduce_Stream sh f z $ IxStream g si
+             in f x y
+       in reduce sh reduce_chunk f z si
+
+-- | Parallelizable reduction
+reduce :: forall d a b.
+          Shape d
+       -> (SomeIndexable d a -> b -> b)
+       -> (b -> b -> b)
+       -> b
+       -> SomeIndexable d a
+       -> b
+reduce sh reduce_slice reduce_item z si =
+  reduce_slice si z
+
+-- | Distributed reduction
+reduce_dist :: forall d a b.
+               Shape d
+            -> (SomeIndexable d a -> b -> b)
+            -> (b -> b -> b)
+            -> b
+            -> SomeIndexable d a
+            -> b
+reduce_dist sh reduce_slice reduce_item z si@(SomeIndexable ix x) =
+  let dom = ix_shape ix x
+      distributed_dom = sh_splitN sh n_PROCESSORS dom
+      
+      -- Compute partial results
+      worker :: SomeIndexable d a -> b
+      worker chunk = reduce_slice chunk z
+
+      distributed_inputs = distribute_indexable sh distributed_dom si worker
+      partial_results = farm distributed_inputs
+
+      -- Sequentially reduce the partial results
+      result = reduce_Stream shape_ListDim reduce_item z $
+               traverse_List partial_results
+
+  in result
+
+farm :: List (() -> b) -> List b
+farm _ = undefined
+
+-- | Stands for the dynamically identified number of distributed processors
+n_PROCESSORS :: Int
+n_PROCESSORS = 1
+
+-- | Split an indexable object into slices, and apply a function to each slice.
+--   This function is called to create worker functions for a distributed
+--   computation.
+distribute_indexable :: Shape d
+                     -> View ListDim (Offset d, d)
+                     -> SomeIndexable d a
+                     -> (SomeIndexable d a -> b)
+                     -> List (() -> b)
+distribute_indexable sh sizes (SomeIndexable ix x) f =
+  let apply_f (off, dom) =
+        -- Compute the slice immediately; defer the application of 'f'.
+        let s = ix_slice ix x dom off
+        in \_ -> f s
+  in build_List $ traverse_View shape_ListDim $ map_View apply_f sizes
 
 -- | Parallel doall
 doallPar :: Shape d -> (a -> Store -> Store) -> Stream d a -> Store -> Store
@@ -749,6 +897,9 @@ tabulate_List f ix =
      of ListDim (Just length) -> List length (build_arr1D visit length)
         ListDim Nothing -> error "Unbounded stream"
 
+preserve x = x
+
+{-
 -- | Construct a list in parallel.  Same interface as 'tabulate_List'.
 tabulate_List_par :: (a -> b) -> SomeIndexable ListDim a -> List b
 tabulate_List_par f ix =
@@ -782,5 +933,6 @@ distribute sh n (SomeIndexable ix_dict x) =
                    fill_singleton offset dom
                  Just (d1, hi_off, d2) ->
                    fill lo_half offset d1 ++
-                   fill hi_half (sh_addOffest offset hi_off) d2
+                   fill hi_half (sh_addOffset offset hi_off) d2
 
+-}

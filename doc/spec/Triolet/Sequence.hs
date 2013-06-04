@@ -26,6 +26,15 @@ map_Seq f (Seq s g) =
                 Done       -> Done
   in Seq s g'
 
+filter_Seq :: (a -> Bool) -> Seq a -> Seq a
+filter_Seq f (Seq s g) =
+  let g' s = case g s
+             of Yield s' x | f x       -> Yield s' x
+                           | otherwise -> Skip s'
+                Skip s'                -> Skip s'
+                Done                   -> Done
+  in Seq s g'
+
 data BindState s a where 
   Outer :: s -> BindState s a 
   Inner :: s -> s' -> (s' -> SeqStep s' a) -> BindState s a
@@ -45,7 +54,20 @@ bind_Seq (Seq s g) k =
   in Seq (Outer s) g'
 
 zipWith_Seq :: (a -> b -> c) -> Seq a -> Seq b -> Seq c
-zipWith_Seq = error "zipWith_Seq"
+zipWith_Seq f (Seq s1 g1) (Seq s2 g2) =
+  let g' (s1, s2, Nothing) =
+        case g1 s1
+        of Yield s1' x -> g_with_value s1' s2 x
+           Skip s1'    -> Skip (s1', s2, Nothing)
+           Done        -> Done
+      g' (s1, s2, Just x) = g_with_value s1 s2 x
+
+      g_with_value s1 s2 x =
+        case g2 s2
+        of Yield s2' y -> Yield (s1, s2', Nothing) (f x y)
+           Skip s2'    -> Skip (s1, s2', Just x)
+           Done        -> Done
+  in Seq (s1, s2, Nothing) g'
 
 fold_Seq :: (a -> acc -> acc) -> Seq a -> acc -> acc 
 {-# INLINE fold_Seq #-}
@@ -75,4 +97,4 @@ unit_Seq :: a -> Seq a
 unit_Seq x =
   let f True  = Yield False x
       f False = Done
-  in Seq True x
+  in Seq True f
