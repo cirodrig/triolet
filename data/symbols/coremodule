@@ -341,13 +341,15 @@ data Repr (a : bare) : box
 };
 
 
-copy @(a : bare) (r : Repr a) (x : a) (y : OutPtr a) -> Store attribute(inline) =
+copy @(a : bare) (r : Repr a) (x : a) (y : OutPtr a)
+  -> Store attribute(inline, inline_sequential) =
   case r of repr tyob sa isref put get.
   blockcopy @a sa x y;
 
 
 -- Convert from boxed to bare
-asbox @(a : bare) (r : Repr a) (x : Init a) -> AsBox a attribute(inline) =
+asbox @(a : bare) (r : Repr a) (x : Init a)
+  -> AsBox a attribute(inline, inline_sequential) =
   case r of repr tyob sa isref put get.
   case isref of {
     notAReference co.
@@ -366,7 +368,7 @@ asbox @(a : bare) (r : Repr a) (x : Init a) -> AsBox a attribute(inline) =
 
 -- Convert from bare to boxed
 asbare @(a : bare) (r : Repr a) (x : AsBox a) (ret : OutPtr a) -> Store
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
 
   case r of repr tyob sa isref put get.
   case isref of {
@@ -2613,16 +2615,12 @@ initToBare @(a : bare) (rep : Repr a) (x : Init a) -> a attribute(inline) =
 
 
 reprSizeAlign @(a : bare) (rep : Repr a) -> SizeAlign a
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
 
   case rep of repr tyob sa isref put get.
 
   sa;
 
-
-dynamicCopyError @(a : bare) (x : a) (ret : OutPtr a) -> Store
-  attribute(inline) =
-  except @Store;
 
 {-
 -- Copy an array.  Use a loop to copy individual array elements.
