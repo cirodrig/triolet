@@ -253,13 +253,6 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   
   time times PrintTimer $ when debugMode $ void $ do
     putStrLn ""
-    putStrLn "Before loop dimension analysis"
-    print $ pprMemModule repr_mod
-
-  repr_mod <- iterateM (highLevelOptimizations times True SystemF.DimensionalitySimplifierPhase) 7 repr_mod
-
-  time times PrintTimer $ when debugMode $ void $ do
-    putStrLn ""
     putStrLn "Before parallelizing"
     print $ pprMemModule repr_mod
 
@@ -271,7 +264,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
               putStrLn ""
               putStrLn "After parallelizing"
               print $ pprMemModule repr_mod
-            highLevelOptimizations times False SystemF.DimensionalitySimplifierPhase repr_mod
+            highLevelOptimizations times False SystemF.GeneralSimplifierPhase repr_mod
     else return repr_mod
 
   -- Sequentialize remaining loops

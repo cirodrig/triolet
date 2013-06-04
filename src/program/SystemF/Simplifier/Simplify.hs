@@ -117,8 +117,6 @@ checkSize e = do
 data SimplifierPhase =
     GeneralSimplifierPhase
 
-  | DimensionalitySimplifierPhase
-
     -- | After parallelization, the sequential phase
     --   converts loops to sequential form
   | SequentialSimplifierPhase
@@ -422,15 +420,6 @@ phasePermitsInlining phase def =
           case def_phase
           of InlNormal     -> True 
              InlWrapper    -> True
-             InlDimensionality -> False
-             InlSequential -> False
-             InlFinal      -> False
-             InlPostfinal  -> False
-        DimensionalitySimplifierPhase ->
-          case def_phase
-          of InlNormal     -> True
-             InlWrapper    -> True
-             InlDimensionality -> True
              InlSequential -> False
              InlFinal      -> False
              InlPostfinal  -> False
@@ -438,7 +427,6 @@ phasePermitsInlining phase def =
           case def_phase
           of InlNormal     -> True 
              InlWrapper    -> True
-             InlDimensionality -> True
              InlSequential -> True
              InlFinal      -> False
              InlPostfinal  -> False
@@ -3176,7 +3164,6 @@ rewriteAtPhase phase mod = rewriteLocalExpr phase rules mod
     rules =
       case phase
       of GeneralSimplifierPhase -> generalRewrites
-         DimensionalitySimplifierPhase -> generalRewrites
          SequentialSimplifierPhase -> sequential_rewrites
          FinalSimplifierPhase -> sequential_rewrites
          PostFinalSimplifierPhase -> sequential_rewrites

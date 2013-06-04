@@ -54,8 +54,6 @@ data Attribute ix =
   | InlineAttr                      -- ^ Definition should be aggressively
                                     --   inlined
   | InlineNeverAttr                 -- ^ Definition should never be inlined
-  | InlineDimensionalityAttr         -- ^ Definition should not be inlined until
-                                    --   the fixed-dimensionality compilation phase
   | InlineSequentialAttr            -- ^ Definition should not be inlined until
                                     --   the sequential compilation phase
   | InlineFinalAttr                 -- ^ Definition should not be inlined until
@@ -75,7 +73,6 @@ castAttribute NonalgebraicAttr = NonalgebraicAttr
 castAttribute ConlikeAttr = ConlikeAttr
 castAttribute InlineAttr = InlineAttr
 castAttribute InlineNeverAttr = InlineNeverAttr
-castAttribute InlineDimensionalityAttr = InlineDimensionalityAttr
 castAttribute InlineSequentialAttr = InlineSequentialAttr
 castAttribute InlineFinalAttr = InlineFinalAttr
 castAttribute InlinePostfinalAttr = InlinePostfinalAttr

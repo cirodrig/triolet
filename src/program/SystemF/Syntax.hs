@@ -608,10 +608,6 @@ data InliningAnnotation =
     InlNormal                   -- ^ A normal function.
   | InlWrapper                  -- ^ A wrapper function; may be inlined even
                                 --   in a recursive definition group.
-  | InlDimensionality           -- ^ A parallelizable function whose definition
-                                --   is specialized to a particular
-                                --   loop dimensionality.  The function should
-                                --   be inlined after unflattening.
   | InlSequential               -- ^ A parallelizable function whose definition
                                 --   consists of sequential loops.  The
                                 --   function should be inlined if it still

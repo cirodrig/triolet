@@ -8620,7 +8620,7 @@ permute1D_list_dim @(a : bare)
   (vw : view list_dim (Boxed (Tuple2 (Stored int) a)))
   (ret : OutPtr (array1 a))
   -> Store
-  attribute(inline, inline_dimensionality) =
+  attribute(inline) =
 
   let rep_tuple : Repr (Tuple2 (Stored int) a) =
         unboxedinfo Tuple2 @(Stored int) @a repr_int rep in
@@ -8675,7 +8675,7 @@ boxedPermute1D_list_dim @(a : bare)
   (vw : view list_dim (Boxed (Tuple2 (Stored int) a)))
   (ret : OutPtr (barray1 a))
   -> Store
-  attribute(inline, inline_dimensionality) =
+  attribute(inline) =
 
   let type Boxed_a = StuckRef (AsBox a) in
 

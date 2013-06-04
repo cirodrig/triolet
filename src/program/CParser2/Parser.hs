@@ -166,7 +166,6 @@ attr = do
        ("conlike", return ConlikeAttr),
        ("inline", return InlineAttr),
        ("inline_never", return InlineNeverAttr),
-       ("inline_dimensionality", return InlineDimensionalityAttr),
        ("inline_sequential", return InlineSequentialAttr),
        ("inline_final", return InlineFinalAttr),
        ("inline_postfinal", return InlinePostfinalAttr),

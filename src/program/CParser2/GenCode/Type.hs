@@ -45,7 +45,6 @@ fromVarAttrs attrs =
     interpret st InlineAttr = st
     interpret st InlineNeverAttr = st
     interpret st InlineSequentialAttr = st
-    interpret st InlineDimensionalityAttr = st
     interpret st InlineFinalAttr = st
     interpret st InlinePostfinalAttr = st
 

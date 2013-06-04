@@ -85,7 +85,7 @@ defAttributes attrs ann =
 
     -- There should be at most one inlining phase attribute
     check_inlining_phase =
-      case filter (`elem` [InlineSequentialAttr, InlineDimensionalityAttr, InlineFinalAttr, InlinePostfinalAttr]) attrs
+      case filter (`elem` [InlineSequentialAttr, InlineFinalAttr, InlinePostfinalAttr]) attrs
       of []  -> ()
          [_] -> ()
          _   -> internalError "Functions may not have more than one inlining phase attribute"
@@ -106,9 +106,6 @@ defAttributes attrs ann =
     -- and here.  Eliminate this one and take the attribute from the type.
     insert_attribute ConlikeAttr ann =
       ann {SystemF.defAnnConlike = True}
-
-    insert_attribute InlineDimensionalityAttr ann =
-      ann {SystemF.defAnnInlinePhase = SystemF.InlDimensionality}
 
     insert_attribute InlineSequentialAttr ann =
       ann {SystemF.defAnnInlinePhase = SystemF.InlSequential}
