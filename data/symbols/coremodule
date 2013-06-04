@@ -3871,9 +3871,8 @@ slice_ListSection @(a : box)
 
   con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
   (idCoercion @list_dim) Indexable_ListSection
-  (preserve @(Boxed (ListSection a))
-   (con_boxed @(ListSection a) (unboxedinfo ListSection @a)
-    (listSection @a @M slice_size sliced_array)));
+  (con_boxed @(ListSection a) (unboxedinfo ListSection @a)
+   (listSection @a @M slice_size sliced_array));
 
 
 traverse_ListSection @(a : box)
@@ -4243,7 +4242,7 @@ tabulate_list_dist @(a b : box)
 
   letfun
     worker (si : SomeIndexable list_dim a) -> dist_result =
-      tabulate_list @a @b rep_a rep_b f si
+      tabulate_list @a @b rep_a rep_b f (preserve_SomeIndexable @list_dim @a si)
   in
 
   case farm_SomeIndexable @list_dim @a @dist_result
@@ -4298,7 +4297,7 @@ reduce_loop_dist @(d : box) @(a b : box)
 
   letfun
     worker (chunk : SomeIndexable d a) -> b =
-      reduce_slice chunk z
+      reduce_slice (preserve_SomeIndexable @d @a chunk) z
   in
 
   -- Compute partial reductions in parallel
@@ -4321,6 +4320,15 @@ reduce_loop_dist @(d : box) @(a b : box)
 
 -- Number of distributed processing elements
 getNumDistributedPlaces : NoneType -> SomeIInt;
+
+
+-- Prevent deconstruction of the underlying data in a 'SomeIndexable'
+preserve_SomeIndexable @(d a : box) (si : SomeIndexable d a)
+  -> SomeIndexable d a attribute(inline) =
+
+  case si of someIndexable @t tyob t_has_shape_d indexable_dict container.
+  someIndexable @d @a @t tyob t_has_shape_d indexable_dict
+  (preserve @(t a) container);
 
 
 -- Distribute the elements of a 'SomeIndexable' and map a function over them
