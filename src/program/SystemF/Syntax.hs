@@ -153,6 +153,16 @@ data Specificity =
     --   There is a demand for each data field.  The demand is the upper bounds
     --   of the demands at all use sites.
 
+  | Called !Int !(Maybe Var) Specificity
+    -- ^ Called with @N > 0@ arguments, then the return value used with the
+    --   indicated specificity.  Construct this term with 'calledSpecificity'.
+    --
+    --   A variable is given for the last parameter of an initializer
+    --   function.  The variable stands for
+    --   the address to which the initializer function writes.
+    --   If this is an iniitalizer function, the return specificity
+    --   is a 'Read' term.
+{-
   | Written !Var (HeapMap Specificity)
     -- ^ An initializer function @\x -> E@.  The variable stands for
     --   the address to which the initializer function writes.  Data
@@ -161,7 +171,7 @@ data Specificity =
     --
     --   The fields represent a lambda function taking a mutable reference
     -- This is similar to 'Decond'.
-
+-}
   | Read (HeapMap Specificity)
     -- ^ Values are read out of memory and used at the given specificities.
     --   Data with this specificity has type @Store@.
@@ -587,13 +597,14 @@ data DefAnn =
     --   is exported to other languages.
   , defAnnExported :: !Bool
     
-    -- | The uses of this definition,
+    -- | The demand on this definition,
     -- as determined by demand analysis
-  , defAnnUses :: !Multiplicity
+  , defAnnUses :: !Dmd
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn InlNormal InlConservatively False False False ManyUnsafe
+defaultDefAnn =
+  DefAnn InlNormal InlConservatively False False False (Dmd ManyUnsafe Used)
 
 -- | An annotation controlling when a function may be inlined.
 --

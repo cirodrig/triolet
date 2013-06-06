@@ -96,15 +96,26 @@ pprSpecificity (Decond mono_type spcs) =
              in parens $ sep $ punctuate (text ",") types_doc
   in text "D" <> braces (type_doc <> text ":" <> cat (map pprDmd spcs))
 
-pprSpecificity (Written v spc) =
-  text "W" <+> parens (text "lambda" <+> pprVar v <> text "." <+> pprHeapMap spc)
+pprSpecificity (Called n mv spc) =
+  -- If last parameter takes a variable, show it as a lambda function
+  let (n_args, body) =
+        case mv
+        of Nothing -> (n, pprSpecificity spc)
+           Just v  -> let lambda_term =
+                            text "lambda" <+> pprVar v <> text "." <+>
+                            pprSpecificity spc
+                      in (n-1, lambda_term)
+  in if n_args == 0
+     then body
+     else text "A" <> text (show n_args) <+> parens body
+
 pprSpecificity (Read m) =
   text "R" <> pprHeapMap m
 pprSpecificity Unused = text "0"
 
 pprHeapMap (HeapMap m) = parens (cat $ punctuate (text ",") cells)
   where
-    cells = [text "()" <+> text "|->" <+> pprSpecificity s | (v, s) <- m]
+    cells = [pprVar v <+> text "|->" <+> pprSpecificity s | (v, s) <- m]
 
 pprTyPat :: TyPat -> Doc
 pprTyPat (TyPat (v ::: t)) = pprVar v <+> text ":" <+> pprType t
@@ -269,7 +280,7 @@ pprDefAnn ann =
       if defAnnJoinPoint ann
       then text "join_point"
       else empty
-    uses_doc = text $ showMultiplicity (defAnnUses ann)
+    uses_doc = pprDmd (defAnnUses ann)
 
 pprFDef def = pprFDefFlags defaultPprFlags def
 

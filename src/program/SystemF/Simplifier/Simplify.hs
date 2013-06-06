@@ -407,7 +407,8 @@ isInliningCandidate phase def = inlining_ok && phase_ok && code_growth_ok
 --   its use annotation.  Functions that are used exactly once should be
 --   inlined because inlining won't produce growth.
 usesSuggestInlining :: FDef a -> Bool
-usesSuggestInlining def = singleMultiplicity $ defAnnUses $ defAnnotation def
+usesSuggestInlining def =
+  singleMultiplicity $ multiplicity $ defAnnUses $ defAnnotation def
 
 -- | Decide whether inlining is permitted for the function in the current 
 --   simplifier phase, based on its phase annotation.

@@ -113,7 +113,7 @@ ltSpecificityConstructor (Decond{}) Inspected = True
 ltSpecificityConstructor _          Unused    = False
 ltSpecificityConstructor Unused     _         = True
 
--- Remaining cases are 'Written', 'Read', which are bounded by the
+-- Remaining cases are 'Called', 'Read', which are bounded by the
 -- top and bottom of the lattice
 ltSpecificityConstructor _          _         = False
 
@@ -151,14 +151,23 @@ instance Dataflow Specificity where
   joinPar Copied (Decond {}) = Inspected
   joinPar (Decond {}) Copied = Inspected
 
-  joinPar (Written v1 h1) (Written v2 h2) =
-    -- Unify variables by renaming v2 to v1
-    let h2' = renameHeapMap (Rename.singleton v2 v1) h2
-        -- Join both maps; absent entries are 'Unused'
-        h' = outerJoinHeapMap (joinPar `on` fromMaybe Unused) h1 h2'
-    in Written v1 h'
-  joinPar (Written {}) _ = Inspected
-  joinPar _ (Written {}) = Inspected
+  joinPar (Called n1 mv1 h1) (Called n2 mv2 h2)
+    | n1 /= n2 = Called (min n1 n2) Nothing Used
+    | otherwise =
+        case (mv1, mv2)
+        of (Just v1, Just v2) ->
+             -- Unify variables by renaming v2 to v1
+             let h2' = Rename.rename (Rename.singleton v2 v1) h2
+                 h' = joinPar h1 h2'
+             in Called n1 (Just v1) h'
+           (Nothing, Nothing) ->
+             Called n1 Nothing (joinPar h1 h2)
+           _ ->
+             -- Cannot represent return specificity precisely
+             Called n1 Nothing Used
+
+  joinPar (Called {}) _ = Inspected
+  joinPar _ (Called {}) = Inspected
 
   joinPar (Read h1) (Read h2) =
     -- Join both maps; absent entries are 'Unused'
@@ -287,12 +296,18 @@ sameSpecificity Unused Unused = True
 sameSpecificity _ _ = False
 -}
 
+-- | Construct the specificity of a function
+calledSpecificity n Nothing  (Called n' mv spc) = Called (n + n') mv spc
+calledSpecificity n Nothing  spc = spc
+calledSpecificity 0 (Just _) spc = internalError "calledSpecificity"
+calledSpecificity n (Just v) spc = Called n (Just v) spc
+
 -- | Given the specificity of a piece of data, create the
 --   specificity of the initializer that created that data.
 initializerSpecificity :: EvalMonad m => Specificity -> m Specificity
 initializerSpecificity spc = do
   v <- newAnonymousVar ObjectLevel
-  return $ Written v (HeapMap [(v, spc)])
+  return $ Called 1 (Just v) (Read (HeapMap [(v, spc)]))
 
 dataFieldDmd m1 BareK (Dmd m2 s) = do s' <- initializerSpecificity s
                                       return $ multiplyDmd m1 $ Dmd m2 s'
@@ -325,10 +340,50 @@ deconstructSpecificity n_fields (Dmd m spc) =
      -- All other usages produce an unknown effect on fields 
      _ -> return $ replicate n_fields unknownDmd
 
+-- | Get the demand on a function's return type, given the demand on the
+--   function.
+--
+-- Multiplicity: If the function were inlined into all its use sites,
+-- by how much would the return value be replicated?
+--
+-- Specificity: How will the return value be used?
+returnTypeDmd :: Int -> Maybe Var -> Dmd -> Dmd
+returnTypeDmd n_params m_target_var (Dmd m s) =
+  let m' = case s
+           of
+             -- This is a bit of a hack for greater precision for initializer
+             -- functions.  If the function takes exactly one argument,
+             -- the multiplicity of calls to the function is also the
+             -- multiplicity of the function's results.
+             Called n_demanded _ _ | n_params == 1 && n_demanded == 1 -> m
+             _ -> ManyUnsafe
+  in Dmd m' (returnTypeSpecificity n_params m_target_var s)
+
+-- | Get the specificity of a function's return type, given the function's
+--   specificity
+returnTypeSpecificity :: Int -> Maybe Var -> Specificity -> Specificity
+returnTypeSpecificity n_params m_target_var spc =
+  case spc
+  of Called n_demanded_params m_binder s
+       | n_params == n_demanded_params -> 
+           case (m_binder, m_target_var)
+           of (Just target_binder, Just v) ->
+                Rename.rename (Rename.singleton target_binder v) s
+              (Nothing, _) ->
+                s
+              _ -> Used         -- Cannot rename appropriately
+
+       | n_params < n_demanded_params ->
+           Called (n_demanded_params - n_params) m_binder s
+
+       | otherwise -> Used
+     Unused -> Unused
+     _ -> Used
+
 initializerResultSpecificity target_var spc =
   case spc
-  of Written target_binder s ->
-       Rename.rename (Rename.singleton target_binder target_var) $ Read s
+  of Called 1 (Just target_binder) s ->
+       Rename.rename (Rename.singleton target_binder target_var) s
      Unused -> Unused
      _ -> Used
 

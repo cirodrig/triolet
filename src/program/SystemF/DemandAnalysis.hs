@@ -262,7 +262,7 @@ dmdExp dmd exp@(ExpM expression) =
   of VarE _ v -> mentionSpecificity v (specificity dmd) >> return exp
      LitE _ _ -> return exp
      ConE inf con sps ty_obj args -> dmdConE dmd inf con sps ty_obj args
-     AppE inf op ts args -> dmdAppE inf op ts args
+     AppE inf op ts args -> dmdAppE inf dmd op ts args
      LamE inf f -> dmdLamE dmd inf f
      LetE inf pat rhs body -> dmdLetE dmd inf pat rhs body
      LetfunE inf dg body -> do
@@ -339,8 +339,10 @@ dmdConE dmd inf con sps ty_obj args = do
 --   Perform dead code elimination on subexpressions as usual.
 --   However, parameters that should be floated are marked as having
 --   multiple uses so that they don't get inlined.
-dmdAppE inf op ty_args args = do
-  op' <- dmdExp unknownDmd op
+dmdAppE inf dmd op ty_args args = do
+  let op_dmd = case dmd
+               of Dmd m s -> Dmd m (calledSpecificity (length args) Nothing s)
+  op' <- dmdExp op_dmd op
   args' <- sequence [ dmdExp use_mode arg
                     | (use_mode, arg) <- zip use_modes args]
   --args' <- sequence $ zipWith3 dmdExpWorker call_modes use_modes args
@@ -442,28 +444,20 @@ dmdAlt dmd (AltM (Alt decon@(TupleDeCon _) Nothing params body)) = do
 
 dmdFun :: Dmd -> DmdAnl FunM
 dmdFun dmd (FunM f) = do
-  is_initializer <- liftTypeEvalM $ isInitializerFun (FunM f)
+  output_param_var <- liftTypeEvalM $ getOutputParameter (FunM f)
 
   -- Extract the demand on the function body
-  let body_dmd =
-        case dmd
-        of Dmd m s@(Written _ _) ->
-             if not is_initializer
-             then internalError "dmdFun"
-             else let [p] = funParams f
-                      spc = initializerResultSpecificity (patMVar p) s
-                  in Dmd m spc
-           _ -> unknownDmd
+  let body_dmd = returnTypeDmd (length $ funParams f) output_param_var dmd
 
   -- Decide whether the function is work-safe.
-  -- If all uses are safe calls, then the function is work-safe.
-  -- Otherwise, it's not work-safe.
+  -- If this is an initializer and all uses are safe calls,
+  -- then the function is work-safe.
+  -- Otherwise, approximate as not work-safe.
   let is_safe =
         case dmd 
-        of Dmd m (Written _ _)
-             | not is_initializer -> internalError "dmdFun"
-             | m == OnceSafe      -> True
-           _                      -> False
+        of Dmd m (Called 1 _ _)
+             | isJust output_param_var && m == OnceSafe -> True
+           _ -> False
 
   -- Eliminate dead code and convert patterns to wildcard patterns
   (tps', (ps', b')) <-
@@ -473,6 +467,26 @@ dmdFun dmd (FunM f) = do
       dfType $ funReturn f
       dmdExp body_dmd (funBody f)
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
+
+-- | Decide whether this function takes an output parameter.
+--   If a function's last parameter is an 'OutPtr' and its return type
+--   is 'Store', return the output parameter.  Otherwise return Nothing.
+getOutputParameter (FunM f)
+  | null (funParams f) = internalError "getOutputParameter: No parameters"
+  | otherwise =
+    let p = last $ funParams f
+    in cond ()
+       [ do -- Parameter has type 'OutPtr t'?
+            Just (op, _) <- lift $ deconVarAppType $ patMType p
+            aguard $ op == outPtrV
+        
+            -- Return type has type 'Store'?
+            VarT rtype_var <- lift $ reduceToWhnf $ funReturn f
+            aguard $ rtype_var == storeV
+
+            return (Just $ patMVar p)
+       , return Nothing
+       ]
 
 -- If a function takes an 'OutPtr' and returns a 'Store', it's an
 -- initializer
@@ -582,7 +596,7 @@ dmdGroup do_def defgroup do_body =
       return ((new_defs, body), new_uses)
     
     set_def_uses dmd def =
-      modifyDefAnnotation (\a -> a {defAnnUses = multiplicity dmd}) def
+      modifyDefAnnotation (\a -> a {defAnnUses = dmd}) def
 
 -- | Given the members of a definition group, the variables mentioned by them, 
 --   and the set of members that are referenced by the rest of the program,

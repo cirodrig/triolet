@@ -344,7 +344,8 @@ renameDefGroup rn group k =
        in k rn' (Rec defs')
   where
   rename_def rn def =
-    def {definiens = rename rn $ definiens def}
+    def { definiens = rename rn $ definiens def
+        , defAnnotation = rename rn $ defAnnotation def}
 
 defGroupFreeVariables :: DefGroup (FDef Mem) -> Set.Set Var -> Set.Set Var
 defGroupFreeVariables (NonRec def) fv =
@@ -470,11 +471,12 @@ substituteDefGroup subst_fun s g k =
        fun_type <- substitute (typeSubst s) $ functionType (definiens def)
 
        -- No new variables in scope over function body
-       def1 <- mapMDefiniens (subst_fun s) def
+       new_ann <- substitute (mkPartialSubst s) $ defAnnotation def
+       new_definiens <- subst_fun s $ definiens def
        
        -- Rename the bound variable if appropriate
        (s', v') <- rename_if_bound s (definiendum def)
-       let def' = def1 {definiendum = v'}
+       let def' = Def v' new_ann new_definiens
        
        -- Add function to environment
        assume v' fun_type $ k s' (NonRec def')
@@ -491,9 +493,10 @@ substituteDefGroup subst_fun s g k =
 
        -- Rename functions
        assumeBinders (zipWith (:::) renamed_definienda function_types) $ do
-         defs' <- mapM (mapMDefiniens (subst_fun s')) defs
-         let new_defs = [def {definiendum = v}
-                        | (def, v) <- zip defs' renamed_definienda]
+         new_annotations <- mapM (substitute (mkPartialSubst s')) $ map defAnnotation defs
+         new_definientia <- mapM (subst_fun s') $ map definiens defs
+         let new_defs = [Def v ann x
+                        | (v, ann, x) <- zip3 renamed_definienda new_annotations new_definientia]
          k s' (Rec new_defs)
   where
     rename_if_bound :: Subst -> Var -> m (Subst, Var)
@@ -523,7 +526,7 @@ substituteDeConInst s decon k =
        k s (TupleDeCon ty_args')
        
 -------------------------------------------------------------------------------
-       
+
 -- | A 'Dmd' can be renamed by renaming its specificity.
 --   The 'multiplicity' field does not mention variable names.
 instance Renameable Dmd where
@@ -544,10 +547,12 @@ instance Renameable Specificity where
          let spcs' = rename rn' spcs
          in Decond decon' spcs'
 
-       Written v m -> 
+       Called n mv spc2 -> 
          -- Remove the bound variable from the environment; it is shadowed
-         let rn' = Rename.exclude v rn
-         in Written v (renameHeapMap rn' m)
+         let rn' = case mv 
+                   of Nothing -> rn
+                      Just v -> Rename.exclude v rn
+         in Called n mv (rename rn' spc2)
 
        Read m -> Read $ renameHeapMap rn m
        
@@ -560,7 +565,7 @@ instance Renameable Specificity where
        Inspected         -> Set.empty
        Copied            -> Set.empty
        Decond decon spcs -> deConFreeVariables decon $ freeVariables spcs
-       Written v spc     -> Set.delete v $ fvHeapMap spc
+       Called n v spc    -> maybe id Set.delete v $ freeVariables spc
        Unused            -> Set.empty
 
 renameHeapMap :: Renameable a => Renaming -> HeapMap a -> HeapMap a
@@ -581,7 +586,11 @@ instance Substitutable Specificity where
            spcs' <- mapM (substitute s') spcs
            return $ Decond decon' spcs'
        
-       Written v heap_map -> do
+       Called n Nothing spc2 -> do
+         spc2 <- substitute s spc2
+         return $ Called n Nothing spc2
+
+       Called n (Just v) spc2 -> do
          -- Rename 'v' if it's in scope
          type_assignment <- lookupType v
          (s', v') <- case type_assignment of
@@ -592,10 +601,16 @@ instance Substitutable Specificity where
              return (s', v')
 
          -- Substitute the rest
-         m_heap_map' <- substituteHeapMap s' heap_map
-         return $! case m_heap_map'
-                   of Just heap_map' -> Written v' heap_map'
-                      Nothing        -> Used -- Not representable
+         spc2' <- substitute s' spc2
+         return $ Called n (Just v') spc2'
+
+       Read m -> do
+         -- Substitution can fail.  If it fails, take the representable  
+         -- upper bound, 'Used'.
+         mm' <- substituteHeapMap s m
+         return $! case mm'
+                   of Just m' -> Read m'
+                      Nothing -> Used -- Not representable
 
        Read _ -> internalError "substitute: Not implemented"
        
@@ -622,6 +637,17 @@ substituteHeapMap s (HeapMap xs) = do
         continue k' = do
           spc' <- substitute s spc
           return $ Just (k', spc')
+
+instance Renameable DefAnn where
+  rename rn ann = ann {defAnnUses = rename rn $ defAnnUses ann} 
+  freeVariables ann = freeVariables $ defAnnUses ann
+
+instance Substitutable DefAnn where
+  type Substitution DefAnn = PartialSubst
+
+  substituteWorker s ann = do
+    uses' <- substitute s $ defAnnUses ann
+    return $ ann {defAnnUses = uses'}
 
 instance Renameable ConInst where
   rename rn (VarCon con ty_args ex_types) =
@@ -817,6 +843,16 @@ instance Substitutable (Fun Mem) where
                           , funParams = params
                           , funReturn = ret
                           , funBody = body}
+
+instance Renameable (Constant Mem) where
+  rename rn (Constant inf ty e) = Constant inf (rename rn ty) (rename rn e)
+  freeVariables (Constant _ ty e) = freeVariables ty `Set.union` freeVariables e
+
+instance Renameable (Ent Mem) where
+  rename rn (FunEnt f)   = FunEnt $ rename rn f
+  rename rn (DataEnt c) = DataEnt $ rename rn c
+  freeVariables (FunEnt f) = freeVariables f
+  freeVariables (DataEnt c) = freeVariables c
 
 -------------------------------------------------------------------------------
 
