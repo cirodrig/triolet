@@ -20,6 +20,7 @@ module SystemF.TypecheckMem
         --   checking, and should only be used on code that's known to
         --   be well-typed.
         inferExpType,
+        inferAltType,
         inferAppType,
         conInstType,
         deConInstType)
@@ -605,6 +606,15 @@ inferConAppType (TupleCon ty_args) = do
   kinds <- mapM typeBaseKind ty_args
   return $ typeApp (UTupleT kinds) ty_args
 
+-- | Infer the type of a case alternative's result.  The code is assumed to be
+--   well-typed; this function doesn't check for most errors.
+inferAltType :: forall m. (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
+                AltM -> m Type
+inferAltType (AltM (Alt con ty_ob params body)) =
+  assumeBinders (deConExTypes con) $
+  maybe id assumePatM ty_ob $
+  assumePatMs params $ inferExpType body
+  
 -- | Infer the type of an application, given the operator type and argument
 --   types.  If the application is not well-typed, an exception is raised.
 inferAppType :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>

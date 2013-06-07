@@ -150,6 +150,7 @@ Executable triolet
     SystemF.DeadCodeSF
     SystemF.DictEnv
     SystemF.EtaReduce
+    SystemF.Flatten
     SystemF.Floating2
     SystemF.IncrementalSubstitution
     SystemF.LoopRewrite
@@ -161,6 +162,7 @@ Executable triolet
     SystemF.PartialEval
     SystemF.Print
     SystemF.PrintMemoryIR
+    SystemF.Raft
     SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict

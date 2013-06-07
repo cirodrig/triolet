@@ -34,6 +34,7 @@ import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.Rename as SystemF
 import qualified SystemF.ReprInference as SystemF
+import qualified SystemF.Flatten as SystemF
 import qualified SystemF.Floating2 as SystemF
 import qualified SystemF.Simplifier.Rewrite as SystemF
 import qualified SystemF.Simplifier.Simplify as SystemF
@@ -117,8 +118,23 @@ runTask GetBuiltins = do
 runTask CompileBuiltinsToPyonAsm = do
   -- Lower the core module.
   -- Most optimizations are skipped.
-  m <- readInitGlobalVarIO Globals.the_coreModule
-  SystemF.lowerModule True m
+  times <- newTimes
+
+  mod <- readInitGlobalVarIO Globals.the_coreModule
+  mod <- time times FlattenTimer $ SystemF.flattenModule mod
+  
+  when debugMode $ void $ do
+    putStrLn ""
+    putStrLn "Builtins"
+    print $ SystemF.PrintMemoryIR.pprModule mod
+    time times TypecheckTimer $ evaluate $ SystemF.checkForShadowingModule mod
+    time times TypecheckTimer $ SystemF.TypecheckMem.typeCheckModule mod
+
+  ll_mod <- SystemF.lowerModule True mod
+  
+  printTimes times
+  
+  return ll_mod
 
 runTask (CompilePyonMemToPyonAsm { compileMemInput = mod
                                  , compileFlags = cflags}) = do

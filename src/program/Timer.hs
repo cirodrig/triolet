@@ -16,6 +16,7 @@ import System.CPUTime
 -- | The part of a program to which execution time is accounted.
 data TimeAttribution =
     RewriteTimer
+  | FlattenTimer
   | SpecializeTimer
   | DemandTimer
   | FloatingTimer
