@@ -206,15 +206,7 @@ type F = UnboxedTypeEvalM
 newtype FRaft a = FRaft (WriterT Raft F a)
               deriving(Functor, Applicative, Monad, MonadIO)
 
--- | A CPS-transformed 'FRaft'.  In a sequence of computations, each
---   computation executes inside the context produced by the previous
---   computation.
---
---   The sequence @m1 >> m2@
---   concatenates @m1@'s raft with @m2@'s raft and propagates @m1@'s type
---   environment to @m2@.
-newtype Hoist a =
-  Hoist {runHoist :: forall r. (Renaming -> a -> FRaft r) -> FRaft r}
+runFRaft (FRaft m) = runWriterT m
 
 instance Supplies FRaft (Ident Var) where
   fresh = FRaft $ lift fresh
@@ -238,6 +230,202 @@ noFloat (FRaft m) = do
   case w of Here -> return x
             _ -> internalError "noFloat"
 
+-- | A CPS-transformed 'FRaft'.  In a sequence of computations, each
+--   computation executes inside the context produced by the previous
+--   computation.
+--
+--   The sequence @m1 >> m2@
+--   concatenates @m1@'s raft with @m2@'s raft and propagates @m1@'s type
+--   environment to @m2@.
+newtype Hoist a =
+  Hoist {runHoist :: Renaming -> forall r. (a -> Renaming -> FRaft r) -> FRaft r}
+
+instance Functor Hoist where
+  fmap f m = Hoist $ \rn k -> runHoist m rn $ \x rn' -> k (f x) rn'
+
+instance Applicative Hoist where
+  pure = return
+  (<*>) = ap
+
+instance Monad Hoist where
+  return x = Hoist $ \rn k -> k x rn
+  m >>= k = Hoist $ \rn k2 -> runHoist m rn $ \x rn' -> runHoist (k x) rn' k2
+
+liftHoistWithRenaming :: (Renaming -> FRaft a) -> Hoist a
+liftHoistWithRenaming f = Hoist $ \rn k -> f rn >>= \x -> k x rn
+
+liftHoist :: FRaft a -> Hoist a
+liftHoist m = Hoist $ \rn k -> m >>= \x -> k x rn
+
+liftT :: (forall r. Renaming -> a -> (Renaming -> a -> FRaft r) -> FRaft r)
+      -> a -> Hoist a
+liftT t x = Hoist $ \rn k -> t rn x (\rn' x' -> k x' rn')
+
+-- | Apply the current renaming to a term
+renameBeforeHoisting :: Rename.Renameable a => a -> Hoist a
+renameBeforeHoisting x = Hoist $ \rn k -> k (rename rn x) rn
+
+-- | Produce a raft to be moved away from this segment of code
+float_new :: Raft -> Hoist ()
+float_new r = liftHoist $ FRaft $ tell r
+
+-- TODO: integrate assumeHoistedType with float_new
+assumeHoistedType v ty = Hoist $ \rn k -> assume v ty $ k () rn
+
+assumeHoistedBinder b = Hoist $ \rn k -> assumeBinder b $ k () rn
+
+-- | Get the bindings that mention the given variables and apply them to the
+--   expression.
+anchor_new :: Renaming -> [Var] -> Hoist ExpM -> FRaft ExpM
+anchor_new rn vs m = FRaft $ WriterT $ do
+  ((x, ty), raft) <- runFRaft $ runHoist m rn computeTypeForAnchor
+  let (dependent, independent) = partitionRaft (Set.fromList vs) raft
+  return (applyRaft dependent ty x, independent)
+
+anchorAll_new :: Renaming -> Hoist ExpM -> F ExpM
+anchorAll_new rn m = do
+  ((x, ty), w) <- runFRaft $ runHoist m rn computeTypeForAnchor
+  return $ applyRaft w ty x
+
+computeTypeForAnchor e _ = do
+  ty <- inferExpType e
+  return (e, ty)
+
+-- | Given an expression that is used in exactly one place,
+--   bind the expression to a new variable and float the binding.
+--   The expression should have been renamed.
+--   The new variable is returned.
+bindNewVariable_new :: ExpM -> Hoist ExpM
+bindNewVariable_new rhs = do
+  ty <- liftHoist $ liftF $ inferExpType rhs
+  v <- liftHoist $ liftF $ newAnonymousVar ObjectLevel
+  let binder = setPatMDmd (Dmd OnceUnsafe Used) $ patM (v ::: ty)
+      inf = expInfo $ fromExpM rhs
+  float_new $ LetR inf binder rhs Here
+  assumeHoistedType v ty
+  return $ ExpM $ VarE inf v
+
+-- | Flatten an expression and then hoist it into a new let-binding.
+--   However, do not hoist trivial expressions.
+hoistExp_new :: ExpM -> Hoist ExpM
+hoistExp_new e = do
+  e' <- flattenExp_new e 
+  if isTrivialExp e' then return e' else bindNewVariable_new e'
+
+hoistExps_new = mapM hoistExp_new
+
+hoistMaybeExp_new :: Maybe ExpM -> Hoist (Maybe ExpM)
+hoistMaybeExp_new x = mapM hoistExp_new x
+
+-- | Flatten an expression and then hoist it into a new let-binding.
+--   However, do not hoist trivial expressions or introduction rules.
+--   (Introduction rules are @LamE@ and @ConE@ expressions.)
+hoistIntroExp_new :: ExpM -> Hoist ExpM
+hoistIntroExp_new exp@(ExpM expression) =
+  case expression
+  of LamE {} -> flattenExp_new exp
+     ConE {} -> flattenExp_new exp
+     _       -> hoistExp_new exp
+
+-- | Flatten an expression and then hoist it into a new let-binding.
+--   However, do not hoist trivial expressions, introduction rules,
+--   or case expressions.
+--
+--   This kind of flattening is performed on the
+--   scrutinee of a case expression.
+hoistScrutineeExp_new :: ExpM -> Hoist ExpM
+hoistScrutineeExp_new exp@(ExpM expression) =
+  case expression
+  of CaseE {} -> flattenExp_new exp
+     _        -> hoistIntroExp_new exp
+
+-- | Extract a raft from an expression.  Recursively flatten under
+--   subexpressions.
+--
+--   If @flattenExp rn e@ evaluates to @(r, e')@,
+--   then @anchor r e'@ is equivalent to @rename rn e@.
+flattenExp_new :: ExpM -> Hoist ExpM
+flattenExp_new exp@(ExpM expression) =
+  case expression
+  of VarE inf v ->
+       ExpM <$> (VarE inf <$> renameBeforeHoisting v)
+     LitE inf l ->
+       pure $ ExpM $ LitE inf l
+     ConE inf con_inst sps tob args ->
+       ExpM <$> (ConE inf <$> renameBeforeHoisting con_inst
+                          <*> hoistExps_new sps
+                          <*> hoistMaybeExp_new tob
+                          <*> hoistExps_new args)
+
+     AppE inf op ty_args args ->
+       ExpM <$> (AppE inf <$> hoistIntroExp_new op
+                          <*> renameBeforeHoisting ty_args
+                          <*> hoistExps_new args)
+
+     LamE inf f -> do
+       -- Do not hoist code out of the function
+       f' <- liftHoistWithRenaming $ \rn -> liftF $ visitFun rn f
+       return (ExpM $ LamE inf f')
+
+     LetE inf b rhs body -> do
+       -- Flatten the right-hand side
+       rhs' <- flattenExp_new rhs
+       b' <- liftT withPatM b
+       -- Turn the let-binding into a raft
+       float_new $ LetR inf b' rhs' Here
+       flattenExp_new body
+
+     LetfunE inf group body -> do
+       group' <- liftT flattenLocalGroup group
+       -- Turn the letfun-binding into a raft
+       float_new $ LetfunR inf group' Here
+       flattenExp_new body
+
+     CaseE inf scr sps alts -> flattenCaseExp_new exp inf scr sps alts
+
+     ExceptE inf ty ->
+       ExpM <$> (ExceptE inf <$> renameBeforeHoisting ty)
+
+     CoerceE inf t1 t2 e ->
+       ExpM <$> (CoerceE inf <$> renameBeforeHoisting t1
+                             <*> renameBeforeHoisting t2
+                             <*> flattenExp_new e)
+
+     ArrayE inf ty es ->
+       ExpM <$> (ArrayE inf <$> renameBeforeHoisting ty
+                            <*> mapM flattenExp_new es)
+
+flattenCaseExp_new :: ExpM -> ExpInfo -> ExpM -> [ExpM] -> [AltM] -> Hoist ExpM
+flattenCaseExp_new case_exp inf scr sps alts = do
+  -- Host size parameters first so that they'll be in scope over the
+  -- scrutinee.  The scrutinee may remain un-hoisted.
+  sps' <- hoistExps_new sps
+  scr' <- hoistScrutineeExp_new scr
+
+  case extractSingleCaseAlternative alts of
+    Just (returning_alt, excepting_alts) -> do
+       -- Turn this single-alternative case expression into a raft
+       excepting_alts' <- renameBeforeHoisting excepting_alts
+       let exc_alts = map exceptingAltRaft excepting_alts'
+
+       -- Flatten within the case alternative's body
+       let AltM (Alt decon tyob params body) = returning_alt
+       decon' <- liftT withDeConInst decon
+       tyob' <- liftT withMaybePatM tyob
+       params' <- liftT withPatMs params
+       let normal_alt = RaftAlt decon' tyob' params' Here
+       float_new $ Case1R inf scr' sps' normal_alt exc_alts
+       flattenExp_new body
+
+    Nothing -> do
+      -- Cannot flatten this case expression
+      alts' <- liftHoistWithRenaming $ \rn -> liftF $ visitAlts rn alts
+      return $ ExpM $ CaseE inf scr' sps' alts'
+
+-------------------------------------------------------------------------------
+-- Old code
+
+{-
 -- | Produce a raft to be moved away from this segment of code
 float :: Raft -> FRaft ()
 float r = FRaft $ tell r
@@ -407,10 +595,11 @@ flattenCaseExp case_exp rn inf scr sps alts k =
 
      Nothing ->
        -- Cannot flatten this case expression
-       hoistIntroExp rn scr $ \rn' scr' ->
-       hoistExps rn' sps $ \rn'' sps' -> do
+       hoistExps rn sps $ \rn' sps' ->
+       hoistScrutineeExp rn' scr $ \rn'' scr' -> do
          alts' <- liftF $ visitAlts rn'' alts
          k rn'' $ ExpM $ CaseE inf scr' sps' alts'
+-}
 
 -- | Extract the non-diverging case alternative, if there's exactly one.
 --   An alternative is recognized as diverging if it diverges immediately.
@@ -430,20 +619,20 @@ extractSingleCaseAlternative alts =
 --   _definitely_ called.
 flattenFun :: Renaming -> FunM -> F (FunM, Raft)
 flattenFun rn (FunM (Fun inf ty_params params ret body)) =
-  runWriterT (case flatten_fun of FRaft m -> m)
+  runFRaft flatten_fun
   where
-    flatten_fun =
+    flatten_fun = 
       withTyParams rn ty_params $ \rn1 ty_params' ->
       withPatMs rn1 params $ \rn2 params' -> do
+        let local_vars = map tyPatVar ty_params' ++ map patMVar params'
         let ret' = rename rn2 ret
-            local_vars = map tyPatVar ty_params ++ map patMVar params
-        body' <- anchor local_vars $ flattenExp rn2 body
+        body' <- anchor_new rn2 local_vars $ flattenExp_new body
         return $ FunM $ Fun inf ty_params' params' ret' body'
 
 -- | Perform flattening in an expression, but do not hoist any terms out
 --   of the expression.
 visitExp :: Renaming -> ExpM -> F ExpM
-visitExp rn exp = anchorAll $ flattenExp rn exp
+visitExp rn exp = anchorAll_new rn $ flattenExp_new exp
 
 visitAlts :: Renaming -> [AltM] -> F [AltM]
 visitAlts rn xs = mapM (visitAlt rn) xs
