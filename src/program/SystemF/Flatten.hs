@@ -3,11 +3,12 @@
 
 Rafts are extracted from:
 
-1. Arguments of data constructors
-2. Arguments of functions
-3. Right-hand-sides of let expressions
-4. Bodies of letfun-bound initializer functions
-5. Arguments of case expressions
+1. Size parameters
+2. Arguments of data constructors
+3. Callees and arguments of function calls
+4. Right-hand-sides of let expressions
+5. Bodies of letfun-bound initializer functions
+6. The scrutinee of case expressions
 
 * Variable name hygiene
 
@@ -87,9 +88,6 @@ import Type.Rename(rename, Renaming)
 import Globals
 import GlobalVar
 
--- | If true, do additional error checking
-sanityCheck = True
-
 -- | Debugging messages
 context s m = do liftIO $ putStrLn ("Begin " ++ s)
                  x <- m
@@ -105,8 +103,7 @@ isTrivialExp (ExpM e) =
      LitE {} -> True
      _       -> False
 
--- | Rename the binder.
---   Give the bound variable a new name if the current name is in scope. 
+-- | Give a new name to a variable if the current name is already in scope.
 freshenIfInEnvironment :: Renaming -> Var -> UnboxedTypeEvalM (Renaming, Var)
 freshenIfInEnvironment rn v
   -- Is it in the renaming's domain?
@@ -120,163 +117,106 @@ freshenIfInEnvironment rn v
     rename_binder = do v' <- newClonedVar v
                        return (Rename.extend v v' rn, v')
 
-freshenIfInEnvironmentList :: Renaming -> [Var] -> UnboxedTypeEvalM (Renaming, [Var])
-freshenIfInEnvironmentList rn (v:vs) = do
-  (rn', v') <- freshenIfInEnvironment rn v
-  (rn'', vs') <- freshenIfInEnvironmentList rn' vs
-  return (rn'', v':vs')
+-------------------------------------------------------------------------------
+-- Variable renaming and type environment maintenance
 
-freshenIfInEnvironmentList rn [] = return (rn, [])
-
--- | Flattening involves type inference in order to create new
---   temporary variables
-newtype Fr a = Fr {unFr :: ReaderT Renaming UnboxedTypeEvalM a}
+-- | Flattening involves renaming and type inference
+newtype F a = F {unF :: ReaderT Renaming UnboxedTypeEvalM a}
              deriving(Functor, Applicative, Monad, MonadIO)
 
-runFr m = runReaderT (unFr m) Rename.empty
+runF m = runReaderT (unF m) Rename.empty
 
-instance Supplies Fr (Ident Var) where
-  fresh = Fr $ lift fresh
+instance Supplies F (Ident Var) where
+  fresh = F $ lift fresh
 
-instance TypeEnvMonad Fr where
-  type EvalBoxingMode Fr = UnboxedMode
-  getTypeEnv = Fr $ lift getTypeEnv
-  liftTypeEnvM m = Fr $ lift $ liftTypeEnvM m
+instance TypeEnvMonad F where
+  type EvalBoxingMode F = UnboxedMode
+  getTypeEnv = F $ lift getTypeEnv
+  liftTypeEnvM m = F $ lift $ liftTypeEnvM m
 
-instance EvalMonad Fr where
-  liftTypeEvalM m = Fr $ lift $ liftTypeEvalM m
+instance EvalMonad F where
+  liftTypeEvalM m = F $ lift $ liftTypeEvalM m
 
-instance MonadReader Fr where
-  type EnvType Fr = Renaming
-  ask = Fr ask
-  local f (Fr m) = Fr (local f m)
+class (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) => FlattenMonad m where
+  -- | Get the current renaming
+  getRenaming :: m Renaming
 
-renameF :: (MonadReader m, EnvType m ~ Renaming) =>
-           Rename.Renameable a => a -> m a
-renameF x = asks (flip rename x)
+  -- | Set the current renaming
+  setRenaming :: Renaming -> m a -> m a
 
-{-
--- | Rename @x@ if necessary; pass the updated renaming to @k@
-adjustRenaming :: (Renaming -> a -> UnboxedTypeEvalM (Renaming, b))
-               -> a -> (b -> Fr c) -> Fr c
-adjustRenaming adjust x k = do
-  rn <- ask
-  (rn', y) <- liftTypeEvalM $ adjust rn x
-  local (const rn') (k y)
--}
+  -- | Rename a value using the current renaming
+  renameF :: Rename.Renameable a => a -> m a
 
-class (EvalMonad m, EvalBoxingMode m ~ UnboxedMode,
-       MonadReader m, EnvType m ~ Renaming) => FlattenMonad m
+instance FlattenMonad F where
+  getRenaming = F ask
+  setRenaming rn (F m) = F (local (const rn) m)
+  renameF x = F (asks (flip rename x))
 
 -- | Rename a binder and add the bound variable to the environment.
-withBinder_new :: FlattenMonad m =>
-                  Binder -> (Binder -> m a) -> m a
-withBinder_new (v ::: t) f = do
-  rn <- ask
+withBinder :: FlattenMonad m => Binder -> (Binder -> m a) -> m a
+withBinder (v ::: t) f = do
+  rn <- getRenaming
   (rn', v') <- liftTypeEvalM $ freshenIfInEnvironment rn v
   let b' = v' ::: rename rn t
-  local (const rn') (f b')
+  setRenaming rn' $ assumeBinder b' $ f b'
 
-withBinders_new = withMany withBinder_new
+withBinders = withMany withBinder
 
-withDeConInst_new :: FlattenMonad m =>
-                     DeConInst -> (DeConInst -> m a) -> m a
-withDeConInst_new dc f =
+withDeConInst :: FlattenMonad m => DeConInst -> (DeConInst -> m a) -> m a
+withDeConInst dc f =
   case dc
   of VarDeCon op ty_args ex_types -> do
        ty_args' <- renameF ty_args
-       withBinders_new ex_types $ \ex_types' ->
+       withBinders ex_types $ \ex_types' ->
           f (VarDeCon op ty_args' ex_types')
      TupleDeCon ty_args -> do
        ty_args' <- renameF ty_args
        f (TupleDeCon ty_args')
 
-withTyParam_new :: FlattenMonad m => TyPat -> (TyPat -> m a) -> m a
-withTyParam_new (TyPat b) m = withBinder_new b (m . TyPat)
+withTyParam :: FlattenMonad m => TyPat -> (TyPat -> m a) -> m a
+withTyParam (TyPat b) m = withBinder b (m . TyPat)
 
-withTyParams_new :: FlattenMonad m => [TyPat] -> ([TyPat] -> m a) -> m a
-withTyParams_new = withMany withTyParam_new
+withTyParams :: FlattenMonad m => [TyPat] -> ([TyPat] -> m a) -> m a
+withTyParams = withMany withTyParam
 
-withPatM_new :: FlattenMonad m => PatM -> (PatM -> m a) -> m a
-withPatM_new (PatM b u) m = withBinder_new b $ \b' -> m (PatM b' u)
+withPatM :: FlattenMonad m => PatM -> (PatM -> m a) -> m a
+withPatM (PatM b u) m = withBinder b $ \b' -> m (PatM b' u)
 
-withPatMs_new :: FlattenMonad m => [PatM] -> ([PatM] -> m a) -> m a
-withPatMs_new = withMany withPatM_new
+withMaybePatM Nothing  f = f Nothing
+withMaybePatM (Just p) f = withPatM p (f . Just)
 
--- | Rename a binder and add the bound variable to the environment.
-withBinder :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
-              Renaming -> Binder -> (Renaming -> Binder -> m a) -> m a
-withBinder rn (v ::: t) f = do
-  (rn', v') <- liftTypeEvalM $ freshenIfInEnvironment rn v
-  let b' = v' ::: rename rn t
-  assumeBinder b' $ f rn' b'
-
-withBinders rn (b:bs) f =
-  withBinder rn b $ \rn' b' -> withBinders rn' bs $ \rn'' bs' -> f rn'' (b':bs')
-
-withBinders rn [] f = f rn []
-
--- | Rename a deconstructor and add bound variables to the environment.
-withDeConInst :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
-                 Renaming -> DeConInst -> (Renaming -> DeConInst -> m a) -> m a
-withDeConInst rn dc f =
-  case dc
-  of VarDeCon op ty_args ex_types ->
-       let ty_args' = rename rn ty_args
-       in withBinders rn ex_types $ \rn' ex_types' ->
-          f rn' (VarDeCon op ty_args' ex_types')
-     TupleDeCon ty_args ->
-       let ty_args' = rename rn ty_args
-       in f rn (TupleDeCon ty_args')
-
-withTyParam :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
-               Renaming -> TyPat -> (Renaming -> TyPat -> m a) -> m a
-withTyParam rn (TyPat b) m = withBinder rn b $ \rn' b' -> m rn' (TyPat b')
-
-withTyParams :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
-                Renaming -> [TyPat] -> (Renaming -> [TyPat] -> m a) -> m a
-withTyParams rn (p:ps) m =
-  withTyParam rn p $ \rn' p' -> withTyParams rn' ps $ \rn'' ps' -> m rn'' (p':ps')
-
-withTyParams rn [] m = m rn []
-
--- | Rename a pattern binding and add it to the type environment
-withPatM :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
-            Renaming -> PatM -> (Renaming -> PatM -> m a) -> m a
-withPatM rn (PatM b u) m = withBinder rn b $ \rn' b' -> m rn' (PatM b' u)
-
-withMaybePatM rn Nothing k = k rn Nothing
-withMaybePatM rn (Just p) k = withPatM rn p $ \rn' p' -> k rn' (Just p')
-
-withPatMs :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
-             Renaming -> [PatM] -> (Renaming -> [PatM] -> m a) -> m a
-withPatMs rn (p:ps) f =
-  withPatM rn p $ \rn' p' -> withPatMs rn' ps $ \rn'' ps' -> f rn'' (p':ps')
-
-withPatMs rn [] f = f rn []
+withPatMs :: FlattenMonad m => [PatM] -> ([PatM] -> m a) -> m a
+withPatMs = withMany withPatM
 
 -------------------------------------------------------------------------------
+-- Generating and moving code rafts
 
--- | Flattening involves type inference in order to create new
---   temporary variables
-type F = UnboxedTypeEvalM
-
--- | A raft-constructing expression
+-- | A flattening computation that extracts some code into a raft.
+--   The result of flattening is normally a simplified piece of code 
+--   that goes inside the raft.
+--
+--   The functions 'anchor' and 'anchorAll' run an 'FRaft' computation
+--   and put its result inside the raft that is produced.
 newtype FRaft a = FRaft (WriterT Raft F a)
               deriving(Functor, Applicative, Monad, MonadIO)
 
-runFRaft (FRaft m) = runWriterT m
-
 instance Supplies FRaft (Ident Var) where
-  fresh = FRaft $ lift fresh
+  fresh = liftF fresh
 
 instance TypeEnvMonad FRaft where
   type EvalBoxingMode FRaft = UnboxedMode
-  getTypeEnv = FRaft $ lift getTypeEnv
-  liftTypeEnvM m = FRaft $ lift $ liftTypeEnvM m
+  getTypeEnv = liftF getTypeEnv
+  liftTypeEnvM m = liftF $ liftTypeEnvM m
 
 instance EvalMonad FRaft where
-  liftTypeEvalM m = FRaft $ lift $ liftTypeEvalM m
+  liftTypeEvalM m = liftF $ liftTypeEvalM m
+
+instance FlattenMonad FRaft where
+  getRenaming = liftF getRenaming
+  setRenaming rn (FRaft (WriterT m)) = FRaft $ WriterT $ setRenaming rn m
+  renameF x = liftF $ renameF x
+
+runFRaft (FRaft m) = runWriterT m
 
 liftF :: F a -> FRaft a
 liftF m = FRaft $ lift m
@@ -297,94 +237,97 @@ noFloat (FRaft m) = do
 --   concatenates @m1@'s raft with @m2@'s raft and propagates @m1@'s type
 --   environment to @m2@.
 newtype Hoist a =
-  Hoist {runHoist :: Renaming -> forall r. (a -> Renaming -> FRaft r) -> FRaft r}
+  Hoist {unHoist :: forall r. (a -> FRaft r) -> FRaft r}
+
+-- | Run a piece of code that performs hoisting.  Any changes to the
+--   renaming and type environment remain confined within this computation.
+runHoist :: Hoist a -> FRaft a
+runHoist h = unHoist h return
 
 instance Functor Hoist where
-  fmap f m = Hoist $ \rn k -> runHoist m rn $ \x rn' -> k (f x) rn'
+  fmap f m = Hoist $ \k -> unHoist m (k . f)
 
 instance Applicative Hoist where
   pure = return
   (<*>) = ap
 
 instance Monad Hoist where
-  return x = Hoist $ \rn k -> k x rn
-  m >>= k = Hoist $ \rn k2 -> runHoist m rn $ \x rn' -> runHoist (k x) rn' k2
-
-liftHoistWithRenaming :: (Renaming -> FRaft a) -> Hoist a
-liftHoistWithRenaming f = Hoist $ \rn k -> f rn >>= \x -> k x rn
+  return x = Hoist ($ x)
+  m >>= k = Hoist $ \k2 -> unHoist m $ \x -> unHoist (k x) k2
 
 liftHoist :: FRaft a -> Hoist a
-liftHoist m = Hoist $ \rn k -> m >>= \x -> k x rn
+liftHoist m = Hoist $ \k -> m >>= k
 
-liftT :: (forall r. Renaming -> a -> (Renaming -> a -> FRaft r) -> FRaft r)
-      -> a -> Hoist a
-liftT t x = Hoist $ \rn k -> t rn x (\rn' x' -> k x' rn')
+liftT :: (forall r. a -> (a -> FRaft r) -> FRaft r) -> a -> Hoist a
+liftT t x = Hoist $ \k -> t x k
 
--- | Apply the current renaming to a term
-renameBeforeHoisting :: Rename.Renameable a => a -> Hoist a
-renameBeforeHoisting x = Hoist $ \rn k -> k (rename rn x) rn
+renameH :: Rename.Renameable a => a -> Hoist a
+renameH = liftHoist . renameF
 
 -- | Produce a raft to be moved away from this segment of code
-float_new :: Raft -> Hoist ()
-float_new r = liftHoist $ FRaft $ tell r
+float :: Raft -> Hoist ()
+float r = liftHoist $ FRaft $ tell r
 
--- TODO: integrate assumeHoistedType with float_new
-assumeHoistedType v ty = Hoist $ \rn k -> assume v ty $ k () rn
-
-assumeHoistedBinder b = Hoist $ \rn k -> assumeBinder b $ k () rn
+-- | Add a type binding to the environment.
+--   This function is called for newly created bindings.
+--   Preexisting bindings are added to the environment by 'withBinder'.
+assumeHoistedType v ty = Hoist $ \k -> assume v ty $ k ()
 
 -- | Get the bindings that mention the given variables and apply them to the
 --   expression.
-anchor_new :: Renaming -> [Var] -> Hoist ExpM -> FRaft ExpM
-anchor_new rn vs m = FRaft $ WriterT $ do
-  ((x, ty), raft) <- runFRaft $ runHoist m rn computeTypeForAnchor
+anchor :: [Var] -> Hoist ExpM -> FRaft ExpM
+anchor vs m = FRaft $ WriterT $ do
+  ((x, ty), raft) <- runFRaft $ runHoist (m >>= computeTypeForAnchor)
   let (dependent, independent) = partitionRaft (Set.fromList vs) raft
   return (applyRaft dependent ty x, independent)
 
-anchorAll_new :: Renaming -> Hoist ExpM -> F ExpM
-anchorAll_new rn m = do
-  ((x, ty), w) <- runFRaft $ runHoist m rn computeTypeForAnchor
-  return $ applyRaft w ty x
+anchorAll :: Hoist ExpM -> F ExpM
+anchorAll m = do
+  ((x, ty), raft) <- runFRaft $ runHoist (m >>= computeTypeForAnchor)
+  return $ applyRaft raft ty x
 
-computeTypeForAnchor e _ = do
-  ty <- inferExpType e
+computeTypeForAnchor e = do
+  ty <- liftHoist $ inferExpType e
   return (e, ty)
+
+-------------------------------------------------------------------------------
+-- Flattening expressions
 
 -- | Given an expression that is used in exactly one place,
 --   bind the expression to a new variable and float the binding.
 --   The expression should have been renamed.
 --   The new variable is returned.
-bindNewVariable_new :: ExpM -> Hoist ExpM
-bindNewVariable_new rhs = do
+bindNewVariable :: ExpM -> Hoist ExpM
+bindNewVariable rhs = do
   ty <- liftHoist $ liftF $ inferExpType rhs
   v <- liftHoist $ liftF $ newAnonymousVar ObjectLevel
   let binder = setPatMDmd (Dmd OnceUnsafe Used) $ patM (v ::: ty)
       inf = expInfo $ fromExpM rhs
-  float_new $ LetR inf binder rhs Here
+  float $ LetR inf binder rhs Here
   assumeHoistedType v ty
   return $ ExpM $ VarE inf v
 
 -- | Flatten an expression and then hoist it into a new let-binding.
 --   However, do not hoist trivial expressions.
-hoistExp_new :: ExpM -> Hoist ExpM
-hoistExp_new e = do
-  e' <- flattenExp_new e 
-  if isTrivialExp e' then return e' else bindNewVariable_new e'
+hoistExp :: ExpM -> Hoist ExpM
+hoistExp e = do
+  e' <- flattenExp e
+  if isTrivialExp e' then return e' else bindNewVariable e'
 
-hoistExps_new = mapM hoistExp_new
+hoistExps = mapM hoistExp
 
-hoistMaybeExp_new :: Maybe ExpM -> Hoist (Maybe ExpM)
-hoistMaybeExp_new x = mapM hoistExp_new x
+hoistMaybeExp :: Maybe ExpM -> Hoist (Maybe ExpM)
+hoistMaybeExp x = mapM hoistExp x
 
 -- | Flatten an expression and then hoist it into a new let-binding.
 --   However, do not hoist trivial expressions or introduction rules.
 --   (Introduction rules are @LamE@ and @ConE@ expressions.)
-hoistIntroExp_new :: ExpM -> Hoist ExpM
-hoistIntroExp_new exp@(ExpM expression) =
+hoistIntroExp :: ExpM -> Hoist ExpM
+hoistIntroExp exp@(ExpM expression) =
   case expression
-  of LamE {} -> flattenExp_new exp
-     ConE {} -> flattenExp_new exp
-     _       -> hoistExp_new exp
+  of LamE {} -> flattenExp exp
+     ConE {} -> flattenExp exp
+     _       -> hoistExp exp
 
 -- | Flatten an expression and then hoist it into a new let-binding.
 --   However, do not hoist trivial expressions, introduction rules,
@@ -392,79 +335,79 @@ hoistIntroExp_new exp@(ExpM expression) =
 --
 --   This kind of flattening is performed on the
 --   scrutinee of a case expression.
-hoistScrutineeExp_new :: ExpM -> Hoist ExpM
-hoistScrutineeExp_new exp@(ExpM expression) =
+hoistScrutineeExp :: ExpM -> Hoist ExpM
+hoistScrutineeExp exp@(ExpM expression) =
   case expression
-  of CaseE {} -> flattenExp_new exp
-     _        -> hoistIntroExp_new exp
+  of CaseE {} -> flattenExp exp
+     _        -> hoistIntroExp exp
 
 -- | Extract a raft from an expression.  Recursively flatten under
 --   subexpressions.
 --
 --   If @flattenExp rn e@ evaluates to @(r, e')@,
 --   then @anchor r e'@ is equivalent to @rename rn e@.
-flattenExp_new :: ExpM -> Hoist ExpM
-flattenExp_new exp@(ExpM expression) =
+flattenExp :: ExpM -> Hoist ExpM
+flattenExp exp@(ExpM expression) =
   case expression
   of VarE inf v ->
-       ExpM <$> (VarE inf <$> renameBeforeHoisting v)
+       ExpM <$> (VarE inf <$> renameH v)
      LitE inf l ->
        pure $ ExpM $ LitE inf l
      ConE inf con_inst sps tob args ->
-       ExpM <$> (ConE inf <$> renameBeforeHoisting con_inst
-                          <*> hoistExps_new sps
-                          <*> hoistMaybeExp_new tob
-                          <*> hoistExps_new args)
+       ExpM <$> (ConE inf <$> renameH con_inst
+                          <*> hoistExps sps
+                          <*> hoistMaybeExp tob
+                          <*> hoistExps args)
 
      AppE inf op ty_args args ->
-       ExpM <$> (AppE inf <$> hoistIntroExp_new op
-                          <*> renameBeforeHoisting ty_args
-                          <*> hoistExps_new args)
+       ExpM <$> (AppE inf <$> hoistIntroExp op
+                          <*> renameH ty_args
+                          <*> hoistExps args)
 
      LamE inf f -> do
        -- Do not hoist code out of the function
-       f' <- liftHoistWithRenaming $ \rn -> liftF $ visitFun rn f
+       f' <- liftHoist $ liftF $ visitFun f
        return (ExpM $ LamE inf f')
 
      LetE inf b rhs body -> do
        -- Flatten the right-hand side
-       rhs' <- flattenExp_new rhs
+       rhs' <- flattenExp rhs
        b' <- liftT withPatM b
        -- Turn the let-binding into a raft
-       float_new $ LetR inf b' rhs' Here
-       flattenExp_new body
+       float $ LetR inf b' rhs' Here
+       flattenExp body
 
      LetfunE inf group body -> do
        group' <- liftT flattenLocalGroup group
        -- Turn the letfun-binding into a raft
-       float_new $ LetfunR inf group' Here
-       flattenExp_new body
+       float $ LetfunR inf group' Here
+       flattenExp body
 
-     CaseE inf scr sps alts -> flattenCaseExp_new exp inf scr sps alts
+     CaseE inf scr sps alts -> flattenCaseExp exp inf scr sps alts
 
      ExceptE inf ty ->
-       ExpM <$> (ExceptE inf <$> renameBeforeHoisting ty)
+       ExpM <$> (ExceptE inf <$> renameH ty)
 
      CoerceE inf t1 t2 e ->
-       ExpM <$> (CoerceE inf <$> renameBeforeHoisting t1
-                             <*> renameBeforeHoisting t2
-                             <*> flattenExp_new e)
+       ExpM <$> (CoerceE inf <$> renameH t1
+                             <*> renameH t2
+                             <*> flattenExp e)
 
      ArrayE inf ty es ->
-       ExpM <$> (ArrayE inf <$> renameBeforeHoisting ty
-                            <*> mapM flattenExp_new es)
+       ExpM <$> (ArrayE inf <$> renameH ty
+                            <*> mapM flattenExp es)
 
-flattenCaseExp_new :: ExpM -> ExpInfo -> ExpM -> [ExpM] -> [AltM] -> Hoist ExpM
-flattenCaseExp_new case_exp inf scr sps alts = do
+flattenCaseExp :: ExpM -> ExpInfo -> ExpM -> [ExpM] -> [AltM] -> Hoist ExpM
+flattenCaseExp case_exp inf scr sps alts = do
   -- Host size parameters first so that they'll be in scope over the
   -- scrutinee.  The scrutinee may remain un-hoisted.
-  sps' <- hoistExps_new sps
-  scr' <- hoistScrutineeExp_new scr
+  sps' <- hoistExps sps
+  scr' <- hoistScrutineeExp scr
 
   case extractSingleCaseAlternative alts of
     Just (returning_alt, excepting_alts) -> do
        -- Turn this single-alternative case expression into a raft
-       excepting_alts' <- renameBeforeHoisting excepting_alts
+       excepting_alts' <- renameH excepting_alts
        let exc_alts = map exceptingAltRaft excepting_alts'
 
        -- Flatten within the case alternative's body
@@ -473,192 +416,112 @@ flattenCaseExp_new case_exp inf scr sps alts = do
        tyob' <- liftT withMaybePatM tyob
        params' <- liftT withPatMs params
        let normal_alt = RaftAlt decon' tyob' params' Here
-       float_new $ Case1R inf scr' sps' normal_alt exc_alts
-       flattenExp_new body
+       float $ Case1R inf scr' sps' normal_alt exc_alts
+       flattenExp body
 
     Nothing -> do
       -- Cannot flatten this case expression
-      alts' <- liftHoistWithRenaming $ \rn -> liftF $ visitAlts rn alts
+      alts' <- liftHoist $ liftF $ visitAlts alts
       return $ ExpM $ CaseE inf scr' sps' alts'
 
+-- NB: Global variables are never renamed by 'flattenGroup'.
+-- Due to how global type environments are handled, global variables
+-- are in scope at their own definitions.  However, renaming removes
+-- label tags, causing linking problems.
+
+flattenGroup :: Rename.Renameable (t Mem) =>
+                Bool            -- ^ Whether this is a global binding
+             -> (t Mem -> Type) -- ^ Get type of an entity
+             -> (DefAnn -> t Mem -> FRaft (t Mem)) -- ^ Flatten an entity
+             -> DefGroup (Def t Mem)               -- ^ The definition group
+             -> (DefGroup (Def t Mem) -> FRaft a)  -- ^ Flatten body
+             -> FRaft a
+flattenGroup is_global get_type flatten_entity (NonRec def) f = do
+  -- Flatten in the function body
+  new_definiens <- flatten_entity (defAnnotation def) $ definiens def
+  new_ann <- renameF $ defAnnotation def
+
+  -- After renaming the binder, continue with the body
+  let flatten_body (new_name ::: new_type) =
+        let def' = Def new_name new_ann new_definiens
+        in f (NonRec def')
+
+  -- Give the function a new name if appropriate
+  let fun_binder = (definiendum def ::: get_type (definiens def))
+  if is_global
+    then assumeBinder fun_binder $ flatten_body fun_binder
+    else withBinder fun_binder flatten_body
+
+flattenGroup is_global get_type flatten_entity (Rec defs) f = do
+  -- After renaming, continue with the local functions and body
+  let flatten_body new_binders = do
+        -- Rename definitions
+        new_anns <- mapM (renameF . defAnnotation) defs
+        new_definientia <-
+          mapM (\d -> flatten_entity (defAnnotation d) (definiens d)) defs
+        let defs' = zipWith3 Def (map binderVar new_binders) new_anns new_definientia
+        f (Rec defs')
+
+  -- Rename variables that shadow existing names
+  let binders = [definiendum d ::: get_type (definiens d) | d <- defs]
+  if is_global
+    then assumeBinders binders $ flatten_body binders
+    else withBinders binders flatten_body
+
+flattenLocalGroup :: DefGroup (FDef Mem)
+                  -> (DefGroup (FDef Mem) -> FRaft a)
+                  -> FRaft a
+flattenLocalGroup = flattenGroup False functionType flatten_function
+  where
+    flatten_function ann f = liftF $ visitFun f
+
+flattenGlobalGroup :: DefGroup (Def Ent Mem)
+                   -> (DefGroup (Def Ent Mem) -> FRaft a)
+                   -> FRaft a
+
+flattenGlobalGroup = flattenGroup True entityType flatten_ent
+  where
+  flatten_ent ann e = liftF $ visitEnt e
+
+-- | Perform flattening in an expression, but do not hoist any terms out
+--   of the expression.
+visitExp :: ExpM -> F ExpM
+visitExp exp = anchorAll $ flattenExp exp
+
+visitAlts :: [AltM] -> F [AltM]
+visitAlts xs = mapM visitAlt xs
+
+-- | Perform flattening in a case alternative.  Cannot float code out of the
+--   case alternative.
+visitAlt :: AltM -> F AltM
+visitAlt (AltM (Alt decon tyob params body)) =
+  withDeConInst decon $ \decon' ->
+  withMaybePatM tyob $ \tyob' ->  
+  withPatMs params $ \params' -> do
+    body' <- visitExp body
+    return $ AltM $ Alt decon' tyob' params' body'
+
+-- | Perform flattening in a function body, but do not migrate any code out
+--   of the function.
+visitFun :: FunM -> F FunM
+visitFun (FunM (Fun inf ty_params params ret body)) =
+  withTyParams ty_params $ \ty_params' ->
+  withPatMs params $ \params' -> do
+    ret' <- renameF ret
+    body' <- visitExp body
+    return $ FunM $ Fun inf ty_params' params' ret' body'
+
+visitEnt :: Ent Mem -> F (Ent Mem)
+visitEnt (FunEnt f) = FunEnt `liftM` visitFun f
+visitEnt (DataEnt c) = DataEnt `liftM` visitConstant c
+
+visitConstant (Constant inf ty e) =
+  Constant inf <$> renameF ty <*> visitExp e
+
+visitExport (Export pos spec f) =
+  Export pos spec <$> visitFun f
+
 -------------------------------------------------------------------------------
--- Old code
-
-{-
--- | Produce a raft to be moved away from this segment of code
-float :: Raft -> FRaft ()
-float r = FRaft $ tell r
-
--- | Get the bindings that mention the given variables and apply them to the
---   expression.
-anchor :: [Var] -> (forall a. (Renaming -> ExpM -> FRaft a) -> FRaft a) -> FRaft ExpM
-anchor vs f = FRaft $ WriterT $ do
-  ((x, ty), raft) <- runWriterT (case f compute_type of FRaft m -> m)
-  i_type_env <- freezeTypeEnv
-  let (dependent, independent) = partitionRaft (Set.fromList vs) raft
-  -- ty <- traceShow (pprTypeEnv i_type_env $$ pprExp (applyRaft dependent intT x)) $ inferExpType x
-  return (applyRaft dependent ty x, independent)
-  where
-    compute_type _ e = do
-      ty <- inferExpType e
-      return (e, ty)
-
-anchorAll :: (forall a. (Renaming -> ExpM -> FRaft a) -> FRaft a) -> F ExpM
-anchorAll f = do
-  ((x, ty), w) <- runWriterT (case f compute_type of FRaft m -> m)
-  i_type_env <- freezeTypeEnv
-  -- ty <- traceShow (pprTypeEnv i_type_env $$ pprExp (applyRaft w intT x)) $ inferExpType x
-  return $ applyRaft w ty x
-  where
-    compute_type _ e = do
-      ty <- inferExpType e
-      return (e, ty)
-
--- | Given an expression that is used in exactly one place,
---   bind the expression to a new variable and float the binding.
---   The expression should have been renamed.
---   The new variable is returned.
-bindNewVariable :: ExpM -> (ExpM -> FRaft a) -> FRaft a
-bindNewVariable rhs k = do
-  ty <- liftF $ inferExpType rhs
-  v <- liftF $ newAnonymousVar ObjectLevel
-  let binder = setPatMDmd (Dmd OnceUnsafe Used) $ patM (v ::: ty)
-      inf = expInfo $ fromExpM rhs
-  float $ LetR inf binder rhs Here
-  assume v ty $ k (ExpM $ VarE inf v)
-
-hoistExps :: Renaming -> [ExpM] -> (Renaming -> [ExpM] -> FRaft a) -> FRaft a
-hoistExps rn (e:es) k =
-  hoistExp rn e $ \rn' e' -> hoistExps rn' es $ \rn'' es' -> k rn'' (e':es')
-
-hoistExps rn [] k = k rn []
-
--- | Flatten an expression and then hoist it into a new let-binding.
---   However, do not hoist trivial expressions.
-hoistExp :: Renaming -> ExpM -> (Renaming -> ExpM -> FRaft a) -> FRaft a
-hoistExp rn e k = flattenExp rn e $ \rn' e' ->
-  if isTrivialExp e' then k rn' e' else bindNewVariable e' (k rn')
-
-hoistMaybeExp :: Renaming -> Maybe ExpM
-              -> (Renaming -> Maybe ExpM -> FRaft a)
-              -> FRaft a
-hoistMaybeExp rn Nothing  k = k rn Nothing
-hoistMaybeExp rn (Just e) k = hoistExp rn e (\rn' e' -> k rn' (Just e'))
-
--- | Flatten an expression and then hoist it into a new let-binding.
---   However, do not hoist trivial expressions or introduction rules.
---   (Introduction rules are @LamE@ and @ConE@ expressions.)
-hoistIntroExp :: Renaming -> ExpM -> (Renaming -> ExpM -> FRaft a) -> FRaft a
-hoistIntroExp rn exp@(ExpM expression) k =
-  case expression
-  of LamE {} -> flattenExp rn exp k
-     ConE {} -> flattenExp rn exp k
-     _       -> hoistExp rn exp k
-
--- | Flatten an expression and then hoist it into a new let-binding.
---   However, do not hoist trivial expressions, introduction rules,
---   or case expressions.
---
---   This kind of flattening is performed on the
---   scrutinee of a case expression.
-hoistScrutineeExp :: Renaming -> ExpM -> (Renaming -> ExpM -> FRaft a) -> FRaft a
-hoistScrutineeExp rn exp@(ExpM expression) k =
-  case expression
-  of CaseE {} -> flattenExp rn exp k
-     _        -> hoistIntroExp rn exp k
-
-flattenExps :: Renaming -> [ExpM] -> (Renaming -> [ExpM] -> FRaft a) -> FRaft a
-flattenExps rn (e:es) k = 
-  flattenExp rn e $ \rn' e' -> flattenExps rn' es $ \rn'' es' -> k rn'' (e':es')
-
-flattenExps rn [] k = k rn []
-
--- | Extract a raft from an expression.  Recursively flatten under
---   subexpressions.
---
---   If @flattenExp rn e@ evaluates to @(r, e')@,
---   then @anchor r e'@ is equivalent to @rename rn e@.
-flattenExp :: Renaming -> ExpM -> (Renaming -> ExpM -> FRaft a) -> FRaft a
-flattenExp rn exp@(ExpM expression) k =
-  case expression
-  of VarE inf v ->
-       k rn $ ExpM $ VarE inf (rename rn v)
-     LitE inf l ->
-       k rn $ ExpM $ LitE inf l
-     ConE inf con_inst sps tob args ->
-       let con_inst' = rename rn con_inst
-       in hoistExps rn sps $ \rn' sps' -> 
-          hoistMaybeExp rn' tob $ \rn'' tob' -> 
-          hoistExps rn'' args $ \rn''' args' -> 
-          k rn''' $ ExpM $ ConE inf con_inst' sps' tob' args'
-
-     AppE inf op ty_args args ->
-       let ty_args' = rename rn ty_args
-       in hoistIntroExp rn op $ \rn' op' ->
-          hoistExps rn' args $ \rn'' args' ->
-          k rn'' $ ExpM $ AppE inf op' ty_args' args'
-
-     LamE inf f -> do
-       -- Do not hoist code out of the function 
-       f' <- liftF $ visitFun rn f
-       k rn (ExpM $ LamE inf f')
-
-     LetE inf b rhs body ->
-       -- Flatten the right-hand side
-       flattenExp rn rhs $ \rn' rhs' ->
-       withPatM rn' b $ \rn'' b' -> do
-         -- Turn the let-binding into a raft
-         float $ LetR inf b' rhs' Here
-         flattenExp rn'' body k
-
-     LetfunE inf group body ->
-       flattenLocalGroup rn group $ \rn' group' -> do
-         -- Turn the letfun-binding into a raft
-         float $ LetfunR inf group' Here
-         flattenExp rn' body k
-
-     CaseE inf scr sps alts -> flattenCaseExp exp rn inf scr sps alts k
-
-     ExceptE inf ty ->
-       k rn (ExpM $ ExceptE inf (rename rn ty))
-
-     CoerceE inf t1 t2 e ->
-       flattenExp rn e $ \rn' e' ->
-       k rn' (ExpM $ CoerceE inf (rename rn' t1) (rename rn' t2) e')
-
-     ArrayE inf ty es ->
-       flattenExps rn es $ \rn' es' ->
-       k rn' (ExpM $ ArrayE inf (rename rn' ty) es')
-
-flattenCaseExp :: ExpM -> Renaming -> ExpInfo -> ExpM -> [ExpM] -> [AltM]
-               -> (Renaming -> ExpM -> FRaft a) -> FRaft a
-flattenCaseExp case_exp rn inf scr sps alts k =
-  case extractSingleCaseAlternative alts
-  of Just (returning_alt, excepting_alts) -> do
-       -- Turn this single-alternative case expression into a raft
-
-       -- Host size parameters first so that they'll be in scope over the
-       -- scrutinee.  The scrutinee may remain un-hoisted.
-       hoistExps rn sps $ \rn' sps' ->
-         hoistScrutineeExp rn' scr $ \rn'' scr' -> do
-           let exc_alts = map exceptingAltRaft $ rename rn'' excepting_alts
-
-           -- Flatten within the case alternative's body
-           let AltM (Alt decon tyob params body) = returning_alt
-           withDeConInst rn'' decon $ \rn1 decon' ->
-             withMaybePatM rn1 tyob $ \rn2 tyob' ->
-             withPatMs rn2 params $ \rn3 params' -> do
-               let normal_alt = RaftAlt decon' tyob' params' Here
-               float $ Case1R inf scr' sps' normal_alt exc_alts
-               flattenExp rn3 body k
-
-     Nothing ->
-       -- Cannot flatten this case expression
-       hoistExps rn sps $ \rn' sps' ->
-       hoistScrutineeExp rn' scr $ \rn'' scr' -> do
-         alts' <- liftF $ visitAlts rn'' alts
-         k rn'' $ ExpM $ CaseE inf scr' sps' alts'
--}
 
 -- | Extract the non-diverging case alternative, if there's exactly one.
 --   An alternative is recognized as diverging if it diverges immediately.
@@ -673,6 +536,7 @@ extractSingleCaseAlternative alts =
       of ExpM (ExceptE {}) -> True
          _                 -> False
 
+{-
 -- | Perform flattening in a function body, extracting code if possible.
 --   It is only safe to extract code from functions that are
 --   _definitely_ called.
@@ -685,125 +549,29 @@ flattenFun rn (FunM (Fun inf ty_params params ret body)) =
       withPatMs rn1 params $ \rn2 params' -> do
         let local_vars = map tyPatVar ty_params' ++ map patMVar params'
         let ret' = rename rn2 ret
-        body' <- anchor_new rn2 local_vars $ flattenExp_new body
+        body' <- anchor rn2 local_vars $ flattenExp body
         return $ FunM $ Fun inf ty_params' params' ret' body'
+-}
 
--- | Perform flattening in an expression, but do not hoist any terms out
---   of the expression.
-visitExp :: Renaming -> ExpM -> F ExpM
-visitExp rn exp = anchorAll_new rn $ flattenExp_new exp
-
-visitAlts :: Renaming -> [AltM] -> F [AltM]
-visitAlts rn xs = mapM (visitAlt rn) xs
-
-visitAlt :: Renaming -> AltM -> F AltM
-visitAlt rn (AltM (Alt decon tyob params body)) =
-  withDeConInst rn decon $ \rn1 decon' ->
-  withMaybePatM rn1 tyob $ \rn2 tyob' ->  
-  withPatMs rn2 params $ \rn3 params' -> do
-    body' <- visitExp rn3 body
-    return $ AltM $ Alt decon' tyob' params' body'
-
--- | Perform flattening in a function body, but do not migrate any code out
---   of the function.
-visitFun :: Renaming -> FunM -> F FunM
-visitFun rn (FunM (Fun inf ty_params params ret body)) =
-  withTyParams rn ty_params $ \rn1 ty_params' ->
-  withPatMs rn1 params $ \rn2 params' -> do
-    let ret' = rename rn2 ret
-    body' <- visitExp rn2 body
-    return $ FunM $ Fun inf ty_params' params' ret' body'
-
-visitEnt :: Renaming -> Ent Mem -> F (Ent Mem)
-visitEnt rn (FunEnt f) = FunEnt `liftM` visitFun rn f
-visitEnt rn (DataEnt c) = DataEnt `liftM` visitConstant rn c
-
-visitConstant rn (Constant inf ty e) = do
-  e' <- visitExp rn e
-  return $ Constant inf (rename rn ty) e'
-
--- NB: Global variables are never renamed by 'flattenGroup'.
--- Due to how global type environments are handled, global variables
--- are in scope at their own definitions.  However, renaming removes
--- label tags, causing linking problems.
-flattenGroup :: Rename.Renameable (t Mem) =>
-                Bool
-             -> (t Mem -> Type)
-             -> (Renaming -> DefAnn -> t Mem -> FRaft (t Mem))
-             -> Renaming -> DefGroup (Def t Mem)
-             -> (Renaming -> DefGroup (Def t Mem) -> FRaft a)
-             -> FRaft a
-flattenGroup is_global get_type rename_entity rn (NonRec def) f = do
-  -- Rename in the function body
-  let new_ann = rename rn $ defAnnotation def
-  new_definiens <- rename_entity rn new_ann $ definiens def
-  let fun_type = get_type new_definiens
-
-  -- Give the function a new name if appropriate
-  (rn', new_name) <- if is_global
-                     then return (rn, definiendum def)
-                     else liftTypeEvalM $ freshenIfInEnvironment rn $ definiendum def
-  let def' = Def new_name new_ann new_definiens
-
-  -- Add to environment and process body
-  assume new_name fun_type $ f rn' (NonRec def')
-
-flattenGroup is_global get_type rename_entity rn (Rec defs) f = do
-  -- Rename variables that shadow existing names
-  (rn', new_vars) <- if is_global
-                     then return (rn, map definiendum defs)
-                     else liftTypeEvalM $ freshenIfInEnvironmentList rn $ map definiendum defs
-
-  -- Add to environment
-  let function_types = map (get_type . rename rn . definiens) defs
-  assumeBinders [v ::: t | (v, t) <- zip new_vars function_types] $ do
-
-    -- Rename definitions
-    let new_anns = map (rename rn' . defAnnotation) defs
-    new_definientia <- zipWithM (\d a -> rename_entity rn' a $ definiens d) defs new_anns
-    let defs' = zipWith3 Def new_vars new_anns new_definientia
-
-    -- Process body
-    f rn' (Rec defs')
-
-flattenExport rn (Export pos spec f) = do
-  f' <- visitFun rn f
-  return $ Export pos spec f'
-
-flattenLocalGroup :: Renaming -> DefGroup (FDef Mem)
-                  -> (Renaming -> DefGroup (FDef Mem) -> FRaft a)
-                  -> FRaft a
-flattenLocalGroup = flattenGroup False functionType flatten_function
-  where
-    flatten_function rn ann f = liftF $ visitFun rn f
-
-flattenGlobalGroup :: Renaming -> DefGroup (Def Ent Mem)
-                   -> (Renaming -> DefGroup (Def Ent Mem) -> FRaft a)
-                   -> FRaft a
-
-flattenGlobalGroup = flattenGroup True entityType flatten_ent
-  where
-  flatten_ent rn ann e = liftF $ visitEnt rn e
-
-flattenGlobals rn (g:gs) m =
-  flattenGlobalGroup rn g $ \rn1 g' ->
-  flattenGlobals rn1 gs $ \rn2 gs' ->
-  m rn2 (g':gs')
-
-flattenGlobals rn [] m = m rn []
+flattenGlobals = withMany flattenGlobalGroup
 
 flattenModule :: Module Mem -> IO (Module Mem)
 flattenModule (Module name imports defs exports) = do
   withTheNewVarIdentSupply $ \id_supply -> do
     i_tenv <- readInitGlobalVarIO the_memTypes
     tenv <- thawTypeEnv i_tenv
-    runTypeEvalM flatten id_supply tenv
+    runTypeEvalM (runF flatten) id_supply tenv
   where
     flatten = do
       (_, (defs', exports')) <-
-        assumeGDefGroup (Rec imports) (return ()) $ noFloat $
-        flattenGlobals Rename.empty defs $ \rn1 defs' -> do
-          exports' <- liftF $ mapM (flattenExport rn1) exports
+        -- Add imports to the type environment; don't transform them
+        assumeGDefGroup (Rec imports) (return ()) $
+
+        -- Cannot float bindings to the top level
+        noFloat $
+
+        -- Flatten all global bindings and exported bindings
+        flattenGlobals defs $ \defs' -> do
+          exports' <- liftF $ mapM visitExport exports
           return (defs', exports')
       return $ Module name imports defs' exports'
-
