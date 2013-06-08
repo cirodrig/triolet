@@ -60,6 +60,7 @@ where
 import Prelude hiding(mapM)
 import Control.Applicative
 import Control.Monad hiding(mapM)
+import Control.Monad.Reader hiding(mapM)
 import Control.Monad.Writer hiding(mapM)
 import Data.List
 import qualified Data.Set as Set
@@ -71,6 +72,7 @@ import Text.PrettyPrint.HughesPJ hiding(float)
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
 import Common.Supply
 import SystemF.Rename
 import SystemF.Syntax
@@ -103,26 +105,9 @@ isTrivialExp (ExpM e) =
      LitE {} -> True
      _       -> False
 
-{-
--- | Add a variable to the environment, renaming if necessary.
---   If the flag is true, then unconditionally rename the variable because
---   the variable binding may be hoisted to a new location.
-withBoundVariable :: Bool -> Renaming -> Var -> (Renaming -> Var -> F a) -> F a
-withBoundVariable rename_always rn v k
-  | rename_always                = rename
-  | Just _ <- Rename.lookup v rn = rename -- Rename to avoid shadowing
-  | otherwise                    = k rn v -- Don't rename
-  where
-    rename = do
-      v' <- newClonedVar v
-      let rn' = Rename.extend v v' rn
-      k rn' v'
--}
-
 -- | Rename the binder.
 --   Give the bound variable a new name if the current name is in scope. 
-freshenIfInEnvironment :: EvalMonad m =>
-                          Renaming -> Var -> m (Renaming, Var)
+freshenIfInEnvironment :: Renaming -> Var -> UnboxedTypeEvalM (Renaming, Var)
 freshenIfInEnvironment rn v
   -- Is it in the renaming's domain?
   | isJust $ Rename.lookup v rn = rename_binder
@@ -135,8 +120,7 @@ freshenIfInEnvironment rn v
     rename_binder = do v' <- newClonedVar v
                        return (Rename.extend v v' rn, v')
 
-freshenIfInEnvironmentList :: EvalMonad m =>
-                              Renaming -> [Var] -> m (Renaming, [Var])
+freshenIfInEnvironmentList :: Renaming -> [Var] -> UnboxedTypeEvalM (Renaming, [Var])
 freshenIfInEnvironmentList rn (v:vs) = do
   (rn', v') <- freshenIfInEnvironment rn v
   (rn'', vs') <- freshenIfInEnvironmentList rn' vs
@@ -144,11 +128,86 @@ freshenIfInEnvironmentList rn (v:vs) = do
 
 freshenIfInEnvironmentList rn [] = return (rn, [])
 
+-- | Flattening involves type inference in order to create new
+--   temporary variables
+newtype Fr a = Fr {unFr :: ReaderT Renaming UnboxedTypeEvalM a}
+             deriving(Functor, Applicative, Monad, MonadIO)
+
+runFr m = runReaderT (unFr m) Rename.empty
+
+instance Supplies Fr (Ident Var) where
+  fresh = Fr $ lift fresh
+
+instance TypeEnvMonad Fr where
+  type EvalBoxingMode Fr = UnboxedMode
+  getTypeEnv = Fr $ lift getTypeEnv
+  liftTypeEnvM m = Fr $ lift $ liftTypeEnvM m
+
+instance EvalMonad Fr where
+  liftTypeEvalM m = Fr $ lift $ liftTypeEvalM m
+
+instance MonadReader Fr where
+  type EnvType Fr = Renaming
+  ask = Fr ask
+  local f (Fr m) = Fr (local f m)
+
+renameF :: (MonadReader m, EnvType m ~ Renaming) =>
+           Rename.Renameable a => a -> m a
+renameF x = asks (flip rename x)
+
+{-
+-- | Rename @x@ if necessary; pass the updated renaming to @k@
+adjustRenaming :: (Renaming -> a -> UnboxedTypeEvalM (Renaming, b))
+               -> a -> (b -> Fr c) -> Fr c
+adjustRenaming adjust x k = do
+  rn <- ask
+  (rn', y) <- liftTypeEvalM $ adjust rn x
+  local (const rn') (k y)
+-}
+
+class (EvalMonad m, EvalBoxingMode m ~ UnboxedMode,
+       MonadReader m, EnvType m ~ Renaming) => FlattenMonad m
+
 -- | Rename a binder and add the bound variable to the environment.
-withBinder :: EvalMonad m =>
+withBinder_new :: FlattenMonad m =>
+                  Binder -> (Binder -> m a) -> m a
+withBinder_new (v ::: t) f = do
+  rn <- ask
+  (rn', v') <- liftTypeEvalM $ freshenIfInEnvironment rn v
+  let b' = v' ::: rename rn t
+  local (const rn') (f b')
+
+withBinders_new = withMany withBinder_new
+
+withDeConInst_new :: FlattenMonad m =>
+                     DeConInst -> (DeConInst -> m a) -> m a
+withDeConInst_new dc f =
+  case dc
+  of VarDeCon op ty_args ex_types -> do
+       ty_args' <- renameF ty_args
+       withBinders_new ex_types $ \ex_types' ->
+          f (VarDeCon op ty_args' ex_types')
+     TupleDeCon ty_args -> do
+       ty_args' <- renameF ty_args
+       f (TupleDeCon ty_args')
+
+withTyParam_new :: FlattenMonad m => TyPat -> (TyPat -> m a) -> m a
+withTyParam_new (TyPat b) m = withBinder_new b (m . TyPat)
+
+withTyParams_new :: FlattenMonad m => [TyPat] -> ([TyPat] -> m a) -> m a
+withTyParams_new = withMany withTyParam_new
+
+withPatM_new :: FlattenMonad m => PatM -> (PatM -> m a) -> m a
+withPatM_new (PatM b u) m = withBinder_new b $ \b' -> m (PatM b' u)
+
+withPatMs_new :: FlattenMonad m => [PatM] -> ([PatM] -> m a) -> m a
+withPatMs_new = withMany withPatM_new
+
+-- | Rename a binder and add the bound variable to the environment.
+withBinder :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
               Renaming -> Binder -> (Renaming -> Binder -> m a) -> m a
 withBinder rn (v ::: t) f = do
-  (rn', v') <- freshenIfInEnvironment rn v
+  (rn', v') <- liftTypeEvalM $ freshenIfInEnvironment rn v
   let b' = v' ::: rename rn t
   assumeBinder b' $ f rn' b'
 
@@ -158,7 +217,7 @@ withBinders rn (b:bs) f =
 withBinders rn [] f = f rn []
 
 -- | Rename a deconstructor and add bound variables to the environment.
-withDeConInst :: EvalMonad m =>
+withDeConInst :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
                  Renaming -> DeConInst -> (Renaming -> DeConInst -> m a) -> m a
 withDeConInst rn dc f =
   case dc
@@ -170,11 +229,11 @@ withDeConInst rn dc f =
        let ty_args' = rename rn ty_args
        in f rn (TupleDeCon ty_args')
 
-withTyParam :: EvalMonad m =>
+withTyParam :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
                Renaming -> TyPat -> (Renaming -> TyPat -> m a) -> m a
 withTyParam rn (TyPat b) m = withBinder rn b $ \rn' b' -> m rn' (TyPat b')
 
-withTyParams :: EvalMonad m =>
+withTyParams :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
                 Renaming -> [TyPat] -> (Renaming -> [TyPat] -> m a) -> m a
 withTyParams rn (p:ps) m =
   withTyParam rn p $ \rn' p' -> withTyParams rn' ps $ \rn'' ps' -> m rn'' (p':ps')
@@ -182,14 +241,14 @@ withTyParams rn (p:ps) m =
 withTyParams rn [] m = m rn []
 
 -- | Rename a pattern binding and add it to the type environment
-withPatM :: EvalMonad m =>
+withPatM :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
             Renaming -> PatM -> (Renaming -> PatM -> m a) -> m a
 withPatM rn (PatM b u) m = withBinder rn b $ \rn' b' -> m rn' (PatM b' u)
 
 withMaybePatM rn Nothing k = k rn Nothing
 withMaybePatM rn (Just p) k = withPatM rn p $ \rn' p' -> k rn' (Just p')
 
-withPatMs :: EvalMonad m =>
+withPatMs :: (EvalMonad m, EvalBoxingMode m ~ UnboxedMode) =>
              Renaming -> [PatM] -> (Renaming -> [PatM] -> m a) -> m a
 withPatMs rn (p:ps) f =
   withPatM rn p $ \rn' p' -> withPatMs rn' ps $ \rn'' ps' -> f rn'' (p':ps')
@@ -683,7 +742,7 @@ flattenGroup is_global get_type rename_entity rn (NonRec def) f = do
   -- Give the function a new name if appropriate
   (rn', new_name) <- if is_global
                      then return (rn, definiendum def)
-                     else freshenIfInEnvironment rn $ definiendum def
+                     else liftTypeEvalM $ freshenIfInEnvironment rn $ definiendum def
   let def' = Def new_name new_ann new_definiens
 
   -- Add to environment and process body
@@ -693,7 +752,7 @@ flattenGroup is_global get_type rename_entity rn (Rec defs) f = do
   -- Rename variables that shadow existing names
   (rn', new_vars) <- if is_global
                      then return (rn, map definiendum defs)
-                     else freshenIfInEnvironmentList rn $ map definiendum defs
+                     else liftTypeEvalM $ freshenIfInEnvironmentList rn $ map definiendum defs
 
   -- Add to environment
   let function_types = map (get_type . rename rn . definiens) defs
