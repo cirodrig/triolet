@@ -20,6 +20,8 @@ module SystemF.Syntax
      Multiplicity(..), Specificity(..),
      HeapMap(..),
      joinHeapMap, outerJoinHeapMap,
+     CallDmd(..),
+     nonCallDmd,
      
      -- * Representation of code
      Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
@@ -209,6 +211,33 @@ outerJoinHeapMap f (HeapMap assocs1) (HeapMap assocs2) = HeapMap new_map
          GT -> (v2, f Nothing  (Just y)) : join xs ys'
     join xs [] = [(v, f (Just x) Nothing) | (v, x) <- xs]
     join [] ys = [(v, f Nothing (Just y)) | (v, y) <- ys]
+
+-- | Function call demands on a variable.
+--   Determines whether a function is definitely called.  If a function is
+--   definitely called, then it is safe to hoist code from the function body
+--   into the place where the function is defined.
+--
+--   Unlike 'Dmd', a definitely-called function is treated differently 
+--   from a maybe-called function.
+data CallDmd =
+    -- | Variable may be unused
+    CallUnused
+    -- | Variable is definitely called with at least @N@ arguments.
+    --   If variable may be used without being called, then @N = 0@.
+    --   If variable is not a function, then @N@ must be zero.
+  | CallUsed {-# UNPACK #-}!Int
+  deriving(Eq)
+
+-- | The call demand on a use of a variable other than a direct call
+nonCallDmd :: CallDmd
+nonCallDmd = CallUsed 0
+
+-- | Call demands are ordered from least specific to most specific
+instance Ord CallDmd where
+  CallUnused `compare` CallUnused = EQ
+  CallUnused `compare` CallUsed _ = LT
+  CallUsed _ `compare` CallUnused = GT
+  CallUsed m `compare` CallUsed n = m `compare` n
 
 -------------------------------------------------------------------------------
 
@@ -600,11 +629,16 @@ data DefAnn =
     -- | The demand on this definition,
     -- as determined by demand analysis
   , defAnnUses :: !Dmd
+
+    -- | Whether this function is definitely called.
+    --   Defaults to 'False' for functions.
+    --   Ignored for non-functions.
+  , defAnnCalled :: !Bool
   }
 
 defaultDefAnn :: DefAnn
 defaultDefAnn =
-  DefAnn InlNormal InlConservatively False False False (Dmd ManyUnsafe Used)
+  DefAnn InlNormal InlConservatively False False False (Dmd ManyUnsafe Used) False
 
 -- | An annotation controlling when a function may be inlined.
 --

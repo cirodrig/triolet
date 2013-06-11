@@ -33,6 +33,7 @@ import Data.List
 import Data.Maybe
 import Data.Traversable
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
@@ -63,6 +64,9 @@ import Globals
 --   The analysis generates demand information on variables.
 newtype Df a = Df {runDf :: TypeEvalM UnboxedMode (a, Dmds)}
 
+returnDf :: a -> TypeEvalM UnboxedMode (a, Dmds)
+returnDf x = return (x, bottom)
+
 evalDf :: Df a -> IdentSupply Var -> ITypeEnvBase UnboxedMode -> IO a
 evalDf m supply env = do
   env' <- thawTypeEnv env
@@ -77,7 +81,7 @@ instance Applicative Df where
   (<*>) = ap
 
 instance Monad Df where
-  return x = Df (return (x, IntMap.empty))
+  return x = Df (returnDf x)
   m >>= k = Df (do (x, dmd1) <- runDf m
                    (y, dmd2) <- runDf (k x)
                    return (y, joinSeq dmd1 dmd2))
@@ -91,23 +95,18 @@ instance MonadWriter Df where
                   return (x, f w))
 
 instance MonadIO Df where
-  liftIO m = Df (do x <- liftIO m 
-                    return (x, IntMap.empty))
+  liftIO m = Df (liftIO m >>= returnDf)
 
 instance TypeEnvMonad Df where
   type EvalBoxingMode Df = UnboxedMode
-  getTypeEnv = Df (do x <- getTypeEnv
-                      return (x, IntMap.empty))
-  liftTypeEnvM m = Df (do x <- liftTypeEnvM m
-                          return (x, IntMap.empty))
+  getTypeEnv = Df (getTypeEnv >>= returnDf)
+  liftTypeEnvM m = Df (liftTypeEnvM m >>= returnDf)
 
 instance Supplies Df (Ident Var) where
-  fresh = Df (do x <- fresh
-                 return (x, IntMap.empty))
+  fresh = Df (fresh >>= returnDf)
 
 instance EvalMonad Df where
-  liftTypeEvalM m = Df (do x <- m
-                           return (x, IntMap.empty))
+  liftTypeEvalM m = Df (m >>= returnDf)
 
 -- | Run multiple dataflow analyses on mutually exclusive execution paths.
 --   This kind of execution occurs in case alternatives.
@@ -116,14 +115,9 @@ parallel dfs = Df $ do
   (xs, dmds) <- liftM unzip $ sequence $ map runDf dfs
   return (xs, joinPars dmds)
 
-underLambda :: Bool -> Df a -> Df a
-underLambda is_safe m = censor change_multiplicities m
-  where
-    -- If a lambda function is called at most once, don't change multiplicity.
-    -- In all other functions, weaken multiplicity information because
-    -- we don't know how often the function is called.
-    change_multiplicities =
-      if is_safe then id else lambdaAbstracted
+underLambda :: Multiplicity -> Bool -> Df a -> Df a
+underLambda call_multiplicity is_called m =
+  censor (lambdaAbstracted call_multiplicity is_called) m
 
 -- | Demand analysis only deals with variables that can be removed from the 
 --   program.  Global type variables (type functions and constructors) and
@@ -136,7 +130,7 @@ isDeletable v = Df $ do
     liftM isNothing (lookupDataType v) >&&>
     liftM isNothing (lookupDataCon v) >&&>
     liftM isNothing (lookupTypeFunction v)
-  return (deletable, IntMap.empty)
+  returnDf deletable
 
 -- | A helper function for 'mention'.  If the variable is a global type or 
 --   data constructor, then ignore it.
@@ -151,35 +145,35 @@ mentionHelperList vs dmd = do
 
 -- | A variable was used somehow.  This is the most general case.
 mention :: Var -> Df ()
-mention v = mentionHelper v $ Dmd OnceSafe Used
+mention v = mentionHelper v (Dmd OnceSafe Used, nonCallDmd)
 
 -- | Mention a list of variables, behaving the same as 'mention'.
 mentionList :: [Var] -> Df ()
-mentionList vs = mentionHelperList vs $ Dmd OnceSafe Used
+mentionList vs = mentionHelperList vs (Dmd OnceSafe Used, nonCallDmd)
 
 -- | A variable was used multiple times.  This prevents inlining.
 --
 --   We put 'Unused' as the specificity here to avoid contaminating the 
 --   specificity information that we compute.
 mentionMany :: Var -> Df ()
-mentionMany v = mentionHelper v $ Dmd ManySafe Unused
+mentionMany v = mentionHelper v (Dmd ManySafe Unused, nonCallDmd)
 
--- | A variable was used with the given specificity.
-mentionSpecificity :: Var -> Specificity -> Df ()
-mentionSpecificity v spc = mentionHelper v $ Dmd OnceSafe spc
+-- | A variable was used with the given demand.
+mentionVarDmd :: Var -> VarDmd -> Df ()
+mentionVarDmd v d = mentionHelper v d
 
 -- | A variable was used in a multiple-alternative case statement or \'copy\'
 --   function.
 mentionMultiCase :: Var -> Df ()
-mentionMultiCase v = mentionHelper v $ Dmd OnceSafe Inspected
+mentionMultiCase v = mentionHelper v (Dmd OnceSafe Inspected, nonCallDmd)
 
--- | A global variable is visible to other Pyon modules.
+-- | A global variable is visible to external code.
 mentionExtern :: Var -> Df ()
-mentionExtern v = mentionHelper v unknownDmd
+mentionExtern v = mentionHelper v (unknownDmd, nonCallDmd)
 
 -- | Get the demand on variable @v@ produced by the given code; also, remove
 --   @v@ from the demanded set
-getDemand :: Var -> Df a -> Df (a, Dmd)
+getDemand :: Var -> Df a -> Df (a, VarDmd)
 getDemand v m = Df $ do
   (x, dmds) <- runDf m
   let dmd = lookupDmd v dmds
@@ -246,7 +240,7 @@ withMaybeParam (Just p) m = do
 withParam :: PatM -> Df a -> Df (PatM, a)
 withParam pat m = do
   dfType $ patMType pat
-  (x, dmd) <- getDemand (patMVar pat) m
+  (x, (dmd, _)) <- getDemand (patMVar pat) m
   let new_pat = setPatMDmd dmd pat
   return (new_pat, x)
 
@@ -256,18 +250,19 @@ withParams = withManyBinders withParam
 -- | Do demand analysis on an expression.
 --   Given the demand on the expression's result, propagate demand information
 --   through the expression.
-dmdExp :: Dmd -> DmdAnl ExpM
+dmdExp :: VarDmd -> DmdAnl ExpM
 dmdExp dmd exp@(ExpM expression) =
   case expression
-  of VarE _ v -> mentionSpecificity v (specificity dmd) >> return exp
+  of VarE _ v -> mentionVarDmd v dmd >> return exp
      LitE _ _ -> return exp
-     ConE inf con sps ty_obj args -> dmdConE dmd inf con sps ty_obj args
+     ConE inf con sps ty_obj args -> dmdConE exp dmd inf con sps ty_obj args
      AppE inf op ts args -> dmdAppE inf dmd op ts args
      LamE inf f -> dmdLamE dmd inf f
      LetE inf pat rhs body -> dmdLetE dmd inf pat rhs body
      LetfunE inf dg body -> do
        -- Partition into minimal definition groups
-       (dg', body') <- dmdGroup dmdDef dg (dmdExp dmd body)
+       let fun_arity f = length $ funParams $ fromFunM f
+       (dg', body') <- dmdGroup fun_arity dmdDef dg (dmdExp dmd body)
        let mk_let defgroup e = ExpM (LetfunE inf defgroup e)
        return $ foldr mk_let body' dg'
      CaseE inf scr sps alts -> dmdCaseE dmd inf scr sps alts
@@ -279,7 +274,7 @@ dmdExp dmd exp@(ExpM expression) =
        return $ ExpM $ CoerceE inf t1 t2 e'
      ArrayE inf ty es -> do
        dfType ty
-       es' <- mapM (dmdExp unknownDmd) es
+       es' <- mapM (dmdExp unknownVarDmd) es
        return $ ExpM $ ArrayE inf ty es'
 
 {-
@@ -324,12 +319,13 @@ dmdExpWorker is_initializer spc expressionM@(ExpM expression) =
     -}
 -}
 
-dmdConE dmd inf con sps ty_obj args = do
-  sps' <- mapM (dmdExp unknownDmd) sps
-  ty_obj' <- mapM (dmdExp unknownDmd) ty_obj
+dmdConE exp (dmd, _) inf con sps ty_obj args = do
+  sps' <- mapM (dmdExp unknownVarDmd) sps
+  ty_obj' <- mapM (dmdExp unknownVarDmd) ty_obj
 
   -- Propagate demand info to each field
-  initializer_dmds <- deconstructSpecificity (length args) dmd
+  initializer_dmds <- deconstructSpecificity con (length args) dmd
+  let dmd_doc (x, y) = pprDmd x <+> pprCallDmd y
   args' <- zipWithM dmdExp initializer_dmds args
 
   return $ ExpM $ ConE inf con sps' ty_obj' args'
@@ -340,8 +336,7 @@ dmdConE dmd inf con sps ty_obj args = do
 --   However, parameters that should be floated are marked as having
 --   multiple uses so that they don't get inlined.
 dmdAppE inf dmd op ty_args args = do
-  let op_dmd = case dmd
-               of Dmd m s -> Dmd m (calledSpecificity (length args) Nothing s)
+  let op_dmd = calleeDmd (length args) dmd
   op' <- dmdExp op_dmd op
   args' <- sequence [ dmdExp use_mode arg
                     | (use_mode, arg) <- zip use_modes args]
@@ -360,8 +355,8 @@ dmdAppE inf dmd op ty_args args = do
          _ -> repeat u
       where
         n_args = length args
-        u = Dmd ManyUnsafe Used
-        c = Dmd ManyUnsafe Copied
+        u = (Dmd ManyUnsafe Used, nonCallDmd)
+        c = (Dmd ManyUnsafe Copied, nonCallDmd)
 
 {-    -- This is a hack to allow inlining beneath the function argument
     -- of 'append_build_list'.  This is important to inline stream 
@@ -381,12 +376,12 @@ dmdLamE dmd inf f = do
 
 dmdLetE dmd inf binder rhs body = do
   (body', local_dmd) <- getDemand (patMVar binder) $ dmdExp dmd body
-  case multiplicity local_dmd of
+  case multiplicity (fst local_dmd) of
     Dead -> return body'        -- RHS is eliminated
     _ -> do
       rhs' <- dmdExp local_dmd rhs
       dfType (patMType binder)
-      return $ ExpM $ LetE inf (setPatMDmd local_dmd binder) rhs' body'
+      return $ ExpM $ LetE inf (setPatMDmd (fst local_dmd) binder) rhs' body'
 
 dmdCaseE dmd inf scrutinee sps alts = do
   -- Get demanded values in each alternative
@@ -403,8 +398,8 @@ dmdCaseE dmd inf scrutinee sps alts = do
       return $ altBody alt'
     _ -> do
       -- Process the scrutinee
-      scrutinee' <- dmdExp (Dmd OnceSafe alts_spc) scrutinee
-      sps' <- mapM (dmdExp unknownDmd) sps
+      scrutinee' <- dmdExp (Dmd OnceSafe alts_spc, nonCallDmd) scrutinee
+      sps' <- mapM (dmdExp unknownVarDmd) sps
       return $ ExpM $ CaseE inf scrutinee' sps' alts'
 
 -- | Construct the specificity for a case scrutinee, based on how its value
@@ -424,7 +419,7 @@ altListSpecificity _   = Inspected
 
 -- | Do demand analysis on a case alternative.  Return the demand on the
 --   scrutinee.
-dmdAlt :: Dmd -> AltM -> Df (AltM, Specificity)
+dmdAlt :: VarDmd -> AltM -> Df (AltM, Specificity)
 dmdAlt dmd (AltM (Alt (VarDeCon con ty_args ex_types) ty_ob_param params body)) = do
   mapM_ dfType ty_args
   (typats', (ty_ob_param', (pats', body'))) <-
@@ -442,7 +437,7 @@ dmdAlt dmd (AltM (Alt decon@(TupleDeCon _) Nothing params body)) = do
   let new_alt = AltM (Alt decon Nothing pats' body')
   return (new_alt, altSpecificity new_alt)  
 
-dmdFun :: Dmd -> DmdAnl FunM
+dmdFun :: VarDmd -> DmdAnl FunM
 dmdFun dmd (FunM f) = do
   output_param_var <- liftTypeEvalM $ getOutputParameter (FunM f)
 
@@ -453,15 +448,18 @@ dmdFun dmd (FunM f) = do
   -- If this is an initializer and all uses are safe calls,
   -- then the function is work-safe.
   -- Otherwise, approximate as not work-safe.
-  let is_safe =
-        case dmd 
+  let old_is_safe =             -- No longer used
+        case fst dmd 
         of Dmd m (Called 1 _ _)
              | isJust output_param_var && m == OnceSafe -> True
            _ -> False
 
+  -- Is this function definitely called?
+  let is_called = snd dmd `isCalledWithArity` length (funParams f)
+
   -- Eliminate dead code and convert patterns to wildcard patterns
   (tps', (ps', b')) <-
-    underLambda is_safe $
+    underLambda (multiplicity $ fst dmd) is_called $
     withTyPats (funTyParams f) $
     withParams (funParams f) $ do
       dfType $ funReturn f
@@ -488,29 +486,8 @@ getOutputParameter (FunM f)
        , return Nothing
        ]
 
--- If a function takes an 'OutPtr' and returns a 'Store', it's an
--- initializer
-isInitializerFun (FunM f) =
-  cond ()
-  [ do -- No type parameters?
-       aguard $ null (funTyParams f) 
-
-       -- Parameter has type 'OutPtr t'?
-       [param] <- return $ funParams f
-       Just (op, _) <- lift $ deconVarAppType $ patMType param
-       aguard $ op == outPtrV
-       
-       -- Return type has type 'Store'?
-       VarT rtype_var <- lift $ reduceToWhnf $ funReturn f
-       aguard $ rtype_var == storeV
-
-       return True
-  , return False
-  ]
-
-
 dmdData (Constant inf ty e) = do
-  e' <- dmdExp unknownDmd e
+  e' <- dmdExp unknownVarDmd e
   dfType ty
   return $ Constant inf ty e'
 
@@ -523,11 +500,11 @@ dmdDef' analyze_t def
   where
     analyze_def = mapMDefiniens analyze_t def
 
-dmdDef :: Dmd -> DmdAnl (FDef Mem)
-dmdDef dmd = dmdDef' (dmdFun dmd)
+dmdDef :: VarDmd -> DmdAnl (FDef Mem)
+dmdDef dmd def = dmdDef' (dmdFun dmd) def
 
-dmdGlobalDef :: Dmd -> DmdAnl (GDef Mem)
-dmdGlobalDef dmd = dmdDef' (dmdEnt dmd)
+dmdGlobalDef :: VarDmd -> DmdAnl (GDef Mem)
+dmdGlobalDef dmd def = dmdDef' (dmdEnt dmd) def
 
 dmdEnt dmd (FunEnt f) = FunEnt `liftM` dmdFun dmd f
 dmdEnt _ (DataEnt d) = DataEnt `liftM` dmdData d
@@ -542,16 +519,17 @@ useExportedDefs defs = mapM_ demand_if_exported defs
       mentionExtern (definiendum def)
   
 dmdGroup :: forall a t.
-            (Dmd -> DmdAnl (Def t Mem))
+            (t Mem -> Int)
+         -> (VarDmd -> DmdAnl (Def t Mem))
          -> DefGroup (Def t Mem)
          -> Df a
          -> Df ([DefGroup (Def t Mem)], a)
-dmdGroup do_def defgroup do_body =
+dmdGroup arity do_def defgroup do_body =
   case defgroup
   of NonRec def -> do
        -- Eliminate dead code.  Decide whether the definition is dead.
        (body, dmd) <- getDemand (definiendum def) do_body_and_exports
-       case multiplicity dmd of
+       case multiplicity (fst dmd) of
          Dead ->
            return ([], body)
          _ -> do
@@ -570,7 +548,7 @@ dmdGroup do_def defgroup do_body =
 
     rec_dmd defs = Df $ do
       -- Scan each definition and the body code
-      defs_and_uses <- mapM (runDf . do_def unknownDmd) defs
+      defs_and_uses <- mapM (runDf . do_def unknownVarDmd) defs
       (body, body_uses) <- runDf do_body_and_exports
 
       -- Partition into strongly connected components
@@ -596,7 +574,11 @@ dmdGroup do_def defgroup do_body =
       return ((new_defs, body), new_uses)
     
     set_def_uses dmd def =
-      modifyDefAnnotation (\a -> a {defAnnUses = dmd}) def
+      let definiens_arity = arity (definiens def)
+          set_annotation a =
+            a { defAnnUses = fst dmd
+              , defAnnCalled = snd dmd `isCalledWithArity` definiens_arity}
+      in modifyDefAnnotation set_annotation def
 
 -- | Given the members of a definition group, the variables mentioned by them, 
 --   and the set of members that are referenced by the rest of the program,
@@ -651,12 +633,14 @@ partitionDefGroup members external_refs =
 -- | Eliminate dead code and get demands for an export declaration
 dmdExport :: DmdAnl (Export Mem)
 dmdExport export = do
-  fun <- dmdFun unknownDmd $ exportFunction export
+  fun <- dmdFun unknownVarDmd $ exportFunction export
   return $ export {exportFunction = fun}
 
 dmdTopLevelGroup (dg:dgs) exports = do
+  let ent_arity (DataEnt _) = 0
+      ent_arity (FunEnt f) = length $ funParams $ fromFunM f
   (dg', (dgs', exports')) <-
-    dmdGroup dmdGlobalDef dg $ dmdTopLevelGroup dgs exports
+    dmdGroup ent_arity dmdGlobalDef dg $ dmdTopLevelGroup dgs exports
   return (dg' ++ dgs', exports')
 
 dmdTopLevelGroup [] exports = do

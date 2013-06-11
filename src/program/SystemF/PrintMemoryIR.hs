@@ -4,6 +4,7 @@ module SystemF.PrintMemoryIR
         defaultPprFlags, briefPprFlags, tersePprFlags,
         pprLit,
         pprDmd,
+        pprCallDmd,
         pprSpecificity,
         pprTyPat,
         pprPat,
@@ -116,6 +117,11 @@ pprSpecificity Unused = text "0"
 pprHeapMap (HeapMap m) = parens (cat $ punctuate (text ",") cells)
   where
     cells = [pprVar v <+> text "|->" <+> pprSpecificity s | (v, s) <- m]
+
+pprCallDmd :: CallDmd -> Doc
+pprCallDmd CallUnused   = text "D"
+pprCallDmd (CallUsed 0) = text "U"
+pprCallDmd (CallUsed n) = text $ "A(" ++ show n ++ ")"
 
 pprTyPat :: TyPat -> Doc
 pprTyPat (TyPat (v ::: t)) = pprVar v <+> text ":" <+> pprType t
@@ -262,7 +268,7 @@ pprFunPrecFlags is_lambda flags (FunM fun) =
 pprDefAnn :: DefAnn -> Doc
 pprDefAnn ann =
   brackets $ sep $ punctuate (text ",") $
-  filter (not . isEmpty) [inl_doc, join_doc, phase_doc, uses_doc]
+  filter (not . isEmpty) [inl_doc, join_doc, phase_doc, call_doc, uses_doc]
   where
     phase_doc =
       case defAnnInlinePhase ann
@@ -281,6 +287,7 @@ pprDefAnn ann =
       then text "join_point"
       else empty
     uses_doc = pprDmd (defAnnUses ann)
+    call_doc = if defAnnCalled ann then text "called" else empty
 
 pprFDef def = pprFDefFlags defaultPprFlags def
 

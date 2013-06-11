@@ -52,6 +52,12 @@ joinPars xs = foldl' joinPar bottom xs
 joinSeqs :: Dataflow a => [a] -> a
 joinSeqs xs = foldl' joinSeq bottom xs
 
+-- | Dataflow semilattices extend to products in the obvious way
+instance (Dataflow a, Dataflow b) => Dataflow (a, b) where
+  bottom = (bottom, bottom)
+  joinPar (u, x) (v, y) = (joinPar u v, joinPar x y)
+  joinSeq (u, x) (v, y) = (joinSeq u v, joinSeq x y)
+
 instance Dataflow a => Dataflow (IntMap.IntMap a) where
   bottom = IntMap.empty
   joinPar m1 m2 = IntMap.unionWith joinPar m1 m2
@@ -198,11 +204,26 @@ showSpecificity Copied = "C"
 showSpecificity Inspected = "I"
 showSpecificity Used = "U"
 
+instance Dataflow CallDmd where
+  bottom = CallUnused
+
+  -- On alternative paths, the least specific demand takes precedence,
+  -- except don't mark it 'unused' if there's a chance that it's used.
+  joinPar CallUnused CallUnused = CallUnused
+  joinPar x y                   = min nonCallDmd (min x y)
+
+  -- On a single path, the most specific demand takes precedence
+  joinSeq x y = max x y
+
+-- | Demand analysis associates a 'Dmd' and a 'CallDmd' with each variable
+--   and each expression
+type VarDmd = (Dmd, CallDmd)
+
 -- | Demand information for a set of variables
-type Dmds = IntMap.IntMap Dmd
+type Dmds = IntMap.IntMap VarDmd
 
 -- | Get the demand on a variable
-lookupDmd :: Var -> Dmds -> Dmd
+lookupDmd :: Var -> Dmds -> VarDmd
 lookupDmd v m = fromMaybe bottom $ IntMap.lookup (fromIdent $ varID v) m
 
 -- | Augment a demand's multiplicity by the given multiplicity.
@@ -233,33 +254,61 @@ multiplyMultiplicity m1 m2
 
 -- | Transform the demand information of values that appear under a lambda.
 --
---   Safe multiplicity becomes unsafe, beca
-lambdaAbstracted :: Dmds -> Dmds
-lambdaAbstracted = IntMap.map lambda_abstract
+--   If the function is used exactly once (multiplicity is 'OnceSafe')
+--   and it's definitely called, then demand information is unchanged.
+--
+--   If the function is definitely called, then demand information is
+--   unchanged.
+--
+--   Otherwise, safe multiplicity becomes unsafe and
+--   definitely-called becomes maybe-called.
+lambdaAbstracted :: Multiplicity -- ^ Multiplicity at which function is used
+                 -> Bool         -- ^ Whether function is definitely called
+                 -> Dmds
+                 -> Dmds
+lambdaAbstracted call_mult called dmds
+  | call_mult == OnceSafe && called = dmds
+  | called                          = IntMap.map called_lambda dmds
+  | otherwise                       = IntMap.map unknown_lambda dmds
   where
-    lambda_abstract dmd = dmd {multiplicity = weaken $ multiplicity dmd}
+    -- The lambda function is called at least once.
+    -- Multiplicities become unsafe because it may be called many times.
+    -- Call demands are unchanged.
+    called_lambda (dmd, cd) =
+      (dmd {multiplicity = weaken $ multiplicity dmd}, cd)
     
+    -- The lambda function is called an unknown number of times.
+    -- Multiplicities become unsafe because it may be called many times.
+    -- Call demands become 'used' because function calls in the function body
+    -- may never be executed.
+    unknown_lambda (dmd, cd) =
+      (dmd {multiplicity = weaken $ multiplicity dmd}, weaken_c cd)
+
     weaken Dead       = Dead
     weaken OnceSafe   = OnceUnsafe
     weaken ManySafe   = ManyUnsafe
     weaken OnceUnsafe = OnceUnsafe
     weaken ManyUnsafe = ManyUnsafe
 
+    weaken_c CallUnused   = CallUnused
+    weaken_c (CallUsed _) = nonCallDmd
+
 -- | Transform the demand information on a coerced value.
 --   After coercion, the value's contents no longer match its type, so we
 --   force the value to be either 'Used' or 'Unused'.
-coerced :: Dmd -> Dmd
-coerced (Dmd m Unused) = Dmd m Unused
-coerced (Dmd m _)      = Dmd m Used
+coerced :: VarDmd -> VarDmd
+coerced (Dmd m Unused, _) = (Dmd m Unused, CallUnused)
+coerced (Dmd m _, _)      = (Dmd m Used, nonCallDmd)
 
--- | Transform the demand information of values that appear in code that will be
---   replicated.
+-- | Transform the demand information of values that appear in code
+--   that will be replicated zero or more times.
 --
 --   Since many copies of the code will be created, one use becomes many.
 replicatedCode :: Dmds -> Dmds
 replicatedCode = IntMap.map replicated
   where
-    replicated dmd = dmd {multiplicity = weaken $ multiplicity dmd}
+    replicated (dmd, cd) =
+      (dmd {multiplicity = weaken $ multiplicity dmd}, weaken_c cd)
     
     weaken Dead = Dead
     weaken OnceSafe = ManySafe
@@ -267,10 +316,13 @@ replicatedCode = IntMap.map replicated
     weaken OnceUnsafe = ManyUnsafe
     weaken ManyUnsafe = ManyUnsafe
 
-useVariable :: Var -> Dmd -> Dmds
+    weaken_c CallUnused   = CallUnused
+    weaken_c (CallUsed _) = nonCallDmd
+
+useVariable :: Var -> VarDmd -> Dmds
 useVariable v dmd = IntMap.singleton (fromIdent $ varID v) dmd
 
-useVariables :: [Var] -> Dmd -> Dmds
+useVariables :: [Var] -> VarDmd -> Dmds
 useVariables vs dmd = IntMap.fromList [(fromIdent $ varID v, dmd) | v <- vs]
 
 {-
@@ -309,9 +361,13 @@ initializerSpecificity spc = do
   v <- newAnonymousVar ObjectLevel
   return $ Called 1 (Just v) (Read (HeapMap [(v, spc)]))
 
-dataFieldDmd m1 BareK (Dmd m2 s) = do s' <- initializerSpecificity s
-                                      return $ multiplyDmd m1 $ Dmd m2 s'
-dataFieldDmd m1 _     d          = return $ multiplyDmd m1 d
+dataFieldDmd m1 BareK (Dmd m2 s) = do
+  -- A definitely-called initializer function
+  s' <- initializerSpecificity s
+  return (multiplyDmd m1 $ Dmd m2 s', CallUsed 1)
+
+dataFieldDmd m1 _ d =
+  return (multiplyDmd m1 d, nonCallDmd)
 
 -- | Given the demand on a data constructor application, get the demands on
 --   its individual fields.
@@ -320,8 +376,8 @@ dataFieldDmd m1 _     d          = return $ multiplyDmd m1 d
 -- by how much would the field be replicated?
 --
 -- Specificity: How will the field be used?
-deconstructSpecificity :: EvalMonad m => Int -> Dmd -> m [Dmd]
-deconstructSpecificity n_fields (Dmd m spc) =
+deconstructSpecificity :: EvalMonad m => ConInst -> Int -> Dmd -> m [VarDmd]
+deconstructSpecificity con_inst n_fields (Dmd m spc) =
   case spc
   of Decond mono_con spcs
        | length spcs /= n_fields ->
@@ -335,10 +391,46 @@ deconstructSpecificity n_fields (Dmd m spc) =
      -- However, don't mark the fields as dead because they're still used
      -- in the expression.
      Unused -> let m' = case m of {Dead -> OnceSafe; _ -> m}
-               in return $ replicate n_fields (Dmd m' Unused)
+               in return $ replicate n_fields (Dmd m' Unused, CallUnused)
 
-     -- All other usages produce an unknown effect on fields 
-     _ -> return $ replicate n_fields unknownDmd
+     -- All other usages produce an unknown effect on fields, and
+     -- demand values of initializers.
+     _ -> case con_inst
+          of VarCon con _ _ -> do
+               -- Find initializers
+               Just data_con <- lookupDataCon con
+               let field_demands = [kind_demand k
+                                   | (_, k) <- dataConFields data_con]
+               return field_demands
+             TupleCon xs ->
+               return $ replicate (length xs) unknownVarDmd
+  where
+    kind_demand BareK = (unknownDmd, CallUsed 1)
+    kind_demand _     = unknownVarDmd
+
+unknownVarDmd = (unknownDmd, nonCallDmd)
+
+-- | Get the demand on a function at the site of a function call, given
+--   the number of arguments and the demand on its result
+calleeDmd :: Int -> VarDmd -> VarDmd
+calleeDmd 0 d = d               -- No change if no arguments are applied
+calleeDmd n_args (Dmd m result_s, result_call_dmd) =
+  let call_s =
+        calledSpecificity n_args Nothing result_s
+      call_dmd =
+        -- Add the number of arguments applied here to the number of arguments 
+        -- applied later
+        let result_args = case result_call_dmd
+                          of CallUsed n -> n
+                             CallUnused -> 0
+        in CallUsed (n_args + result_args)
+  in (Dmd m call_s, call_dmd)
+
+-- | Check whether the function is certain to be passed at least N
+--   arguments
+isCalledWithArity :: CallDmd -> Int -> Bool
+CallUnused `isCalledWithArity` _ = False
+CallUsed m `isCalledWithArity` n = m >= n
 
 -- | Get the demand on a function's return type, given the demand on the
 --   function.
@@ -347,17 +439,16 @@ deconstructSpecificity n_fields (Dmd m spc) =
 -- by how much would the return value be replicated?
 --
 -- Specificity: How will the return value be used?
-returnTypeDmd :: Int -> Maybe Var -> Dmd -> Dmd
-returnTypeDmd n_params m_target_var (Dmd m s) =
-  let m' = case s
-           of
-             -- This is a bit of a hack for greater precision for initializer
-             -- functions.  If the function takes exactly one argument,
-             -- the multiplicity of calls to the function is also the
-             -- multiplicity of the function's results.
-             Called n_demanded _ _ | n_params == 1 && n_demanded == 1 -> m
-             _ -> ManyUnsafe
-  in Dmd m' (returnTypeSpecificity n_params m_target_var s)
+returnTypeDmd :: Int -> Maybe Var -> VarDmd -> VarDmd
+returnTypeDmd n_params m_target_var (Dmd m s, call_dmd) = let
+  -- Is this function definitely called?
+  call_dmd' =
+    case call_dmd
+    of CallUnused -> CallUnused
+       CallUsed n -> CallUsed (if n > n_params then n - n_params else 0)
+
+  s' = returnTypeSpecificity n_params m_target_var s
+  in (Dmd ManyUnsafe s', call_dmd')
 
 -- | Get the specificity of a function's return type, given the function's
 --   specificity
