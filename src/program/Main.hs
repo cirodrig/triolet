@@ -127,6 +127,8 @@ runTask CompileBuiltinsToPyonAsm = do
     putStrLn ""
     putStrLn "Builtins"
     print $ SystemF.PrintMemoryIR.pprModule mod
+    -- Note that flattening may introduce shadowing, so detecting shadowing
+    -- here is not necessarily an error.  Should remove this check eventually.
     time times TypecheckTimer $ evaluate $ SystemF.checkForShadowingModule mod
     time times TypecheckTimer $ SystemF.TypecheckMem.typeCheckModule mod
 
@@ -185,6 +187,13 @@ highLevelOptimizations :: Times
                        -> SystemF.Module SystemF.Mem
                        -> IO (SystemF.Module SystemF.Mem)
 highLevelOptimizations times global_demand_analysis simplifier_phase mod = do
+  -- Flatten expressions
+  mod <- time times FlattenTimer $ SystemF.flattenModule mod
+  when debugMode $ void $ do
+    putStrLn "After flattening"
+    time times PrintTimer $ print $ pprMemModule mod
+    time times TypecheckTimer $ SystemF.TypecheckMem.typeCheckModule mod
+
   -- Run the rewriter (most optimizations are in here)
   mod <- time times RewriteTimer $
          SystemF.rewriteAtPhase simplifier_phase mod
