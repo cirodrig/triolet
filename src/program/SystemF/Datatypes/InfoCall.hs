@@ -205,5 +205,5 @@ callBoxedInfoFunction type_info dcon_type ty_args ex_types = do
   -- Create a constructor call
   return $ do
     args <- sequence m_args
-    return $ varAppE' (dataTypeBoxedInfoVar data_type con) (ty_args ++ ex_types) args
+    return $ varAppE' (dataTypeBoxedInfoVar data_type con) ty_args args
 
