@@ -13,7 +13,8 @@ Rafts are extracted from:
 * Variable name hygiene
 
 Because this module moves variable bindings around, it also takes measures
-to prevent variable name shadowing.
+to avoid accidentally introducing variable name shadowing.  Shadowing is
+permitted in some circumstances (see the example at the end).
 
 As an example of shadowing, consider the following expression that
 contains two non-nested bindings of 'x'.
@@ -52,6 +53,29 @@ That is, we choose between producing
 depeding on whether expression @FOO@ mentions the bound variable @x@.
 To keep the process simple, we unconditionally rename @x@ in this case
 before deciding whether to push it inside the binding.
+
+Flattening can introduce name shadowing. 
+Shadowing is introduced when one binding is moved past a nested scope
+containing the same binding.
+Suppose we start with two non-nested occurrences of variable @x@:
+
+> letrec f y =
+>   letrec g x = x + y in
+>   let x = 1 in
+>   g x in
+> f 2
+
+After flattening, we may end up with the following.
+
+> let x = 1 in
+> letrec f y =
+>   letrec g x = x + y in
+>   g x in
+> f 2
+
+The binding @let x = 1$ has been moved above the binding @letrec g x = ...@.
+Nevertheless, every use of @x@ still refers to the same variable it referred
+to originally.
 -}
 
 {-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes #-}
@@ -117,6 +141,11 @@ freshenIfInEnvironment rn v
     rename_binder = do v' <- newClonedVar v
                        return (Rename.extend v v' rn, v')
 
+-- | Give a new name to a variable
+freshen :: Renaming -> Var -> UnboxedTypeEvalM (Renaming, Var)
+freshen rn v = do v' <- newClonedVar v
+                  return (Rename.extend v v' rn, v')
+
 -------------------------------------------------------------------------------
 -- Variable renaming and type environment maintenance
 
@@ -153,40 +182,61 @@ instance FlattenMonad F where
   renameF x = F (asks (flip rename x))
 
 -- | Rename a binder and add the bound variable to the environment.
-withBinder :: FlattenMonad m => Binder -> (Binder -> m a) -> m a
-withBinder (v ::: t) f = do
+withBinder :: FlattenMonad m => Bool -> Binder -> (Binder -> m a) -> m a
+withBinder always_freshen (v ::: t) f = do
   rn <- getRenaming
-  (rn', v') <- liftTypeEvalM $ freshenIfInEnvironment rn v
+  (rn', v') <- liftTypeEvalM $ if always_freshen
+                               then freshen rn v
+                               else freshenIfInEnvironment rn v
   let b' = v' ::: rename rn t
   setRenaming rn' $ assumeBinder b' $ f b'
 
-withBinders = withMany withBinder
+withBinders always_freshen = withMany (withBinder always_freshen)
 
 withDeConInst :: FlattenMonad m => DeConInst -> (DeConInst -> m a) -> m a
 withDeConInst dc f =
   case dc
   of VarDeCon op ty_args ex_types -> do
        ty_args' <- renameF ty_args
-       withBinders ex_types $ \ex_types' ->
+       withBinders False ex_types $ \ex_types' ->
           f (VarDeCon op ty_args' ex_types')
      TupleDeCon ty_args -> do
        ty_args' <- renameF ty_args
        f (TupleDeCon ty_args')
 
+withTyParam_ext always_rename (TyPat b) m =
+  withBinder always_rename b (m . TyPat)
+
 withTyParam :: FlattenMonad m => TyPat -> (TyPat -> m a) -> m a
-withTyParam (TyPat b) m = withBinder b (m . TyPat)
+withTyParam = withTyParam_ext False
+
+-- | Like 'withTyParam', but always rename the variable
+withFreshTyParam :: FlattenMonad m => TyPat -> (TyPat -> m a) -> m a
+withFreshTyParam = withTyParam_ext True
 
 withTyParams :: FlattenMonad m => [TyPat] -> ([TyPat] -> m a) -> m a
 withTyParams = withMany withTyParam
 
+-- | Like 'withTyParams', but always rename the variable
+withFreshTyParams :: FlattenMonad m => [TyPat] -> ([TyPat] -> m a) -> m a
+withFreshTyParams = withMany withFreshTyParam
+
+withPatM_ext always_rename (PatM b u) m =
+  withBinder always_rename b $ \b' -> m (PatM b' u)
+
 withPatM :: FlattenMonad m => PatM -> (PatM -> m a) -> m a
-withPatM (PatM b u) m = withBinder b $ \b' -> m (PatM b' u)
+withPatM = withPatM_ext False
 
 withMaybePatM Nothing  f = f Nothing
 withMaybePatM (Just p) f = withPatM p (f . Just)
 
 withPatMs :: FlattenMonad m => [PatM] -> ([PatM] -> m a) -> m a
 withPatMs = withMany withPatM
+
+-- | Like 'withPatM', but always rename the variable
+withFreshPatM = withPatM_ext True
+
+withFreshPatMs = withMany withFreshPatM
 
 -------------------------------------------------------------------------------
 -- Generating and moving code rafts
@@ -195,7 +245,10 @@ withPatMs = withMany withPatM
 --   The result of flattening is normally a simplified piece of code 
 --   that goes inside the raft.
 --
---   The functions 'anchor' and 'anchorAll' run an 'FRaft' computation
+--   This monad is mostly used as a component of the 'Hoist' monad, which
+--   ensures that variables from the current raft are in the current
+--   type environment.
+--   The function 'anchorAll' runs an 'FRaft' computation
 --   and put its result inside the raft that is produced.
 newtype FRaft a = FRaft (WriterT Raft F a)
               deriving(Functor, Applicative, Monad, MonadIO)
@@ -218,9 +271,13 @@ instance FlattenMonad FRaft where
 
 runFRaft (FRaft m) = runWriterT m
 
+getRaft :: FRaft a -> FRaft (a, Raft)
+getRaft (FRaft m) = FRaft (listen m)
+
 liftF :: F a -> FRaft a
 liftF m = FRaft $ lift m
 
+{-
 -- | Prohibit floating here.  It's a run-time error if any code is moved past
 --   this point.
 noFloat :: FRaft a -> F a
@@ -228,6 +285,7 @@ noFloat (FRaft m) = do
   (x, w) <- runWriterT m
   case w of Here -> return x
             _ -> internalError "noFloat"
+-}
 
 -- | A CPS-transformed 'FRaft'.  In a sequence of computations, each
 --   computation executes inside the context produced by the previous
@@ -273,14 +331,6 @@ float r = liftHoist $ FRaft $ tell r
 --   Preexisting bindings are added to the environment by 'withBinder'.
 assumeHoistedType v ty = Hoist $ \k -> assume v ty $ k ()
 
--- | Get the bindings that mention the given variables and apply them to the
---   expression.
-anchor :: [Var] -> Hoist ExpM -> FRaft ExpM
-anchor vs m = FRaft $ WriterT $ do
-  ((x, ty), raft) <- runFRaft $ runHoist (m >>= computeTypeForAnchor)
-  let (dependent, independent) = partitionRaft (Set.fromList vs) raft
-  return (applyRaft dependent ty x, independent)
-
 anchorAll :: Hoist ExpM -> F ExpM
 anchorAll m = do
   ((x, ty), raft) <- runFRaft $ runHoist (m >>= computeTypeForAnchor)
@@ -289,6 +339,24 @@ anchorAll m = do
 computeTypeForAnchor e = do
   ty <- liftHoist $ inferExpType e
   return (e, ty)
+
+-- | Do not hoist bindings past this point if they mention any
+--   variables in 'vs'
+anchor :: [Var] -> Hoist ExpM -> Hoist ExpM
+anchor vs m = Hoist $ \k -> do
+  -- Run 'm' and anchor variables.  Get the raft that is left after anchoring.
+  (e, raft) <- getRaft $ anchorRaft vs m
+
+  -- Add the raft to the type environment
+  assumeRaft raft $ k e
+
+-- | Get the bindings that mention the given variables and apply them to the
+--   expression.  This is a helper function for 'anchor'.
+anchorRaft :: [Var] -> Hoist ExpM -> FRaft ExpM
+anchorRaft vs m = FRaft $ WriterT $ do
+  ((x, ty), raft) <- runFRaft $ runHoist (m >>= computeTypeForAnchor)
+  let (dependent, independent) = partitionRaft (Set.fromList vs) raft
+  return (applyRaft dependent ty x, independent)
 
 -------------------------------------------------------------------------------
 -- Flattening expressions
@@ -378,7 +446,7 @@ flattenExp exp@(ExpM expression) =
        flattenExp body
 
      LetfunE inf group body -> do
-       group' <- liftT flattenLocalGroup group
+       group' <- flattenLocalGroup group
        -- Turn the letfun-binding into a raft
        float $ LetfunR inf group' Here
        flattenExp body
@@ -424,6 +492,52 @@ flattenCaseExp case_exp inf scr sps alts = do
       alts' <- liftHoist $ liftF $ visitAlts alts
       return $ ExpM $ CaseE inf scr' sps' alts'
 
+-- | Flatten a definition group in the 'Hoist' monad.
+--   Bindings from functions in the group, as well as from the body,
+flattenGroup_Hoist :: Rename.Renameable (t Mem) =>
+                    (t Mem -> Type) -- ^ Get type of an entity
+             -> ([Var] -> DefAnn -> t Mem -> Hoist (t Mem)) -- ^ Flatten an entity
+             -> DefGroup (Def t Mem)               -- ^ The definition group
+             -> Hoist (DefGroup (Def t Mem))
+flattenGroup_Hoist get_type flatten_entity (NonRec def) = do
+  -- Flatten in the function body
+  new_definiens <- flatten_entity [] (defAnnotation def) $ definiens def
+  new_ann <- liftHoist $ renameF $ defAnnotation def
+
+  -- Give the function a new name if appropriate
+  let fun_binder = (definiendum def ::: get_type (definiens def))
+
+  -- After renaming the binder, continue with the body
+  new_binder@(new_name ::: new_type) <- liftT (withBinder False) fun_binder
+  let def' = Def new_name new_ann new_definiens
+  return (NonRec def')
+
+flattenGroup_Hoist get_type flatten_entity (Rec defs) = do
+  -- Rename variables that shadow existing names
+  let binders = [definiendum d ::: get_type (definiens d) | d <- defs]
+  new_binders <- liftT (withBinders False) binders
+  let def_vars = map binderVar new_binders
+
+  -- Rename local definitions
+  new_anns <- liftHoist $ mapM (renameF . defAnnotation) defs
+  new_definientia <-
+    mapM (\d -> flatten_entity def_vars (defAnnotation d) (definiens d)) defs
+
+  -- Continue with the body
+  let defs' = zipWith3 Def def_vars new_anns new_definientia
+  return (Rec defs')
+
+flattenLocalGroup :: DefGroup (FDef Mem)
+                  -> Hoist (DefGroup (FDef Mem))
+flattenLocalGroup = flattenGroup_Hoist functionType flatten_function
+  where
+    flatten_function bound_vs ann f =
+      -- If function is definitely called, then allow code to be hoisted out
+      -- of the function.
+      if defAnnCalled ann
+      then flattenFun bound_vs f
+      else liftHoist $ liftF $ visitFun f
+
 -- NB: Global variables are never renamed by 'flattenGroup'.
 -- Due to how global type environments are handled, global variables
 -- are in scope at their own definitions.  However, renaming removes
@@ -432,10 +546,10 @@ flattenCaseExp case_exp inf scr sps alts = do
 flattenGroup :: Rename.Renameable (t Mem) =>
                 Bool            -- ^ Whether this is a global binding
              -> (t Mem -> Type) -- ^ Get type of an entity
-             -> (DefAnn -> t Mem -> FRaft (t Mem)) -- ^ Flatten an entity
+             -> (DefAnn -> t Mem -> F (t Mem)) -- ^ Flatten an entity
              -> DefGroup (Def t Mem)               -- ^ The definition group
-             -> (DefGroup (Def t Mem) -> FRaft a)  -- ^ Flatten body
-             -> FRaft a
+             -> (DefGroup (Def t Mem) -> F a)  -- ^ Flatten body
+             -> F a
 flattenGroup is_global get_type flatten_entity (NonRec def) f = do
   -- Flatten in the function body
   new_definiens <- flatten_entity (defAnnotation def) $ definiens def
@@ -450,7 +564,7 @@ flattenGroup is_global get_type flatten_entity (NonRec def) f = do
   let fun_binder = (definiendum def ::: get_type (definiens def))
   if is_global
     then assumeBinder fun_binder $ flatten_body fun_binder
-    else withBinder fun_binder flatten_body
+    else withBinder False fun_binder flatten_body
 
 flattenGroup is_global get_type flatten_entity (Rec defs) f = do
   -- After renaming, continue with the local functions and body
@@ -466,22 +580,14 @@ flattenGroup is_global get_type flatten_entity (Rec defs) f = do
   let binders = [definiendum d ::: get_type (definiens d) | d <- defs]
   if is_global
     then assumeBinders binders $ flatten_body binders
-    else withBinders binders flatten_body
-
-flattenLocalGroup :: DefGroup (FDef Mem)
-                  -> (DefGroup (FDef Mem) -> FRaft a)
-                  -> FRaft a
-flattenLocalGroup = flattenGroup False functionType flatten_function
-  where
-    flatten_function ann f = liftF $ visitFun f
+    else withBinders False binders flatten_body
 
 flattenGlobalGroup :: DefGroup (Def Ent Mem)
-                   -> (DefGroup (Def Ent Mem) -> FRaft a)
-                   -> FRaft a
-
+                   -> (DefGroup (Def Ent Mem) -> F a)
+                   -> F a
 flattenGlobalGroup = flattenGroup True entityType flatten_ent
   where
-  flatten_ent ann e = liftF $ visitEnt e
+    flatten_ent ann e = visitEnt e
 
 -- | Perform flattening in an expression, but do not hoist any terms out
 --   of the expression.
@@ -536,22 +642,24 @@ extractSingleCaseAlternative alts =
       of ExpM (ExceptE {}) -> True
          _                 -> False
 
-{-
 -- | Perform flattening in a function body, extracting code if possible.
 --   It is only safe to extract code from functions that are
 --   _definitely_ called.
-flattenFun :: Renaming -> FunM -> F (FunM, Raft)
-flattenFun rn (FunM (Fun inf ty_params params ret body)) =
-  runFRaft flatten_fun
-  where
-    flatten_fun = 
-      withTyParams rn ty_params $ \rn1 ty_params' ->
-      withPatMs rn1 params $ \rn2 params' -> do
-        let local_vars = map tyPatVar ty_params' ++ map patMVar params'
-        let ret' = rename rn2 ret
-        body' <- anchor rn2 local_vars $ flattenExp body
-        return $ FunM $ Fun inf ty_params' params' ret' body'
--}
+--
+--   This function may be part of a recursive binding, in which case
+--   any code using the recursive variables must remain inside the function.  
+--   Recursive bound variables (if any) are passed in as parameters.
+flattenFun :: [Var] -> FunM -> Hoist FunM
+flattenFun bound_vs (FunM (Fun inf ty_params params ret body)) = do
+  -- Always rename the function parameters to avoid name shadowing.
+  -- The function parameter bindings may be moved under other bindings.
+  ty_params' <- liftT withFreshTyParams ty_params
+  params' <- liftT withFreshPatMs params
+
+  let local_vars = bound_vs ++ map tyPatVar ty_params' ++ map patMVar params'
+  ret' <- liftHoist $ renameF ret
+  body' <- anchor local_vars $ flattenExp body
+  return $ FunM $ Fun inf ty_params' params' ret' body'
 
 flattenGlobals = withMany flattenGlobalGroup
 
@@ -567,11 +675,8 @@ flattenModule (Module name imports defs exports) = do
         -- Add imports to the type environment; don't transform them
         assumeGDefGroup (Rec imports) (return ()) $
 
-        -- Cannot float bindings to the top level
-        noFloat $
-
         -- Flatten all global bindings and exported bindings
         flattenGlobals defs $ \defs' -> do
-          exports' <- liftF $ mapM visitExport exports
+          exports' <- mapM visitExport exports
           return (defs', exports')
       return $ Module name imports defs' exports'

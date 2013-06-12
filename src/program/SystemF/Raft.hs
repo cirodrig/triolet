@@ -161,4 +161,15 @@ altFreeVariables (RaftAlt decon tyob_param params body) =
 
 -- | Add a raft's bound variables to the environment
 assumeRaft :: TypeEnvMonad m => Raft -> m a -> m a
-assumeRaft raft m = undefined
+assumeRaft Here m = m
+assumeRaft (LetR _ b _ body) m =
+  assumePatM b $ assumeRaft body m
+assumeRaft (LetfunR _ g body) m =
+  let def_binders = [definiendum d ::: functionType (definiens d)
+                    | d <- defGroupMembers g]
+  in assumeBinders def_binders $ assumeRaft body m
+assumeRaft (Case1R _ _ _ (RaftAlt decon tyob params body) _) m =
+  assumeBinders (deConExTypes decon) $
+  maybe id assumePatM tyob $
+  assumePatMs params $
+  assumeRaft body m
