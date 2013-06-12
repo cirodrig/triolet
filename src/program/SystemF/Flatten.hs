@@ -442,7 +442,7 @@ flattenExp exp@(ExpM expression) =
        rhs' <- flattenExp rhs
        b' <- liftT withPatM b
        -- Turn the let-binding into a raft
-       float $ LetR inf b' rhs' Here
+       floatLetBinding inf b' rhs'
        flattenExp body
 
      LetfunE inf group body -> do
@@ -464,6 +464,17 @@ flattenExp exp@(ExpM expression) =
      ArrayE inf ty es ->
        ExpM <$> (ArrayE inf <$> renameH ty
                             <*> mapM flattenExp es)
+
+-- | Float a let-binding.  If the right-hand side is a lambda term, convert
+--   it to a nonrecursive letfun binding.
+floatLetBinding inf pat rhs =
+  case rhs
+  of ExpM (LamE _ f) ->
+       let fun_def = modifyDefAnnotation (\a -> a {defAnnUses = patMDmd pat}) $
+                     mkDef (patMVar pat) f
+           group = NonRec fun_def
+       in float $ LetfunR inf group Here
+     _ -> float $ LetR inf pat rhs Here
 
 flattenCaseExp :: ExpM -> ExpInfo -> ExpM -> [ExpM] -> [AltM] -> Hoist ExpM
 flattenCaseExp case_exp inf scr sps alts = do
