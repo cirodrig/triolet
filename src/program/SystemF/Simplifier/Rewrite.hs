@@ -363,6 +363,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (coreBuiltin The_mulI, rwMulInt)
             , (coreBuiltin The_floordivI, rwFloorDivInt)
             , (coreBuiltin The_modI, rwModInt)
+            , (coreBuiltin The_maxU, rwMaxUint)
             ]
 
     exprs = [(coreBuiltin The_count, count_expr)]
@@ -1363,6 +1364,15 @@ rwModInt inf [] [e1, e2]
     zero_lit = ExpM $ LitE inf (IntL 0 intT)
 
 rwModInt _ _ _ = return Nothing
+
+rwMaxUint :: RewriteRule
+rwMaxUint inf [] [e1, e2]
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+      let IntL m t = l1
+          IntL n _ = l2
+      in return $! Just $! ExpM (LitE inf (IntL (max m n) t))
+
+rwMaxUint _ _ _ = return Nothing
 
 rwGcd :: RewriteRule
 rwGcd inf [] [e1, e2]
