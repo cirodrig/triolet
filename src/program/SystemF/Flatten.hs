@@ -373,9 +373,9 @@ bindNewVariable :: ExpM -> Hoist ExpM
 bindNewVariable rhs = do
   ty <- liftHoist $ liftF $ inferExpType rhs
   v <- liftHoist $ liftF $ newAnonymousVar ObjectLevel
-  let binder = setPatMDmd (Dmd OnceUnsafe Used) $ patM (v ::: ty)
+  let binder = patM (v ::: ty)
       inf = expInfo $ fromExpM rhs
-  float $ LetR inf binder rhs Here
+  floatLetBinding inf binder rhs
   assumeHoistedType v ty
   return $ ExpM $ VarE inf v
 
