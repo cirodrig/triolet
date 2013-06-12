@@ -99,6 +99,7 @@ import Common.Error
 import Common.Identifier
 import Common.MonadLogic
 import Common.Supply
+import Builtins.Builtins
 import SystemF.Rename
 import SystemF.Syntax
 import SystemF.Raft
@@ -119,12 +120,15 @@ context s m = do liftIO $ putStrLn ("Begin " ++ s)
                  return x
 
 -- | Return True if the expression is a trivial expression. 
---   A trivial expression is a variable or literal.
+--   A trivial expression is a variable, literal, or the data values
+--   @True@ or @False@.
 isTrivialExp :: ExpM -> Bool
 isTrivialExp (ExpM e) = 
   case e
   of VarE {} -> True
      LitE {} -> True
+     ConE _ (VarCon v [] []) [] Nothing []
+       | v `isCoreBuiltin` The_True || v `isCoreBuiltin` The_False -> True
      _       -> False
 
 -- | Give a new name to a variable if the current name is already in scope.
