@@ -735,25 +735,32 @@ data IndexableDict (t : box -> box) : box
    forall a: box. ReprBox a -> t a -> BoxIndex (shape t) -> a,
    -- slice
    forall a: box.
-   ReprBox a -> t a -> shape t -> BoxOffset (shape t) -> SomeIndexable (shape t) a
+   ReprBox a -> t a -> shape t -> BoxOffset (shape t) -> SomeIndexable (shape t) a,
+   -- preserveHint
+   forall a : box. t a -> t a
   );
 };
 
 ix_shape @(t : box -> box) (ix : IndexableDict t)
     -> forall a : box. t a -> shape t attribute(inline) =
-    case ix of indexableDict tyob f sh at sl.
+    case ix of indexableDict tyob f sh at sl ph.
     sh;
 
 ix_at @(t : box -> box) (ix : IndexableDict t)
     -> forall a : box. ReprBox a -> t a -> BoxIndex (shape t) -> a attribute(inline) =
-    case ix of indexableDict tyob f sh at sl.
+    case ix of indexableDict tyob f sh at sl ph.
     at;
 
 ix_slice @(t : box -> box) (ix : IndexableDict t)
     -> forall a : box. ReprBox a -> t a -> shape t -> BoxOffset (shape t)
        -> SomeIndexable (shape t) a attribute(inline) =
-    case ix of indexableDict tyob f sh at sl.
+    case ix of indexableDict tyob f sh at sl ph.
     sl;
+
+ix_preserveHint @(t : box -> box) (ix : IndexableDict t)
+    -> forall a : box. t a -> t a attribute(inline) =
+    case ix of indexableDict tyob f sh at sl ph.
+    ph;
 
 data SomeIndexable (d a : box) : box
 {
@@ -3544,7 +3551,8 @@ Indexable_view @(sh : box) (sh_shape : ShapeDict sh)
   (Functor_view @sh)
   (shape_view @sh sh_shape)
   (at_view @sh sh_shape)
-  (slice_view @sh sh_shape);
+  (slice_view @sh sh_shape)
+  (preserve_view @sh sh_shape);
 
 
 shape_view @(d : box) (sh_shape : ShapeDict d)
@@ -3585,6 +3593,13 @@ slice_view @(d : box) (sh_shape : ShapeDict d)
     (con_view @d @a dom g);
 
 
+preserve_view @(d : box) (sh_shape : ShapeDict d)
+  -> forall a : box. view d a -> view d a attribute(inline) =
+
+  -- There is no advantage to disabling optimization on views
+  \ @(a : box) (x : view d a) -> view d a. x;
+
+
 -- Workaround for inlining
 -- FIXME: Handle recursion properly
 Indexable_view2 @(sh : box) (sh_shape : ShapeDict sh)
@@ -3594,7 +3609,8 @@ Indexable_view2 @(sh : box) (sh_shape : ShapeDict sh)
   (Functor_view @sh)
   (shape_view @sh sh_shape)
   (at_view @sh sh_shape)
-  (slice_view2 @sh sh_shape);
+  (slice_view2 @sh sh_shape)
+  (preserve_view @sh sh_shape);
 
 
 slice_view2 @(d : box) (sh_shape : ShapeDict d)
@@ -3729,7 +3745,8 @@ Indexable_list : IndexableDict (\ (a : box). Boxed (list (AsBare a))) =
   Functor_list
   shape_list
   at_list
-  slice_list;
+  slice_list
+  preserve_list;
 
 
 shape_list @(a : box) (lst : Boxed (list (AsBare a)))
@@ -3778,6 +3795,12 @@ slice_list @(a : box) (rep : ReprBox a)
   (con_boxed @(ListSection a) (unboxedinfo ListSection @a)
    (listSection @a @M slice_size
     (subarray @N @M @(AsBare a) sa_a ay (unboxIntValue off))));
+
+
+-- There is no advantage to disabling optimization on lists
+preserve_list @(a : box) (x : Boxed (list (AsBare a)))
+  -> Boxed (list (AsBare a)) attribute(inline) =
+  x;
 
 
 Traversable_list : TraversableDict (\ (a : box). Boxed (list (AsBare a))) =
@@ -3832,7 +3855,8 @@ map_ListSection @(a b : box)
 Indexable_ListSection : IndexableDict (\ (a : box). Boxed (ListSection a)) =
   indexableDict @(\ (a : box). Boxed (ListSection a))
   (boxedinfo indexableDict @(\ (a : box). Boxed (ListSection a)))
-  Functor_ListSection shape_ListSection at_ListSection slice_ListSection;
+  Functor_ListSection shape_ListSection at_ListSection slice_ListSection
+  preserve_ListSection;
 
 
 shape_ListSection @(a : box) (s : Boxed (ListSection a)) -> list_dim =
@@ -3875,6 +3899,13 @@ slice_ListSection @(a : box)
    (listSection @a @M slice_size sliced_array));
 
 
+-- Don't deconstruct ListSections that are used in distributed computation
+preserve_ListSection @(a : box) (x : Boxed (ListSection a))
+  -> Boxed (ListSection a) attribute(inline) =
+
+  preserve @(Boxed (ListSection a)) x;
+
+
 traverse_ListSection @(a : box)
   (rep : ReprBox a) (s : Boxed (ListSection a)) -> Stream list_dim a =
 
@@ -3913,7 +3944,8 @@ Indexable_Zip2Indexable @(d : box) (sh : ShapeDict d)
   (Functor_Zip2Indexable @d)
   (shape_Zip2Indexable @d sh)
   (at_Zip2Indexable @d sh)
-  (slice_Zip2Indexable @d sh);
+  (slice_Zip2Indexable @d sh)
+  (preserve_Zip2Indexable @d sh);
 
 
 shape_Zip2Indexable @(domain : box) (sh : ShapeDict domain)
@@ -3966,6 +3998,15 @@ slice_Zip2Indexable @(domain : box) (sh : ShapeDict domain)
        (coerce @(AsBox (offset domain)) @(AsBox (offset (shape t))) off))));
 
 
+preserve_Zip2Indexable @(d : box) (sh : ShapeDict d)
+  -> forall a : box. Zip2Indexable d a -> Zip2Indexable d a attribute(inline) =
+
+  \ @(a : box) (x : Zip2Indexable d a) -> Zip2Indexable d a.
+    case x of zip2Indexable @(b c : box) tyob rep_b rep_c f c1 c2.
+    zip2Indexable @d @a @b @c tyob rep_b rep_c f
+    (preserve_SomeIndexable @d @b c1) (preserve_SomeIndexable @d @c c2);
+
+
 -- Workaround for inlining
 -- FIXME: Handle recursion properly
 Indexable_Zip2Indexable2 @(d : box) (sh : ShapeDict d)
@@ -3974,9 +4015,49 @@ Indexable_Zip2Indexable2 @(d : box) (sh : ShapeDict d)
   (Functor_Zip2Indexable @d)
   (shape_Zip2Indexable @d sh)
   (at_Zip2Indexable @d sh)
-  (slice_Zip2Indexable2 @d sh);
+  (slice_Zip2Indexable2 @d sh)
+  (preserve_Zip2Indexable @d sh);
 
 slice_Zip2Indexable2 @(domain : box) (sh : ShapeDict domain)
+  -> forall a : box. ReprBox a -> Zip2Indexable domain a -> domain
+     -> BoxOffset domain -> SomeIndexable domain a
+  attribute(inline) =
+
+  \ @(a : box)
+    (rep : ReprBox a) (x : Zip2Indexable domain a)
+    (dom : domain) (off : BoxOffset domain)
+    -> SomeIndexable domain a.
+
+    case x of zip2Indexable @c @d tyob rep_c rep_d f si1 si2.
+    case si1 of someIndexable @s tyob c1 ix1 container1.
+    case si2 of someIndexable @t tyob c2 ix2 container2.
+    
+    con_someIndexable @domain @a @(Zip2Indexable domain)
+    (idCoercion @domain)
+    (Indexable_Zip2Indexable3 @domain sh)
+    (con_zip2Indexable @domain @a @c @d rep_c rep_d f
+     (coerce @(SomeIndexable (shape s) c) @(SomeIndexable domain c)
+      (ix_slice @s ix1 @c rep_c container1
+       (coerce @domain @(shape s) dom)
+       (coerce @(AsBox (offset domain)) @(AsBox (offset (shape s))) off)))
+     (coerce @(SomeIndexable (shape t) d) @(SomeIndexable domain d)
+      (ix_slice @t ix2 @d rep_d container2
+       (coerce @domain @(shape t) dom)
+       (coerce @(AsBox (offset domain)) @(AsBox (offset (shape t))) off))));
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+Indexable_Zip2Indexable3 @(d : box) (sh : ShapeDict d)
+  -> IndexableDict (Zip2Indexable d) =
+  indexableDict @(Zip2Indexable d) (boxedinfo indexableDict @(Zip2Indexable d))
+  (Functor_Zip2Indexable @d)
+  (shape_Zip2Indexable @d sh)
+  (at_Zip2Indexable @d sh)
+  (slice_Zip2Indexable3 @d sh)
+  (preserve_Zip2Indexable @d sh);
+
+slice_Zip2Indexable3 @(domain : box) (sh : ShapeDict domain)
   -> forall a : box. ReprBox a -> Zip2Indexable domain a -> domain
      -> BoxOffset domain -> SomeIndexable domain a
   attribute(inline_never) =
@@ -3992,7 +4073,7 @@ slice_Zip2Indexable2 @(domain : box) (sh : ShapeDict domain)
     
     con_someIndexable @domain @a @(Zip2Indexable domain)
     (idCoercion @domain)
-    (Indexable_Zip2Indexable2 @domain sh)
+    (Indexable_Zip2Indexable3 @domain sh)
     (con_zip2Indexable @domain @a @c @d rep_c rep_d f
      (coerce @(SomeIndexable (shape s) c) @(SomeIndexable domain c)
       (ix_slice @s ix1 @c rep_c container1
@@ -4328,7 +4409,7 @@ preserve_SomeIndexable @(d a : box) (si : SomeIndexable d a)
 
   case si of someIndexable @t tyob t_has_shape_d indexable_dict container.
   someIndexable @d @a @t tyob t_has_shape_d indexable_dict
-  (preserve @(t a) container);
+  (ix_preserveHint @t indexable_dict @a container);
 
 
 -- Distribute the elements of a 'SomeIndexable' and map a function over them
