@@ -10,7 +10,8 @@ module SystemF.Datatypes.InfoCall
         callConstantUnboxedInfoFunction,
         callBoxedInfoFunction,
         callConstantBoxedInfoFunction,
-        constructInfo)
+        constructInfo,
+        hasConstantLayout)
 where
 
 import Prelude hiding(catch)
@@ -207,3 +208,48 @@ callBoxedInfoFunction type_info dcon_type ty_args ex_types = do
     args <- sequence m_args
     return $ varAppE' (dataTypeBoxedInfoVar data_type con) ty_args args
 
+-------------------------------------------------------------------------------
+
+-- | Decide whether an object of the given type has a constant memory layout.
+--   Layout is constant iff it isn't a function of run-time type information.
+hasConstantLayout :: Type -> UnboxedTypeEvalM Bool
+hasConstantLayout ty =
+  condM (reduceToWhnf ty)
+  [ -- Type constructor: Check layout of size parameters
+    do Just (op, args) <- liftM fromVarApp it
+       Just data_type <- lift $ lookupDataType op
+       lift $ hasConstantAlgDataTypeLayout data_type args
+
+  , -- Coercions have constant layout
+    do (CoT _, _) <- liftM fromTypeApp it
+       return True
+
+  , -- Unboxed tuples have constant layout if all their
+    -- field layouts are constant
+    do (UTupleT ks, ts) <- liftM fromTypeApp it
+       lift $ allM hasConstantFieldLayout $ zipWith KindedType ks ts
+
+    -- Otherwise, layout is not constant
+  , return False
+  ]
+
+-- | An algebraic data type has a statically determined layout if all its
+--   size parameters have statically determined layouts
+hasConstantAlgDataTypeLayout data_type ty_args = do
+  -- Check layout of size parameters and static types for this constructor
+  size_param_types <- instantiateSizeParams data_type ty_args
+  static_types <- instantiateStaticTypes data_type ty_args
+  allM hasConstantFieldLayout $ size_param_types ++ static_types
+
+-- Layout of any boxed field is a pointer
+hasConstantFieldLayout (KindedType BoxK _)      = return True
+hasConstantFieldLayout (KindedType BareK t)     = hasConstantLayout t
+hasConstantFieldLayout (KindedType ValK t)      = hasConstantLayout t
+hasConstantFieldLayout (KindedType IntIndexK t) = isConstantInt t
+
+isConstantInt ty = do
+  ty' <- reduceToWhnf ty
+  case ty' of
+    IntT _ -> return True
+    _      -> return False
+  

@@ -1095,6 +1095,12 @@ planFlattening mode ty spc = do
          aguard $ dataTypeIsAbstract dtype
          lift id_decomp
 
+      -- Don't flatten data types whose layout is not statically fixed. 
+      -- (Polymorphism can produce types with non-fixed layout).
+    , do known_rep <- lift $ liftTypeEvalM $ hasConstantLayout whnf_type
+         aguard (not known_rep)
+         lift id_decomp
+
     , do Decond (VarDeCon spc_con _ _) spcs <- it
          lift $ decon_decomp spc_con (Just spcs)
 
