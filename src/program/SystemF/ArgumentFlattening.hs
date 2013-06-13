@@ -1072,21 +1072,9 @@ planFlattening mode ty spc = do
          _ -> id_decomp
 
   cond spc $
-    [ -- Don't flatten or remove Repr or FIInt parameters, because later
-      -- stages of the compiler might want to access them.
-      do Just (op, _) <- return $ fromVarApp whnf_type
-         aguard (op == coreBuiltin The_Repr || op == coreBuiltin The_FIInt)
-         lift id_decomp
-
-    , -- Remove dead fields
+    [ -- Remove dead fields
       do Unused <- return spc
          lift dead_decomp
-
-    , -- Don't flatten dictionary parameters.
-      -- They can be removed if dead.
-      do Just (op, _) <- return $ fromVarApp whnf_type
-         aguard $ isDictionaryTypeCon op
-         lift id_decomp
 
     , -- Don't flatten abstract data types.
       -- They can be removed if dead.
