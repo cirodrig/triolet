@@ -21,6 +21,9 @@
 // True while scanning memory images
 static int scanning_images = 0;
 
+// Path of the main program image
+static const char *main_image_path = NULL;
+
 struct SectionName {
   const char *segment;
   const char *section;
@@ -37,6 +40,18 @@ static const struct SectionName sections[] = {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static void
+use_section(const Dl_info *dynamic_linker_info,
+            const struct SectionName *section,
+            const intptr_t start,
+            const intptr_t end);
+
+static void
+scan_image (const struct mach_header *_header, intptr_t slide);
+
+static void
+get_main_image_path(void);
+
 /* Examine a single loaded memory section */
 static void
 use_section(const Dl_info *dynamic_linker_info,
@@ -51,13 +66,24 @@ use_section(const Dl_info *dynamic_linker_info,
          dynamic_linker_info->dli_fname);
 #endif
 
-    
-  // Is the image from the Triolet library?
-  if (triolet_is_rts_path(dynamic_linker_info->dli_fname)) {
-    /* Include this address range in the Triolet library address range */
-    triolet_extend_address_range(&Triolet_library_address_start,
-                                 &Triolet_library_address_end,
-                                 (void *)start, (void *)end);
+  const char *path = dynamic_linker_info->dli_fname;
+  void *sa = (void *)start;
+  void *ea = (void *)end;
+
+  if (path != NULL) {
+    // Is the image from the Triolet library?
+    if (triolet_is_rts_path(path)) {
+      /* Include this address range in the Triolet library address range */
+      triolet_extend_address_range(&Triolet_library_address_start,
+                                   &Triolet_library_address_end,
+                                   sa, ea);
+    }
+    // Is the image from the main program?
+    else if (strcmp(path, main_image_path) == 0) {
+      triolet_extend_address_range(&Triolet_program_address_start,
+                                   &Triolet_program_address_end,
+                                   sa, ea);
+    }
   }
 }
 
@@ -102,9 +128,37 @@ scan_image (const struct mach_header *_header, intptr_t slide)
 
 }
 
+// Find the path of the main program's image and write it to
+// 'main_image_path'.  The path is a statically allocated string.
+// It should not be freed.
+static void
+get_main_image_path(void)
+{
+  void *main = dlsym(RTLD_DEFAULT, "main");
+  if (main == NULL) {
+    // This error should never happen. 'main' is always part of the program.
+    exit(-1);
+  }
+
+  Dl_info dynamic_linker_info;
+  if (dladdr(main, &dynamic_linker_info) == 0) {
+    // This error should never happen. 'main' is always part of the program.
+    exit(-1);
+  }
+
+  if (dynamic_linker_info.dli_fname == NULL) {
+    // Should never happen; main image always has a path
+    exit(-1);
+  }
+
+  main_image_path = dynamic_linker_info.dli_fname;
+}
+
 void
 triolet_scan_memory_map_darwin(void)
 {
+  get_main_image_path();
+
   scanning_images = 1;
 
   /* The given callback will be called for each loaded image */
