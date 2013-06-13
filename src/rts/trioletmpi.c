@@ -18,6 +18,7 @@ static void MPIMessage_recv(int src_rank, MPIMessage *msg);
 
 
 // Called from rank 0
+static void assertRank0(void);
 static int getIdleProcess(void);
 static void markProcessIdle(int);
 static void onTermination(void);
@@ -80,6 +81,18 @@ MPIMessage_recv(int src_rank, MPIMessage *msg)
   }
   msg->length = length;
   msg->data = data;
+}
+
+static void
+assertRank0(void)
+{
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  if (rank != 0) {
+    fprintf(stderr,
+            "Worker performed an action that is only permitted on the main process\n");
+    exit(-1);
+  }
 }
 
 // Called from rank 0.
@@ -212,6 +225,8 @@ void create_message(MPIMessage * msg, char *data, int count) {
 // This function can only be called from rank 0.
 // Launch some work on an idle process.  Error if there are no idle processes.
 MPITask triolet_MPITask_launch(int length, char *data) {
+  assertRank0();
+
   int dst = getIdleProcess();
   if (dst == -1) {
     fprintf(stderr, "No idle processes\n");
@@ -244,6 +259,7 @@ MPITask triolet_MPITask_launch(int length, char *data) {
 // Deallocate the task object.
 void *
 triolet_MPITask_wait(MPITask task) {
+  assertRank0();
 
   // Wait and get the result of the task
   MPIMessage output;
