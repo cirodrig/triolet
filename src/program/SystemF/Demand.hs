@@ -414,7 +414,7 @@ unknownVarDmd = (unknownDmd, nonCallDmd)
 --   the number of arguments and the demand on its result
 calleeDmd :: Int -> VarDmd -> VarDmd
 calleeDmd 0 d = d               -- No change if no arguments are applied
-calleeDmd n_args (Dmd m result_s, result_call_dmd) =
+calleeDmd n_args (Dmd _ result_s, result_call_dmd) =
   let call_s =
         calledSpecificity n_args Nothing result_s
       call_dmd =
@@ -424,7 +424,7 @@ calleeDmd n_args (Dmd m result_s, result_call_dmd) =
                           of CallUsed n -> n
                              CallUnused -> 0
         in CallUsed (n_args + result_args)
-  in (Dmd m call_s, call_dmd)
+  in (Dmd OnceSafe call_s, call_dmd)
 
 -- | Check whether the function is certain to be passed at least N
 --   arguments
