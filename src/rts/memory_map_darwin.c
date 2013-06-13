@@ -55,18 +55,9 @@ use_section(const Dl_info *dynamic_linker_info,
   // Is the image from the Triolet library?
   if (triolet_is_rts_path(dynamic_linker_info->dli_fname)) {
     /* Include this address range in the Triolet library address range */
-    void *sa = (void *)start;
-    void *ea = (void *)end;
-    if (Triolet_library_address_start == 0) {
-      Triolet_library_address_start = sa;
-      Triolet_library_address_end = ea;
-    }
-    else {
-      Triolet_library_address_start =
-        min_addr(Triolet_library_address_start, sa);
-      Triolet_library_address_end =
-        max_addr(Triolet_library_address_end, ea);
-    }
+    triolet_extend_address_range(&Triolet_library_address_start,
+                                 &Triolet_library_address_end,
+                                 (void *)start, (void *)end);
   }
 }
 

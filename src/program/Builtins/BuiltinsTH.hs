@@ -906,6 +906,7 @@ builtinVariableNames =
   , "subarray"
   , "subarray_out"
   , "getNumDistributedPlaces"
+  , "inDistributedTask"
   , "farm"
   , "doall"
   , "for"

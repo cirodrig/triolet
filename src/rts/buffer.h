@@ -38,5 +38,8 @@ extern function core.internal.buffer.testCopyViaBuffer (owned, owned) -> owned;
 // Defined in memory_map.c
 extern data pointer builtin.Triolet_library_address_start
   "Triolet_library_address_start";
-import procedure triolet_global_pointer_offset (pointer) -> uint32;
+extern data pointer builtin.Triolet_program_address_start
+  "Triolet_program_address_start";
+import procedure triolet_library_pointer_offset (pointer) -> uint32;
+import procedure triolet_program_pointer_offset (pointer) -> uint32;
 

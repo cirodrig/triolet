@@ -13,6 +13,9 @@
 // Enables debugging output
 //#define CHATTY
 
+// Maximum size of the full path of the program (including terminating null)
+#define EXE_PATH_SIZE 1024
+
 ///////////////////////////////////////////////////////////////////////////////
 // Parsing for the proc filesystem
 
@@ -218,6 +221,18 @@ parse_memory_map_entry(struct map_entry *result, FILE *maps)
   return 0;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Other code
+
+static void
+use_memory_map_entry(struct map_entry *entry,
+                     int *entry_is_triolet_library,
+                     const char *exe_path,
+                     int previous_entry_is_triolet_library);
+
+static char *
+get_exepath(void);
+
 /* Scan the parsed memory map entry and update global memory map information.
  *
  * Caller should pass nonzero for 'previous_entry_is_triolet_library' if the
@@ -227,33 +242,62 @@ parse_memory_map_entry(struct map_entry *result, FILE *maps)
 static void
 use_memory_map_entry(struct map_entry *entry,
                      int *entry_is_triolet_library,
+                     const char *exe_path,
                      int previous_entry_is_triolet_library)
 {
   /* Is the filename's base name "libtrioletrts"? */
   int is_triolet_library = triolet_is_rts_path(entry->filename);
   *entry_is_triolet_library = is_triolet_library;
 
+  /* Is the filename equal to this executable's name? */
+  int is_exe =
+    entry->filename != NULL &&
+    strcmp(exe_path, entry->filename) == 0;
+
+  void *sa = (void *)entry->start_addr;
+  void *ea = (void *)entry->end_addr;
+
   if (is_triolet_library || previous_entry_is_triolet_library) {
     /* Include this address range in the Triolet library address range */
-    void *sa = (void *)entry->start_addr;
-    void *ea = (void *)entry->end_addr;
-    if (Triolet_library_address_start == 0) {
-      Triolet_library_address_start = sa;
-      Triolet_library_address_end = ea;
-    }
-    else {
-      Triolet_library_address_start =
-        min_addr(Triolet_library_address_start, sa);
-      Triolet_library_address_end =
-        max_addr(Triolet_library_address_end, ea);
-    }
+    triolet_extend_address_range(&Triolet_library_address_start,
+                                 &Triolet_library_address_end,
+                                 sa, ea);
   }
+
+  else if (is_exe) {
+    /* Include this address range in the program address range */
+    triolet_extend_address_range(&Triolet_program_address_start,
+                                 &Triolet_program_address_end,
+                                 sa, ea);
+  }
+}
+
+// Return the path of the current program.  The path is a dynamically allocated
+// string and should be freed with 'free'.
+static char *
+get_exepath(void)
+{
+  char *path = malloc(EXE_PATH_SIZE);
+
+  pid_t pid = getpid();
+  char proc_filename[30];
+  sprintf(proc_filename, "/proc/%u/exe", (unsigned int) pid);
+  int path_length = readlink(proc_filename, path, EXE_PATH_SIZE - 1);
+  if (path_length == -1) {
+    fprintf(stderr, "Cannot read executable path\n");
+    exit(-1);
+  }
+  path[path_length] = 0;
+
+  return path;
 }
 
 /* Search for the Triolet libraries in the memory map */
 void triolet_scan_memory_map_procfs(void)
 {
   FILE *maps;
+
+  const char *exe_path = get_exepath();
 
   /* Find and open the memory map */
   {
@@ -283,12 +327,14 @@ void triolet_scan_memory_map_procfs(void)
 
     use_memory_map_entry(&entry,
                          &entry_is_triolet_library,
+                         exe_path,
                          previous_entry_is_triolet_library);
 
     map_entry_finalize(&entry);
     previous_entry_is_triolet_library = entry_is_triolet_library;
   } while(1);
 
+  free((void *)exe_path);
   fclose(maps);
 }
 

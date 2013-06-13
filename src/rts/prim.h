@@ -106,8 +106,13 @@ extern function core.internal.prim.for
 
 extern function core.internal.prim.getNumDistributedPlaces
   (unit) -> SomeIndInt;
+extern function core.internal.prim.inDistributedTask
+  (unit) -> uint32;
 
+import procedure triolet_begin_distributed_task () -> ();
+import procedure triolet_end_distributed_task () -> ();
 import procedure triolet_get_num_distributed_places () -> int32;
+import procedure triolet_in_distributed_task() -> int32;
 
 import procedure triolet_MPITask_launch(int32, pointer) -> pointer;
 import procedure triolet_MPITask_wait(pointer, pointer) -> owned;

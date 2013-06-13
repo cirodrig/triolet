@@ -4402,6 +4402,10 @@ reduce_loop_dist @(d : box) @(a b : box)
 -- Number of distributed processing elements
 getNumDistributedPlaces : NoneType -> SomeIInt;
 
+-- True if called from a distributed task.
+-- FIXME: This function is not semantically sound, becuase its return value
+-- is not a function of its arguments!
+inDistributedTask : NoneType -> bool;
 
 -- Prevent deconstruction of the underlying data in a 'SomeIndexable'
 preserve_SomeIndexable @(d a : box) (si : SomeIndexable d a)
@@ -4427,8 +4431,11 @@ farm_SomeIndexable @(d : box) @(a b : box)
 
   let type dist_thunk = NoneType -> b in
 
-  -- Distribute into subdomains
-  case getNumDistributedPlaces None of
+  -- Distribute into subdomains.
+  -- If running in a worker thread, produce a single subdomain.
+  case if inDistributedTask None
+       then defineIntIndex 1
+       else getNumDistributedPlaces None of
     someIInt @(Nplaces : intindex) (nplaces : FIInt Nplaces).
   case nplaces of fiInt nplaces_i.
 

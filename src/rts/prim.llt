@@ -363,7 +363,7 @@ function extgcd_x (int x, int y) -> int {
 };
 
 // Get the number of distributed-memory processing elements.
-// Implemented in C code/
+// Implemented in C code
 function inline getNumDistributedPlaces (unit dummy) -> SomeIndInt {
 
 #ifdef USE_MPI
@@ -383,11 +383,31 @@ function inline doall (FinIndInt ix, owned f) -> unit {
   nil;
 };
 
+// Check whether executing in a distributed task
+function inline inDistributedTask (unit dummy) -> uint32 {
+  
+#ifdef USE_MPI
+  uint32 primcall triolet_in_distributed_task ();
+#else
+  false as uint32;
+#endif // USE_MPI
+};
+
 #ifdef USE_MPI
 
 function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
   FinIndInt {n} = ntasks;
 
+  if (uint32 primcall triolet_in_distributed_task () as bool) {
+    // Already executing a farmed task; run sequentially
+    owned primcall farm_sequential (n, rep_output, tasks);
+  }
+  else {
+    owned primcall farm_parallel (n, rep_output, tasks);
+  };
+};
+
+procedure farm_parallel (int n, owned rep_output, owned tasks) -> owned {
   // Error if number of tasks is less than 1
   _ = if (n < int 1) {
     () = () primcall exit(int -1);
@@ -396,7 +416,7 @@ function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
 
   typedef boxed_array = Boxed(array(value n, owned));
 
-  // Create temporary array to hold running tasks
+  // Create temporary array to hold running tasks and results
   typedef running_task_array = array(value n, pointer);
 
   // Launch all tasks but the last
@@ -411,7 +431,9 @@ function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
   };
 
   // Run the last task on this processor
+  () = () primcall triolet_begin_distributed_task ();
   local_result = owned call (tasks @! boxed_array.member[n - int 1]) (nil);
+  () = () primcall triolet_end_distributed_task ();
 
   // Collect results
   results = pointer primcall triolet_alloc (sizeof boxed_array);
@@ -423,7 +445,6 @@ function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
       owned primcall triolet_MPITask_wait (running_task);
     i + int 1;
   };
-
   results @! boxed_array.member[n - int 1] = local_result;
 
   results as owned;
@@ -436,6 +457,12 @@ function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
 function farm (FinIndInt ntasks, owned type_obj, owned tasks) -> owned {
   FinIndInt {n} = ntasks;
 
+  owned primcall farm_sequential (n, type_obj, tasks);
+};
+
+#endif // USE_MPI
+
+procedure farm_sequential (int n, owned type_obj, owned tasks) -> owned {
   // Error if number of tasks is less than 1
   _ = if (n < int 1) {
     () = () primcall exit(int -1);
@@ -450,17 +477,17 @@ function farm (FinIndInt ntasks, owned type_obj, owned tasks) -> owned {
 
   _ = while (int i = int 0) (i < n) {
     // Copy input and output to test buffer code
-    f_copy = owned call testCopyViaBuffer (null as owned, tasks @! boxed_array.member[i]);
+    //f_copy = owned call testCopyViaBuffer (null as owned, tasks @! boxed_array.member[i]);
+    f_copy = tasks @! boxed_array.member[i];
     x = owned call f_copy (nil);
-    x_copy = owned call testCopyViaBuffer (null as owned, x);
+    //x_copy = owned call testCopyViaBuffer (null as owned, x);
+    x_copy = x;
     results @! boxed_array.member[i] = x_copy;
     i + int 1;
   };
 
   results as owned;
 };
-
-#endif // USE_MPI
 
 procedure triolet_deserialize (uint32 length, pointer dat) -> owned {
   // FIXME: This buffer doesn't follow the memory layout rules for

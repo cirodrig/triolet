@@ -138,13 +138,34 @@ function inline putUnit (unit n, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function inline putPointer (pointer n, owned buf, unit dummy) -> unit {
+function putPointer (pointer n, owned buf, unit dummy) -> unit {
 #ifdef PRINT_PUTS
   () = () primcall triolet_db_int(int 205);
 #endif
-  dst = pointer primcall MkBuffer_allocate(buf, sizeof pointer, alignof pointer);
-  !dst = n;
-  nil;
+  // Once the segment and offset are identified, send them
+  letrec {
+    function write_pointer (uint index, uint offset) -> unit {
+      _ = unit call putUint (index, buf, dummy);
+      unit call putUint (offset, buf, dummy); 
+    }
+  };
+
+  // Try to send a program address first
+  offset = uint32 primcall triolet_program_pointer_offset(n);
+  if (offset != ~# uint32 0) {
+    unit call write_pointer (uint 1, offset as uint);
+  }
+  else {
+    // Then try to send a library address
+    offset = uint32 primcall triolet_library_pointer_offset(n);
+    if (offset != ~# uint32 0) {
+      unit call write_pointer (uint 2, offset as uint);
+    }
+    else {
+      // Unknown address range
+      unit primcall exit(int -1);
+    };
+  };
 };
 
 function inline putCursor (cursor n, owned buf, unit dummy) -> unit {
@@ -202,7 +223,7 @@ function putBoxedObject (owned x, owned buf, unit dummy) -> unit {
 #endif
   // If it's a global object, serialize the object's location in the global
   // memory area
-  global_offset = uint32 primcall triolet_global_pointer_offset (x as pointer);
+  global_offset = uint32 primcall triolet_library_pointer_offset (x as pointer);
   if (global_offset != ~# uint32 0) {
     _ = unit call putUint (uint 1, buf, dummy);
     unit call putUint (global_offset as uint, buf, dummy);
@@ -314,14 +335,34 @@ function inline getUnit (cursor buffer) -> ReadResult(unit) {
   ReadResult(unit) {buffer, nil};
 };
 
-function inline getPointer (cursor buffer) -> ReadResult(pointer) {
+function getPointer (cursor buffer) -> ReadResult(pointer) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 105);
 #endif
-  (start, end) =
-    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof pointer, alignof pointer);
-  n = pointer load start;
-  ReadResult(pointer) {end, n};
+  // Receive a segment and offset
+  ReadResult(uint) {buffer2, segment} =
+    ReadResult(uint) call getUint (buffer);
+
+  ReadResult(uint) {buffer3, offset} =
+    ReadResult(uint) call getUint(buffer2);
+
+  letrec {
+    function finish (pointer base_address) -> ReadResult(pointer) {
+      p = base_address ^+ (offset as int);
+      ReadResult(pointer) {buffer3, p};
+    }
+  };
+
+  // Translate the segment to a base address
+  if (segment == uint 1) {
+    ReadResult(pointer) call finish
+      (pointer load Triolet_program_address_start);
+  } else if (segment == uint 2) {
+    ReadResult(pointer) call finish
+      (pointer load Triolet_library_address_start);
+  } else {
+    ReadResult(pointer) primcall exit(int -1);
+  };
 };
 
 function inline getCursor (cursor buffer) -> ReadResult(cursor) {

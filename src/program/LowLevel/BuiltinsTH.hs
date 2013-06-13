@@ -399,6 +399,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_extgcd_x) |])
   , (CoreName module_prim "getNumDistributedPlaces",
      Right [| coreBuiltin (SystemF.The_getNumDistributedPlaces) |])
+  , (CoreName module_prim "inDistributedTask",
+     Right [| coreBuiltin (SystemF.The_inDistributedTask) |])
 
   , (CoreName module_prim "farm",
      Right [| coreBuiltin (SystemF.The_farm) |])

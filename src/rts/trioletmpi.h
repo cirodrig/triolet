@@ -4,6 +4,12 @@
 
 #ifdef USE_MPI
 
+// FIXME: This should be part of a thread-state object, but the infrastructure
+// for managing thread state objects isn't there
+typedef struct {
+  int runningDistributedTask;   /* Nonzero if running a distributed task */
+} ThreadState;
+
 typedef struct {
   int rank; //the id of node on which this task will run
 } *MPITask;
@@ -30,12 +36,24 @@ void *triolet_MPITask_wait(MPITask);
 // This function is implemented in Triolet.  Deserialize a single object.
 void *triolet_deserialize(int32_t length, char *data);
 
+// Begin executing a distributed task.
+// When the main rank runs a task, it calls this function.
+// Worker ranks processing 'MPITask's call this automatically.
+void triolet_begin_distributed_task(void);
+
+// Finish executing a distributed task.
+// When the main rank runs a task, it calls this function.
+// Worker ranks processing 'MPITask's call this automatically.
+void triolet_end_distributed_task(void);
+
 // This function is implemented in Triolet.  Run a task on a client.
 int32_t triolet_run_task(int32_t length, char *data, void (*)(int32_t, char *));
 
-// Exported to Triolet
+// Get the number of distributed execution places
 int32_t triolet_get_num_distributed_places(void);
 
+// Check whether the current processor is executing a distributed task
+int32_t triolet_in_distributed_task(void);
 
 #endif  /* USE_MPI */
 

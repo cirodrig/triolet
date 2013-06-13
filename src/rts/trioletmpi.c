@@ -34,6 +34,11 @@ static int numProcs; // number of processors in the system
 // is_busy[i] is zero iff node i+1 is idle.
 static int *is_busy;
 
+// State of this distributed task
+// FIXME: This should be part of a thread-state object, but the infrastructure
+// for managing thread state objects isn't there
+ThreadState thread_state = {0};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 static void
@@ -139,6 +144,7 @@ slaveProcess_sendResult(int32_t length, char *data);
 // Run a slave process
 static void
 slaveProcess(int rank) {
+  struct timeval t1, t2, t3;
   while(1) {
     // Receive a command from rank 0
     MPIMessage command;
@@ -158,7 +164,9 @@ slaveProcess(int rank) {
 
     // Run the command
     MPIMessage output;
+    triolet_begin_distributed_task();
     triolet_run_task(command.length, command.data, &slaveProcess_sendResult);
+    triolet_end_distributed_task();
     MPIMessage_finalize(&command);
   }
 
@@ -210,22 +218,15 @@ int triolet_MPITask_setup(int *argc, char ***argv) {
   return -1;
 }
 
-// create a task from a message and the node_id
-void create_task(MPITask task, int node_id) {
-  //	printf("create_task: Creating task\n");
-  task->rank = node_id;
-}
-
-// create a message from data and task
-void create_message(MPIMessage * msg, char *data, int count) {
-  msg->data = data;
-  msg->length = count;
-}
-
 // This function can only be called from rank 0.
 // Launch some work on an idle process.  Error if there are no idle processes.
 MPITask triolet_MPITask_launch(int length, char *data) {
+  // Correctness checks
   assertRank0();
+  if (triolet_in_distributed_task()) {
+    fprintf(stderr, "Cannot launch a nested distributed task\n");
+    exit(-1);
+  }
 
   int dst = getIdleProcess();
   if (dst == -1) {
@@ -280,10 +281,36 @@ triolet_MPITask_wait(MPITask task) {
   return ret;
 }
 
+void triolet_begin_distributed_task(void)
+{
+  if (triolet_in_distributed_task()) {
+    fprintf(stderr, "Cannot launch a nested distributed task\n");
+    exit(-1);
+  }
+  thread_state.runningDistributedTask = 1;
+}
+
+void triolet_end_distributed_task(void)
+{
+  if (!triolet_in_distributed_task()) {
+    fprintf(stderr, "Not running a nested distributed task\n");
+    exit(-1);
+  }
+  thread_state.runningDistributedTask = 0;
+}
+
 // Called from Triolet code
 int32_t triolet_get_num_distributed_places(void)
 {
   return numProcs;
 }
+
+// Called from Triolet code
+int32_t triolet_in_distributed_task(void)
+{
+  // Return a boolean (1 -> True; 0 -> False)
+  return thread_state.runningDistributedTask;
+}
+
 
 #endif  /* USE_MPI */
