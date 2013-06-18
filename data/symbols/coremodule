@@ -4184,7 +4184,7 @@ chain @(a : box) (s1 s2 : Stream list_dim a) -> Stream list_dim a =
   -- TODO
   except @(Stream list_dim a);
 
--- FIXME: handle recursive fucntions properly
+-- FIXME: handle recursive functions properly
 reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline) =
 
@@ -4193,13 +4193,21 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       fold_Seq @a @a f sq z
 
   ; splittableStream @d2 tyob co sh2 vw.
-      let rep_stream = repr_Box @(Stream list_dim a) in
+      let type inner_stream = Stream list_dim a in
+      let rep_stream = repr_Box @inner_stream in
       letfun
-        reduce_slice (si : SomeIndexable d2 (Stream list_dim a)) (x : a) -> a =
-          let local_s = 
-                splittableStream @d @a @d2 tyob co sh2
-                (someIndexableToView @d2 @(Stream list_dim a) rep_stream si) in
-          shFold @d sh @a @a rep rep f local_s x
+        reduce_slice (si : SomeIndexable d2 inner_stream) (x : a) -> a =
+          case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
+          let vw = indexableToView @t @inner_stream rep_stream ix container in
+
+          -- Reduce over inner loop
+          let vw2 = map_view @d2 @inner_stream @a rep_stream rep
+                    (reduce_Stream2 @list_dim @a ShapeDict_list_dim rep f z)
+                    (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw) in
+
+          -- Sequentially reduce the partial results for this loop
+          let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
+          shFold @d2 sh2 @a @a rep rep f local_s x
       in
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
@@ -4214,7 +4222,8 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       reduce_loop @d @b @a sh rep_b rep reduce_slice f z si
   };
 
-{-
+
+-- FIXME: handle recursive functions properly
 reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline) =
 
@@ -4223,13 +4232,21 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       fold_Seq @a @a f sq z
 
   ; splittableStream @d2 tyob co sh2 vw.
-      let rep_stream = repr_Box @(Stream list_dim a) in
+      let type inner_stream = Stream list_dim a in
+      let rep_stream = repr_Box @inner_stream in
       letfun
-        reduce_slice (si : SomeIndexable d2 (Stream list_dim a)) (x : a) -> a =
-          let y = reduce_Stream3 @d @a sh rep f z
-                  (splittableStream @d @a @d2 tyob co sh2
-                   (someIndexableToView @d2 @(Stream list_dim a) rep_stream si)) in
-          f x y
+        reduce_slice (si : SomeIndexable d2 inner_stream) (x : a) -> a =
+          case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
+          let vw = indexableToView @t @inner_stream rep_stream ix container in
+
+          -- Reduce over inner loop
+          let vw2 = map_view @d2 @inner_stream @a rep_stream rep
+                    (reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z)
+                    (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw) in
+
+          -- Sequentially reduce the partial results for this loop
+          let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
+          shFold @d2 sh2 @a @a rep rep f local_s x
       in
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
@@ -4238,13 +4255,14 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   ; ixStream @b tyob rep_b g si.
       letfun
         reduce_slice (si : SomeIndexable d b) (x : a) -> a =
-          let y = reduce_Stream3 @d @a sh rep f z
-                  (ixStream @d @a @b tyob rep_b g si) in
-          f x y
+          let local_s = ixStream @d @a @b tyob rep_b g si in
+          shFold @d sh @a @a rep rep f local_s x
       in
       reduce_loop @d @b @a sh rep_b rep reduce_slice f z si
   };
 
+
+-- FIXME: handle recursive functions properly
 reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline_never) =
 
@@ -4253,13 +4271,21 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       fold_Seq @a @a f sq z
 
   ; splittableStream @d2 tyob co sh2 vw.
-      let rep_stream = repr_Box @(Stream list_dim a) in
+      let type inner_stream = Stream list_dim a in
+      let rep_stream = repr_Box @inner_stream in
       letfun
-        reduce_slice (si : SomeIndexable d2 (Stream list_dim a)) (x : a) -> a =
-          let y = reduce_Stream3 @d @a sh rep f z
-                  (splittableStream @d @a @d2 tyob co sh2
-                   (someIndexableToView @d2 @(Stream list_dim a) rep_stream si)) in
-          f x y
+        reduce_slice (si : SomeIndexable d2 inner_stream) (x : a) -> a =
+          case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
+          let vw = indexableToView @t @inner_stream rep_stream ix container in
+
+          -- Reduce over inner loop
+          let vw2 = map_view @d2 @inner_stream @a rep_stream rep
+                    (reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z)
+                    (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw) in
+
+          -- Sequentially reduce the partial results for this loop
+          let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
+          shFold @d2 sh2 @a @a rep rep f local_s x
       in
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
@@ -4268,13 +4294,12 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   ; ixStream @b tyob rep_b g si.
       letfun
         reduce_slice (si : SomeIndexable d b) (x : a) -> a =
-          let y = reduce_Stream3 @d @a sh rep f z
-                  (ixStream @d @a @b tyob rep_b g si) in
-          f x y
+          let local_s = ixStream @d @a @b tyob rep_b g si in
+          shFold @d sh @a @a rep rep f local_s x
       in
       reduce_loop @d @b @a sh rep_b rep reduce_slice f z si
   };
--}
+
 
 -------------------------------------------------------------------------------
 -- Parallelizable loops
