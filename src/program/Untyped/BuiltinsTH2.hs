@@ -56,6 +56,8 @@ frontendSourceGlobals =
   , "zip3"
   , "zip4"
   , "count"
+  , "par"
+  , "seq"
   {-, "range"
   , "arrayRange"
   , "chain"

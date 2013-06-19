@@ -35,6 +35,15 @@ filter_Seq f (Seq s g) =
                 Done                   -> Done
   in Seq s g'
 
+guard_Seq :: Bool -> Seq a -> Seq a
+guard_Seq b (Seq s g) =
+  let g' (False, s) = Done
+      g' (True, s)  = case g s
+                      of Yield s' x -> Yield (True, s') x
+                         Skip s'    -> Skip (True, s')
+                         Done       -> Done
+  in Seq (b, s) g'
+
 data BindState s a where 
   Outer :: s -> BindState s a 
   Inner :: s -> s' -> (s' -> SeqStep s' a) -> BindState s a

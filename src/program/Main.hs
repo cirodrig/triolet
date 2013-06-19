@@ -38,7 +38,7 @@ import qualified SystemF.Flatten as SystemF
 import qualified SystemF.Floating2 as SystemF
 import qualified SystemF.Simplifier.Rewrite as SystemF
 import qualified SystemF.Simplifier.Simplify as SystemF
-import qualified SystemF.LoopRewrite as SystemF
+--import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
@@ -280,17 +280,6 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
     putStrLn ""
     putStrLn "Before parallelizing"
     print $ pprMemModule repr_mod
-
-  -- Parallelize outer loops
-  repr_mod <-
-    if lookupCompileFlag DoParallelization compile_flags
-    then do repr_mod <- time times ParallelizeTimer $ SystemF.parallelLoopRewrite repr_mod
-            time times PrintTimer $ when debugMode $ void $ do
-              putStrLn ""
-              putStrLn "After parallelizing"
-              print $ pprMemModule repr_mod
-            highLevelOptimizations times False SystemF.GeneralSimplifierPhase repr_mod
-    else return repr_mod
 
   -- Sequentialize remaining loops
   repr_mod <- iterateM (highLevelOptimizations times False SystemF.SequentialSimplifierPhase) 6 repr_mod

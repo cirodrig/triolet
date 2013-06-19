@@ -119,7 +119,7 @@ data Shape d =
     -- | Split into N pieces
   , sh_splitN    :: Int -> d -> View ListDim (Offset d, d)
   , sh_peel      :: forall a r.
-                    (a -> Stream ListDim a -> r) -> (() -> r)
+                    ParHint -> (a -> Stream ListDim a -> r) -> (() -> r)
                  -> View d (Stream ListDim a) -> r
   , sh_flatten   :: forall a. Stream d a -> Stream ListDim a
   , sh_generate  :: forall a. Offset d -> d -> (Index d -> a) -> Stream d a
@@ -175,14 +175,17 @@ traversable_View sh =
   }
 
 traverse_View :: Shape d -> View d a -> Stream d a
-traverse_View sh v = IxStream id (SomeIndexable (indexable_View sh) v)
+traverse_View sh v =
+  stream $ IxStream id (SomeIndexable (indexable_View sh) v)
 
 build_View :: forall d a. Shape d -> Stream d a -> View d a
 build_View sh s =
   case s
-  of IxStream f (SomeIndexable ix x) -> map_View f $ indexableToView ix x
-     SeqStream _ -> via_array ()
-     Splittable _ _ -> via_array ()
+  of Stream _ i_s ->
+       case i_s
+       of IxStream f (SomeIndexable ix x) -> map_View f $ indexableToView ix x
+          SeqStream _ -> via_array ()
+          Splittable _ _ -> via_array ()
   where
     -- Write to an array, then create a view into the array
     via_array :: forall. d ~ ListDim => () -> View ListDim a
@@ -256,14 +259,17 @@ traversable_List = Traversable traverse_List build_List
 
 traverse_List :: List a -> Stream ListDim a
 traverse_List lst =
+  stream $
   IxStream id $ SomeIndexable indexable_ListSection (listToListSection lst)
 
 build_List :: Stream ListDim a -> List a
 build_List s = 
   case s
-  of SeqStream s -> from_seq s
-     Splittable sh v -> from_seq (flattenSplittable sh v)
-     IxStream f ix -> tabulate_List f ix
+  of Stream _ i_s ->
+       case i_s
+       of SeqStream s -> from_seq s
+          Splittable sh v -> from_seq (flattenSplittable sh v)
+          IxStream f ix -> tabulate_List f ix
   where
     -- Implemented with a primitive array-appending function in Triolet;
     -- not defined in Haskell
@@ -304,7 +310,7 @@ traversable_ListSection = Traversable traverse_ListSection build_ListSection
 
 traverse_ListSection :: ListSection a -> Stream ListDim a
 traverse_ListSection sec =
-  IxStream id (SomeIndexable indexable_ListSection sec)
+  stream $ IxStream id (SomeIndexable indexable_ListSection sec)
 
 build_ListSection :: Stream ListDim a -> ListSection a
 build_ListSection s = listToListSection $ build_List s
@@ -567,13 +573,13 @@ peelStream :: forall a r.
            -> (() -> r)                    -- ^ Empty continuation
            -> Stream ListDim a
            -> r
-peelStream val_k emp_k s =
-  case s
+peelStream val_k emp_k (Stream h i_s) =
+  case i_s
   of SeqStream sq -> case peel_Seq sq
-                     of Just (x, sq') -> val_k x (SeqStream sq')
+                     of Just (x, sq') -> val_k x (Stream h $ SeqStream sq')
                         Nothing       -> emp_k ()
 
-     Splittable shp vw -> sh_peel shp val_k emp_k vw
+     Splittable shp vw -> sh_peel shp h val_k emp_k vw
 
      IxStream transform indexable_obj ->
        let View dom visit = map_View transform $
@@ -585,11 +591,12 @@ peelStream val_k emp_k s =
                in val_k (visit 0) (traverse_View shape_ListDim (View dom' visit'))
 
 peel_ListDim :: forall a r.
-                (a -> Stream ListDim a -> r)
+                ParHint
+             -> (a -> Stream ListDim a -> r)
              -> (() -> r)
              -> View ListDim (Stream ListDim a)
              -> r
-peel_ListDim val_k emp_k (View (ListDim bound) visit) =
+peel_ListDim hint val_k emp_k (View (ListDim bound) visit) =
   -- Sequentially search 'visit' until a value is found 
   let search i =
         if case bound of {Nothing -> True; Just n -> i < n}
@@ -599,6 +606,7 @@ peel_ListDim val_k emp_k (View (ListDim bound) visit) =
                                  of Nothing -> ListDim Nothing
                                     Just n  -> ListDim (Just (n - i))
                        remainder_input =
+                         Stream hint $
                          Splittable shape_ListDim $
                          View new_dom (\j -> visit (i + j))
                        remainder = chain s remainder_input
@@ -616,34 +624,35 @@ generate_ListDim off dom g =
   traverse_View shape_ListDim (View dom (\x -> g (off + x)))
 
 map_ListDim :: (a -> b) -> Stream ListDim a -> Stream ListDim b
-map_ListDim f s = 
+map_ListDim f (Stream h s) =
   case s
-  of SeqStream s -> SeqStream (map_Seq f s)
+  of SeqStream s -> Stream h $ SeqStream (map_Seq f s)
      Splittable shp (View dom g) ->
-       Splittable shp (View dom (\i -> map_ListDim f (g i)))
-     IxStream g i -> IxStream (f . g) i
+       Stream h $ Splittable shp (View dom (\i -> map_ListDim f (g i)))
+     IxStream g i -> Stream h $ IxStream (f . g) i
 
 zipWith_ListDim :: forall a b c.
                    (a -> b -> c)
                 -> Stream ListDim a -> Stream ListDim b -> Stream ListDim c
-zipWith_ListDim f s t =
-  case s
-  of IxStream f1 i1 ->
-       case t
-       of IxStream f2 i2 ->
-            let tup x y = (x, y) 
-                f' (x, y) = f (f1 x) (f2 y)
-            in case i1 
-               of SomeIndexable ix1 c1 ->
-                    case i2
-                    of SomeIndexable ix2 c2 ->
-                         IxStream f' $
-                         zip2Indexable shape_ListDim ix1 ix2 tup c1 c2
-          _ -> use_sequences ()
-     _ -> use_sequences ()
+zipWith_ListDim f (Stream h1 s) (Stream h2 t) =
+  let u = case s
+          of IxStream f1 i1 ->
+               case t
+               of IxStream f2 i2 ->
+                    let tup x y = (x, y) 
+                        f' (x, y) = f (f1 x) (f2 y)
+                    in case i1 
+                       of SomeIndexable ix1 c1 ->
+                            case i2
+                            of SomeIndexable ix2 c2 ->
+                                 IxStream f' $
+                                 zip2Indexable shape_ListDim ix1 ix2 tup c1 c2
+                  _ -> use_sequences ()
+             _ -> use_sequences ()
+  in Stream (zipParHints h1 h2) u
   where
     use_sequences () =
-      SeqStream $ zipWith_Seq f (asSequence s) (asSequence t)
+      SeqStream $ zipWith_Seq f (asSequenceI s) (asSequenceI t)
 
 fold_ListDim :: (a -> acc -> acc) -> Stream ListDim a -> acc -> acc
 {-# INLINE fold_ListDim #-}
@@ -665,25 +674,43 @@ foreach_ListDim (ListDim bound) off gen init =
 -------------------------------------------------------------------------------
 -- Streams
 
-data Stream d a where
+data ParHint = HintAny | HintSeq | HintLocalPar | HintPar
+
+zipParHints :: ParHint -> ParHint -> ParHint
+zipParHints x y =
+  case x
+  of HintAny      -> y
+     HintSeq      -> HintSeq
+     HintLocalPar -> case y
+                     of HintAny -> x
+                        HintSeq -> HintSeq
+                        _       -> HintLocalPar
+     HintPar      -> y
+
+data Stream d a = Stream !ParHint !(IStream d a)
+
+stream s = Stream HintAny s
+
+data IStream d a where
   -- | Values computed sequentially
-  SeqStream :: Seq a -> Stream ListDim a
+  SeqStream :: Seq a -> IStream ListDim a
 
   -- | Partitionable sequences
-  Splittable :: Shape d -> View d (Stream ListDim a) -> Stream ListDim a
+  Splittable :: Shape d -> View d (Stream ListDim a) -> IStream ListDim a
 
   -- | Random-access sequences.
   --   We try to make the 'SomeIndexable' a manifest data structure,
   --   either an array or a section, whenever possible.
   --   If we want to map a function over this data structure, the map
   --   is deferred until when the stream is actually executed.
-  IxStream :: (a -> b) -> SomeIndexable d a -> Stream d b
+  IxStream :: (a -> b) -> SomeIndexable d a -> IStream d b
 
 indices :: Shape d -> d -> Stream d (Index d)
 indices shp dom = sh_generate shp (sh_noOffset shp) dom id
 
 chain :: Stream ListDim a -> Stream ListDim a -> Stream ListDim a
 chain s1 s2 =
+  stream $
   Splittable shape_ChainDim $
   View ChainBoth (\i -> case i
                         of False -> s1
@@ -693,46 +720,59 @@ funct_Stream :: Funct (Stream d)
 funct_Stream = Funct map_Stream
 
 map_Stream :: (a -> b) -> Stream d a -> Stream d b
-map_Stream f s =
-  case s
-  of SeqStream sq -> SeqStream $ map_Seq f sq
-     Splittable sh vw -> Splittable sh $ map_View (map_Stream f) vw
-     IxStream g i -> IxStream (f . g) i
+map_Stream f (Stream h s) =
+  let u = case s
+          of SeqStream sq -> SeqStream $ map_Seq f sq
+             Splittable sh vw -> Splittable sh $ map_View (map_Stream f) vw
+             IxStream g i -> IxStream (f . g) i
+  in Stream h u
 
 asSequence :: Stream ListDim a -> Seq a
 {-# INLINE asSequence #-}
-asSequence (SeqStream s) = s
-asSequence (Splittable sh v) = flattenSplittable sh v
-asSequence (IxStream f i) = map_Seq f $ viewToSeq $ someIndexableToView i
+asSequence (Stream _ s) = asSequenceI s
+
+asSequenceI :: IStream ListDim a -> Seq a
+asSequenceI (SeqStream s) = s
+asSequenceI (Splittable sh v) = flattenSplittable sh v
+asSequenceI (IxStream f i) = map_Seq f $ viewToSeq $ someIndexableToView i
 
 
 unit :: a -> Stream ListDim a
-unit x = IxStream id $
+unit x = stream $
+         IxStream id $
          SomeIndexable (indexable_View shape_ListDim) $
          singleton_View x
 
 empty :: Stream ListDim a
-empty = IxStream id $
+empty = stream $
+        IxStream id $
         SomeIndexable (indexable_View shape_ListDim) $
         View (ListDim (Just 0)) (\_ -> error "empty")
 
 guard :: Bool -> Stream ListDim a -> Stream ListDim a
-guard True s  = s
-guard False _ = empty
+guard b (Stream h s) =
+  let u = case s
+          of SeqStream sq -> SeqStream $ guard_Seq b sq
+             Splittable sh vw -> Splittable sh $ map_View (guard b) vw
+             IxStream _ _ ->
+               -- TODO
+               undefined
+  in Stream h u
 
 bind :: Stream ListDim a -> (a -> Stream ListDim b) -> Stream ListDim b
-bind s k =
-  case s
-  of SeqStream sq -> SeqStream $ bind_Seq sq (\x -> asSequence (k x))
-     Splittable sh (View d f) -> Splittable sh (View d (\i -> bind (f i) k))
-     IxStream transform (SomeIndexable ix x) ->
-       let dom = ix_shape ix x
-           f i = k $ transform (ix_at ix x i)
-       in Splittable shape_ListDim $ View dom f
+bind (Stream h s) k =
+  let u = case s
+          of SeqStream sq -> SeqStream $ bind_Seq sq (\x -> asSequence (k x))
+             Splittable sh (View d f) -> Splittable sh (View d (\i -> bind (f i) k))
+             IxStream transform (SomeIndexable ix x) ->
+               let dom = ix_shape ix x
+                   f i = k $ transform (ix_at ix x i)
+               in Splittable shape_ListDim $ View dom f
+  in Stream h u
 
 -- RECURSIVE
 reduce_Stream :: forall d a. Shape d -> (a -> a -> a) -> a -> Stream d a -> a
-reduce_Stream sh f z s =
+reduce_Stream sh f z (Stream h s) =
   case s
   of SeqStream sq ->
        fold_Seq f sq z
@@ -741,6 +781,7 @@ reduce_Stream sh f z s =
        let reduce_chunk :: SomeIndexable d' (Stream ListDim a) -> a -> a 
            reduce_chunk si x =
              let y = reduce_Stream sh f z $
+                     Stream HintSeq $
                      Splittable sh_local (someIndexableToView si)
              in f x y
        in reduce sh_local reduce_chunk f z $  
@@ -748,7 +789,7 @@ reduce_Stream sh f z s =
 
      IxStream g si ->
        let reduce_chunk si x =
-             let y = reduce_Stream sh f z $ IxStream g si
+             let y = reduce_Stream sh f z $ Stream HintSeq $ IxStream g si
              in f x y
        in reduce sh reduce_chunk f z si
 
@@ -810,6 +851,7 @@ distribute_indexable sh sizes (SomeIndexable ix x) f =
         in \_ -> f s
   in build_List $ traverse_View shape_ListDim $ map_View apply_f sizes
 
+{-
 -- | Parallel doall
 doallPar :: Shape d -> (a -> Store -> Store) -> Stream d a -> Store -> Store
 doallPar sh gen s store =
@@ -864,6 +906,7 @@ reducePar sh f z s =
 
 reduceSeq :: Shape d -> (a -> a -> a) -> a -> Stream d a -> a
 reduceSeq sh f z s = sh_fold sh f s z
+-}
 
 splitter :: Shape d -> ((d, Offset d) -> Maybe ((d, Offset d), (d, Offset d)))
 splitter sh (dom, off) =

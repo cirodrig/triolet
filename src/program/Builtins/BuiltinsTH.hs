@@ -753,6 +753,8 @@ builtinVariableNames =
   , "isNil"
   , "head"
   , "tail"
+  , "fun_par"
+  , "fun_seq"
 
     -- In-place update
   , "intUpdateInPlace_int_coercion"
