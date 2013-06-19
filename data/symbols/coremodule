@@ -4527,15 +4527,15 @@ distribute_Indexable @(d : box) @(a b : box)
 
       -- Return a thunk that applies 'f' to the slice
       \ (dummy : NoneType) -> b. f sliced_ob
-
   in
 
   let rep_fun = repr_Box @(NoneType -> b) in
 
-  build_list @(NoneType -> b) rep_fun
-  (traverse_view_real @list_dim @(NoneType -> b) ShapeDict_list_dim rep_fun
-   (map_view @list_dim @(Subdomain d) @(NoneType -> b)
-    (repr_Box @(Subdomain d)) rep_fun apply distributed_sizes));
+  -- Convert the view to a list of thunks.
+  -- This should be a sequential function!
+  viewToList @(NoneType -> b) rep_fun
+  (map_view @list_dim @(Subdomain d) @(NoneType -> b)
+   (repr_Box @(Subdomain d)) rep_fun apply distributed_sizes);
 
 
 -- Concatenate a collection of lists, where the list offsets and output size 
