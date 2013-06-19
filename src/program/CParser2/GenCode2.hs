@@ -259,7 +259,13 @@ expr (L pos expression) =
 
        -- Infer alternatives
        (alts', alt_types) <- mapAndUnzipM (translateLAlt scrutinee_type) alts
-       let ty = case alt_types of t:_ -> t
+
+       -- Verify that all alternatives have the same type
+       let ty:other_tys = alt_types
+       liftTypeEvalM $ sequence_
+         [ SystemF.Typecheck.checkType
+           (Type.inconsistentCaseAlternatives pos i) ty t
+         | (t, i) <- zip other_tys [2..]]
        return (SystemF.ExpM $ SystemF.CaseE inf s' sps' alts', ty)
      LetE binder rhs body -> do
        (rhs', rhs_type) <- expr rhs
