@@ -400,7 +400,7 @@ isInliningCandidate phase def = inlining_ok && phase_ok && code_growth_ok
       -- Use a low threshold for compiler-inserted join points, because
       -- they generally don't provide useful opportunities for optimization
       if defAnnJoinPoint ann
-      then 8
+      then 15
       else -- After the 'Final' phase, reduce the inlining threshold
            -- in order to focus on intraprocedural code cleanup
            if phase < PostFinalSimplifierPhase then 800 else 16
@@ -561,7 +561,7 @@ expSize (ExpM expression) =
   of VarE {} -> codeSize 1
      LitE {} -> codeSize 1
      ConE _ con sps ty_ob es -> codeSize 1 `mappend` expSizes (sps ++ maybeToList ty_ob ++ es)
-     AppE _ op ts args -> codeSize (1 + length ts) `mappend` expSizes (op : args)
+     AppE _ op ts args -> codeSize 1 `mappend` expSizes (op : args)
      LamE _ f -> funSize f
      LetE _ b rhs body -> codeSize 1 `mappend` expSize rhs `mappend` expSize body
      LetfunE _ defs body ->
@@ -573,17 +573,8 @@ expSize (ExpM expression) =
   where
     alt_sizes xs = mconcat $ map alt_size xs
     alt_size (AltM (Alt decon ty_ob params body)) =
-      decon_size decon `mappend` codeSize (length params) `mappend` expSize body
+      codeSize (1 + length params) `mappend` expSize body
     
-    con_size con = codeSize (length $ conTypes con)
-
-    decon_size (VarDeCon _ ty_args ex_types) =
-      codeSize (length ty_args + length ex_types)
-
-    decon_size (TupleDeCon ty_args) =
-      codeSize (length ty_args)
-
-
 expSizes :: [ExpM] -> CodeSizeTest
 expSizes es = mconcat $ map expSize es
 
