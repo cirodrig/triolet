@@ -290,15 +290,16 @@ withKnownValue v val m = LR $ \env ->
 class Definiens t where
   definiensInfo :: t Mem -> ExpInfo
   definiensIsInliningCandidate :: SimplifierPhase -> Def t Mem -> Bool
-  definiensValue :: Def t Mem -> AbsCode
+  definiensValue :: Def t Mem -> LR AbsCode
   definiensTypeSM :: t SM -> Type
 
 instance Definiens Fun where
   definiensInfo = funInfo . fromFunM
   definiensIsInliningCandidate = isInliningCandidate
-  definiensValue (Def v _ f) =
+  definiensValue (Def v _ f) = do
     let fun_info = funInfo $ fromFunM f
-    in labelCodeVar v $ labelCode (ExpM $ LamE fun_info f) $ topCode
+    fun_code <- liftTypeEvalM $ lambdaValue f
+    return $ labelCodeVar v $ labelCode (ExpM $ LamE fun_info f) fun_code
   definiensTypeSM = functionTypeSM
 
 instance Definiens Ent where
@@ -322,7 +323,7 @@ instance Definiens Constant where
   definiensInfo = constInfo
   definiensIsInliningCandidate phase _ = True
   definiensValue (Def v ann d) =
-    labelCodeVar v $ interpretConstant d
+    return $ labelCodeVar v $ interpretConstant d
 
   definiensTypeSM = constType
   
@@ -335,7 +336,8 @@ withDefValue :: Definiens t => Def t Mem -> LR a -> LR a
 withDefValue def@(Def v _ f) m = do
   phase <- getPhase
   if definiensIsInliningCandidate phase def
-    then withKnownValue v (definiensValue def) m
+    then do val <- definiensValue def
+            withKnownValue v val m
     else m
 
 -- | Add a function definition to the environment, but don't inline it
@@ -1992,9 +1994,11 @@ rwLetViaBoxedNormal inf scrut size_param (PatSM ty_ob_pat) (PatSM pat) compute_b
   -- If scrutinee is 'boxed' applied to a case statement,
   -- apply case-of-case transformation to move the 'boxed' constructor
   -- inwards
+  have_fuel <- checkFuel
+  phase <- getPhase
   m_deconstructed_scrutinee <- ifFuel Nothing $ decon_scrutinee_case scrut'
   case m_deconstructed_scrutinee of
-    Just (scrut_type, scrut_ty_ob, scrut_sp, inner_scrutinee, inner_sps, inner_alts) -> do
+    Just (scrut_type, scrut_ty_ob, scrut_sp, inner_scrutinee, inner_sps, inner_alts) | have_fuel -> do
       consumeFuel
       
       -- Simplify the alternative.
@@ -2006,7 +2010,23 @@ rwLetViaBoxedNormal inf scrut size_param (PatSM ty_ob_pat) (PatSM pat) compute_b
       rwCaseOfCase inf (Just (scrut_type, scrut_ty_ob, scrut_sp))
         inner_scrutinee inner_sps inner_alts [size_param'] [subst_alt]
     _ ->
-      rewrite_body scrut' scrut_val [size_param']
+      -- If scrutinee is a multi-branch case statement,
+      -- apply case-of-case transformation
+      -- FIXME: This code for applying case-of-case is redundant with
+      -- rwCaseAlternatives.
+      -- Should refactor it.
+      case scrut' of
+        ExpM (CaseE _ inner_scrut inner_sps inner_alts)
+          | have_fuel &&
+            phase >= PostFinalSimplifierPhase &&
+            length inner_alts >= 1 -> do
+              consumeFuel
+
+              alt <- case_alternative scrut_val
+              subst_alt <- freshenAlt emptySubst alt
+              rwCaseOfCase inf Nothing
+                inner_scrut inner_sps inner_alts [size_param'] [subst_alt]
+        _ -> rewrite_body scrut' scrut_val [size_param']
   where
     -- Attempt to deconstruct an expression of the form
     -- @boxed (t) (case e of ...)@ where the case statement has multiple

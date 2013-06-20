@@ -31,6 +31,7 @@ module SystemF.Simplifier.AbsValue
         AbsData(..),
         AbsProp(..),
         funValue,
+        lambdaValue,
         initializerValue,
         scrutineeDataValue,
         AbsComputation(..),
@@ -820,6 +821,53 @@ funValue typarams params body =
   of TopAC -> topCode
      ReturnAC val | TopAV <- codeValue val -> topCode
      _ -> valueCode $ FunAV (AbsFun [b | TyPat b <- typarams] params body)
+
+-- | Construct an abstract value for a lambda expression.
+--
+--   This code is designed to interpret initializer functions accurately.
+lambdaValue :: FunM -> UnboxedTypeEvalM AbsCode
+lambdaValue (FunM (Fun info ty_params params _ body)) =
+  assumeTyPats ty_params $ assumePatMs params $ do
+    body_code <- expAbsValue body
+    return $ funValue ty_params params body_code
+
+-- | Construct an abstract value for an expression.
+--
+--   This code handles constructors, applications, variables, and literals,
+--   because these four terms occur in initializer functions.
+--   Most expressions are not modeled precisely, since the simplifier will
+--   optimize them without our help.
+expAbsValue :: ExpM -> UnboxedTypeEvalM AbsComputation
+expAbsValue (ExpM e) =
+  case e
+  of VarE _ v -> return $ ReturnAC $ valueCode (VarAV v)
+     LitE _ l -> return $ ReturnAC $ litCode l
+     ConE _ con sps tyob fs -> do
+       -- Get abstract values for subexpressions
+       interpret_maybe_exp tyob $ \tyob_abs_value -> do
+         sps_codes <- mapM expAbsValue sps
+         sequenceComputations sps_codes $ \sps_abs_values -> do
+           fs_codes <- mapM expAbsValue fs
+           sequenceComputations fs_codes $ \fs_abs_values -> do
+             -- Apply constructor to arguments
+             interpretCon con tyob_abs_value sps_abs_values fs_abs_values
+
+     AppE _ op ty_args args -> do
+       -- Get abstract values for subexpressions
+       op_code <- expAbsValue op
+       interpretComputation op_code $ \op_abs_value -> do
+         args_codes <- mapM expAbsValue args
+         sequenceComputations args_codes $ \args_abs_values -> do
+           -- Apply operator to arguments
+           applyCode op_abs_value ty_args args_abs_values
+
+     -- Other expressions are not represented precisely
+     _ -> return TopAC
+  where
+    interpret_maybe_exp Nothing k = k Nothing
+    interpret_maybe_exp (Just e) k = do
+      code <- expAbsValue e
+      interpretComputation code (k . Just)
 
 -- | Given a data value and its type, construct the value of the
 -- corresponding initializer function.
