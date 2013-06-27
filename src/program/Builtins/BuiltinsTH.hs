@@ -754,6 +754,7 @@ builtinVariableNames =
   , "head"
   , "tail"
   , "fun_par"
+  , "fun_localpar"
   , "fun_seq"
 
     -- In-place update
@@ -930,4 +931,8 @@ builtinVariableNames =
   , "blocked_PBTree_doall"
   , "emptyStore"
   , "seqStore"
+  , "read_int"
+  , "write_int"
+  , "read_float"
+  , "write_float"
   ]

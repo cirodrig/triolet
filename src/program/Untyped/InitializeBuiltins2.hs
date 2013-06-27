@@ -1248,6 +1248,7 @@ varInitializers =
       , (TheV_zip3, The_zip3)
       , (TheV_zip4, The_zip4)
       , (TheV_par, The_fun_par)
+      , (TheV_localpar, The_fun_localpar)
       , (TheV_seq, The_fun_seq)
       {-, (TheV_range, The_range)
       , (TheV_arrayRange, The_arrayRange)

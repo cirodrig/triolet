@@ -19,6 +19,24 @@ function inline seqStore (unit _, unit _) -> unit {
   nil;
 };
 
+function inline read_int (pointer p, unit _) -> U2Tuple (int, unit) {
+  U2Tuple (int, unit) {int load p, nil};
+};
+
+function inline write_int (int n, pointer p, unit _) -> unit {
+  !p = n;
+  nil;
+};
+
+function inline read_float (pointer p, unit _) -> U2Tuple (float, unit) {
+  U2Tuple (float, unit) {float load p, nil};
+};
+
+function inline write_float (float n, pointer p, unit _) -> unit {
+  !p = n;
+  nil;
+};
+
 // Create an identity coercion
 function inline makeIdCoercion (unit _) -> unit {
   nil;

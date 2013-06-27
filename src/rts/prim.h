@@ -1,5 +1,9 @@
 
 extern function core.internal.prim.seqStore (unit, unit) -> (unit);
+extern function core.internal.prim.read_int (pointer, unit) -> U2Tuple(int, unit);
+extern function core.internal.prim.write_int (int, pointer, unit) -> unit;
+extern function core.internal.prim.read_float (pointer, unit) -> U2Tuple(float, unit);
+extern function core.internal.prim.write_float (float, pointer, unit) -> unit;
 
 extern function core.internal.prim.makeIdCoercion (unit) -> unit;
 extern function core.internal.prim.makeIdBareCoercion (unit) -> unit;

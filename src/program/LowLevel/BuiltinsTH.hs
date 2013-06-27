@@ -181,6 +181,15 @@ module_lazy = ModuleName "core.internal.lazy"
 builtinFunctions =
   [ (CoreName module_memory_py "blockcopy",
      Right [| coreBuiltin SystemF.The_blockcopy |])
+  , (CoreName module_prim "read_int",
+     Right [| coreBuiltin SystemF.The_read_int |])
+  , (CoreName module_prim "write_int",
+     Right [| coreBuiltin SystemF.The_write_int |])
+  , (CoreName module_prim "read_float",
+     Right [| coreBuiltin SystemF.The_read_float |])
+  , (CoreName module_prim "write_float",
+     Right [| coreBuiltin SystemF.The_write_float |])
+
   --, (CoreName module_prim "convertToBoxed",
   --  Right [| coreBuiltin (SystemF.The_asbox) |])
   --, (CoreName module_prim "convertToBare",

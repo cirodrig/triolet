@@ -389,6 +389,41 @@ blockcopy : forall a : bare. SizeAlign a -> a -> OutPtr a -> Store
   attribute(conlike, builtin);
 
 
+-- A data type that can be read from or written to mutable storage
+data Mutable (a : bare) : box
+{
+  mutable (
+    -- Read mutable value
+    OutPtr a -> Store -> (AsBox a, Store),
+
+    -- Write mutable value
+    AsBox a -> OutPtr a -> Store -> Store,
+
+    -- Is the bitwise-zero value?
+    AsBox a -> bool);
+};
+
+
+readMutable @(a : bare) (m : Mutable a) (p : OutPtr a) (s : Store)
+  -> (AsBox a, Store)
+  attribute(inline) =
+
+  case m of mutable tyob read write isZero. read p s;
+
+
+writeMutable @(a : bare) (m : Mutable a) (x : AsBox a) (p : OutPtr a) (s : Store)
+  -> Store
+  attribute(inline) =
+
+  case m of mutable tyob read write isZero. write x p s;
+
+
+isZeroMutable @(a : bare) (m : Mutable a) (x : AsBox a)
+  -> bool attribute(inline) =
+
+  case m of mutable tyob read write isZero. isZero x;
+
+
 data ReprVal (a : val) : box
   attribute(builtin)
 {
@@ -861,6 +896,77 @@ emptyStore : Store;
 
 seqStore : Store -> Store -> Store;
 
+Mutable_int : Mutable (Stored int) =
+  mutable @(Stored int) (boxedinfo mutable @(Stored int))
+  read_int_helper write_int_helper isZero_int;
+
+read_int_helper (p : OutPtr (Stored int)) (s : Store)
+  -> (Boxed (Stored int), Store) =
+  case read_int p s of (x, s2). (boxIntValue x, s2);
+
+read_int :  OutPtr (Stored int) -> Store -> (int, Store);
+
+write_int_helper (x : Boxed (Stored int)) (p : OutPtr (Stored int)) (s : Store)
+  -> Store =
+  write_int (unboxIntValue x) p s;
+
+write_int :  int -> OutPtr (Stored int) -> Store -> Store;
+
+isZero_int (bx : Boxed (Stored int)) -> bool =
+  unboxIntValue bx ==# 0;
+
+
+Mutable_float : Mutable (Stored float) =
+  mutable @(Stored float) (boxedinfo mutable @(Stored float))
+  read_float_helper write_float_helper isZero_float;
+
+read_float_helper (p : OutPtr (Stored float)) (s : Store)
+  -> (Boxed (Stored float), Store) =
+  case read_float p s of (x, s2). (boxFloatValue x, s2);
+
+read_float :  OutPtr (Stored float) -> Store -> (float, Store);
+
+write_float_helper (x : Boxed (Stored float)) (p : OutPtr (Stored float)) (s : Store)
+  -> Store =
+  write_float (unboxFloatValue x) p s;
+
+write_float :  float -> OutPtr (Stored float) -> Store -> Store;
+
+isZero_float (bx : Boxed (Stored float)) -> bool =
+  eqF (unboxFloatValue bx) 0.0;
+
+
+-- A 'Collector k v r' creates a return value from a collection of
+-- key-value pairs
+data Collector (k v r : box) : box
+{
+  collector @(acc : bare) (
+    Repr acc,
+
+    -- Initialize
+    OutPtr acc -> Store,
+
+    -- Read mutable value at index
+    k -> OutPtr acc -> Store -> (v, Store),
+
+    -- Write mutable value at index
+    k -> v -> OutPtr acc -> Store -> Store,
+
+    -- Create result in sequential mode
+    acc -> r,
+
+    -- Update mutable value
+    v -> v -> v,
+
+    -- Combine accumulators
+    StuckBox acc -> StuckBox acc -> StuckBox acc,
+
+    -- Create result
+    StuckBox acc -> r
+    );
+};
+
+
 -- An opaque reference to mutable data.
 data OpaqueRef : box
   attribute(abstract, nonalgebraic, builtin)
@@ -885,14 +991,14 @@ append_build_list : forall a : bare.
 -- A finalizer performs a one-time computation to convert the updatable
 -- data structure to a read-only data structure.  In some cases, a finalizer
 -- is not required, in which case the update is really performed in-place.
-data UpdateInPlaceFinalizer (mutable immutable : bare) : box
+data UpdateInPlaceFinalizer (mut_t immut_t : bare) : box
 {
   -- The data can be mutated in place if the mutable and immutable data formats
   -- are the same
-  mutateInPlace (coerce @bare mutable immutable);
+  mutateInPlace (coerce @bare mut_t immut_t);
 
   -- Data should be mutated out-of-place, then written to the output
-  mutateAndCopy (mutable -> Init immutable);
+  mutateAndCopy (mut_t -> Init immut_t);
 };
 
 -- A scatter-reduce operation.  Reductions are performed with a combination of
@@ -3318,7 +3424,8 @@ viewToSeq @(a : box) (vw : view list_dim a) -> Seq a attribute(inline) =
 
 -- Build a list _sequentially_ from the contents of a view.
 -- Used in the implementation of stream operations.
-viewToList @(a : box) (rep : ReprBox a) (vw : view list_dim a)
+viewToList @(a : box)
+  (rep : ReprBox a) (is_parallel : bool) (vw : view list_dim a)
   -> Boxed (list (AsBare a)) attribute(inline) =
 
   let type a_bare = AsBare a in
@@ -3331,7 +3438,7 @@ viewToList @(a : box) (rep : ReprBox a) (vw : view list_dim a)
   (make_list @a_bare @N size
    (con_stuckBox @(arr N a_bare) rep_array
     (\ (ret : OutPtr (arr N a_bare)) -> Store.
-      arr1D_build @N @a_bare rep size
+      arr1D_build @N @a_bare rep size is_parallel
       (\ (i : int) (ret : OutPtr a_bare) -> Store.
        asbare @a_bare rep (visit (boxIntValue i)) ret)
       ret)));
@@ -4362,16 +4469,73 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
 
 -------------------------------------------------------------------------------
+-- Collectors
+
+collect @(a : box)
+  (rep_a : Repr (AsBare a))
+  (mut_a : Mutable (AsBare a))
+  (f : a -> a -> a)
+  (init : a)
+  -> Collector (Boxed (Stored NoneType)) a a =
+
+  case mut_a of mutable tyob read_a write_a isZero_a.
+
+  let sa_a = reprSizeAlign @(AsBare a) rep_a in
+
+  collector @(Boxed (Stored NoneType)) @a @a @(AsBare a)
+  (boxedinfo collector @(Boxed (Stored NoneType)) @a @a)
+  rep_a
+
+  -- Initialize: write the initial value
+  (\ (ret : OutPtr (AsBare a)) -> Store.
+     asbare @(AsBare a) rep_a init ret)
+
+  -- Load
+  (\ (i : Boxed (Stored NoneType)) (ret : OutPtr (AsBare a)) (s : Store)
+     -> (a, Store).
+     read_a ret s)
+
+  -- Store
+  (\ (i : Boxed (Stored NoneType)) (x : a) (ret : OutPtr (AsBare a)) (s : Store) -> Store.
+     write_a x ret s)
+
+  (bareToBox @(AsBare a) rep_a)
+
+  f
+
+  (\ (x y : StuckBox (AsBare a)) -> StuckBox (AsBare a).
+    case x of [sa_a] stuckBox tyob ux.
+    case y of [sa_a] stuckBox tyob uy.
+    let z = f (bareToBox @(AsBare a) rep_a ux) (bareToBox @(AsBare a) rep_a uy) in
+    stuckBox @(AsBare a) sa_a tyob
+    (asbare @(AsBare a) rep_a z))
+
+  (\ (x : StuckBox (AsBare a)) -> a.
+    case x of [sa_a] stuckBox tyob ux. bareToBox @(AsBare a) rep_a ux);
+
+
+-------------------------------------------------------------------------------
 -- Parallelization markers
 
-fun_par @(d a : box) (s : Stream d a)
-  -> Stream d a attribute(inline) =
-  annotateParHint @d @a hintPar s;
+fun_par @(t : box -> box) @(a : box)
+  (traversable : TraversableDict t) (rep : Repr (AsBare a)) (x : t a)
+  -> Stream (shape t) a attribute(inline) =
+  case traversable of traversableDict tyob traverse build.
+  annotateParHint @(shape t) @a hintPar (traverse @a rep x);
 
 
-fun_seq @(d a : box) (s : Stream d a)
-  -> Stream d a attribute(inline) =
-  annotateParHint @d @a hintSeq s;
+fun_localpar @(t : box -> box) @(a : box)
+  (traversable : TraversableDict t) (rep : Repr (AsBare a)) (x : t a)
+  -> Stream (shape t) a attribute(inline) =
+  case traversable of traversableDict tyob traverse build.
+  annotateParHint @(shape t) @a hintLocalPar (traverse @a rep x);
+
+
+fun_seq @(t : box -> box) @(a : box)
+  (traversable : TraversableDict t) (rep : Repr (AsBare a)) (x : t a)
+  -> Stream (shape t) a attribute(inline) =
+  case traversable of traversableDict tyob traverse build.
+  annotateParHint @(shape t) @a hintSeq (traverse @a rep x);
 
 
 -- Set the stream's parallelism hint to 'h'
@@ -4396,7 +4560,7 @@ tabulate_list @(a b : box)
   case par_hint of {
     hintAny. do_seq None
   ; hintSeq. do_seq None
-  ; hintLocalPar. do_seq None
+  ; hintLocalPar. tabulate_list_localpar @a @b rep_a rep_b f s
   ; hintPar. tabulate_list_dist @a @b rep_a rep_b f s
   };
 
@@ -4406,7 +4570,7 @@ tabulate_list_seq @(a b : box)
   (f : a -> b) (s : SomeIndexable list_dim a) -> Boxed (list (AsBare b))
   attribute(inline, inline_sequential) =
 
-  viewToList @b rep_b
+  viewToList @b rep_b False
   (map_view @list_dim @a @b
    rep_a rep_b f (someIndexableToView @list_dim @a rep_a s));
 
@@ -4443,6 +4607,20 @@ reduce_loop_seq @(d : box) @(a b : box) (sh : ShapeDict d)
   attribute(inline, inline_sequential) =
 
   reduce_slice input z;
+
+
+-------------------------------------------------------------------------------
+-- Multicore versions of parallelizable loops
+
+tabulate_list_localpar @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : SomeIndexable list_dim a) -> Boxed (list (AsBare b))
+  attribute(inline, inline_sequential) =
+
+  -- Tabulate a list in parallel
+  viewToList @b rep_b True
+  (map_view @list_dim @a @b
+   rep_a rep_b f (someIndexableToView @list_dim @a rep_a s));
 
 
 -------------------------------------------------------------------------------
@@ -4652,7 +4830,7 @@ distribute_Indexable @(d : box) @(a b : box)
 
   -- Convert the view to a list of thunks.
   -- This should be a sequential function!
-  viewToList @(NoneType -> b) rep_fun
+  viewToList @(NoneType -> b) rep_fun False
   (map_view @list_dim @(Subdomain d) @(NoneType -> b)
    (repr_Box @(Subdomain d)) rep_fun apply distributed_sizes);
 
@@ -11025,14 +11203,25 @@ tail @(a : box) (rep : Repr (AsBare a)) (l : llist (AsBare a))
 
 
 arr1D_build @(N : intindex) @(a : bare)
-  (rep : Repr a) (size : FIInt N) (f : int -> Init a)
+  (rep : Repr a) (size : FIInt N)
+  (is_parallel : bool)
+  (f : int -> Init a)
   (arr_ptr : OutPtr (arr N a))
   -> Store
   attribute(inline) =
 
-  doall @N size
-  (\ (i : int) -> Store.
-     f i (subscript_out @N @a (reprSizeAlign @a rep) arr_ptr i));
+  let sa = reprSizeAlign @a rep in
+
+  -- Call either 'parallel_doall' or 'doall'
+  if is_parallel
+  then
+    parallel_doall @N size
+    (\ (i : int) -> Store.
+       f i (subscript_out @N @a sa arr_ptr i))
+  else
+    doall @N size
+    (\ (i : int) -> Store.
+       f i (subscript_out @N @a sa arr_ptr i));
 
 
 arr2D_build @(M N : intindex) @(a : bare)

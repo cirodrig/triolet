@@ -157,6 +157,12 @@ record Tuple1(a) {
   const a member;
 };
 
+// Unboxed 2-tuples
+record U2Tuple(a, b) {
+  const a member1;
+  const b member2;
+};
+
 // Core 2-tuples
 record Tuple2(a, b) {
   const a member1;
