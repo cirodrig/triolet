@@ -186,6 +186,7 @@ data Prim =
     
   | PrimPowF !Size              -- ^ Floating-point exponentiation
   | PrimUnaryF !UnaryFPIntrinsic !Size -- ^ Intrinsic FP function
+  | PrimMemBar                         -- ^ Memory barrier
 
 primReturnType :: Prim -> [ValueType]
 primReturnType prim =
@@ -231,6 +232,7 @@ primReturnType prim =
      PrimPowF sz              -> float sz
      PrimRoundF _ _ sgn sz    -> int sgn sz
      PrimUnaryF _ sz          -> float sz
+     PrimMemBar               -> []
   where
     int sgn sz = [PrimType $ IntType sgn sz]
     float sz = [PrimType $ FloatType sz]

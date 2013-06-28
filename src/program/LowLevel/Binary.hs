@@ -93,6 +93,7 @@ instance Binary Prim where
        PrimRoundF r x y z -> putWord8 040 >> put r >> put x >> put y >> put z
        PrimPowF x        -> putWord8 041 >> put x
        PrimUnaryF x y    -> putWord8 042 >> put x >> put y
+       PrimMemBar        -> putWord8 043
 
   get = getWord8 >>= pick
     where
@@ -139,6 +140,7 @@ instance Binary Prim where
       pick 040 = PrimRoundF <$> get <*> get <*> get <*> get
       pick 041 = PrimPowF <$> get
       pick 042 = PrimUnaryF <$> get <*> get
+      pick 043 = pure PrimMemBar
       pick _ = readError "Prim.get"
 
 instance Binary Lit where

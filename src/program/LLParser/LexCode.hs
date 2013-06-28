@@ -87,6 +87,7 @@ data Token =
   | LetrecTok
   | LoadTok
   | ModuleTok
+  | MemoryBarrierTok
   | NilTok
   | NullTok
   | OwnedTok
@@ -169,6 +170,7 @@ showToken Int64Tok = "'int64'"
 showToken LetrecTok = "'letrec'"
 showToken LoadTok = "'load'"
 showToken ModuleTok = "'module'"
+showToken MemoryBarrierTok = "'memory_barrier'"
 showToken NilTok = "'nil'"
 showToken NullTok = "'null'"
 showToken OwnedTok = "'owned'"

@@ -55,6 +55,7 @@ rules :-
 "letrec" / @notid	{ tok LetrecTok }
 "load" / @notid		{ tok LoadTok }
 "module" / @notid	{ tok ModuleTok }
+"memory_barrier" / @notid { tok MemoryBarrierTok }
 "nil" / @notid		{ tok NilTok }
 "null" / @notid		{ tok NullTok }
 "owned" / @notid	{ tok OwnedTok }

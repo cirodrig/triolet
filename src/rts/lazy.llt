@@ -16,23 +16,37 @@ import procedure exit (int) -> ();
 procedure force_Lazy(pointer p, uint size, uint align) -> () {
   typedef lazy_type = Lazy(bytes(value (size as int), value (align as int)));
 
-  status = p @! lazy_type.status;
-  if (status == LAZY_MANIFEST) {
-    ();
-  }
-  else if (status == LAZY_UNEVALUATED) {
-    // Set status to 'busy' before evaluating
-    p @! lazy_type.status = LAZY_BUSY;
-    () = () primcall (p @! lazy_type.generator) (p @ lazy_type.payload);
+  letrec {
+    function eval_or_wait () -> () {
+      status = p @! lazy_type.status;
+      if (status == LAZY_MANIFEST) {
+        ();
+      }
+      else if (status == LAZY_UNEVALUATED) {
+        // Set status to 'busy' before evaluating
+        p @! lazy_type.status = LAZY_BUSY;
+        memory_barrier;
 
-    // Update status
-    p @! lazy_type.status = LAZY_MANIFEST;
-    ();
-  }
-  else {
-    // Error, this is a self-referential lazy value
-    () primcall exit(int -1);
+        // Run the generator, which will assign the lazy value
+        () = () primcall (p @! lazy_type.generator) (p @ lazy_type.payload);
+
+        // Update status
+        memory_barrier;
+        p @! lazy_type.status = LAZY_MANIFEST;
+        ();
+      }
+      else {
+        // Yield and retry
+        _ = int primcall sched_yield ();
+        () call eval_or_wait ();
+
+        // Error, this is a self-referential lazy value
+        // () primcall exit(int -1);
+      };
+    }
   };
+
+  () call eval_or_wait ();
 };
 
 procedure inline force_Lazy_owned (pointer lazy) -> owned

@@ -224,6 +224,7 @@ primHasSideEffect prim =
      PrimRoundF {}        -> False
      PrimPowF {}          -> False
      PrimUnaryF {}        -> False
+     PrimMemBar {}        -> True -- MemBar affects other side effecting prims
 
 dceAtom :: DCE Atom
 dceAtom atom = nudge 1 $

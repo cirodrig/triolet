@@ -162,3 +162,8 @@ cGoto lab = CGoto lab internalNode
 
 cReturn :: Maybe CExpr -> CStat
 cReturn me = CReturn me internalNode
+
+cMemoryBarrier :: CExpr
+cMemoryBarrier =
+  CCall (CVar (internalIdent "__sync_synchronize") internalNode) [] internalNode
+      

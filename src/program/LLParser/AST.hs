@@ -236,6 +236,9 @@ data Stmt a =
   | WhileS [(Parameter a, Expr a)] (Expr a) (Stmt a) (Maybe ([LValue a], Stmt a))
   | ReturnS (Atom a)
 
+    -- | A memory barrier followed by another statement
+  | MemoryBarrierS (Stmt a)
+
 deriving instance Show (Type Parsed)
 deriving instance Show (TypeArg Parsed)
 deriving instance Show (Def Parsed)

@@ -771,6 +771,7 @@ stmtType (IfS _ _ _ (Just (_, s))) = stmtType s
 stmtType (WhileS inits _ _ Nothing) = [t | (Parameter t _, _) <- inits]
 stmtType (WhileS _ _ _ (Just (_, s))) = stmtType s
 stmtType (ReturnS atom) = atomType atom
+stmtType (MemoryBarrierS s) = stmtType s
 
 -------------------------------------------------------------------------------
 -- Name resolution and inference of record definitions
@@ -946,6 +947,9 @@ resolveStmt stmt =
      ReturnS atom -> do
        atom' <- resolveAtom atom
        return $ ReturnS atom'
+     MemoryBarrierS body -> do 
+       body' <- resolveStmt body
+       return $ MemoryBarrierS body'
   where
     resolve_cont if_return_type (lhs, stmt) = do
       lhs' <- resolveLValues lhs if_return_type

@@ -636,6 +636,9 @@ genStmt tenv stmt =
      ReturnS atom -> do
        atom' <- genAtom tenv atom
        return (LL.ReturnE atom')
+     MemoryBarrierS body -> do
+       emitAtom0 $ LL.PrimA LL.PrimMemBar []
+       genStmt tenv body
 
 genStmtAtom :: TypeEnv -> Stmt Typed -> G LL.Atom
 genStmtAtom tenv stmt =

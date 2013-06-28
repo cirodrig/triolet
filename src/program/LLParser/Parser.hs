@@ -382,7 +382,7 @@ block = braces statements
 
 -- | Parse a sequence of statements
 statements :: P (Stmt Parsed)
-statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
+statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> membar_stmt <|> let_or_atom
   where
     -- An 'if' statement
     if_stmt = do
@@ -412,6 +412,13 @@ statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
       match SemiTok
       body <- statements
       return $ LetrecS fdefs body
+
+    -- A memory barrier statement
+    membar_stmt = do
+      match MemoryBarrierTok
+      match SemiTok
+      body <- statements
+      return $ MemoryBarrierS body
 
     -- A 'typedef' statement
     typedef_stmt = do

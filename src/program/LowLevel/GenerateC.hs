@@ -556,6 +556,8 @@ genPrimOp prim args =
            op = internalIdent op_name
            [arg] = args
        in cCall (cVar op) [arg]
+     PrimMemBar ->
+       cMemoryBarrier
      _ -> internalError $ 
           "Cannot generate C code for primitive operation: " ++
           show (pprPrim prim)

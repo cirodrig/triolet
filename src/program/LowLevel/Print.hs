@@ -246,6 +246,7 @@ pprPrim prim =
            PrimRoundF Truncate _ _ _ -> "trunc"
            PrimPowF _ -> "fpow"
            PrimUnaryF op _ -> unary_float op
+           PrimMemBar -> "membar"
       ty =
         case prim
         of PrimLoad _ _ t -> pprValueType t

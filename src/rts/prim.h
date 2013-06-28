@@ -1,4 +1,6 @@
 
+import procedure sched_yield (int) -> ();
+
 extern function core.internal.prim.seqStore (unit, unit) -> (unit);
 extern function core.internal.prim.read_int (pointer, unit) -> U2Tuple(int, unit);
 extern function core.internal.prim.write_int (int, pointer, unit) -> unit;
