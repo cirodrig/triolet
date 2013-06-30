@@ -4,8 +4,6 @@ def hist_function(x : float) -> int:
   return (1.05 + sin(2*pi/100 * x)) // 0.1
 
 def histo(n):
-#  return __build__(hist_function(__fromint__(x)) for x in range(n))
-  return histogram(0, 21, (hist_function(__fromint__(x))
-                          for x in range(n)))
+  return histogram(21, ((hist_function(__fromint__(x)), 1) for x in range(n)))
 
-export cplusplus histo : int -> array1(int)
+export cplusplus histo : int -> list(int)

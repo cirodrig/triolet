@@ -263,7 +263,7 @@ builtinFunctions =
      Right [| coreBuiltin SystemF.The_append_build_list |])
   {-, (CoreName module_inplace "repr_append_list",
      Right [| coreBuiltin SystemF.The_repr_append_list |])-}
-  , (CoreName module_inplace "intSumScatter_make_init",
+  {-, (CoreName module_inplace "intSumScatter_make_init",
      Right [| coreBuiltin (SystemF.The_intSumScatter_make_init) |])
   , (CoreName module_inplace "countingScatter_make_init",
      Right [| coreBuiltin (SystemF.The_countingScatter_make_init) |])
@@ -286,7 +286,7 @@ builtinFunctions =
   , (CoreName module_inplace "appendScatter_initializer",
      Right [| coreBuiltin (SystemF.The_appendScatter_initializer) |])
   , (CoreName module_inplace "appendScatter_update_real",
-     Right [| coreBuiltin (SystemF.The_appendScatter_update_real) |])
+     Right [| coreBuiltin (SystemF.The_appendScatter_update_real) |])-}
   , (CoreName module_inplace "compute_hash_table_size",
      Right [| coreBuiltin (SystemF.The_compute_hash_table_size) |])
   , (CoreName module_inplace "build_hash_table",

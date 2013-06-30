@@ -14,10 +14,10 @@ frontendSourceTypes =
    "shape", "list_dim", "dim0", "dim1", "dim2", "dim3",
    "index", "slice", "offset", "cartesianDomain",
    "view",
-   "Scatter",
+   "Collector",
 
    -- Classes
-   "Repr", "Functor", "Traversable", "Shape", "Indexable",
+   "Repr", "Mutable", "Functor", "Traversable", "Shape", "Indexable",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",
@@ -55,12 +55,14 @@ frontendSourceGlobals =
   , "zip"
   , "zip3"
   , "zip4"
+  , "collect"
+  , "histogram"
   , "count"
   , "par"
   , "localpar"
   , "seq"
-  {-, "range"
-  , "arrayRange"
+  , "range"
+  {-, "arrayRange"
   , "chain"
   , "singletonIter"
   , "indices"
@@ -85,6 +87,8 @@ frontendSourceGlobals =
   , "unionView3D"
   , "histogram"-}
   , "floor"
+  , "valueCollector"
+  , "listCollector"
   {-, "intScatter"
   , "floatScatter"
   , "boolScatter"

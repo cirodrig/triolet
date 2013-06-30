@@ -1,4 +1,3 @@
-
 type ReprBox = \ (a : box). Repr (AsBare a);
 type BoxIndex = \ (a : box). AsBox (index a);
 type BoxOffset = \ (a : box). AsBox (offset a);
@@ -625,55 +624,65 @@ data ShapeDict (d : box) : box
    forall a acc : box.
    Repr (AsBare a) -> Repr (AsBare acc) ->
    (a -> acc -> acc) -> Stream d a -> acc -> acc,
+   -- imperative fold
+   -- This is inside a data structure for compatibility with the frontend
+   ImperativeFoldFunction d,
    -- foreach
    forall acc : box.
    d -> BoxOffset d -> (BoxIndex d -> acc -> acc) -> acc -> acc
   );
 };
 
+data ImperativeFoldFunction (d : box) : val
+{
+  imperativeFoldFunction
+  (forall a : box.
+   Repr (AsBare a) -> (a -> Store -> Store) -> Stream d a -> Store -> Store);
+};
+
 shRepOffset @(d : box) (sh : ShapeDict d) -> Repr (offset d) attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     rep_o;
 
 shRepIndex @(d : box) (sh : ShapeDict d) -> Repr (index d) attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     rep_i;
 
 shNoOffset @(d : box) (sh : ShapeDict d)
     -> BoxOffset d attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     noOff;
 
 shAddOffset @(d : box) (sh : ShapeDict d)
     -> BoxOffset d -> BoxOffset d -> BoxOffset d attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     addOff;
 
 shAppOffset @(d : box) (sh : ShapeDict d)
     -> BoxOffset d -> BoxIndex d -> BoxIndex d attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     appOff;
 
 shIntersect @(d : box) (sh : ShapeDict d) -> d -> d -> d attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split spltN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     intersect;
 
 shMember @(d : box) (sh : ShapeDict d) -> BoxIndex d -> d -> bool attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     member;
 
 
@@ -682,7 +691,7 @@ shSlice @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     sl;
 
 
@@ -691,7 +700,7 @@ shSplit @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     split;
 
 shSplitN @(d : box) (sh : ShapeDict d)
@@ -699,7 +708,7 @@ shSplitN @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     splitN;
 
 shPeel @(d : box) (sh : ShapeDict d)
@@ -710,7 +719,7 @@ shPeel @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     peel;
 
 shFlatten @(d : box) (sh : ShapeDict d)
@@ -718,7 +727,7 @@ shFlatten @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     flat;
 
 shGenerate @(d : box) (sh : ShapeDict d)
@@ -727,7 +736,7 @@ shGenerate @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     gen;
 
 shZipWith @(d : box) (sh : ShapeDict d)
@@ -737,7 +746,7 @@ shZipWith @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     zipWith;
 
 shFold @(d : box) (sh : ShapeDict d)
@@ -747,8 +756,19 @@ shFold @(d : box) (sh : ShapeDict d)
 
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN peel
-               flat gen zipWith fold foreach.
+               flat gen zipWith fold imp_fold foreach.
     fold;
+
+shImpFold @(d : box) (sh : ShapeDict d)
+   -> forall a : box.
+      ReprBox a ->
+      (a -> Store -> Store) -> Stream d a -> Store -> Store attribute(inline) =
+
+    case sh of shapeDict tyob rep_i rep_o rep_s
+               noOff addOff appOff intersect member sl split splitN peel
+               flat gen zipWith fold imp_fold foreach.
+    case imp_fold of imperativeFoldFunction f.
+    f;
 
 -- The functor type class
 data FunctorDict (t : box -> box) : box
@@ -952,19 +972,35 @@ data Collector (k v r : box) : box
     -- Write mutable value at index
     k -> v -> OutPtr acc -> Store -> Store,
 
-    -- Create result in sequential mode
-    acc -> r,
-
     -- Update mutable value
     v -> v -> v,
 
     -- Combine accumulators
-    StuckBox acc -> StuckBox acc -> StuckBox acc,
+    acc -> acc -> OutPtr acc -> Store,
 
     -- Create result
-    StuckBox acc -> r
+    CollectorFinalize acc r
     );
 };
+
+data CollectorFinalize (acc : bare) (r : box) : box {
+  collectorFinalizeInPlace (coerce @box (AsBox acc) r);
+  collectorFinalize (Init acc -> r, acc -> r);
+};
+
+con_collectorFinalizeInPlace @(acc : bare) @(r : box)
+  (co : coerce @box (AsBox acc) r)
+  -> CollectorFinalize acc r attribute(inline) =
+
+  collectorFinalizeInPlace @acc @r
+  (boxedinfo collectorFinalizeInPlace @acc @r) co;
+
+con_collectorFinalize @(acc : bare) @(r : box)
+  (f : Init acc -> r) (g : acc -> r)
+  -> CollectorFinalize acc r attribute(inline) =
+
+  collectorFinalize @acc @r
+  (boxedinfo collectorFinalize @acc @r) f g;
 
 
 -- An opaque reference to mutable data.
@@ -4471,12 +4507,171 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 -------------------------------------------------------------------------------
 -- Collectors
 
-collect @(a : box)
+-- Compute a list histogram.
+-- This is a specialized instance of 'collect'.
+histogram @(t : box -> box) @(v : box)
+  (traversable_t : TraversableDict t)
+  (shape_t : ShapeDict (shape t))
+  (rep_v : ReprBox v)
+  (mut_v : Mutable (AsBare v))
+  (additive_v : AdditiveDict v)
+  (size : int)
+  (input : t (Boxed (Tuple2 (Stored int) (AsBare v))))
+  -> Boxed (list (AsBare v))
+  attribute(inline) =
+
+  let rep_list = unboxedinfo list @(AsBare v) in
+
+  -- Size must be nonnegative
+  let dom : list_dim = if size <# 0 then except @list_dim else
+                       con_list_dim (justVal @int size) in
+
+  case additive_v of additiveDict tyob add sub negate zero.
+
+  let coll = listCollector @(Boxed (Stored NoneType)) @v @v
+             repr_NoneType rep_v rep_v
+             (valueCollector @v rep_v mut_v add zero)
+             dom in
+
+  -- Transform each input tuple from (k, v) to ((k, None), v)
+  case traversable_t of traversableDict tyob traverse build.
+
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+  let sa_NoneType = reprSizeAlign @(Stored NoneType) repr_NoneType in
+  let sa_v = reprSizeAlign @(AsBare v) rep_v in
+  let type input_tuple = Tuple2 (Stored int) (AsBare v) in
+  let rep_input_tuple = unboxedinfo Tuple2 @(Stored int) @(AsBare v)
+                        repr_int rep_v in
+  let type key = Tuple2 (Stored int) (Stored NoneType) in
+  let rep_key = unboxedinfo Tuple2 @(Stored int) @(Stored NoneType)
+                repr_int repr_NoneType in
+  let sa_key = reprSizeAlign @key rep_key in
+  let type transformed_tuple = Tuple2 key (AsBare v) in
+  let rep_transformed_tuple = unboxedinfo Tuple2 @key @(AsBare v)
+                              rep_key rep_v in
+
+  let input_s = traverse @(Boxed input_tuple) rep_input_tuple input in
+  letfun
+    transform_tuple (x : Boxed input_tuple) -> Boxed transformed_tuple =
+      case x of [reprSizeAlign @input_tuple rep_input_tuple]
+        boxed tyob ([sa_int, sa_v] tuple2 (stored idx) bare_v).
+
+      con_boxed @transformed_tuple rep_transformed_tuple
+      (tuple2 @key @(AsBare v) sa_key sa_v
+       (tuple2 @(Stored int) @(Stored NoneType) sa_int sa_NoneType
+        (stored @int idx) (stored @NoneType None))
+       (copy @(AsBare v) rep_v bare_v))
+  in
+  let transformed_s =
+        map_Stream @(shape t) @(Boxed input_tuple) @(Boxed transformed_tuple)
+        rep_input_tuple rep_transformed_tuple transform_tuple input_s in
+
+  collect @(Stream (shape t)) @(Boxed key) @v
+  @(Boxed (list (AsBare v)))
+  (Traversable_Stream @(shape t))
+  shape_t rep_key rep_v rep_list coll transformed_s;
+
+
+collect @(t : box -> box) @(k v r : box)
+  (traversable_dict : TraversableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_r : ReprBox r)
+  (coll : Collector k v r)
+  (input : t (Boxed (Tuple2 (AsBare k) (AsBare v))))
+  -> r
+  attribute(inline) =
+
+  case traversable_dict of traversableDict tyob traverse build.
+
+  let rep_tuple = unboxedinfo Tuple2 @(AsBare k) @(AsBare v) rep_k rep_v in
+
+  collect_Stream @(shape t) @k @v @r shape_dict rep_k rep_v rep_r
+  coll
+  (traverse @(Boxed (Tuple2 (AsBare k) (AsBare v))) rep_tuple input);
+
+
+collect_Stream @(d : box) @(k v r : box)
+  (shape_dict : ShapeDict d)
+  (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_r : ReprBox r)
+  (coll : Collector k v r)
+  (input : Stream d (Boxed (Tuple2 (AsBare k) (AsBare v))))
+  -> r
+  attribute(inline) =
+
+  case coll of
+    collector @acc tyob
+    rep_acc init read write update combine finalizer.
+
+  letfun
+    do_seq (s : Stream d (Boxed (Tuple2 (AsBare k) (AsBare v)))) -> r =
+      finalize_collect_seq @acc @r rep_acc
+      (\ (ret : OutPtr acc) -> Store.
+         -- Initialize
+         let init_store = init ret in
+
+         -- Collect
+         partial_collect @d @k @v @acc
+         shape_dict rep_k rep_v rep_acc
+         read write update s ret init_store)
+      finalizer
+  in
+
+  do_seq input;
+
+
+-- Collect a stream locally
+partial_collect @(d : box) @(k v : box) @(acc : bare)
+  (shape_dict : ShapeDict d)
+  (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_acc : Repr acc)
+  (read : k -> OutPtr acc -> Store -> (v, Store))
+  (write : k -> v -> OutPtr acc -> Store -> Store)
+  (update : v -> v -> v)
+  (input : Stream d (Boxed (Tuple2 (AsBare k) (AsBare v))))
+  (ret : OutPtr acc)
+  (input_state : Store)
+  -> Store
+  attribute(inline) =
+
+  let type t2 = Tuple2 (AsBare k) (AsBare v) in
+  let rep_t2 = unboxedinfo Tuple2 @(AsBare k) @(AsBare v) rep_k rep_v in
+  let sa_t2 = reprSizeAlign @t2 rep_t2 in
+  let sa_k = reprSizeAlign @(AsBare k) rep_k in
+  let sa_v = reprSizeAlign @(AsBare v) rep_v in
+
+  letfun
+    modify_state (x : Boxed t2) (input_state : Store) -> Store =
+      case x of [sa_t2] boxed tyob ([sa_k, sa_v] tuple2 key_bare value_bare).
+      let key = bareToBox @(AsBare k) rep_k key_bare in
+      let value = bareToBox @(AsBare v) rep_v value_bare in
+      case read key ret input_state of (acc_value, s1).
+      let new_value = update acc_value value in
+      write key new_value ret s1
+  in
+
+  shImpFold @d shape_dict @(Boxed t2) rep_t2 modify_state input input_state;
+
+
+-- Finish collecting a stream locally
+finalize_collect_seq @(acc : bare) @(r : box) (rep_acc : Repr acc)
+  (worker : Init acc) (finalizer : CollectorFinalize acc r)
+  -> r attribute(inline) =
+
+  case finalizer of {
+    collectorFinalizeInPlace tyob (co : coerce @box (AsBox acc) r).
+      coerce @(AsBox acc) @r (asbox @acc rep_acc worker)
+
+  ; collectorFinalize tyob from_initializer from_value.
+      from_initializer worker
+  };
+
+
+valueCollector @(a : box)
   (rep_a : Repr (AsBare a))
   (mut_a : Mutable (AsBare a))
   (f : a -> a -> a)
   (init : a)
-  -> Collector (Boxed (Stored NoneType)) a a =
+  -> Collector (Boxed (Stored NoneType)) a a
+  attribute(inline, inline_sequential) =
 
   case mut_a of mutable tyob read_a write_a isZero_a.
 
@@ -4499,19 +4694,121 @@ collect @(a : box)
   (\ (i : Boxed (Stored NoneType)) (x : a) (ret : OutPtr (AsBare a)) (s : Store) -> Store.
      write_a x ret s)
 
-  (bareToBox @(AsBare a) rep_a)
-
   f
 
-  (\ (x y : StuckBox (AsBare a)) -> StuckBox (AsBare a).
-    case x of [sa_a] stuckBox tyob ux.
-    case y of [sa_a] stuckBox tyob uy.
-    let z = f (bareToBox @(AsBare a) rep_a ux) (bareToBox @(AsBare a) rep_a uy) in
-    stuckBox @(AsBare a) sa_a tyob
-    (asbare @(AsBare a) rep_a z))
+  (\ (x y : AsBare a) (ret : OutPtr (AsBare a)) -> Store.
+     let z = f (bareToBox @(AsBare a) rep_a x) (bareToBox @(AsBare a) rep_a y) in
+     asbare @(AsBare a) rep_a z ret)
 
-  (\ (x : StuckBox (AsBare a)) -> a.
-    case x of [sa_a] stuckBox tyob ux. bareToBox @(AsBare a) rep_a ux);
+  (con_collectorFinalizeInPlace @(AsBare a) @a (idCoercion @a));
+
+
+listCollector @(k v r : box)
+  (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_r : ReprBox r)
+  (coll : Collector k v r)
+  (size : list_dim)
+  -> Collector (Boxed (Tuple2 (Stored int) (AsBare k))) v (Boxed (list (AsBare r)))
+  attribute(inline, inline_sequential) =
+
+  let type result_type = Boxed (list (AsBare r)) in
+  let type t2 = Tuple2 (Stored int) (AsBare k) in
+  let rep_t2 = unboxedinfo Tuple2 @(Stored int) @(AsBare k) repr_int rep_k in
+  let sa_t2 = reprSizeAlign @t2 rep_t2 in
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+  let sa_k = reprSizeAlign @(AsBare k) rep_k in
+
+  case size of mk_list_dim tyob mbound.
+  let size_int : int = case mbound of {justVal n. n; nothingVal. except @int} in
+  case defineIntIndex size_int of someIInt @N size.
+
+  case coll of
+    collector @acc tyob repr_acc
+    c_init c_read c_write c_update c_combine c_finalize.
+
+  let sa_r = reprSizeAlign @(AsBare r) rep_r in
+  let sa_acc = reprSizeAlign @acc repr_acc in
+  let rep_arr = repr_arr @N @acc size repr_acc in
+  let sa_arr = reprSizeAlign @(arr N acc) rep_arr in
+
+  let rep_result_arr = repr_arr @N @(AsBare r) size rep_r in
+
+  letfun {
+    -- Given the final array, create a list object
+    mk_result_value_init (worker : Init (arr N (AsBare r))) -> result_type =
+      con_boxed @(list (AsBare r)) (unboxedinfo list @(AsBare r))
+      (make_list @(AsBare r) @N
+       size (con_stuckBox @(arr N (AsBare r)) rep_result_arr worker));
+
+    -- Given the final array, create a list object
+    mk_result_value_obj (array_data : arr N (AsBare r)) -> result_type =
+      mk_result_value_init (copy @(arr N (AsBare r)) rep_result_arr array_data);
+
+    -- Map a finalizer function over the final array and create a list object
+    mk_result_value_f (f : acc -> r) (array_data : arr N acc) -> result_type =
+      mk_result_value_init
+      (\ (ret : OutPtr (arr N (AsBare r))) -> Store.
+
+         -- Call 'f' on each array element
+         arr1D_build @N @(AsBare r) rep_r size False
+         (\ (i : int) (ret : OutPtr (AsBare r)) -> Store.
+            asbare @(AsBare r) rep_r (f (subscript @N @acc sa_acc array_data i)) ret)
+         ret)
+  } in
+
+  collector @(Boxed t2) @v @result_type @(arr N acc)
+  (boxedinfo collector @(Boxed t2) @v @result_type)
+  rep_arr
+
+  -- Initialize
+  (\ (ret : OutPtr (arr N acc)) -> Store.
+     doall @N size (\ (i : int) -> Store.
+       c_init (subscript_out @N @acc sa_acc ret i)))
+
+  -- Load
+  (\ (i : Boxed t2) (ret : OutPtr (arr N acc)) (s : Store)
+     -> (v, Store).
+     case i of [sa_t2] boxed tyob ([sa_int, sa_k] tuple2 (stored idx) i2).
+     let i2_box = bareToBox @(AsBare k) rep_k i2 in
+     c_read i2_box (subscript_out @N @acc sa_acc ret idx) s)
+
+  -- Store
+  (\ (i : Boxed t2) (value : v) (ret : OutPtr (arr N acc)) (s : Store)
+     -> Store.
+     case i of [sa_t2] boxed tyob ([sa_int, sa_k] tuple2 (stored idx) i2).
+     let i2_box = bareToBox @(AsBare k) rep_k i2 in
+     c_write i2_box value (subscript_out @N @acc sa_acc ret idx) s)
+
+  c_update
+
+  -- Combine
+  (\ (x y : arr N acc) (ret : OutPtr (arr N acc)) -> Store.
+     doall @N size
+     (\ (i : int) -> Store.
+        c_combine (subscript @N @acc sa_acc x i)
+                  (subscript @N @acc sa_acc y i)
+                  (subscript_out @N @acc sa_acc ret i)))
+
+  -- Create result
+  (case c_finalize of {
+    collectorFinalizeInPlace tyob (co : coerce @box (AsBox acc) r).
+
+      -- Coerce function parameters from array of acc to array of (AsBare r)
+      con_collectorFinalize @(arr N acc) @result_type
+      (coerce @(Init (arr N (AsBare r)) -> result_type)
+              @(Init (arr N acc) -> result_type)
+              mk_result_value_init)
+      (coerce @(arr N (AsBare r) -> result_type)
+              @(arr N acc -> result_type)
+              mk_result_value_obj)
+
+  ; collectorFinalize tob f_init f_obj.
+
+      con_collectorFinalize @(arr N acc) @result_type
+      (\ (x : Init (arr N acc)) -> result_type.
+         let bx = initToBare @(arr N acc) rep_arr x in
+         mk_result_value_f f_obj bx)
+      (mk_result_value_f f_obj)
+  });
 
 
 -------------------------------------------------------------------------------
@@ -5490,7 +5787,12 @@ ShapeDict_list_dim : ShapeDict list_dim =
   generate_list_dim
   zipWith_list_dim
   fold_list_dim
+  imp_fold_list_dim_wrapper
   foreach_list_dim;
+
+
+imp_fold_list_dim_wrapper : ImperativeFoldFunction list_dim =
+  imperativeFoldFunction @list_dim imp_fold_list_dim;
 
 
 noOffset_list_dim : Boxed (Stored int) attribute(inline) = boxIntValue 0;
@@ -5754,6 +6056,17 @@ fold_list_dim @(a acc : box)
   fold_Seq @a @acc combine (streamToSequence @a s) init;
 
 
+imp_fold_list_dim @(a : box)
+  (rep_a : ReprBox a)
+  (combine : a -> Store -> Store)
+  (s : Stream list_dim a)
+  (init : Store)
+  -> Store
+  attribute(inline) =
+
+  imp_fold_Seq @a combine (streamToSequence @a s) init;
+
+
 foreach_list_dim @(acc : box)
   (dom : list_dim)
   (off : BoxOffset list_dim)
@@ -5783,7 +6096,12 @@ ShapeDict_chain_dim : ShapeDict chain_dim =
   generate_chain_dim
   zipWith_chain_dim
   fold_chain_dim
+  imp_fold_chain_dim_wrapper
   foreach_chain_dim;
+
+
+imp_fold_chain_dim_wrapper : ImperativeFoldFunction chain_dim =
+  imperativeFoldFunction @chain_dim imp_fold_chain_dim;
 
 
 noOffset_chain_dim : Boxed (Stored NoneType) attribute(inline) =
@@ -5915,6 +6233,45 @@ fold_chain_dim @(a acc : box)
     -- Only the ixStream constructor is possible
   ; seqStream tyob co sq. except @acc
   ; splittableStream @sh tyob co ix si. except @acc
+  };
+
+
+imp_fold_chain_dim @(a : box)
+  (rep_a : ReprBox a)
+  (combine : a -> Store -> Store)
+  (s : Stream chain_dim a)
+  (init : Store)
+  -> Store
+  attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case i_s of {
+    ixStream @b tyob rep_b f (someIndexable @t tyob2 co ix_dict container).
+      case coerce @(shape t) @chain_dim (ix_shape @t ix_dict @b container) of
+        mk_chain_dim tyob domain_int.
+
+      letfun
+        eval (ix : bool) (x : Store) -> Store =
+
+          let coerced_index =
+                coerce @(BoxIndex chain_dim) @(BoxIndex (shape t)) (boxBoolValue ix) in
+          let y = ix_at @t ix_dict @b rep_b container coerced_index in
+          combine (f y) x
+      in
+
+      -- Enumerate the elements of the domain
+      let tmp1 =
+            if oper_BITWISEAND domain_int 1 /=# 0
+            then eval False init
+            else init in
+
+      if oper_BITWISEAND domain_int 2 /=# 0
+      then eval True tmp1
+      else tmp1
+
+    -- Only the ixStream constructor is possible
+  ; seqStream tyob co sq. except @Store
+  ; splittableStream @sh tyob co ix si. except @Store
   };
 
 
@@ -10249,6 +10606,15 @@ count_helper (x : NoneType) -> Stream list_dim (Boxed (Stored int)) =
   (con_view @list_dim @index_list_dim (con_list_dim (nothingVal @int))
    (\ (x : index_list_dim) -> index_list_dim. x));
 
+range (length : Boxed (Stored int)) -> Stream list_dim (Boxed (Stored int))
+  attribute(inline) =
+
+  let type index_list_dim = Boxed (Stored int) in
+  let dom = con_list_dim (justVal @int (unboxIntValue length)) in
+  traverse_view_real @list_dim @index_list_dim ShapeDict_list_dim repr_int
+  (con_view @list_dim @index_list_dim dom
+   (\ (x : index_list_dim) -> index_list_dim. x));
+
 
 {- REPLACED BY NEW STREAM CODE
 
@@ -13022,6 +13388,20 @@ fold_Seq @(a acc : box) (f: a -> acc -> acc) (sq: Seq a) (ac : acc)
   case sq of seq @s tyob state generator.
   letfun
     go (state : s) (ac : acc) -> acc =
+      case generator state of {
+        seqYield new_state x.   go new_state (f x ac)
+      ; seqSkip new_state.      go new_state ac
+      ; seqDone.                ac
+      }
+    in
+    go state ac;
+
+
+imp_fold_Seq @(a : box) (f: a -> Store -> Store) (sq: Seq a) (ac : Store)
+  -> Store attribute(inline, inline_final) =
+  case sq of seq @s tyob state generator.
+  letfun
+    go (state : s) (ac : Store) -> Store =
       case generator state of {
         seqYield new_state x.   go new_state (f x ac)
       ; seqSkip new_state.      go new_state ac

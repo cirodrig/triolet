@@ -493,7 +493,7 @@ tyConInitializers =
       , (TheTC_dim2,             Right The_dim2)
       , (TheTC_dim3,             Right The_dim3)
       , (TheTC_view,             Right The_view)
-      , (TheTC_Scatter,          Right The_Scatter)
+      , (TheTC_Collector,        Right The_Collector)
       ]
 
     fam_initializers =
@@ -506,6 +506,7 @@ tyConInitializers =
 
     cls_initializers =
       [ (TheTC_Repr,           The_Repr,             True,  reprClass)
+      , (TheTC_Mutable,        The_Mutable,          True,  mutableClass)
       , (TheTC_Eq,             The_EqDict,           False, eqClass)
       , (TheTC_Ord,            The_OrdDict,          False, ordClass)
       , (TheTC_Functor,        The_FunctorDict,      False, functorClass)
@@ -708,6 +709,22 @@ reprClass core_env tc_map = do
         --in mkPolyCallE noSourcePos TIBoxed sf_op [mkType head] args
         in return ([], Instance head inst)
 
+mutableClass _ tc_map = do
+  let int_instance =
+        value_instance (lookupBuiltinVar SF.intV tc_map) (coreBuiltin The_Mutable_int)
+  let float_instance =
+        value_instance (lookupBuiltinVar SF.intV tc_map) (coreBuiltin The_Mutable_float)
+  return [int_instance, float_instance]
+  where
+    value_instance frontend_type sf_dict_con =
+      return $ Instance frontend_type $ NewAbstractClassInstance make_expr
+      where
+        make_expr [] [] =
+          let info = SF.mkExpInfoWithRepresentation
+                     noSourcePos SF.BoxedRepresentation
+          in SF.ExpSF $ SF.VarE info sf_dict_con
+
+
 eqClass _ tc_map = do
   let int_instance =
         monomorphicClassInstance (lookupBuiltinVar SF.intV tc_map)
@@ -857,6 +874,7 @@ shapeClass _ tc_map = do
          coreBuiltin The_generate_list_dim,
          coreBuiltin The_zipWith_list_dim,
          coreBuiltin The_fold_list_dim,
+         coreBuiltin The_imp_fold_list_dim_wrapper,
          coreBuiltin The_foreach_list_dim])]
        {-(ConTy (builtinTyCon TheTC_dim0),
         [coreBuiltin The_ShapeDict_dim0_member,
@@ -1247,11 +1265,13 @@ varInitializers =
       , (TheV_sum, The_sum)
       , (TheV_zip3, The_zip3)
       , (TheV_zip4, The_zip4)
+      , (TheV_collect, The_collect)
+      , (TheV_histogram, The_histogram)
       , (TheV_par, The_fun_par)
       , (TheV_localpar, The_fun_localpar)
       , (TheV_seq, The_fun_seq)
-      {-, (TheV_range, The_range)
-      , (TheV_arrayRange, The_arrayRange)
+      , (TheV_range, The_range)
+      {-, (TheV_arrayRange, The_arrayRange)
       , (TheV_chain, The_chain)
       , (TheV_singletonIter, The_singletonIter)
       , (TheV_indices, The_fun_indices)
@@ -1274,9 +1294,10 @@ varInitializers =
       , (TheV_stencil3D, The_stencil3D)
       , (TheV_boxedStencil3D, The_boxedStencil3D)
       , (TheV_extend3D, The_extend3D)
-      , (TheV_unionView3D, The_unionView3D)
-      , (TheV_histogram, The_histogram)-}
+      , (TheV_unionView3D, The_unionView3D)-}
       , (TheV_floor, The_floor)
+      , (TheV_valueCollector, The_valueCollector)
+      , (TheV_listCollector, The_listCollector)
       {- Temporarily commented out while porting the library
       , (TheV_intScatter, The_intScatter)
       , (TheV_floatScatter, The_floatScatter)

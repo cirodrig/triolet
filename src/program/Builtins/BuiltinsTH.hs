@@ -45,8 +45,7 @@ builtinTypeNames =
   , "FIInt"
   , "IInt"
   , "SomeIInt"
-  , "UpdateInPlaceFinalizer"
-  , "Scatter"
+  , "Collector"
   , "PBTree"
 
     -- Representation coercions
@@ -83,6 +82,7 @@ builtinTypeNames =
   , "SizeAlign"
   , "SizeAlignVal"
   , "Repr"
+  , "Mutable"
   , "FunctorDict"
   , "TraversableDict"
   , "ShapeDict"
@@ -207,7 +207,6 @@ builtinVariableNames =
   , "mk_arr_shape"
   , "mutateInPlace"
   , "mutateAndCopy"
-  , "mk_scatter"
   , "pbBranch"
   , "pbLeaf"
   , "pbEmpty"
@@ -216,6 +215,7 @@ builtinVariableNames =
   , "sizeAlign"
   , "sizeAlignVal"
   , "repr"
+  , "mutable"
   , "functorDict"
   , "traversableDict"
   , "shapeDict"
@@ -280,6 +280,8 @@ builtinVariableNames =
   , "frontend_repr_Tuple3"
   , "frontend_repr_Tuple4"
   , "frontend_repr_arr"
+  , "Mutable_int"
+  , "Mutable_float"
   {-, "sizealign_int"
   , "sizealign_uint"
   , "sizealign_float"
@@ -364,6 +366,7 @@ builtinVariableNames =
   , "generate_list_dim"
   , "zipWith_list_dim"
   , "fold_list_dim"
+  , "imp_fold_list_dim_wrapper"
   , "foreach_list_dim"  
     {-
   , "ShapeDict_list_dim_member"
@@ -693,7 +696,8 @@ builtinVariableNames =
   , "reduce"
   , "reduce1"
   , "sum"
-  , "fun_scatter"
+  , "collect"
+  , "histogram"
   , "fun_indices"
   , "zip"
   , "zip3"
@@ -709,7 +713,6 @@ builtinVariableNames =
   , "safeSlice"
   , "width"
   , "height"
-  , "histogram"
   , "rows"
   , "cols"
   , "outerproduct"
@@ -757,8 +760,12 @@ builtinVariableNames =
   , "fun_localpar"
   , "fun_seq"
 
+    -- Collectors
+  , "valueCollector"
+  , "listCollector"
+
     -- In-place update
-  , "intUpdateInPlace_int_coercion"
+{-  , "intUpdateInPlace_int_coercion"
   , "intUpdateInPlace_finalizer"
   , "intUpdateInPlace_initializer"
   , "intUpdateInPlace_updater"
@@ -807,7 +814,7 @@ builtinVariableNames =
   , "array3Scatter"
   , "Sequence_partial_scatter"
   , "partial_list_dim_scatter"
-  , "finish_scatter"
+  , "finish_scatter"-}
 
     -- Inserted by rewrites or inlining
   , "sequenceToView"
