@@ -1390,7 +1390,7 @@ rwAppWithOperator' inf op op_val ty_args args =
      _ ->
        case codeExp op_val
        of Just (ExpM (LamE _ f)) ->
-            consumeFuel >> inline_function_call op f
+            trace_inlining $ consumeFuel >> inline_function_call op f
 
           -- Use special rewrite semantics for built-in functions
           Just (ExpM (VarE _ op_var))
@@ -1431,6 +1431,13 @@ rwAppWithOperator' inf op op_val ty_args args =
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
     inline_function_call op_exp funm = betaReduce inf op_exp funm ty_args args
+
+    -- Change this to print out the names of direct-called functions that
+    -- get inlined
+    trace_inlining x = x
+    {-
+    trace_inlining x = traceShow (text "Inlining" <+> pprExp op) x
+    -}
 
 -- | Special simplification rules for applications of built-in functions.
 --   The key is the variable ID of the function name.
