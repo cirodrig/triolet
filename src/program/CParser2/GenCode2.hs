@@ -538,6 +538,11 @@ withPattern pos scrutinee_type (TuplePattern fields) do_body = do
   let new_con = SystemF.TupleDeCon $ map SystemF.patMType patterns
   return (buildAlt pos new_con Nothing patterns body', x)
 
+-- An ambiguous pattern that could be a constructor pattern match or a
+-- variable binding.  Assume the pattern is a constructor name.
+withPattern pos scrutinee_type (ConOrVarPattern con) do_body =
+  withPattern pos scrutinee_type (ConPattern [] con [] []) do_body
+
 -- | Bind multiple patterns over the scope of an expression.
 --   Return the translated expression and the patterns' variable bindings.
 bindPatternList :: SourcePos
