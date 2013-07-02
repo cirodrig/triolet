@@ -189,6 +189,10 @@ function inline putStoredFloat (cursor c, owned buf, unit dummy) -> unit {
   unit call putFloat (float load c, buf, dummy);
 };
 
+function inline putStoredCursor (cursor c, owned buf, unit dummy) -> unit {
+  unit call putCursor (cursor load c, buf, dummy);
+};
+
 function putArrWithSerializer
   (FinIndInt length, SA elem_size, owned put_elem, cursor arr,
    owned buf, unit dummy) -> unit {
@@ -402,6 +406,18 @@ function inline getStoredUint (cursor buffer) -> ReadResult(owned) {
 
 function inline getStoredFloat (cursor buffer) -> ReadResult(owned) {
   ReadResult(float) {end, n} = ReadResult(float) call getFloat(buffer);
+  letrec {
+    function write_result (pointer ret) -> unit {
+      !ret = n;
+      nil;
+    }
+  };
+
+  ReadResult(owned) {end, write_result};
+};
+
+function inline getStoredCursor (cursor buffer) -> ReadResult(owned) {
+  ReadResult(cursor) {end, n} = ReadResult(cursor) call getCursor(buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;

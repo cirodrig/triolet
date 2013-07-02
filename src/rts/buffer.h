@@ -16,6 +16,7 @@ extern function core.internal.buffer.putCursor (cursor, owned, unit) -> unit;
 extern function core.internal.buffer.putStoredInt (cursor, owned, unit) -> unit;
 extern function core.internal.buffer.putStoredUint (cursor, owned, unit) -> unit;
 extern function core.internal.buffer.putStoredFloat (cursor, owned, unit) -> unit;
+extern function core.internal.buffer.putStoredCursor (cursor, owned, unit) -> unit;
 extern function core.internal.buffer.putBoxedObject (owned, owned, unit) -> unit;
 
 extern function core.internal.buffer.getInt (cursor) -> ReadResult(int);
@@ -29,6 +30,7 @@ extern function core.internal.buffer.getCursor (cursor) -> ReadResult(cursor);
 extern function core.internal.buffer.getStoredInt (cursor) -> ReadResult(owned);
 extern function core.internal.buffer.getStoredUint (cursor) -> ReadResult(owned);
 extern function core.internal.buffer.getStoredFloat (cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getStoredCursor (cursor) -> ReadResult(owned);
 extern function core.internal.buffer.getBoxedObject (cursor) -> ReadResult(owned);
 
 extern function core.internal.buffer.serializeBoxedObject(owned) -> (uint, pointer);

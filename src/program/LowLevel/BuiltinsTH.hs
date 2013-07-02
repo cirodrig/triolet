@@ -318,6 +318,8 @@ builtinFunctions =
      Right [| SystemF.putStoredUintV |])
   , (CoreName module_buffer "putStoredFloat",
      Right [| SystemF.putStoredFloatV |])
+  , (CoreName module_buffer "putStoredCursor",
+     Right [| SystemF.putStoredCursorV |])
   , (CoreName module_buffer "putArrWithSerializer",
      Right [| coreBuiltin SystemF.The_putArrWithSerializer |])
   , (CoreName module_buffer "getInt",
@@ -344,6 +346,8 @@ builtinFunctions =
      Right [| SystemF.getStoredUintV |])
   , (CoreName module_buffer "getStoredFloat",
      Right [| SystemF.getStoredFloatV |])
+  , (CoreName module_buffer "getStoredCursor",
+     Right [| SystemF.getStoredCursorV |])
   , (CoreName module_buffer "getArrWithSerializer",
      Right [| coreBuiltin SystemF.The_getArrWithSerializer |])
   , (CoreName module_buffer "testCopyViaBuffer",
@@ -388,6 +392,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_defineIntIndex) |])
   , (CoreName module_prim "fromCursor",
      Right [| coreBuiltin (SystemF.The_fromCursor) |])
+  , (CoreName module_prim "toCursor",
+     Right [| coreBuiltin (SystemF.The_toCursor) |])
   , (CoreName module_prim "subscript",
      Right [| coreBuiltin (SystemF.The_subscript) |])
   , (CoreName module_prim "subscript_out",
@@ -415,6 +421,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_farm) |])
   , (CoreName module_prim "doall",
      Right [| coreBuiltin (SystemF.The_doall) |])
+  , (CoreName module_prim "doall_mutable",
+     Right [| coreBuiltin (SystemF.The_doall_mutable) |])
   --, (CoreName module_prim "for",
   --   Right [| coreBuiltin (SystemF.The_for) |])
   , (CoreName module_prim "blocked_1d_reduce",

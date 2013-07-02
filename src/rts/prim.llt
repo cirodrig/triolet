@@ -266,6 +266,8 @@ function inline defineIntIndex (int n) -> SomeIndInt {
 
 function inline fromCursor (cursor x) -> cursor { x; };
 
+function inline toCursor (cursor x) -> cursor { x; };
+
 // Get a pointer to an array element
 function inline subscript
  (SA sizealign, cursor ar, int index) -> cursor {
@@ -396,6 +398,15 @@ function inline doall (FinIndInt ix, owned f) -> unit {
   FinIndInt {count} = ix;
   _ = while (int n = int 0) (n < count) {
     _ = unit call f (n);
+    n + int 1;
+  };
+  nil;
+};
+
+function inline doall_mutable (FinIndInt ix, owned f, unit dummy) -> unit {
+  FinIndInt {count} = ix;
+  _ = while (int n = int 0) (n < count) {
+    _ = unit call f (n, nil);
     n + int 1;
   };
   nil;

@@ -70,6 +70,7 @@ extern function core.internal.prim.div_float (float, float) -> float;
 extern function core.internal.prim.defineIntIndex (int) -> SomeIndInt;
 
 extern function core.internal.prim.fromCursor (cursor) -> cursor;
+extern function core.internal.prim.toCursor (cursor) -> cursor;
 
 extern function core.internal.prim.subscript
   (SA, cursor, int) -> cursor;
@@ -103,6 +104,9 @@ extern function core.internal.prim.extgcd_x (int, int) -> int;
 
 extern function core.internal.prim.doall
   (FinIndInt, owned) -> unit;
+
+extern function core.internal.prim.doall_mutable
+  (FinIndInt, owned, unit) -> unit;
 
 extern function core.internal.prim.for
   (owned, FinIndInt, pointer, owned, pointer) -> unit;

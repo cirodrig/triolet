@@ -827,7 +827,7 @@ mkWiredInTypeEnv = do
                , dataTypeDataConstructors = []}
       where
         layout = unboxedDataTypeLayout [] []
-                 valInfo_cursorV putCursorV getCursorV []
+                 valInfo_cursorV putStoredCursorV getStoredCursorV []
 
     store_data_type =
       DataType { dataTypeCon = storeV

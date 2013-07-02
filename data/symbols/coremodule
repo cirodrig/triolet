@@ -975,8 +975,12 @@ data Collector (k v r : box) : box
     -- Update mutable value
     v -> v -> v,
 
-    -- Combine accumulators
+    -- Combine two accumulators
     acc -> acc -> OutPtr acc -> Store,
+
+    -- Combine residual accumulators from a parallel task.
+    -- Scalars are processed sequentially.
+    Stream list_dim (Boxed (Stored (cursor acc))) -> OutPtr acc -> Store,
 
     -- Create result
     CollectorFinalize acc r
@@ -2222,6 +2226,7 @@ putBoxCoercion : forall a b : box. coerce @box a b -> MessageWriter attribute(bu
 putStoredInt : Stored int -> MessageWriter attribute(builtin);
 putStoredUint : Stored uint -> MessageWriter attribute(builtin);
 putStoredFloat : Stored float -> MessageWriter attribute(builtin);
+putStoredCursor : forall a : bare. Stored (cursor a) -> MessageWriter attribute(builtin);
 
 putArrWithSerializer : forall n : intindex, a : bare.
                        FIInt n -> SizeAlign a -> (a -> MessageWriter)
@@ -2247,6 +2252,7 @@ getBoxCoercion : forall a b : box. MessageReader -> (MessageReader, coerce @box 
 getStoredInt : MessageReader -> (MessageReader, Init (Stored int)) attribute(builtin);
 getStoredUint : MessageReader -> (MessageReader, Init (Stored uint)) attribute(builtin);
 getStoredFloat : MessageReader -> (MessageReader, Init (Stored float)) attribute(builtin);
+getStoredCursor : forall a : bare. MessageReader -> (MessageReader, Init (Stored (cursor a))) attribute(builtin);
 
 getArrWithSerializer : forall n : intindex, a : bare.
                        FIInt n -> Repr a
@@ -2855,6 +2861,10 @@ sizealign_NoneType : SizeAlign (Stored NoneType);
 sizealign_Ref @(a : box) -> SizeAlign (Ref a) =
   sizeAlign @(Ref a) 8U 8U False;
 
+-- FIXME: These sizes are architecture-dependent!
+sizeAlign_cursor @(a : bare) -> SizeAlignVal (cursor a) =
+  sizeAlignVal @(cursor a) 16U 8U False;
+
 sizealign_arr @(n : intindex) @(e : bare) (len : FIInt n) (sa : SizeAlign e)
   -> SizeAlign (arr n e)
   attribute(inline, inline_postfinal) =
@@ -2923,13 +2933,18 @@ repr_bool : Repr (Stored bool) attribute(inline, inline_final) =
 repr_NoneType : Repr (Stored NoneType) attribute(inline, inline_final) =
   repr_Stored @NoneType (unboxedinfo NoneType);
 
+repr_cursor @(a : bare) -> Repr (Stored (cursor a)) attribute(inline, inline_final) =
+  repr_Stored @(cursor a) (unboxedinfo cursor @a);
+
 repr_FIInt @(n : intindex) -> Repr (Stored (FIInt n))
   attribute(inline, inline_final) =
   repr_Stored @(FIInt n) (unboxedinfo FIInt @n);
 
---repr_EffTok : Repr (Stored EffTok) attribute(inline, inline_postfinal) =
---  repr_Stored @EffTok (unboxedinfo EffTok);
-
+reprVal_cursor @(a : bare) -> ReprVal (cursor a) attribute(builtin, inline, inline_final) =
+  reprVal @(cursor a) (boxedinfo reprVal @(cursor a))
+  (sizeAlign_cursor @a)
+  (putStoredCursor @a)
+  (getStoredCursor @a);
 
 -- repr_SliceObject : Repr SliceObject;
 repr_list_dim : Repr (Ref list_dim);
@@ -4387,7 +4402,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let type inner_stream = Stream list_dim a in
       let rep_stream = repr_Box @inner_stream in
       letfun
-        reduce_slice (si : SomeIndexable d2 inner_stream) (x : a) -> a =
+        reduce_slice (si : SomeIndexable d2 inner_stream) -> a =
           case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
           let vw = indexableToView @t @inner_stream rep_stream ix container in
 
@@ -4398,7 +4413,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
           -- Sequentially reduce the partial results for this loop
           let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
-          shFold @d2 sh2 @a @a rep rep f local_s x
+          shFold @d2 sh2 @a @a rep rep f local_s z
       in
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
@@ -4407,11 +4422,11 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
   ; ixStream @b tyob rep_b g si.
       letfun
-        reduce_slice (si : SomeIndexable d b) (x : a) -> a =
+        reduce_slice (si : SomeIndexable d b) -> a =
           -- Sequentially reduce the partial results for this loop
           let local_s = con_stream @d @a hintSeq
                         (ixStream @d @a @b tyob rep_b g si) in
-          shFold @d sh @a @a rep rep f local_s x
+          shFold @d sh @a @a rep rep f local_s z
       in
       reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice f z si
   };
@@ -4430,7 +4445,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let type inner_stream = Stream list_dim a in
       let rep_stream = repr_Box @inner_stream in
       letfun
-        reduce_slice (si : SomeIndexable d2 inner_stream) (x : a) -> a =
+        reduce_slice (si : SomeIndexable d2 inner_stream) -> a =
           case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
           let vw = indexableToView @t @inner_stream rep_stream ix container in
 
@@ -4441,7 +4456,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
           -- Sequentially reduce the partial results for this loop
           let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
-          shFold @d2 sh2 @a @a rep rep f local_s x
+          shFold @d2 sh2 @a @a rep rep f local_s z
       in
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
@@ -4451,11 +4466,11 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
   ; ixStream @b tyob rep_b g si.
       letfun
-        reduce_slice (si : SomeIndexable d b) (x : a) -> a =
+        reduce_slice (si : SomeIndexable d b) -> a =
           -- Sequentially reduce the partial results for this loop
           let local_s = con_stream @d @a hintSeq
                         (ixStream @d @a @b tyob rep_b g si) in
-          shFold @d sh @a @a rep rep f local_s x
+          shFold @d sh @a @a rep rep f local_s z
       in
       reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice f z si
   };
@@ -4474,7 +4489,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let type inner_stream = Stream list_dim a in
       let rep_stream = repr_Box @inner_stream in
       letfun
-        reduce_slice (si : SomeIndexable d2 inner_stream) (x : a) -> a =
+        reduce_slice (si : SomeIndexable d2 inner_stream) -> a =
           case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
           let vw = indexableToView @t @inner_stream rep_stream ix container in
 
@@ -4485,7 +4500,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
           -- Sequentially reduce the partial results for this loop
           let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
-          shFold @d2 sh2 @a @a rep rep f local_s x
+          shFold @d2 sh2 @a @a rep rep f local_s z
       in
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
@@ -4494,11 +4509,11 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
   ; ixStream @b tyob rep_b g si.
       letfun
-        reduce_slice (si : SomeIndexable d b) (x : a) -> a =
+        reduce_slice (si : SomeIndexable d b) -> a =
           -- Sequentially reduce the partial results for this loop
           let local_s = con_stream @d @a hintSeq
                         (ixStream @d @a @b tyob rep_b g si) in
-          shFold @d sh @a @a rep rep f local_s x
+          shFold @d sh @a @a rep rep f local_s z
       in
       reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice f z si
   };
@@ -4590,6 +4605,9 @@ collect @(t : box -> box) @(k v r : box)
   (traverse @(Boxed (Tuple2 (AsBare k) (AsBare v))) rep_tuple input);
 
 
+-- This is the main entry point to the collector interface.
+-- Update an accumulator in-place where possible; use a global reduction to
+-- combine partial results.
 collect_Stream @(d : box) @(k v r : box)
   (shape_dict : ShapeDict d)
   (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_r : ReprBox r)
@@ -4600,10 +4618,10 @@ collect_Stream @(d : box) @(k v r : box)
 
   case coll of
     collector @acc tyob
-    rep_acc init read write update combine finalizer.
+    rep_acc init read write update combine combine_stream finalizer.
 
   letfun
-    do_seq (s : Stream d (Boxed (Tuple2 (AsBare k) (AsBare v)))) -> r =
+    do_seq (dummy : NoneType) -> r =
       finalize_collect_seq @acc @r rep_acc
       (\ (ret : OutPtr acc) -> Store.
          -- Initialize
@@ -4612,11 +4630,31 @@ collect_Stream @(d : box) @(k v r : box)
          -- Collect
          partial_collect @d @k @v @acc
          shape_dict rep_k rep_v rep_acc
-         read write update s ret init_store)
+         read write update input ret init_store)
       finalizer
   in
 
-  do_seq input;
+  letfun
+    do_par (dummy : NoneType) -> r =
+      finalize_collect_seq @acc @r rep_acc
+      (\ (ret : OutPtr acc) -> Store.
+         -- Initialize
+         let init_store = init ret in
+
+         -- Collect
+         partial_collect @d @k @v @acc
+         shape_dict rep_k rep_v rep_acc
+         read write update input ret init_store)
+      finalizer
+  in
+
+  case input of stream tyob par_hint i_s.
+  case par_hint of {
+    hintAny. do_seq None
+  ; hintSeq. do_seq None
+  ; hintLocalPar. do_par None
+  ; hintPar. do_par None
+  };
 
 
 -- Collect a stream locally
@@ -4677,6 +4715,9 @@ valueCollector @(a : box)
 
   let sa_a = reprSizeAlign @(AsBare a) rep_a in
 
+  let rep_c = repr_cursor @(AsBare a) in
+  let sa_c = reprSizeAlign @(Stored (cursor (AsBare a))) rep_c in
+
   collector @(Boxed (Stored NoneType)) @a @a @(AsBare a)
   (boxedinfo collector @(Boxed (Stored NoneType)) @a @a)
   rep_a
@@ -4696,9 +4737,24 @@ valueCollector @(a : box)
 
   f
 
+  -- Combine two
   (\ (x y : AsBare a) (ret : OutPtr (AsBare a)) -> Store.
      let z = f (bareToBox @(AsBare a) rep_a x) (bareToBox @(AsBare a) rep_a y) in
      asbare @(AsBare a) rep_a z ret)
+
+  -- Combine many
+  (\ (s : Stream list_dim (Boxed (Stored (cursor (AsBare a)))))
+     (ret : OutPtr (AsBare a)) -> Store.
+     let r = shFold @list_dim ShapeDict_list_dim
+             @(Boxed (Stored (cursor (AsBare a)))) @a
+             rep_c rep_a
+             (\ (x : Boxed (Stored (cursor (AsBare a)))) (y : a) -> a.
+                case x of [sa_c] boxed tyob (stored c).
+                let ux = bareToBox @(AsBare a) rep_a (fromCursor @(AsBare a) c) in
+                f ux y)
+             s
+             init
+     in asbare @(AsBare a) rep_a r ret)
 
   (con_collectorFinalizeInPlace @(AsBare a) @a (idCoercion @a));
 
@@ -4723,7 +4779,9 @@ listCollector @(k v r : box)
 
   case coll of
     collector @acc tyob repr_acc
-    c_init c_read c_write c_update c_combine c_finalize.
+    c_init c_read c_write c_update c_combine c_combine_stream c_finalize.
+
+  let type acc_cursor = Boxed (Stored (cursor (arr N acc))) in
 
   let sa_r = reprSizeAlign @(AsBare r) rep_r in
   let sa_acc = reprSizeAlign @acc repr_acc in
@@ -4731,6 +4789,23 @@ listCollector @(k v r : box)
   let sa_arr = reprSizeAlign @(arr N acc) rep_arr in
 
   let rep_result_arr = repr_arr @N @(AsBare r) size rep_r in
+
+  letfun
+    -- Initialize an accumulator
+    initialize_acc (ret : OutPtr (arr N acc)) -> Store =
+      doall @N size (\ (i : int) -> Store.
+        c_init (subscript_out @N @acc sa_acc ret i))
+  in
+
+  letfun
+    -- Combine two accumulators
+    combine_acc (x y : arr N acc) (ret : OutPtr (arr N acc)) -> Store =
+      doall @N size
+      (\ (i : int) -> Store.
+         c_combine (subscript @N @acc sa_acc x i)
+                   (subscript @N @acc sa_acc y i)
+                   (subscript_out @N @acc sa_acc ret i))
+  in
 
   letfun {
     -- Given the final array, create a list object
@@ -4760,9 +4835,7 @@ listCollector @(k v r : box)
   rep_arr
 
   -- Initialize
-  (\ (ret : OutPtr (arr N acc)) -> Store.
-     doall @N size (\ (i : int) -> Store.
-       c_init (subscript_out @N @acc sa_acc ret i)))
+  initialize_acc
 
   -- Load
   (\ (i : Boxed t2) (ret : OutPtr (arr N acc)) (s : Store)
@@ -4781,12 +4854,42 @@ listCollector @(k v r : box)
   c_update
 
   -- Combine
-  (\ (x y : arr N acc) (ret : OutPtr (arr N acc)) -> Store.
-     doall @N size
-     (\ (i : int) -> Store.
-        c_combine (subscript @N @acc sa_acc x i)
-                  (subscript @N @acc sa_acc y i)
-                  (subscript_out @N @acc sa_acc ret i)))
+  combine_acc
+
+  -- Combine many arrays
+  (\ (s : Stream list_dim acc_cursor) (ret : OutPtr (arr N acc)) -> Store.
+
+     let rep_c = repr_cursor @(arr N acc) in
+     let sa_c = reprSizeAlign @(Stored (cursor (arr N acc))) rep_c in
+
+     let first_array =
+           con_stuckBox @(arr N acc) rep_arr initialize_acc in
+
+     letfun
+       array_to_cursor (x : StuckBox (arr N acc)) -> acc_cursor =
+         -- Create a cursor
+         case x of [sa_arr] stuckBox tyob ar.
+         con_boxed @(Stored (cursor (arr N acc))) rep_c
+         (stored @(cursor (arr N acc)) (toCursor @(arr N acc) ar))
+     in
+
+     -- Parallel reduction
+     let total =
+           reduce_Stream @list_dim @(Boxed (Stored (cursor (arr N acc))))
+           ShapeDict_list_dim (repr_cursor @(arr N acc))
+           (\ (bc1 bc2 : acc_cursor) -> acc_cursor.
+              case bc1 of [sa_c] boxed tyob (stored c1).
+              case bc2 of [sa_c] boxed tyob (stored c2).
+              array_to_cursor
+              (con_stuckBox @(arr N acc) rep_arr
+               (combine_acc (fromCursor @(arr N acc) c1)
+                            (fromCursor @(arr N acc) c2))))
+           (array_to_cursor first_array)
+           s in
+
+     -- Copy to output
+     case total of [sa_c] boxed tyob (stored c).
+     copy @(arr N acc) rep_arr (fromCursor @(arr N acc) c) ret)
 
   -- Create result
   (case c_finalize of {
@@ -4875,7 +4978,7 @@ tabulate_list_seq @(a b : box)
 reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (par_hint : ParHint)
-  (reduce_slice : SomeIndexable d a -> b -> b)
+  (reduce_slice : SomeIndexable d a -> b)
   (reduce_elem : b -> b -> b)
   (z : b)
   (input : SomeIndexable d a)
@@ -4896,15 +4999,14 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
 
 reduce_loop_seq @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
-  (reduce_slice : SomeIndexable d a -> b -> b)
+  (reduce_slice : SomeIndexable d a -> b)
   (reduce_elem : b -> b -> b)
   (z : b)
   (input : SomeIndexable d a)
   -> b
   attribute(inline, inline_sequential) =
 
-  reduce_slice input z;
-
+  reduce_slice input;
 
 -------------------------------------------------------------------------------
 -- Multicore versions of parallelizable loops
@@ -4988,7 +5090,7 @@ tabulate_list_dist @(a b : box)
 
 reduce_loop_dist @(d : box) @(a b : box)
   (sh : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
-  (reduce_slice : SomeIndexable d a -> b -> b)
+  (reduce_slice : SomeIndexable d a -> b)
   (reduce_elem : b -> b -> b)
   (z : b)
   (input : SomeIndexable d a)
@@ -4997,7 +5099,7 @@ reduce_loop_dist @(d : box) @(a b : box)
 
   letfun
     worker (chunk : SomeIndexable d a) -> b =
-      reduce_slice (preserve_SomeIndexable @d @a chunk) z
+      reduce_slice (preserve_SomeIndexable @d @a chunk)
   in
 
   -- Compute partial reductions in parallel
@@ -8684,6 +8786,7 @@ data InternalSlice : box
 };
 
 fromCursor : forall a : bare. cursor a -> a;
+toCursor : forall a : bare. a -> cursor a;
 
 subscript : forall n : intindex, a : bare.
             SizeAlign a
@@ -13022,20 +13125,14 @@ distribute @(N : intindex) @(d : box) @(a b : box)
   fill n_int (shNoOffset @d shape_dict) dom (con_nil @list_elt rep_list_elt);
 
 
--- Parallelizable loop
-doall : forall n : intindex.
-        FIInt n
-     -> (int -> Store)
-     -> Store;
+-- A loop with no dependences
+doall : forall n : intindex. FIInt n -> (int -> Store) -> Store;
 
--- A doall loop that won't be parallelized
-sequential_doall @(n : intindex)
-     (count : FIInt n)
-     (f : int -> Store)
-     -> Store
-     attribute(inline, inline_sequential) =
-
-     doall @n count f;
+-- A mutating loop with no dependences
+doall_mutable : forall n : intindex.
+                FIInt n
+             -> (int -> Store -> Store)
+             -> Store -> Store;
 
 -- A distributed doall loop
 farm : forall N : intindex, a : box.

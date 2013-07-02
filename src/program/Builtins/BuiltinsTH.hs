@@ -909,6 +909,7 @@ builtinVariableNames =
   
     -- Inserted by rewrite rules
   , "fromCursor"
+  , "toCursor"
   , "fromIndInt"
   , "defineIntIndex"
   , "subscript"
@@ -919,6 +920,7 @@ builtinVariableNames =
   , "inDistributedTask"
   , "farm"
   , "doall"
+  , "doall_mutable"
   , "for"
   , "for_box"
   --, "parallel_dim1_reduce"
