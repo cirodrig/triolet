@@ -10889,6 +10889,16 @@ range (length : Boxed (Stored int)) -> Stream list_dim (Boxed (Stored int))
    (\ (x : index_list_dim) -> index_list_dim. x));
 
 
+fun_indices @(sh : box) (shape_dict : ShapeDict sh) (shp : sh)
+  -> Stream sh (BoxIndex sh)
+  attribute(inline) =
+
+  let rep_index = shRepIndex @sh shape_dict in
+  shGenerate @sh shape_dict @(BoxIndex sh)
+  rep_index (shNoOffset @sh shape_dict) shp
+  (\ (x : BoxIndex sh) -> BoxIndex sh. x);
+
+
 {- REPLACED BY NEW STREAM CODE
 
 fun_map @(t : box -> box)
@@ -11168,16 +11178,6 @@ fun_sum @(t : box -> box) @(a : box)
   fun_reduce @t @a traversable shp rep add zero src;
 
 
-fun_indices @(sh : box) (shape_dict : ShapeDict sh) (shp : sh)
-  -> Stream sh (AsBox (index sh))
-  attribute(inline) =
-
-  case shape_dict of
-    shapeDict tyob index_repr slice_repr
-    shape_member shape_intersect shape_flatten shape_generate
-    shape_map shape_zipWith shape_zipWith3 shape_zipWith4 shape_slice.
-
-  shape_generate @(AsBox (index sh)) index_repr shp (\ (x : AsBox (index sh)) -> AsBox (index sh). x);
 
 
 displaceView @(t : box -> box) @(a : box)
