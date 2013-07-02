@@ -4424,7 +4424,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice reduce_residual z si
+      par_hint reduce_slice reduce_residual si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4434,7 +4434,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual z si
+      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual si
   };
 
 
@@ -4474,7 +4474,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
 
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice reduce_residual z si
+      par_hint reduce_slice reduce_residual si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4484,7 +4484,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual z si
+      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual si
   };
 
 
@@ -4523,7 +4523,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice reduce_residual z si
+      par_hint reduce_slice reduce_residual si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4533,7 +4533,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual z si
+      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual si
   };
 
 
@@ -4623,6 +4623,7 @@ collect @(t : box -> box) @(k v r : box)
   (traverse @(Boxed (Tuple2 (AsBare k) (AsBare v))) rep_tuple input);
 
 
+{-
 -- This is the main entry point to the collector interface.
 -- Update an accumulator in-place where possible; use a global reduction to
 -- combine partial results.
@@ -4673,6 +4674,132 @@ collect_Stream @(d : box) @(k v r : box)
   ; hintLocalPar. do_par None
   ; hintPar. do_par None
   };
+-}
+
+
+-- This is the main entry point to the collector interface.
+-- Update an accumulator in-place where possible; use a global reduction to
+-- combine partial results.
+collect_Stream @(d : box) @(k v r : box)
+  (shape_dict : ShapeDict d)
+  (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_r : ReprBox r)
+  (coll : Collector k v r)
+  (input : Stream d (Boxed (Tuple2 (AsBare k) (AsBare v))))
+  -> r
+  attribute(inline) =
+
+  let type stream_elem = Boxed (Tuple2 (AsBare k) (AsBare v)) in
+
+  case coll of
+    collector @acc tyob
+    rep_acc init read write update combine combine_stream finalizer.
+
+  letfun
+    do_seq (dummy : NoneType) -> r =
+      finalize_collect_seq @acc @r rep_acc
+      (\ (ret : OutPtr acc) -> Store.
+         -- Initialize
+         let init_store = init ret in
+
+         -- Collect
+         partial_collect @d @k @v @acc
+         shape_dict rep_k rep_v rep_acc
+         read write update input ret init_store)
+      finalizer
+  in
+
+  let type acc_cursor = Boxed (Stored (cursor acc)) in
+
+  letfun
+    reduce_residual (s : Stream list_dim acc_cursor) -> acc_cursor =
+      case con_stuckBox @acc rep_acc (combine_stream s) of
+        [reprSizeAlign @acc rep_acc] stuckBox tyob x.
+      con_boxed @(Stored (cursor acc)) (repr_cursor @acc)
+      (stored @(cursor acc) (toCursor @acc x))
+  in
+
+  letfun
+    finalize_cursor (r_cursor : Boxed (Stored (cursor acc))) -> r =
+      case r_cursor of [reprSizeAlign @(Stored (cursor acc)) (repr_cursor @acc)]
+        boxed tyob (stored c).
+      finalize_collect_reduction @acc @r rep_acc (fromCursor @acc c) finalizer
+  in
+
+  letfun
+    collect_slice @(d : box) (sh : ShapeDict d)
+      (s : Stream d stream_elem) -> acc_cursor =
+      let bx = con_stuckBox @acc rep_acc
+               (\ (ret : OutPtr acc) -> Store.
+                  -- Initialize
+                  let init_store = init ret in
+
+                  -- Collect
+                  partial_collect @d @k @v @acc
+                  sh rep_k rep_v rep_acc
+                  read write update s ret init_store) in
+      case bx of [reprSizeAlign @acc rep_acc] stuckBox tyob x.
+      con_boxed @(Stored (cursor acc)) (repr_cursor @acc)
+      (stored @(cursor acc) (toCursor @acc x))
+  in
+
+  case input of stream tyob par_hint i_s.
+
+  letfun
+    -- The parallel algorithm.  It starts by examining the stream argument.
+    examine_stream (dummy : NoneType) -> r =
+      case i_s of {
+        seqStream tyob co sq.
+          do_seq None
+
+      ; splittableStream @d2 tyob co sh2 vw.
+          let type inner_stream = Stream list_dim stream_elem in
+          let rep_stream = repr_Box @inner_stream in
+          letfun
+            reduce_slice (si : SomeIndexable d2 inner_stream) -> acc_cursor =
+              case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
+
+              -- Convert the slice back to a stream
+              let vw = indexableToView @t @inner_stream rep_stream ix container in
+              let s = con_stream @list_dim @stream_elem hintSeq
+                      (con_splittableStream @stream_elem @d2 sh2
+                       (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw)) in
+
+              -- Collect the slice sequentially
+              collect_slice @list_dim ShapeDict_list_dim s
+          in
+          let si = con_someIndexable @d2 @inner_stream @(view d2)
+                   (idCoercion @d2) (Indexable_view @d2 sh2) vw in
+          let r_cursor =
+                reduce_loop @d2 @(Stream list_dim stream_elem) @acc_cursor
+                sh2 rep_stream (repr_cursor @acc) par_hint
+                reduce_slice reduce_residual si in
+
+          finalize_cursor r_cursor
+
+      ; ixStream @b tyob rep_b g si.
+          letfun
+            reduce_slice (si : SomeIndexable d b) -> acc_cursor =
+              -- Sequentially reduce the partial results for this loop
+              let local_s = con_stream @d @stream_elem hintSeq
+                            (ixStream @d @stream_elem @b tyob rep_b g si) in
+              collect_slice @d shape_dict local_s
+          in
+          let r_cursor =
+                reduce_loop @d @b @acc_cursor
+                shape_dict rep_b (repr_cursor @acc) par_hint
+                reduce_slice reduce_residual si in
+
+          finalize_cursor r_cursor
+      }
+  in
+
+  -- Use sequential algorithm, unless parallelism is indicated
+  case par_hint of {
+    hintAny.      do_seq None
+  ; hintSeq.      do_seq None
+  ; hintLocalPar. examine_stream None
+  ; hintPar.      examine_stream None
+  };
 
 
 -- Collect a stream locally
@@ -4718,6 +4845,20 @@ finalize_collect_seq @(acc : bare) @(r : box) (rep_acc : Repr acc)
 
   ; collectorFinalize tyob from_initializer from_value.
       from_initializer worker
+  };
+
+
+-- Finish collecting a stream that's been reduced
+finalize_collect_reduction @(acc : bare) @(r : box) (rep_acc : Repr acc)
+  (x : acc) (finalizer : CollectorFinalize acc r)
+  -> r attribute(inline) =
+
+  case finalizer of {
+    collectorFinalizeInPlace tyob (co : coerce @box (AsBox acc) r).
+      coerce @(AsBox acc) @r (bareToBox @acc rep_acc x)
+
+  ; collectorFinalize tyob from_initializer from_value.
+      from_value x
   };
 
 
@@ -4998,20 +5139,19 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
   (par_hint : ParHint)
   (reduce_slice : SomeIndexable d a -> b)
   (reduce_residual : Stream list_dim b -> b)
-  (z : b)
   (input : SomeIndexable d a)
   -> b
   attribute(inline, inline_sequential) =
 
   letfun do_seq (dummy : NoneType) -> b =
-    reduce_loop_seq @d @a @b sh rep_a rep_b reduce_slice reduce_residual z input
+    reduce_loop_seq @d @a @b sh rep_a rep_b reduce_slice reduce_residual input
   in
 
   case par_hint of {
     hintAny. do_seq None
   ; hintSeq. do_seq None
   ; hintLocalPar. do_seq None
-  ; hintPar. reduce_loop_dist @d @a @b sh rep_a rep_b reduce_slice reduce_residual z input
+  ; hintPar. reduce_loop_dist @d @a @b sh rep_a rep_b reduce_slice reduce_residual input
   };
 
 
@@ -5019,7 +5159,6 @@ reduce_loop_seq @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (reduce_slice : SomeIndexable d a -> b)
   (reduce_residual : Stream list_dim b -> b)
-  (z : b)
   (input : SomeIndexable d a)
   -> b
   attribute(inline, inline_sequential) =
@@ -5110,7 +5249,6 @@ reduce_loop_dist @(d : box) @(a b : box)
   (sh : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
   (reduce_slice : SomeIndexable d a -> b)
   (reduce_residual : Stream list_dim b -> b)
-  (z : b)
   (input : SomeIndexable d a)
   -> b
   attribute(inline, inline_sequential) =
