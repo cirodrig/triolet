@@ -4393,6 +4393,12 @@ chain @(a : box) (s1 s2 : Stream list_dim a) -> Stream list_dim a =
 reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline) =
 
+  letfun
+    -- Perform a final reduction on partial results
+    reduce_residual (s : Stream list_dim a) -> a =
+      fold_list_dim @a @a rep rep f s z
+  in
+
   case s of stream tyob par_hint i_s.
   case i_s of {
     seqStream tyob co sq.
@@ -4418,7 +4424,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice f z si
+      par_hint reduce_slice reduce_residual z si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4428,7 +4434,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice f z si
+      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual z si
   };
 
 
@@ -4436,6 +4442,12 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline) =
 
+  letfun
+    -- Perform a final reduction on partial results
+    reduce_residual (s : Stream list_dim a) -> a =
+      fold_list_dim @a @a rep rep f s z
+  in
+
   case s of stream tyob par_hint i_s.
   case i_s of {
     seqStream tyob co sq.
@@ -4462,7 +4474,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
 
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice f z si
+      par_hint reduce_slice reduce_residual z si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4472,7 +4484,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice f z si
+      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual z si
   };
 
 
@@ -4480,6 +4492,12 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline_never) =
 
+  letfun
+    -- Perform a final reduction on partial results
+    reduce_residual (s : Stream list_dim a) -> a =
+      fold_list_dim @a @a rep rep f s z
+  in
+
   case s of stream tyob par_hint i_s.
   case i_s of {
     seqStream tyob co sq.
@@ -4505,7 +4523,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice f z si
+      par_hint reduce_slice reduce_residual z si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4515,7 +4533,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice f z si
+      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual z si
   };
 
 
@@ -4979,28 +4997,28 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (par_hint : ParHint)
   (reduce_slice : SomeIndexable d a -> b)
-  (reduce_elem : b -> b -> b)
+  (reduce_residual : Stream list_dim b -> b)
   (z : b)
   (input : SomeIndexable d a)
   -> b
   attribute(inline, inline_sequential) =
 
   letfun do_seq (dummy : NoneType) -> b =
-    reduce_loop_seq @d @a @b sh rep_a rep_b reduce_slice reduce_elem z input
+    reduce_loop_seq @d @a @b sh rep_a rep_b reduce_slice reduce_residual z input
   in
 
   case par_hint of {
     hintAny. do_seq None
   ; hintSeq. do_seq None
   ; hintLocalPar. do_seq None
-  ; hintPar. reduce_loop_dist @d @a @b sh rep_a rep_b reduce_slice reduce_elem z input
+  ; hintPar. reduce_loop_dist @d @a @b sh rep_a rep_b reduce_slice reduce_residual z input
   };
 
 
 reduce_loop_seq @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (reduce_slice : SomeIndexable d a -> b)
-  (reduce_elem : b -> b -> b)
+  (reduce_residual : Stream list_dim b -> b)
   (z : b)
   (input : SomeIndexable d a)
   -> b
@@ -5091,7 +5109,7 @@ tabulate_list_dist @(a b : box)
 reduce_loop_dist @(d : box) @(a b : box)
   (sh : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
   (reduce_slice : SomeIndexable d a -> b)
-  (reduce_elem : b -> b -> b)
+  (reduce_residual : Stream list_dim b -> b)
   (z : b)
   (input : SomeIndexable d a)
   -> b
@@ -5110,12 +5128,15 @@ reduce_loop_dist @(d : box) @(a b : box)
   let sa_ref_b = reprSizeAlign @(StuckRef b) repr_ref_b in
 
   -- Sequentially compute the rest of the reductions
-  fold_list_dim @(Boxed (StuckRef b)) @b
-  (unboxedinfo StuckRef @b) rep_b
-  (\ (x : Boxed (StuckRef b)) (y : b) -> b.
-     case x of [sa_ref_b] boxed tyob (stuckRef ux). reduce_elem ux y)
-  (traverse_list @(Boxed (StuckRef b)) repr_ref_b partial_results)
-  z;
+  let residual : Stream list_dim b =
+        annotateParHint @list_dim @b hintLocalPar
+        (map_Stream @list_dim @(Boxed (StuckRef b)) @b
+         (unboxedinfo StuckRef @b) rep_b
+         (\ (x : Boxed (StuckRef b)) -> b.
+            case x of [sa_ref_b] boxed tyob (stuckRef ux). ux)
+         (traverse_list @(Boxed (StuckRef b)) repr_ref_b partial_results)) in
+
+  reduce_residual residual;
 
 -------------------------------------------------------------------------------
 -- Distributed computation helper functions
@@ -9339,6 +9360,17 @@ leastParHint (x y : ParHint) -> ParHint =
       ; hintLocalPar. hintLocalPar
       ; hintPar. hintPar
       }
+  };
+
+-- Create a parallelism hint for an inner loop.
+-- This returns a smaller-scale level of parallelism than was given in the
+-- argument.
+innerLoopParHint (x : ParHint) -> ParHint =
+  case x of {
+    hintAny.      hintSeq
+  ; hintSeq.      hintSeq
+  ; hintLocalPar. hintSeq
+  ; hintPar.      hintLocalPar
   };
 
 -------------------------------------------------------------------------------
