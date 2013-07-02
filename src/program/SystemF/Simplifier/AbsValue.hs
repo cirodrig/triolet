@@ -225,6 +225,7 @@ data AbsValue =
   | HeapAV !AbsHeap             -- ^ A heap fragment
   | BoolAV !AbsProp             -- ^ A boolean value carrying the truth
                                 --   value of a proposition
+  | CursorAV AbsCode            -- ^ A cursor
 
 data AbsComputation =
     TopAC                       -- ^ Unknown computation
@@ -325,6 +326,7 @@ pprAbsValue (FunAV f) = pprAbsFun f
 pprAbsValue (DataAV d) = pprAbsData d
 pprAbsValue (HeapAV hp) = pprAbsHeap hp
 pprAbsValue (BoolAV b) = text "BOOL" <> parens (pprAbsProp b)
+pprAbsValue (CursorAV c) = text "CURSOR" <> parens (pprAbsCode c)
 
 pprAbsComputation TopAC = text "TOP"
 pprAbsComputation (ReturnAC c) = text "RET" <+> pprAbsCode c
@@ -606,6 +608,7 @@ substituteAbsValue s value =
      BoolAV p -> case substituteAbsProp s p
                  of Nothing -> return TopAV
                     Just p' -> return $ BoolAV p'
+     CursorAV v -> CursorAV `liftM` substitute s v
 
 instance Substitutable AbsCode where
   type Substitution AbsCode = AbsSubst
