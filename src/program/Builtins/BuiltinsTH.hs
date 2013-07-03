@@ -310,6 +310,7 @@ builtinVariableNames =
     
   , "map_view"
   , "map_Stream"
+  , "map_list"
   {-, "TraversableDict_Stream_traverse"
   , "TraversableDict_Stream_build"
   , "TraversableDict_llist_traverse"
@@ -352,6 +353,11 @@ builtinVariableNames =
   , "shape_view"
   , "at_view"
   , "slice_view"
+  , "preserve_view"
+  , "shape_list"
+  , "at_list"
+  , "slice_list"
+  , "preserve_list"
     
   , "noOffset_list_dim"
   , "addOffset_list_dim"

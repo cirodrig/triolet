@@ -788,6 +788,8 @@ ordClass _ tc_map = do
   return [int_instance, float_instance, tuple2_instance]
 
 functorClass _ tc_map = do
+  let instances1 = [monomorphicClassInstance head methods
+                   | (head, methods) <- monomorphic_instances]
   view_instance <- polymorphic [Star] $ \ [sh] ->
     let head = ConTy (builtinTyCon TheTC_view) @@ ConTy sh
         body = MethodsInstance [coreBuiltin The_map_view]    
@@ -796,7 +798,12 @@ functorClass _ tc_map = do
     let head = ConTy (builtinTyCon TheTC_iter) @@ ConTy sh
         body = MethodsInstance [coreBuiltin The_map_Stream]
     in return ([], Instance head body)
-  return [view_instance, iter_instance]
+  return $ instances1 ++ [view_instance, iter_instance]
+  where
+    monomorphic_instances =
+      [(ConTy $ builtinTyCon TheTC_list,
+        [coreBuiltin The_map_list])
+      ]
 
 traversableClass _ tc_map = do
   let instances1 = [monomorphicClassInstance head methods
@@ -810,9 +817,9 @@ traversableClass _ tc_map = do
     let head = ConTy (builtinTyCon TheTC_view) @@ ConTy sh
         body = MethodsInstance [coreBuiltin The_traverse_view,
                                 coreBuiltin The_build_view]
-    in return ([], Instance head body)
+    in return ([instancePredicate TheTC_Shape (ConTy sh)], Instance head body)
 
-  return $ [iter_instance] ++ instances1
+  return $ [iter_instance, view_instance] ++ instances1
   where
     monomorphic_instances =
       [(ConTy $ builtinTyCon TheTC_list,
@@ -925,18 +932,21 @@ indexableClass _ tc_map = do
     polymorphic [Star] $ \ [sh] ->
     let head = ConTy (builtinTyCon TheTC_view) @@ ConTy sh
         cst = [instancePredicate TheTC_Shape (ConTy sh)]
-        body = [coreBuiltin The_at_view,
-                coreBuiltin The_shape_view,
-                coreBuiltin The_slice_view]
+        body = [coreBuiltin The_shape_view,
+                coreBuiltin The_at_view,
+                coreBuiltin The_slice_view,
+                coreBuiltin The_preserve_view]
     in return (cst, Instance head $ MethodsInstance body)
   return $ view_instance : instances
   where
     monomorphic_instances =
-      []
-      {-
       [(ConTy $ builtinTyCon TheTC_list,
-        [coreBuiltin The_IndexableDict_list_at_point,
-         coreBuiltin The_IndexableDict_list_get_shape]),
+        [coreBuiltin The_shape_list,
+         coreBuiltin The_at_list,
+         coreBuiltin The_slice_list,
+         coreBuiltin The_preserve_list])
+      ]
+      {-
        (ConTy $ builtinTyCon TheTC_blist,
         [coreBuiltin The_IndexableDict_blist_at_point,
          coreBuiltin The_IndexableDict_blist_get_shape]),

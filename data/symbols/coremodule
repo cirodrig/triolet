@@ -2946,7 +2946,7 @@ reprVal_cursor @(a : bare) -> ReprVal (cursor a) attribute(builtin, inline, inli
   (putStoredCursor @a)
   (getStoredCursor @a);
 
--- repr_SliceObject : Repr SliceObject;
+repr_SliceObject : Repr SliceObject = unboxedinfo SliceObject;
 repr_list_dim : Repr (Ref list_dim);
 repr_dim0 : Repr (Ref dim0);
 repr_dim1 : Repr (Ref dim1);
@@ -3741,15 +3741,17 @@ zipWith_view @(d a b c : box)
 Indexable_view @(sh : box) (sh_shape : ShapeDict sh)
   -> IndexableDict (view sh) attribute(inline) =
 
+  let f = Functor_view @sh in
+
   indexableDict @(view sh) (boxedinfo indexableDict @(view sh))
-  (Functor_view @sh)
-  (shape_view @sh sh_shape)
-  (at_view @sh sh_shape)
-  (slice_view @sh sh_shape)
-  (preserve_view @sh sh_shape);
+  f
+  (shape_view_real @sh)
+  (at_view @sh sh_shape f)
+  (slice_view @sh sh_shape f)
+  (preserve_view_real @sh);
 
 
-shape_view @(d : box) (sh_shape : ShapeDict d)
+shape_view @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
   -> forall a : box. view d a -> d attribute(inline) =
   shape_view_real @d;
 
@@ -3758,7 +3760,7 @@ shape_view_real @(d a : box) (v : view d a) -> d attribute(inline) =
   case v of mk_view tyob dv rest. dv;
 
 
-at_view @(d : box) (sh_shape : ShapeDict d)
+at_view @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
   -> forall a : box. ReprBox a -> view d a -> BoxIndex d -> a
   attribute(inline) =
 
@@ -3770,11 +3772,11 @@ at_view_real @(d a : box) (v : view d a) (i : BoxIndex d) -> a attribute(inline)
   case v of mk_view tyob f g. g i;
 
 
-slice_view @(d : box) (sh_shape : ShapeDict d)
+slice_view @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
   -> forall a : box. ReprBox a -> view d a -> d -> BoxOffset d -> SomeIndexable d a
   attribute(inline) =
-
-  \ @(a : box) (rep : ReprBox a) (v : view d a) (dom : d) (off : BoxOffset d)
+  \ @(a : box)
+    (rep : ReprBox a) (v : view d a) (dom : d) (off : BoxOffset d)
     -> SomeIndexable d a.
 
     case v of mk_view tyob input_dom f.
@@ -3787,11 +3789,13 @@ slice_view @(d : box) (sh_shape : ShapeDict d)
     (con_view @d @a dom g);
 
 
-preserve_view @(d : box) (sh_shape : ShapeDict d)
+preserve_view @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
   -> forall a : box. view d a -> view d a attribute(inline) =
 
+  preserve_view_real @d;
+
   -- There is no advantage to disabling optimization on views
-  \ @(a : box) (x : view d a) -> view d a. x;
+preserve_view_real @(d a : box) (x : view d a) -> view d a = x;
 
 
 -- Workaround for inlining
@@ -3799,18 +3803,20 @@ preserve_view @(d : box) (sh_shape : ShapeDict d)
 Indexable_view2 @(sh : box) (sh_shape : ShapeDict sh)
   -> IndexableDict (view sh) attribute(inline) =
 
+  let f = Functor_view @sh in
+
   indexableDict @(view sh) (boxedinfo indexableDict @(view sh))
-  (Functor_view @sh)
-  (shape_view @sh sh_shape)
-  (at_view @sh sh_shape)
-  (slice_view2 @sh sh_shape)
-  (preserve_view @sh sh_shape);
+  f
+  (shape_view_real @sh)
+  (at_view @sh sh_shape f)
+  (slice_view2 @sh sh_shape f)
+  (preserve_view_real @sh);
 
 
-slice_view2 @(d : box) (sh_shape : ShapeDict d)
+slice_view2 @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
   -> forall a : box. ReprBox a -> view d a -> d -> BoxOffset d -> SomeIndexable d a
   attribute(inline_never) =
-  slice_view @d sh_shape;
+  slice_view @d sh_shape f;
 
 
 Traversable_view @(sh : box) (sh_shape : ShapeDict sh)
@@ -3946,13 +3952,18 @@ Indexable_list : IndexableDict (\ (a : box). Boxed (list (AsBare a))) =
   indexableDict @(\ (a : box). Boxed (list (AsBare a)))
   (boxedinfo indexableDict @(\ (a : box). Boxed (list (AsBare a))))
   Functor_list
-  shape_list
-  at_list
-  slice_list
-  preserve_list;
+  shape_list_real
+  at_list_real
+  slice_list_real
+  preserve_list_real;
 
 
-shape_list @(a : box) (lst : Boxed (list (AsBare a)))
+shape_list (f : FunctorDict (\ (a : box). Boxed (list (AsBare a))))
+  -> forall a : box. Boxed (list (AsBare a)) -> list_dim =
+  shape_list_real;
+
+
+shape_list_real @(a : box) (lst : Boxed (list (AsBare a)))
   -> list_dim attribute(inline) =
 
   case lst of [reprSizeAlign @(list (AsBare a)) (unboxedinfo list @(AsBare a))]
@@ -3961,7 +3972,13 @@ shape_list @(a : box) (lst : Boxed (list (AsBare a)))
   fiIntToList_dim @N size;
 
 
-at_list @(a : box) (rep : ReprBox a)
+at_list (f : FunctorDict (\ (a : box). Boxed (list (AsBare a))))
+  -> forall a : box.
+     ReprBox a -> Boxed (list (AsBare a)) -> Boxed (Stored int) -> a =
+  at_list_real;
+
+
+at_list_real @(a : box) (rep : ReprBox a)
   (lst : Boxed (list (AsBare a))) (i : Boxed (Stored int))
   -> a
   attribute(inline) =
@@ -3978,7 +3995,13 @@ at_list @(a : box) (rep : ReprBox a)
    (reprSizeAlign @(AsBare a) rep) ay (unboxIntValue i));
 
 
-slice_list @(a : box) (rep : ReprBox a)
+slice_list (f : FunctorDict (\ (a : box). Boxed (list (AsBare a))))
+  -> forall a : box. ReprBox a -> Boxed (list (AsBare a)) -> list_dim ->
+     Boxed (Stored int) -> SomeIndexable list_dim a attribute(inline) =
+  slice_list_real;
+
+
+slice_list_real @(a : box) (rep : ReprBox a)
   (lst : Boxed (list (AsBare a))) (d : list_dim) (off : Boxed (Stored int))
   -> SomeIndexable list_dim a attribute(inline) =
 
@@ -4000,8 +4023,13 @@ slice_list @(a : box) (rep : ReprBox a)
     (subarray @N @M @(AsBare a) sa_a ay (unboxIntValue off))));
 
 
+preserve_list (f : FunctorDict (\ (a : box). Boxed (list (AsBare a))))
+  -> forall a : box. Boxed (list (AsBare a)) -> Boxed (list (AsBare a)) =
+  preserve_list_real;
+
+
 -- There is no advantage to disabling optimization on lists
-preserve_list @(a : box) (x : Boxed (list (AsBare a)))
+preserve_list_real @(a : box) (x : Boxed (list (AsBare a)))
   -> Boxed (list (AsBare a)) attribute(inline) =
   x;
 
@@ -4396,7 +4424,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   letfun
     -- Perform a final reduction on partial results
     reduce_residual (s : Stream list_dim a) -> a =
-      fold_list_dim @a @a rep rep f s z
+      real_fold_list_dim @a @a rep rep f s z
   in
 
   case s of stream tyob par_hint i_s.
@@ -4445,7 +4473,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   letfun
     -- Perform a final reduction on partial results
     reduce_residual (s : Stream list_dim a) -> a =
-      fold_list_dim @a @a rep rep f s z
+      real_fold_list_dim @a @a rep rep f s z
   in
 
   case s of stream tyob par_hint i_s.
@@ -4495,7 +4523,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   letfun
     -- Perform a final reduction on partial results
     reduce_residual (s : Stream list_dim a) -> a =
-      fold_list_dim @a @a rep rep f s z
+      real_fold_list_dim @a @a rep rep f s z
   in
 
   case s of stream tyob par_hint i_s.
@@ -5181,7 +5209,6 @@ tabulate_list_localpar @(a b : box)
 
 -------------------------------------------------------------------------------
 -- Distributed versions of parallelizable loops
-
 
 -- Distributed version of 'tabulate'
 tabulate_list_dist @(a b : box)
@@ -6034,43 +6061,69 @@ ShapeDict_list_dim : ShapeDict list_dim =
   shapeDict @list_dim (boxedinfo shapeDict @list_dim)
   repr_int
   repr_int
-  (unboxedinfo SliceObject)
-  noOffset_list_dim
-  addOffset_list_dim
-  appOffset_list_dim
-  intersect_list_dim
-  member_list_dim
-  slice_list_dim
-  split_list_dim
-  splitN_list_dim
-  peel_list_dim
-  flatten_list_dim
-  generate_list_dim
-  zipWith_list_dim
-  fold_list_dim
-  imp_fold_list_dim_wrapper
-  foreach_list_dim;
+  repr_SliceObject
+  real_noOffset_list_dim
+  real_addOffset_list_dim
+  real_addOffset_list_dim -- This is 'appOffset'
+  real_intersect_list_dim
+  real_member_list_dim
+  real_slice_list_dim
+  real_split_list_dim
+  real_splitN_list_dim
+  real_peel_list_dim
+  real_flatten_list_dim
+  real_generate_list_dim
+  real_zipWith_list_dim
+  real_fold_list_dim
+  real_imp_fold_list_dim_wrapper
+  real_foreach_list_dim;
 
 
-imp_fold_list_dim_wrapper : ImperativeFoldFunction list_dim =
+imp_fold_list_dim_wrapper
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> ImperativeFoldFunction list_dim attribute(inline) =
+  real_imp_fold_list_dim_wrapper;
+
+
+real_imp_fold_list_dim_wrapper : ImperativeFoldFunction list_dim attribute(inline) =
   imperativeFoldFunction @list_dim imp_fold_list_dim;
 
 
-noOffset_list_dim : Boxed (Stored int) attribute(inline) = boxIntValue 0;
-
-
-addOffset_list_dim (x y : Boxed (Stored int))
+noOffset_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
   -> Boxed (Stored int) attribute(inline) =
+  real_noOffset_list_dim;
+
+
+real_noOffset_list_dim : Boxed (Stored int) = boxIntValue 0;
+
+
+addOffset_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> Boxed (Stored int) -> Boxed (Stored int) -> Boxed (Stored int) attribute(inline) =
+  real_addOffset_list_dim;
+
+
+-- This is both 'addOffset' and 'appOffset'.
+real_addOffset_list_dim (x y : Boxed (Stored int)) -> Boxed (Stored int)
+  attribute(inline) =
   boxIntValue (unboxIntValue x +# unboxIntValue y);
 
 
 -- Same as 'addOffset_list_dim', because offsets and indices have the same type
-appOffset_list_dim (x y : Boxed (Stored int))
-  -> Boxed (Stored int) attribute(inline) =
-  boxIntValue (unboxIntValue x +# unboxIntValue y);
+appOffset_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> Boxed (Stored int) -> Boxed (Stored int) ->  Boxed (Stored int) attribute(inline) =
+  real_addOffset_list_dim;
 
 
-intersect_list_dim (d1 d2 : list_dim)
+intersect_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> list_dim -> list_dim -> list_dim attribute(inline) =
+  real_intersect_list_dim;
+
+
+real_intersect_list_dim (d1 d2 : list_dim)
   -> list_dim attribute(inline, inline_final) =
   case d1 of mk_list_dim tyob (m_size1 : MaybeVal int).
   case d2 of mk_list_dim tyob (m_size2 : MaybeVal int).
@@ -6088,7 +6141,14 @@ intersect_list_dim (d1 d2 : list_dim)
    });
 
 
-member_list_dim (i : Boxed (Stored int)) (d : list_dim)
+member_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> Boxed (Stored int) -> list_dim -> bool attribute(inline) =
+  real_member_list_dim;
+
+
+real_member_list_dim
+  (i : Boxed (Stored int)) (d : list_dim)
   -> bool attribute(inline, inline_sequential) =
 
   let ix_i = unboxIntValue i in
@@ -6099,7 +6159,15 @@ member_list_dim (i : Boxed (Stored int)) (d : list_dim)
   };
 
 
-slice_list_dim (sl : Boxed SliceObject) (dom : list_dim)
+slice_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> Boxed SliceObject -> list_dim -> (Boxed (Stored int), list_dim)
+  attribute(inline) =
+  real_slice_list_dim;
+
+
+real_slice_list_dim
+  (sl : Boxed SliceObject) (dom : list_dim)
   -> (Boxed (Stored int), list_dim) attribute(inline, inline_sequential) =
 
   case sl of [reprSizeAlign @SliceObject (unboxedinfo SliceObject)]
@@ -6148,7 +6216,15 @@ slice_list_dim (sl : Boxed SliceObject) (dom : list_dim)
   };
 
 
-split_list_dim (dom : list_dim)
+split_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> list_dim -> MaybeVal (list_dim, Boxed (Stored int), list_dim)
+  attribute(inline) =
+  real_split_list_dim;
+
+
+real_split_list_dim
+  (dom : list_dim)
   -> MaybeVal (list_dim, Boxed (Stored int), list_dim) =
 
   case dom of mk_list_dim tyob m_size.
@@ -6165,7 +6241,14 @@ split_list_dim (dom : list_dim)
   };
 
 
-splitN_list_dim (n : int) (d : list_dim)
+splitN_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> int -> list_dim -> view list_dim (Subdomain list_dim) attribute(inline) =
+  real_splitN_list_dim;
+
+
+real_splitN_list_dim
+  (n : int) (d : list_dim)
   -> view list_dim (Subdomain list_dim) attribute(inline) =
 
   case d of mk_list_dim tyob (m_size : MaybeVal int).
@@ -6185,9 +6268,17 @@ splitN_list_dim (n : int) (d : list_dim)
   };
 
 
+peel_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> forall a r : box.
+     Repr (AsBare a) -> Boxed (Stored ParHint) ->
+     (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
+     view list_dim (Stream list_dim a) -> r
+  attribute(inline) =
+  real_peel_list_dim;
 
 
-peel_list_dim @(a r : box)
+real_peel_list_dim @(a r : box)
   (rep_a : ReprBox a)
   (par_hint : Boxed (Stored ParHint))
   (value_k : a -> Stream list_dim a -> r) -- Success continuation
@@ -6231,33 +6322,60 @@ peel_list_dim @(a r : box)
   search 0;
 
 
-flatten_list_dim @(a : box) (s : Stream list_dim a)
-  -> Stream list_dim a attribute(inline) = s;
+flatten_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> forall a : box. Stream list_dim a -> Stream list_dim a
+  attribute(inline) =
+  real_flatten_list_dim;
 
 
-generate_list_dim @(a : box)
+real_flatten_list_dim @(a : box) (s : Stream list_dim a) -> Stream list_dim a =
+  s;
+
+
+generate_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> forall a : box.
+     Repr (AsBare a) -> BoxOffset list_dim -> list_dim ->
+     (BoxIndex list_dim -> a) -> Stream list_dim a
+  attribute(inline) =
+  real_generate_list_dim;
+
+real_generate_list_dim @(a : box)
   (rep_a : ReprBox a)
   (off : BoxOffset list_dim) (dom : list_dim) (g : BoxIndex list_dim -> a)
-  -> Stream list_dim a
-  attribute(inline) =
+  -> Stream list_dim a attribute(inline) =
 
   -- Create a view.  Apply the offset before calling g.
   let vw : view list_dim a =
         con_view @list_dim @a dom
-        (\ (i : BoxIndex list_dim) -> a. g (appOffset_list_dim off i)) in
+        (\ (i : BoxIndex list_dim) -> a.
+           -- Apply the offset
+           g (real_addOffset_list_dim off i)) in
 
   -- Convert to a stream
   traverse_view_real @list_dim @a ShapeDict_list_dim rep_a vw;
 
 
-zipWith_list_dim @(a b c : box)
+zipWith_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> forall a b c : box.
+     Repr (AsBare a) -> Repr (AsBare b) -> Repr (AsBare c) ->
+     (a -> b -> c) ->
+     Stream list_dim a -> Stream list_dim b -> Stream list_dim c
+  attribute(inline) =
+  real_zipWith_list_dim;
+
+
+real_zipWith_list_dim @(a b c : box)
   (rep_a : ReprBox a)
   (rep_b : ReprBox b)
   (rep_c : ReprBox c)
   (f : a -> b -> c)
   (s1 : Stream list_dim a)
   (s2 : Stream list_dim b)
-  -> Stream list_dim c attribute(inline) =
+  -> Stream list_dim c
+  attribute(inline) =
 
   letfun
     zip_using_sequences (dummy : NoneType) -> Stream list_dim c =
@@ -6305,7 +6423,16 @@ zipWith_list_dim @(a b c : box)
   };
 
 
-fold_list_dim @(a acc : box)
+fold_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> forall a acc : box.
+     Repr (AsBare a) -> Repr (AsBare acc) ->
+     (a -> acc -> acc) -> Stream list_dim a -> acc -> acc
+  attribute(inline) =
+
+  real_fold_list_dim;
+
+real_fold_list_dim @(a acc : box)
   (rep_a : ReprBox a)
   (rep_acc : ReprBox acc)
   (combine : a -> acc -> acc)
@@ -6328,7 +6455,13 @@ imp_fold_list_dim @(a : box)
   imp_fold_Seq @a combine (streamToSequence @a s) init;
 
 
-foreach_list_dim @(acc : box)
+foreach_list_dim
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> forall acc : box.
+     list_dim -> BoxOffset list_dim -> (BoxIndex list_dim -> acc -> acc) -> acc -> acc =
+  real_foreach_list_dim;
+
+real_foreach_list_dim @(acc : box)
   (dom : list_dim)
   (off : BoxOffset list_dim)
   (combine : BoxIndex list_dim -> acc -> acc)
@@ -7831,22 +7964,26 @@ EqDict_Tuple3_ne @(a b c : box)
 OrdDict_int : OrdDict (Boxed (Stored int));
 
 
-OrdDict_int_lt (x : Boxed (Stored int)) (y : Boxed (Stored int))
+OrdDict_int_lt (eq_dict : EqDict (Boxed (Stored int)))
+  (x y : Boxed (Stored int))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (ltI (unboxIntValue x) (unboxIntValue y));
 
 
-OrdDict_int_le (x : Boxed (Stored int)) (y : Boxed (Stored int))
+OrdDict_int_le (eq_dict : EqDict (Boxed (Stored int)))
+  (x y : Boxed (Stored int))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (leI (unboxIntValue x) (unboxIntValue y));
 
 
-OrdDict_int_gt (x : Boxed (Stored int)) (y : Boxed (Stored int))
+OrdDict_int_gt (eq_dict : EqDict (Boxed (Stored int)))
+  (x y : Boxed (Stored int))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (gtI (unboxIntValue x) (unboxIntValue y));
 
 
-OrdDict_int_ge (x : Boxed (Stored int)) (y : Boxed (Stored int))
+OrdDict_int_ge (eq_dict : EqDict (Boxed (Stored int)))
+  (x y : Boxed (Stored int))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (geI (unboxIntValue x) (unboxIntValue y));
 
@@ -7854,31 +7991,38 @@ OrdDict_int_ge (x : Boxed (Stored int)) (y : Boxed (Stored int))
 OrdDict_float : OrdDict (Boxed (Stored float));
 
 
-OrdDict_float_lt (x : Boxed (Stored float)) (y : Boxed (Stored float))
+OrdDict_float_lt (eq_dict : EqDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (ltF (unboxFloatValue x) (unboxFloatValue y));
 
 
-OrdDict_float_le (x : Boxed (Stored float)) (y : Boxed (Stored float))
+OrdDict_float_le (eq_dict : EqDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (leF (unboxFloatValue x) (unboxFloatValue y));
 
 
-OrdDict_float_gt (x : Boxed (Stored float)) (y : Boxed (Stored float))
+OrdDict_float_gt (eq_dict : EqDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (gtF (unboxFloatValue x) (unboxFloatValue y));
 
 
-OrdDict_float_ge (x : Boxed (Stored float)) (y : Boxed (Stored float))
+OrdDict_float_ge (eq_dict : EqDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (geF (unboxFloatValue x) (unboxFloatValue y));
 
 
-OrdDict_Tuple2 : forall a b : box. Repr (AsBare a) -> Repr (AsBare b)
+OrdDict_Tuple2 : forall a b : box.
+                 EqDict (Boxed (Tuple2 (AsBare a) (AsBare b)))
+              -> Repr (AsBare a) -> Repr (AsBare b)
               -> OrdDict a -> OrdDict b
               -> OrdDict (Boxed (Tuple2 (AsBare a) (AsBare b)));
 
 OrdDict_Tuple2_lt @(a b : box)
+  (eq_dict : EqDict (Boxed (Tuple2 (AsBare a) (AsBare b))))
   (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b))
   (ord_a : OrdDict a) (ord_b : OrdDict b)
   (x : Boxed (Tuple2 (AsBare a) (AsBare b))) 
@@ -7904,6 +8048,7 @@ OrdDict_Tuple2_lt @(a b : box)
 
 
 OrdDict_Tuple2_le @(a b : box)
+  (eq_dict : EqDict (Boxed (Tuple2 (AsBare a) (AsBare b))))
   (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b))
   (ord_a : OrdDict a) (ord_b : OrdDict b)
   (x : Boxed (Tuple2 (AsBare a) (AsBare b)))
@@ -7929,6 +8074,7 @@ OrdDict_Tuple2_le @(a b : box)
 
 
 OrdDict_Tuple2_gt @(a b : box)
+  (eq_dict : EqDict (Boxed (Tuple2 (AsBare a) (AsBare b))))
   (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b))
   (ord_a : OrdDict a) (ord_b : OrdDict b)
   (x : Boxed (Tuple2 (AsBare a) (AsBare b)))
@@ -7954,6 +8100,7 @@ OrdDict_Tuple2_gt @(a b : box)
 
 
 OrdDict_Tuple2_ge @(a b : box)
+  (eq_dict : EqDict (Boxed (Tuple2 (AsBare a) (AsBare b))))
   (rep_a : Repr (AsBare a)) (rep_b : Repr (AsBare b))
   (ord_a : OrdDict a) (ord_b : OrdDict b)
   (x : Boxed (Tuple2 (AsBare a) (AsBare b)))
@@ -8126,66 +8273,81 @@ AdditiveDict_Tuple2_zero @(a b : box)
 
 MultiplicativeDict_int : MultiplicativeDict (Boxed (Stored int));
 
-MultiplicativeDict_int_one : Boxed (Stored int) = boxIntValue 1;
+MultiplicativeDict_int_one (additive_dict : AdditiveDict (Boxed (Stored int)))
+  -> Boxed (Stored int) attribute(inline) =
+  boxIntValue 1;
 
 
-MultiplicativeDict_int_mul (x : Boxed (Stored int)) (y : Boxed (Stored int))
+MultiplicativeDict_int_mul (additive_dict : AdditiveDict (Boxed (Stored int)))
+  (x y : Boxed (Stored int))
   -> Boxed (Stored int) attribute(inline) =
   boxIntValue (mulI (unboxIntValue x) (unboxIntValue y));
 
 
 -- Converting int to int is the identity transformation
-MultiplicativeDict_int_fromInt (x : Boxed (Stored int))
+MultiplicativeDict_int_fromInt (additive_dict : AdditiveDict (Boxed (Stored int)))
+  (x : Boxed (Stored int))
   -> Boxed (Stored int) attribute(inline) =
   x;
 
 
 MultiplicativeDict_uint : MultiplicativeDict (Boxed (Stored uint));
-MultiplicativeDict_uint_one : Boxed (Stored uint);
-MultiplicativeDict_uint_mul : Boxed (Stored uint) -> Boxed (Stored uint)
+MultiplicativeDict_uint_one
+  (additive_dict : AdditiveDict (Boxed (Stored uint))) 
+  -> Boxed (Stored uint) attribute(inline) =
+  boxUintValue 1U;
+
+MultiplicativeDict_uint_mul : AdditiveDict (Boxed (Stored uint)) -> Boxed (Stored uint) -> Boxed (Stored uint)
                            -> Boxed (Stored uint);
-MultiplicativeDict_uint_fromInt : Boxed (Stored int) -> Boxed (Stored uint);
+MultiplicativeDict_uint_fromInt : AdditiveDict (Boxed (Stored uint)) -> Boxed (Stored int) -> Boxed (Stored uint);
 
 
 MultiplicativeDict_float : MultiplicativeDict (Boxed (Stored float));
-MultiplicativeDict_float_one : Boxed (Stored float) = boxFloatValue 1.0;
-
-
-MultiplicativeDict_float_mul (x : Boxed (Stored float)) (y : Boxed (Stored float))
+MultiplicativeDict_float_one (additive_dict : AdditiveDict (Boxed (Stored float)))
   -> Boxed (Stored float) attribute(inline) =
+  boxFloatValue 1.0;
+
+
+MultiplicativeDict_float_mul (additive_dict : AdditiveDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float)) -> Boxed (Stored float) attribute(inline) =
   boxFloatValue (mulF (unboxFloatValue x) (unboxFloatValue y));
 
 
-MultiplicativeDict_float_fromInt (x : Boxed (Stored int))
+MultiplicativeDict_float_fromInt (additive_dict : AdditiveDict (Boxed (Stored float)))
+  (x : Boxed (Stored int))
   -> Boxed (Stored float) attribute(inline) =
   boxFloatValue (fromintF (unboxIntValue x));
 
 
-RemainderDict_int_floordiv (x : Boxed (Stored int)) (y : Boxed (Stored int))
+RemainderDict_int_floordiv (mul_dict : MultiplicativeDict (Boxed (Stored int)))
+  (x y : Boxed (Stored int))
   -> Boxed (Stored int) attribute(inline) =
   boxIntValue (floordivI (unboxIntValue x) (unboxIntValue y));
 
 
-RemainderDict_int_mod (x : Boxed (Stored int)) (y : Boxed (Stored int))
+RemainderDict_int_mod (mul_dict : MultiplicativeDict (Boxed (Stored int)))
+  (x y : Boxed (Stored int))
   -> Boxed (Stored int) attribute(inline) =
   boxIntValue (modI (unboxIntValue x) (unboxIntValue y));
 
 
-RemainderDict_uint_floordiv : uint -> uint -> uint;
-RemainderDict_uint_mod : uint -> uint -> uint;
+RemainderDict_uint_floordiv : MultiplicativeDict (Boxed (Stored uint)) -> uint -> uint -> uint;
+RemainderDict_uint_mod : MultiplicativeDict (Boxed (Stored uint)) -> uint -> uint -> uint;
 
 
-RemainderDict_float_floordiv (x : Boxed (Stored float)) (y : Boxed (Stored float))
-  -> Boxed (Stored int) attribute(inline) =
+RemainderDict_float_floordiv (mul_dict : MultiplicativeDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float)) -> Boxed (Stored int) attribute(inline) =
   boxIntValue (floordivF (unboxFloatValue x) (unboxFloatValue y));
 
 
-RemainderDict_float_mod (x : Boxed (Stored float)) (y : Boxed (Stored float))
+RemainderDict_float_mod (mul_dict : MultiplicativeDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float))
   -> Boxed (Stored float) attribute(inline) =
   boxFloatValue (modF (unboxFloatValue x) (unboxFloatValue y));
 
 
-FractionalDict_float_div (x : Boxed (Stored float)) (y : Boxed (Stored float))
+FractionalDict_float_div (mul_dict : MultiplicativeDict (Boxed (Stored float)))
+  (x y : Boxed (Stored float))
   -> Boxed (Stored float) attribute(inline) =
   boxFloatValue (divF (unboxFloatValue x) (unboxFloatValue y));
 
@@ -8798,6 +8960,17 @@ boxIntValue (n : int) -> Boxed (Stored int) =
 
 unboxIntValue (n : Boxed (Stored int)) -> int =
   case n of [reprSizeAlign @(Stored int) repr_int]
+    boxed tyob (stored un). un;
+
+boxUintValue (n : uint) -> Boxed (Stored uint) =
+  let rep_Suint = repr_Stored @uint (unboxedinfo uint) in
+  boxed @(Stored uint)
+  (reprSizeAlign @(Stored uint) rep_Suint)
+  (boxedinfo boxed @(Stored uint) rep_Suint)
+  (stored @uint n);
+
+unboxUintValue (n : Boxed (Stored uint)) -> uint =
+  case n of [reprSizeAlign @(Stored uint) repr_uint]
     boxed tyob (stored un). un;
 
 boxFloatValue (n : float) -> Boxed (Stored float) =

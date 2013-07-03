@@ -772,10 +772,14 @@ elaborateAlt target_type (AltSF (Alt decon m_tyob params body)) = do
       return (result_type, AltM (Alt decon' m_ty_ob' params' body'))
 
 elaborateCoerce info rep t t' body = do
-  -- Convert types.  Make sure they have the same kind.  Use the natural
-  -- representation of the types.
-  (elaborated_t, k) <- elaborateType t
-  elaborated_t' <- elaborateTypeTo k t'
+  -- Convert types.  Use the boxed form to ensure that the coercion
+  -- can go through.
+  --
+  -- An example where we need boxed forms is the coercion
+  -- @int ~ index (shape t)@.  Both sides of the equality can be coerced
+  -- to kind @box@.  Only the left side can be coerced to kind @val@.
+  elaborated_t <- elaborateBaseTypeToForm BoxedT t
+  elaborated_t' <- elaborateBaseTypeToForm BoxedT t'
   body' <- elaborateExpressionTo elaborated_t body
   return $ EExp elaborated_t' (ExpM $ CoerceE info elaborated_t elaborated_t' body') 
 

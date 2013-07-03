@@ -341,7 +341,8 @@ instanceTerm prd@(IsInst tycon inst_type) inst c_ty_args c_premises
   case instBody inst of
     AbstractClassInstance fun type_args ->
       -- Create a function call
-      return $ instantiate type_args fun
+      let c_premise_exps = map (uncurry proofExp) c_premises
+      in return $ instantiate type_args c_premise_exps fun
 
     NewAbstractClassInstance fun ->
       -- Create a function call
@@ -349,17 +350,17 @@ instanceTerm prd@(IsInst tycon inst_type) inst c_ty_args c_premises
 
     MethodsInstance methods ->
       -- Create a class dictionary
-      let inst_methods = map (instantiate i_ty_args) methods
-          c_premise_exps = map (uncurry proofExp) c_premises
+      let c_premise_exps = map (uncurry proofExp) c_premises
+          inst_methods = map (instantiate i_ty_args c_premise_exps) methods
       in return $ mkDictE noSourcePos cls (mkType inst_type)
                   c_premise_exps (clsTyObjectCon cls) inst_methods
   where
     -- Instantiate a function or class method.
     -- For class methods, the type arguments are given by the instance's
     -- type signature; for abstract instances, they are given explicitly.
-    instantiate type_args f_var =
+    instantiate type_args c_premise_args f_var =
       let fun_ty_args = map mkType type_args
-          fun_args = map (uncurry proofExp) i_premises
+          fun_args = c_premise_args ++ map (uncurry proofExp) i_premises
           fun_repr = polyThingRepr TIBoxed type_args fun_args
           fun = mkVarE noSourcePos fun_repr f_var
       in mkPolyCallE noSourcePos TIBoxed fun fun_ty_args fun_args
