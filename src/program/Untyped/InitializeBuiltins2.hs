@@ -882,7 +882,7 @@ shapeClass _ tc_map = do
          coreBuiltin The_zipWith_list_dim,
          coreBuiltin The_fold_list_dim,
          coreBuiltin The_imp_fold_list_dim_wrapper,
-         coreBuiltin The_foreach_list_dim])]
+         coreBuiltin The_foreach_list_dim_wrapper])]
        {-(ConTy (builtinTyCon TheTC_dim0),
         [coreBuiltin The_ShapeDict_dim0_member,
          coreBuiltin The_ShapeDict_dim0_intersect,

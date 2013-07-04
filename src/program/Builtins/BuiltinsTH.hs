@@ -373,7 +373,7 @@ builtinVariableNames =
   , "zipWith_list_dim"
   , "fold_list_dim"
   , "imp_fold_list_dim_wrapper"
-  , "foreach_list_dim"  
+  , "foreach_list_dim_wrapper"  
     {-
   , "ShapeDict_list_dim_member"
   , "ShapeDict_list_dim_intersect"

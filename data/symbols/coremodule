@@ -628,8 +628,7 @@ data ShapeDict (d : box) : box
    -- This is inside a data structure for compatibility with the frontend
    ImperativeFoldFunction d,
    -- foreach
-   forall acc : box.
-   d -> BoxOffset d -> (BoxIndex d -> acc -> acc) -> acc -> acc
+   ImperativeForeachFunction d
   );
 };
 
@@ -638,6 +637,12 @@ data ImperativeFoldFunction (d : box) : val
   imperativeFoldFunction
   (forall a : box.
    Repr (AsBare a) -> (a -> Store -> Store) -> Stream d a -> Store -> Store);
+};
+
+data ImperativeForeachFunction (d : box) : val
+{
+  imperativeForeachFunction
+  (d -> BoxOffset d -> (BoxIndex d -> Store -> Store) -> Store -> Store)
 };
 
 shRepOffset @(d : box) (sh : ShapeDict d) -> Repr (offset d) attribute(inline) =
@@ -768,6 +773,16 @@ shImpFold @(d : box) (sh : ShapeDict d)
                noOff addOff appOff intersect member sl split splitN peel
                flat gen zipWith fold imp_fold foreach.
     case imp_fold of imperativeFoldFunction f.
+    f;
+
+shForeach @(d : box) (sh : ShapeDict d)
+   -> d -> BoxOffset d -> (BoxIndex d -> Store -> Store) -> Store -> Store
+   attribute(inline) =
+
+    case sh of shapeDict tyob rep_i rep_o rep_s
+               noOff addOff appOff intersect member sl split splitN peel
+               flat gen zipWith fold imp_fold foreach.
+    case foreach of imperativeForeachFunction f.
     f;
 
 -- The functor type class
@@ -3895,6 +3910,34 @@ map_Stream @(d a b : box)
 map_Stream2 @(d a b : box)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (f : a -> b) (s : Stream d a) -> Stream d b
+  attribute(inline) =
+  case s of stream tyob_stream par_hint i_s.
+  case i_s of {
+    seqStream tyob co sq.
+      coerce @(Stream list_dim b) @(Stream d b)
+      (con_stream @list_dim @b par_hint
+       (con_seqStream @b (map_Seq @a @b f sq)))
+
+  ; splittableStream @d2 tyob co shape_d2 vw.
+      let rep_stream_a = repr_Box @(Stream list_dim a) in
+      let rep_stream_b = repr_Box @(Stream list_dim b) in
+      coerce @(Stream list_dim b) @(Stream d b)
+      (con_stream @list_dim @b par_hint
+       (con_splittableStream @b @d2 shape_d2
+        (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
+         rep_stream_a rep_stream_b
+         (map_Stream3 @list_dim @a @b rep_a rep_b f) vw)))
+
+  ; ixStream @c tyob rep transformer vw.
+      con_stream @d @b par_hint
+       (con_ixStream @d @b @c rep (\ (x : c) -> b. f (transformer x)) vw)
+  };
+
+
+-- FIXME: Handle recursive function inlining properly
+map_Stream3 @(d a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : Stream d a) -> Stream d b
   attribute(inline_never) =
   case s of stream tyob_stream par_hint i_s.
   case i_s of {
@@ -3911,7 +3954,7 @@ map_Stream2 @(d a b : box)
        (con_splittableStream @b @d2 shape_d2
         (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
          rep_stream_a rep_stream_b
-         (map_Stream2 @list_dim @a @b rep_a rep_b f) vw)))
+         (map_Stream3 @list_dim @a @b rep_a rep_b f) vw)))
 
   ; ixStream @c tyob rep transformer vw.
       con_stream @d @b par_hint
@@ -6076,7 +6119,7 @@ ShapeDict_list_dim : ShapeDict list_dim =
   real_zipWith_list_dim
   real_fold_list_dim
   real_imp_fold_list_dim_wrapper
-  real_foreach_list_dim;
+  real_foreach_list_dim_wrapper;
 
 
 imp_fold_list_dim_wrapper
@@ -6089,13 +6132,27 @@ real_imp_fold_list_dim_wrapper : ImperativeFoldFunction list_dim attribute(inlin
   imperativeFoldFunction @list_dim imp_fold_list_dim;
 
 
+foreach_list_dim_wrapper
+  (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
+  -> ImperativeForeachFunction list_dim attribute(inline) =
+  real_foreach_list_dim_wrapper;
+
+
+real_foreach_list_dim_wrapper : ImperativeForeachFunction list_dim attribute(inline) =
+  imperativeForeachFunction @list_dim foreach_list_dim;
+
+
 noOffset_list_dim
   (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
   -> Boxed (Stored int) attribute(inline) =
   real_noOffset_list_dim;
 
 
-real_noOffset_list_dim : Boxed (Stored int) = boxIntValue 0;
+real_noOffset_list_dim : Boxed (Stored int) attribute(inline) =
+  -- Use data constructors so that this term can be inlined
+  boxed @(Stored int) (reprSizeAlign @(Stored int) repr_int)
+  (boxedinfo boxed @(Stored int) repr_int)
+  (stored @int 0);
 
 
 addOffset_list_dim
@@ -6444,6 +6501,8 @@ real_fold_list_dim @(a acc : box)
   fold_Seq @a @acc combine (streamToSequence @a s) init;
 
 
+-- This function is recursive
+-- FIXME: Handle recursion properly
 imp_fold_list_dim @(a : box)
   (rep_a : ReprBox a)
   (combine : a -> Store -> Store)
@@ -6452,14 +6511,120 @@ imp_fold_list_dim @(a : box)
   -> Store
   attribute(inline) =
 
-  imp_fold_Seq @a combine (streamToSequence @a s) init;
+  case s of stream tyob par_hint i_s.
+  case i_s of {
+    seqStream tyob co sq.
+      imp_fold_Seq @a combine sq init
+
+  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+      -- Outer loop over 'dom'
+      let off = boxIntValue 0 in
+      shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
+      (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
+
+         -- Inner loop
+         imp_fold_list_dim2 @a rep_a combine (gen outer_i) state)
+      init
+
+  ; ixStream @b tyob rep_b f si.
+      -- Loop over the indexable object
+      case map_view @list_dim @b @a rep_b rep_a f
+           (someIndexableToView @list_dim @b rep_b si) of
+        mk_view tyob dom gen.
+
+      let off = boxIntValue 0 in
+      foreach_list_dim dom off
+      (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
+         combine (gen outer_i) state)
+      init
+  };
 
 
-foreach_list_dim
+-- This function is recursive
+-- FIXME: Handle recursion properly
+imp_fold_list_dim2 @(a : box)
+  (rep_a : ReprBox a)
+  (combine : a -> Store -> Store)
+  (s : Stream list_dim a)
+  (init : Store)
+  -> Store
+  attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case i_s of {
+    seqStream tyob co sq.
+      imp_fold_Seq @a combine sq init
+
+  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+      -- Outer loop over 'dom'
+      let off = boxIntValue 0 in
+      shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
+      (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
+
+         -- Inner loop
+         imp_fold_list_dim3 @a rep_a combine (gen outer_i) state)
+      init
+
+  ; ixStream @b tyob rep_b f si.
+      -- Loop over the indexable object
+      case map_view @list_dim @b @a rep_b rep_a f
+           (someIndexableToView @list_dim @b rep_b si) of
+        mk_view tyob dom gen.
+
+      let off = boxIntValue 0 in
+      foreach_list_dim dom off
+      (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
+         combine (gen outer_i) state)
+      init
+  };
+
+
+-- This function is recursive
+-- FIXME: Handle recursion properly
+imp_fold_list_dim3 @(a : box)
+  (rep_a : ReprBox a)
+  (combine : a -> Store -> Store)
+  (s : Stream list_dim a)
+  (init : Store)
+  -> Store
+  attribute(inline_never) =
+
+  case s of stream tyob par_hint i_s.
+  case i_s of {
+    seqStream tyob co sq.
+      imp_fold_Seq @a combine sq init
+
+  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+      -- Outer loop over 'dom'
+      let off = boxIntValue 0 in
+      shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
+      (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
+
+         -- Inner loop
+         imp_fold_list_dim3 @a rep_a combine (gen outer_i) state)
+      init
+
+  ; ixStream @b tyob rep_b f si.
+      -- Loop over the indexable object
+      case map_view @list_dim @b @a rep_b rep_a f
+           (someIndexableToView @list_dim @b rep_b si) of
+        mk_view tyob dom gen.
+
+      let off = boxIntValue 0 in
+      foreach_list_dim dom off
+      (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
+         combine (gen outer_i) state)
+      init
+  };
+
+
+{-
+real_foreach_list_dim
   (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
   -> forall acc : box.
      list_dim -> BoxOffset list_dim -> (BoxIndex list_dim -> acc -> acc) -> acc -> acc =
   real_foreach_list_dim;
+
 
 real_foreach_list_dim @(acc : box)
   (dom : list_dim)
@@ -6468,8 +6633,48 @@ real_foreach_list_dim @(acc : box)
   (init : acc)
   -> acc =
 
-  -- TODO
-  except @acc;
+  case dom of mk_list_dim tyob m_size.
+  case m_size of {
+    justVal bound.
+      let start = unboxIntValue off in
+      let end = start +# bound in
+      letfun
+        step (i : int) (x : acc) -> acc =
+          if i <# end
+          then step (i +# 1) (combine (boxIntValue i) x)
+          else x
+      in
+      step start init
+
+  ; nothingVal.
+      except @acc
+  };
+-}
+
+-- Loop over the entire domain and accumulate a value
+foreach_list_dim
+  (dom : list_dim)
+  (off : BoxOffset list_dim)
+  (combine : BoxIndex list_dim -> Store -> Store)
+  (init : Store)
+  -> Store attribute(inline) =
+
+  case dom of mk_list_dim tyob m_size.
+  case m_size of {
+    justVal bound.
+      let start = unboxIntValue off in
+      let end = start +# bound in
+      letfun
+        step (i : int) (x : Store) -> Store =
+          if i <# end
+          then step (i +# 1) (combine (boxIntValue i) x)
+          else x
+      in
+      step start init
+
+  ; nothingVal.
+      except @Store
+  };
 
 
 ShapeDict_chain_dim : ShapeDict chain_dim =
@@ -6491,11 +6696,14 @@ ShapeDict_chain_dim : ShapeDict chain_dim =
   zipWith_chain_dim
   fold_chain_dim
   imp_fold_chain_dim_wrapper
-  foreach_chain_dim;
+  foreach_chain_dim_wrapper;
 
 
 imp_fold_chain_dim_wrapper : ImperativeFoldFunction chain_dim =
   imperativeFoldFunction @chain_dim imp_fold_chain_dim;
+
+foreach_chain_dim_wrapper : ImperativeForeachFunction chain_dim =
+  imperativeForeachFunction @chain_dim foreach_chain_dim;
 
 
 noOffset_chain_dim : Boxed (Stored NoneType) attribute(inline) =
@@ -6669,15 +6877,15 @@ imp_fold_chain_dim @(a : box)
   };
 
 
-foreach_chain_dim @(acc : box)
+foreach_chain_dim
   (dom : chain_dim)
   (off : BoxOffset chain_dim)
-  (combine : BoxIndex chain_dim -> acc -> acc)
-  (init : acc)
-  -> acc =
+  (combine : BoxIndex chain_dim -> Store -> Store)
+  (init : Store)
+  -> Store =
 
   -- TODO
-  except @acc;
+  except @Store;
 
 
 {- REPLACED BY NEW STREAM CODE
@@ -13908,11 +14116,64 @@ filter_Stream @(a : box) (test : a -> Boxed (Stored bool)) (s : Stream list_dim 
   except @(Stream list_dim a);
 
 
+-- This function is recursive
+-- FIXME: handle recursive functions properly
 bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
-  -> Stream list_dim b attribute(inline, inline_sequential) =
+  -> Stream list_dim b attribute(inline) =
 
-  -- TODO
-  except @(Stream list_dim b);
+  case s of stream tyob par_hint i_s.
+  let u = case i_s of {
+            seqStream tyob co sq.
+              con_seqStream @b
+              (bind_Seq @a @b sq
+               (\ (x : a) -> Seq b. streamToSequence @b (t x)))
+
+          ; splittableStream @sh tyob co shape_sh (mk_view tyob2 dom f).
+              con_splittableStream @b @sh shape_sh
+              (con_view @sh @(Stream list_dim b) dom
+               (\ (i : BoxIndex sh) -> Stream list_dim b.
+                  bind_Stream2 @a @b (f i) t))
+
+          ; ixStream @c tyob rep_c f
+            (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container).
+              let dom = coerce @(shape s) @list_dim
+                        (ix_shape @s ix @c container) in
+              letfun
+                g (i : BoxIndex list_dim) -> Stream list_dim b =
+                  t (f (ix_at @s ix @c rep_c container
+                        (coerce @(BoxIndex list_dim) @(BoxIndex (shape s)) i))) in
+              con_splittableStream @b @list_dim ShapeDict_list_dim
+              (con_view @list_dim @(Stream list_dim b) dom g)
+          } in
+  con_stream @list_dim @b par_hint u;
 
 
+bind_Stream2 @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
+  -> Stream list_dim b attribute(inline_never) =
+
+  case s of stream tyob par_hint i_s.
+  let u = case i_s of {
+            seqStream tyob co sq.
+              con_seqStream @b
+              (bind_Seq @a @b sq
+               (\ (x : a) -> Seq b. streamToSequence @b (t x)))
+
+          ; splittableStream @sh tyob co shape_sh (mk_view tyob2 dom f).
+              con_splittableStream @b @sh shape_sh
+              (con_view @sh @(Stream list_dim b) dom
+               (\ (i : BoxIndex sh) -> Stream list_dim b.
+                  bind_Stream2 @a @b (f i) t))
+
+          ; ixStream @c tyob rep_c f
+            (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container).
+              let dom = coerce @(shape s) @list_dim
+                        (ix_shape @s ix @c container) in
+              letfun
+                g (i : BoxIndex list_dim) -> Stream list_dim b =
+                  t (f (ix_at @s ix @c rep_c container
+                        (coerce @(BoxIndex list_dim) @(BoxIndex (shape s)) i))) in
+              con_splittableStream @b @list_dim ShapeDict_list_dim
+              (con_view @list_dim @(Stream list_dim b) dom g)
+          } in
+  con_stream @list_dim @b par_hint u;
 
