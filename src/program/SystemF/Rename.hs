@@ -566,6 +566,7 @@ instance Renameable Specificity where
        Copied            -> Set.empty
        Decond decon spcs -> deConFreeVariables decon $ freeVariables spcs
        Called n v spc    -> maybe id Set.delete v $ freeVariables spc
+       Read m            -> fvHeapMap m
        Unused            -> Set.empty
 
 renameHeapMap :: Renameable a => Renaming -> HeapMap a -> HeapMap a
