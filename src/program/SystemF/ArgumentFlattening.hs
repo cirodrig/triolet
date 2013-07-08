@@ -1235,15 +1235,37 @@ planOutputReturn pat = do
   let return_type = fromOutPtrType $ patMType pat
   flat_ret <- planReturn mode Used return_type
 
-  -- Only perform decomposition if everything was converted to a value
+  -- Only perform decomposition if everything was converted to a value.
+  -- See note OUTPUT_RETURN.
   real_ret <- do
     value <- unpacksToAValue flat_ret
-    return $! if value
+    return $! if False {- value -}
               then flat_ret
               else FlatRet (frType flat_ret) IdDecomp
   return $ PlanRetWriter pat real_ret
   where
     mode = PlanMode LiberalSmall Don'tUnpackExistentials
+
+-- Note OUTPUT_RETURN
+--
+-- Imperatively written return values can't be flattened.
+-- The problem is that an output pointer may be used in a way that doesn't
+-- correspond to simply initializing the output.  This error showed up
+-- in some code to box a value:
+--
+-- > f return_ptr =
+-- >   case x
+-- >     of notAReference co.
+-- >          stored 0 ret
+-- >        isAReference @a co.
+-- >          ref (coerce 0) (coerce ret)
+--
+-- We'd like to return an integer instead of writing to an integer.
+-- However, the 'isAReference' case uses the return pointer in a coercion, 
+-- and we can't transform that to an equivalent operation on an integer. 
+-- That case is actually unreachable code, but the compiler doesn't
+-- know this.  Because we don't have a general strategy for transforming
+-- imperative return values, we don't transform them at all.
 
 -- | A flattened local variable.
 --
