@@ -998,17 +998,14 @@ bareInfoDefinition var_supply dtype = do
       rep <- structureRepr dyn_info ty =<< lift (computeStructure ty)
       return $ packRepr ty rep
 
--- Add an \"inline-postfinal\" attribute to functions.
+-- Add an \"inline-final\" attribute to functions.
 -- We inline unboxed info.  It's a good idea because it gets rid
 -- of type objects.
-addInlineAttribute d
-  -- Is this a function?
-  | FunEnt (FunM f) <- definiens d, not (null $ funParams f) =
-      modifyDefAnnotation make_inlined d
-  | otherwise = d
+addInlineAttribute d =
+  modifyDefAnnotation make_inlined d
   where
     make_inlined d = d { defAnnInlineRequest = InlAggressively
-                       , defAnnInlinePhase = InlSequential
+                       , defAnnInlinePhase = InlFinal
                        }
 
 addExportedAttribute d =

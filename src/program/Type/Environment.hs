@@ -386,15 +386,21 @@ data DataType =
     --   have a built-in, nonalgebraic definition.
   , dataTypeIsAlgebraic :: !Bool
 
+    -- | Whether the data type is a singleton type constructor.
+    --
+    --   Each singleton type has exactly one inhabitant; consequently, if two  
+    --   variables have the same singleton type, they are equal.
+  , dataTypeIsSingleton :: !Bool
+
     -- | Data constructors of this data type
   , dataTypeDataConstructors :: [Var]
 
   }
 
 instance NFData DataType where
-  rnf (DataType c p l k b1 b2 cs) =
+  rnf (DataType c p l k b1 b2 b3 cs) =
     rnf c `seq` rnf p `seq` rnf l `seq` rnf k `seq` rnf b1 `seq`
-    rnf b2 `seq` rnf cs
+    rnf b2 `seq` rnf b3 `seq` rnf cs
 
 dataTypeConIndex :: DataType -> Var -> Int
 dataTypeConIndex data_type c =
@@ -824,6 +830,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = []}
       where
         layout = unboxedDataTypeLayout [] []
@@ -836,6 +843,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = True
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = [store_conV]}
       where
         layout = unboxedDataTypeLayout [] []
@@ -855,6 +863,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = BareK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = []}
       where
         layout = unboxedDataTypeLayout
@@ -871,6 +880,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = BareK
                , dataTypeIsAbstract = False
                , dataTypeIsAlgebraic = True
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = [stored_conV]}
       where
         layout = specialDataTypeLayout
@@ -891,6 +901,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = []}
       where
         int_layout = unboxedDataTypeLayout [] []
@@ -903,6 +914,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = []}
       where
         uint_layout = unboxedDataTypeLayout [] []
@@ -915,6 +927,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = []}
       where
         float_layout = unboxedDataTypeLayout [] []
@@ -927,6 +940,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = ValK
                , dataTypeIsAbstract = True
                , dataTypeIsAlgebraic = False
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = []}
       where
         byte_layout = unboxedDataTypeLayout [] []
@@ -939,6 +953,7 @@ mkWiredInTypeEnv = do
                , dataTypeKind = BareK
                , dataTypeIsAbstract = False
                , dataTypeIsAlgebraic = True
+               , dataTypeIsSingleton = False
                , dataTypeDataConstructors = [ref_conV]}
       where
         ref_layout = unboxedDataTypeLayout
@@ -1014,6 +1029,7 @@ data DataTypeDescr =
     [DataConDescr]              -- Constructors
     !Bool                       -- Is abstract
     !Bool                       -- Is algebraic
+    !Bool                       -- Is singleton
 
 data DataConDescr =
   DataConDescr 
@@ -1022,7 +1038,8 @@ data DataConDescr =
     [(Type, BaseKind)]          -- Field types and their kinds
 
 insertDataType :: MTypeEnvBase b -> DataTypeDescr -> IO ()
-insertDataType (MTypeEnv ht) (DataTypeDescr ty_con u_args range ctors is_abstract is_algebraic) = do
+insertDataType (MTypeEnv ht) (DataTypeDescr ty_con u_args range ctors
+                              is_abstract is_algebraic is_singleton) = do
   uncurry (HT.insert ht) ty_con_assignment
   mapM_ (uncurry (HT.insert ht)) data_con_assignments
   where
@@ -1030,7 +1047,7 @@ insertDataType (MTypeEnv ht) (DataTypeDescr ty_con u_args range ctors is_abstrac
     
     data_cons = [dtor | DataConDescr dtor _ _ <- ctors]
     data_type = DataType ty_con u_args Nothing range
-                is_abstract is_algebraic data_cons
+                is_abstract is_algebraic is_singleton data_cons
     ty_con_assignment = (ty_con, TyConTypeAssignment data_type)
 
     data_con (DataConDescr v bs fs) = DataConType v bs fs data_type
@@ -1312,12 +1329,12 @@ specializeTypeEnv basekind_f kind_f type_f tybind_f (MTypeEnv m) = do
     kind_assignment (DataConTypeAssignment _) = Nothing
 
     data_type (DataType con params l k
-               is_abstract is_algebraic ctors) = do
+               is_abstract is_algebraic is_singleton ctors) = do
       params' <- specializeBinders kind_f params
       l' <- mapM layout l
       k' <- basekind_f k
       return $ DataType con params' l' k'
-        is_abstract is_algebraic ctors
+        is_abstract is_algebraic is_singleton ctors
 
     layout (DataTypeLayout size_params fixed_types info_type info ser des fields) =
       DataTypeLayout <$> mapM kinded_type size_params

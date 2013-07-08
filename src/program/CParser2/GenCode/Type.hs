@@ -196,12 +196,13 @@ dataEnt pos core_name dom kind data_cons attrs = do
   kind' <- genKind kind
   let abstract = AbstractAttr `elem` attrs
       algebraic = not $ NonalgebraicAttr `elem` attrs
+      singleton = SingletonAttr `elem` attrs
 
   domains pos dom $ \params -> do
     data_con_descrs <-
       mapM (translateDataConDecl core_name) data_cons
     base_kind <- toBaseKind pos kind'
-    let descr = DataTypeDescr core_name params base_kind data_con_descrs abstract algebraic
+    let descr = DataTypeDescr core_name params base_kind data_con_descrs abstract algebraic singleton
     return $ UpdateTypeEnv (\env -> insertDataType env descr)
 
 entity core_name _ (VarEnt ty attrs) = varEnt core_name ty attrs

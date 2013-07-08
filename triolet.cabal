@@ -134,6 +134,7 @@ Executable triolet
     SystemF.Build
     SystemF.Context
     SystemF.ConSpecialization
+    SystemF.CSE
     SystemF.Datatypes.Code
     SystemF.Datatypes.Driver
     SystemF.Datatypes.DynamicTypeInfo

@@ -226,6 +226,10 @@ data AbsValue =
   | BoolAV !AbsProp             -- ^ A boolean value carrying the truth
                                 --   value of a proposition
   | CursorAV AbsCode            -- ^ A cursor
+  | InlinedAV ExpM              -- ^ An inlinable constant expression
+
+-- Inlined constants are kind of a hack; they should be handled by the
+-- simplifier instead of abstract values.
 
 data AbsComputation =
     TopAC                       -- ^ Unknown computation
@@ -327,6 +331,7 @@ pprAbsValue (DataAV d) = pprAbsData d
 pprAbsValue (HeapAV hp) = pprAbsHeap hp
 pprAbsValue (BoolAV b) = text "BOOL" <> parens (pprAbsProp b)
 pprAbsValue (CursorAV c) = text "CURSOR" <> parens (pprAbsCode c)
+pprAbsValue (InlinedAV e) = text "INLINED" <> pprExp e
 
 pprAbsComputation TopAC = text "TOP"
 pprAbsComputation (ReturnAC c) = text "RET" <+> pprAbsCode c
@@ -609,6 +614,11 @@ substituteAbsValue s value =
                  of Nothing -> return TopAV
                     Just p' -> return $ BoolAV p'
      CursorAV v -> CursorAV `liftM` substitute s v
+     InlinedAV e -> do
+       subst_e <- runMaybeT $ substituteExp s e
+       return $ case subst_e
+                of Nothing -> TopAV
+                   Just e' -> InlinedAV e'
 
 instance Substitutable AbsCode where
   type Substitution AbsCode = AbsSubst
@@ -828,10 +838,10 @@ funValue typarams params body =
 -- | Construct an abstract value for a lambda expression.
 --
 --   This code is designed to interpret initializer functions accurately.
-lambdaValue :: FunM -> UnboxedTypeEvalM AbsCode
-lambdaValue (FunM (Fun info ty_params params _ body)) =
+lambdaValue :: AbsEnv -> FunM -> UnboxedTypeEvalM AbsCode
+lambdaValue env (FunM (Fun info ty_params params _ body)) =
   assumeTyPats ty_params $ assumePatMs params $ do
-    body_code <- expAbsValue body
+    body_code <- expAbsValue env body
     return $ funValue ty_params params body_code
 
 -- | Construct an abstract value for an expression.
@@ -840,26 +850,38 @@ lambdaValue (FunM (Fun info ty_params params _ body)) =
 --   because these four terms occur in initializer functions.
 --   Most expressions are not modeled precisely, since the simplifier will
 --   optimize them without our help.
-expAbsValue :: ExpM -> UnboxedTypeEvalM AbsComputation
-expAbsValue (ExpM e) =
+expAbsValue :: AbsEnv -> ExpM -> UnboxedTypeEvalM AbsComputation
+expAbsValue env (ExpM e) =
   case e
-  of VarE _ v -> return $ ReturnAC $ valueCode (VarAV v)
+  of VarE _ v ->
+       -- Look up the variable's abstract value in the environment
+       let abs_value = lookupAbstractValue v env
+       in case codeValue abs_value
+          of TopAV -> return $ ReturnAC $ valueCode (VarAV v)
+             val   -> return $ ReturnAC abs_value
      LitE _ l -> return $ ReturnAC $ litCode l
      ConE _ con sps tyob fs -> do
        -- Get abstract values for subexpressions
        interpret_maybe_exp tyob $ \tyob_abs_value -> do
-         sps_codes <- mapM expAbsValue sps
+         sps_codes <- mapM (expAbsValue env) sps
          sequenceComputations sps_codes $ \sps_abs_values -> do
-           fs_codes <- mapM expAbsValue fs
+           fs_codes <- mapM (expAbsValue env) fs
            sequenceComputations fs_codes $ \fs_abs_values -> do
              -- Apply constructor to arguments
              interpretCon con tyob_abs_value sps_abs_values fs_abs_values
 
+     -- Special case handling of the builtin copy function.
+     -- If the source is a heap fragment and the destination is a variable,
+     -- then the return value is a new heap fragment at the destination.
+     AppE _ (ExpM (VarE _ v)) [ty] [_, src, dst]
+       | v == blockcopyV ->
+           copiedHeapValue env src dst
+
      AppE _ op ty_args args -> do
        -- Get abstract values for subexpressions
-       op_code <- expAbsValue op
+       op_code <- expAbsValue env op
        interpretComputation op_code $ \op_abs_value -> do
-         args_codes <- mapM expAbsValue args
+         args_codes <- mapM (expAbsValue env) args
          sequenceComputations args_codes $ \args_abs_values -> do
            -- Apply operator to arguments
            applyCode op_abs_value ty_args args_abs_values
@@ -869,8 +891,20 @@ expAbsValue (ExpM e) =
   where
     interpret_maybe_exp Nothing k = k Nothing
     interpret_maybe_exp (Just e) k = do
-      code <- expAbsValue e
+      code <- expAbsValue env e
       interpretComputation code (k . Just)
+
+-- | Create the abstract value produced by an expression that copies the
+--   source to the destination
+copiedHeapValue :: AbsEnv -> ExpM -> ExpM -> UnboxedTypeEvalM AbsComputation
+copiedHeapValue env src dst =
+  case dst
+  of ExpM (VarE _ dst_addr) -> do
+       src_comp <- expAbsValue env src
+       interpretComputation src_comp $ \src_value ->
+         -- Put the value onto the heap at the destination address
+         return $ ReturnAC $ valueCode $ HeapAV $ AbsHeap (HeapMap [(dst_addr, src_value)])
+     _ -> return TopAC
 
 -- | Given a data value and its type, construct the value of the
 -- corresponding initializer function.
@@ -997,7 +1031,7 @@ interpretConstant c = interpret_exp $ constExp c
            -- This must be a value or boxed expression.
            -- Allow this expression to be inlined.
            -- Note that work may be duplicated by inlining.
-           labelCode expression topCode
+           labelCode expression $ valueCode $ InlinedAV expression
          _ ->
            internalError "interpretConstant: Unexpected expression"
 

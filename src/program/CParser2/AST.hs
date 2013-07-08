@@ -50,6 +50,7 @@ unLoc (L _ x) = x
 data Attribute ix =
     AbstractAttr                    -- ^ Data type is abstract
   | NonalgebraicAttr                -- ^ Data type is not algebraic
+  | SingletonAttr                   -- ^ Data type is a singleton type constructor
   | ConlikeAttr                     -- ^ Function calls are cheap to reevaluate
   | InlineAttr                      -- ^ Definition should be aggressively
                                     --   inlined
@@ -70,6 +71,7 @@ data Attribute ix =
 castAttribute :: Attribute a -> Attribute b
 castAttribute AbstractAttr = AbstractAttr
 castAttribute NonalgebraicAttr = NonalgebraicAttr
+castAttribute SingletonAttr = SingletonAttr
 castAttribute ConlikeAttr = ConlikeAttr
 castAttribute InlineAttr = InlineAttr
 castAttribute InlineNeverAttr = InlineNeverAttr

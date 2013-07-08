@@ -163,6 +163,7 @@ attr = do
     attr_table =
       [("abstract", return AbstractAttr),
        ("nonalgebraic", return NonalgebraicAttr),
+       ("singleton", return SingletonAttr),
        ("conlike", return ConlikeAttr),
        ("inline", return InlineAttr),
        ("inline_never", return InlineNeverAttr),

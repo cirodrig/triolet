@@ -24,6 +24,7 @@ import qualified Untyped.TypeInference2 as Untyped
 import qualified SystemF.ArgumentFlattening as SystemF
 -- import qualified SystemF.ConSpecialization as SystemF
 import qualified SystemF.PartialEval as SystemF
+import qualified SystemF.CSE as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.Syntax as SystemF
@@ -267,6 +268,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   repr_mod <- highLevelOptimizations times True SystemF.GeneralSimplifierPhase repr_mod
 
   repr_mod <- time times FloatingTimer $ SystemF.longRangeFloating repr_mod
+  repr_mod <- time times CSETimer $ SystemF.commonSubexpressionElimination repr_mod
   time times PrintTimer $ when debugMode $ void $ do
     putStrLn "After floating 1"
     print $ pprMemModule repr_mod
@@ -294,6 +296,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   -- Final floating, to move repr dictionaries out of the way and ensure
   -- that copying is eliminated
   repr_mod <- time times FloatingTimer $ SystemF.longRangeFloating repr_mod
+  repr_mod <- time times CSETimer $ SystemF.commonSubexpressionElimination repr_mod
 
   -- Restructure the code resulting from inlining, which may create new
   -- local functions

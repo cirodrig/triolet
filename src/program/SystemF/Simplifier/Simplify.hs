@@ -10,7 +10,6 @@ and some local expression reordering.
 
 {-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types,
     ViewPatterns, ConstraintKinds #-}
-{-# OPTIONS_GHC -auto-all #-}
 module SystemF.Simplifier.Simplify
        (SimplifierPhase(..),
         rewriteLocalExpr,
@@ -275,6 +274,10 @@ lookupKnownValue :: Var -> LR AbsCode
 lookupKnownValue v = LR $ \env ->
   return $! Just $! lookupAbstractValue v (lrKnownValues env)
 
+getKnownValues :: LR AbsEnv
+getKnownValues = LR $ \env ->
+  return $ Just $ lrKnownValues env
+
 -- | Add a variable's known value to the environment 
 withKnownValue :: Var -> AbsCode -> LR a -> LR a
 withKnownValue v val m = LR $ \env ->
@@ -298,7 +301,8 @@ instance Definiens Fun where
   definiensIsInliningCandidate = isInliningCandidate
   definiensValue (Def v _ f) = do
     let fun_info = funInfo $ fromFunM f
-    fun_code <- liftTypeEvalM $ lambdaValue f
+    env <- getKnownValues
+    fun_code <- liftTypeEvalM $ lambdaValue env f
     return $ labelCodeVar v $ labelCode (ExpM $ LamE fun_info f) fun_code
   definiensTypeSM = functionTypeSM
 
@@ -321,7 +325,7 @@ instance Definiens Ent where
 
 instance Definiens Constant where
   definiensInfo = constInfo
-  definiensIsInliningCandidate phase _ = True
+  definiensIsInliningCandidate = isConstantInliningCandidate
   definiensValue (Def v ann d) =
     return $ labelCodeVar v $ interpretConstant d
 
@@ -405,6 +409,37 @@ isInliningCandidate phase def = inlining_ok && phase_ok && code_growth_ok
            -- in order to focus on intraprocedural code cleanup
            if phase < PostFinalSimplifierPhase then 800 else 16
 
+-- | Decide whether a constant may have its value propagated
+--   (outside of its own definition group).
+--   The constant's attributes are used for the decision.
+--
+--   The inlining annotation must allow inlining.  Furthermore, the constant
+--   must be marked for aggressive inlining.
+isConstantInliningCandidate :: SimplifierPhase -> Def Constant Mem -> Bool
+isConstantInliningCandidate phase def =
+  inlining_ok && phase_ok
+  where
+    ann = defAnnotation def
+    phase_ok = phasePermitsInlining phase def
+    inlining_ok =
+      case defAnnInlineRequest ann
+      of InlNever          -> False
+         InlConservatively -> is_data_expression (constExp $ definiens def)
+         InlAggressively   -> True
+
+    -- An expression consisting only of variables, literals, constructors,
+    -- and type applications is always profitable to value-propagate.
+    is_data_expression (ExpM e) =
+      case e
+      of VarE {} -> True
+         LitE {} -> True
+         ConE _ con sps ty_ob args ->
+           all is_data_expression (sps ++ maybeToList ty_ob ++ args)
+
+         -- A type application
+         AppE inf op ty_args [] -> is_data_expression op
+         _ -> False
+
 -- | Decide whether the function is good for inlining, based on 
 --   its use annotation.  Functions that are used exactly once should be
 --   inlined because inlining won't produce growth.
@@ -414,7 +449,7 @@ usesSuggestInlining def =
 
 -- | Decide whether inlining is permitted for the function in the current 
 --   simplifier phase, based on its phase annotation.
-phasePermitsInlining :: SimplifierPhase -> FDef a -> Bool
+phasePermitsInlining :: SimplifierPhase -> Def t a -> Bool
 phasePermitsInlining phase def =
   let def_phase = defAnnInlinePhase $ defAnnotation def
   in def_phase `seq`
@@ -1181,6 +1216,16 @@ rwVar inf v = lookupKnownValue v >>= rewrite
     original_expression = ExpM $ VarE inf v
 
     rewrite val
+      -- Value should be inlined
+      | InlinedAV value <- codeValue val = do
+          -- Use fuel to replace this variable.
+          -- Don't propagate the variable's abstract value any further;
+          -- we don't want to keep inlining it everywhere that this expression 
+          -- is used.
+          consumeFuel
+          rwExpReturn (value, topCode)
+
+      -- Value is trivial, and always profitable to inline
       | Just cheap_value <- codeTrivialExp val = do
           -- Use fuel to replace this variable
           consumeFuel

@@ -135,7 +135,7 @@ data LinearMap : val
 
 -- A finite indexed integer 
 data FIInt (n : intindex) : val
-  attribute(builtin)
+  attribute(builtin, singleton)
 {
   fiInt (int) attribute(builtin);
 };
@@ -307,7 +307,7 @@ unpack_Tuple4_box @(a b c d : box)
 -- Size, alignment, and pointerfreeness
 -- used by a data constructor/deconstructor
 data SizeAlign (a : bare) : val
-  attribute(builtin)
+  attribute(builtin, singleton)
 {
   sizeAlign (uint, uint, bool) attribute(builtin);
 };
@@ -315,20 +315,20 @@ data SizeAlign (a : bare) : val
 -- Size, alignment, and pointerfreeness
 -- used by a data constructor/deconstructor
 data SizeAlignVal (a : val) : val
-  attribute(builtin)
+  attribute(builtin, singleton)
 {
   sizeAlignVal (uint, uint, bool) attribute(builtin);
 };
 
 -- Evidence that a bare type is or is not of the form 'Ref t'.
-data IsRef (a : bare) : val attribute(builtin)
+data IsRef (a : bare) : val attribute(builtin, singleton)
 {
   notAReference (coerce @box (AsBox a) (Boxed a)) attribute(builtin);
   isAReference @(b : box) (coerce @bare a (Ref b)) attribute(builtin);
 };
 
 data Repr (a : bare) : box
-  attribute(abstract, builtin)
+  attribute(builtin, singleton)
 {
   repr
   (SizeAlign a,       -- Size and alignment
@@ -424,7 +424,7 @@ isZeroMutable @(a : bare) (m : Mutable a) (x : AsBox a)
 
 
 data ReprVal (a : val) : box
-  attribute(builtin)
+  attribute(builtin, singleton)
 {
   reprVal
   (SizeAlignVal a,               -- Size and alignment
@@ -437,7 +437,7 @@ data ReprVal (a : val) : box
 -- Run-time type info for boxed objects.
 -- Each instantiated data constructor is described by a TypeObject.
 data TypeObject (a : box) : box
-  attribute(builtin)
+  attribute(builtin, singleton)
 {
   typeObject
   (uint,                  -- Data constructor index
@@ -462,12 +462,14 @@ typeObject_typeObject @(a : box)
   boxedinfo typeObject @a;
 
 data EqDict (a : box) : box
+  attribute(singleton)
 {
   eqDict
   (a -> a -> Boxed (Stored bool), a -> a -> Boxed (Stored bool));
 };
 
 data OrdDict (a : box) : box
+  attribute(singleton)
 {
   ordDict
   (EqDict a,
@@ -478,6 +480,7 @@ data OrdDict (a : box) : box
 };
 
 data AdditiveDict (a : box) : box
+  attribute(singleton)
 {
   additiveDict
   (a -> a -> a,                 -- add
@@ -487,6 +490,7 @@ data AdditiveDict (a : box) : box
 };
 
 data MultiplicativeDict (a : box) : box
+  attribute(singleton)
 {
   multiplicativeDict
   (AdditiveDict a,
@@ -496,6 +500,7 @@ data MultiplicativeDict (a : box) : box
 };
 
 data RemainderDict (a : box) : box
+  attribute(singleton)
 {
   remainderDict
   (MultiplicativeDict a,
@@ -504,12 +509,14 @@ data RemainderDict (a : box) : box
 };
 
 data FractionalDict (a : box) : box
+  attribute(singleton)
 {
   fractionalDict
   (MultiplicativeDict a, a -> a -> a); -- true division
 };
 
 data FloatingDict (a : box) : box
+  attribute(singleton)
 {
   floatingDict
   (Boxed (Stored float) -> a,   -- from float
@@ -524,6 +531,7 @@ data FloatingDict (a : box) : box
 };
 
 data VectorDict (a : box) : box
+  attribute(singleton)
 {
   vectorDict
   (AdditiveDict a,
@@ -546,6 +554,7 @@ data VectorDict (a : box) : box
 -- 9. Scale an index by an inverse scale factor
 -- 10.The largest domain
 data CartesianDict (sh : box) : box
+  attribute(singleton)
 {
   cartesianDict
   (coerce @box (cartesianDomain (index sh)) sh,
@@ -562,6 +571,7 @@ data CartesianDict (sh : box) : box
 };
 
 data TraversableDict (t : box -> box) : box
+  attribute(singleton)
 {
   traversableDict
   (forall a : box. ReprBox a -> t a -> Stream (shape t) a,
@@ -585,6 +595,7 @@ con_subdomain @(d : box) (off : BoxOffset d) (dom : d)
 -- The operations are flatten-to-list, generate, map, zipWith{2..4},
 -- range checking for integers, and slicing.
 data ShapeDict (d : box) : box
+  attribute(singleton)
 {
   shapeDict
   (Repr (index d),
@@ -787,6 +798,7 @@ shForeach @(d : box) (sh : ShapeDict d)
 
 -- The functor type class
 data FunctorDict (t : box -> box) : box
+  attribute(singleton)
 {
   functorDict (forall a b : box.
                Repr (AsBare a) -> Repr (AsBare b) -> (a -> b) -> t a -> t b);
@@ -796,6 +808,7 @@ data FunctorDict (t : box -> box) : box
 -- The type class for random-access containers.
 -- Methods should not perform bounds checking.
 data IndexableDict (t : box -> box) : box
+  attribute(singleton)
 {
   indexableDict
   (-- functor

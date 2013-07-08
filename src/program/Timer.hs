@@ -19,6 +19,7 @@ data TimeAttribution =
   | FlattenTimer
   | SpecializeTimer
   | DemandTimer
+  | CSETimer
   | FloatingTimer
   | ParallelizeTimer
   | FlattenArgumentsTimer
