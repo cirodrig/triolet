@@ -4511,6 +4511,10 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       real_fold_list_dim @a @a rep rep f s z
   in
 
+  letfun
+    reduce_unit (dummy : NoneType) -> a = z
+  in
+
   case s of stream tyob par_hint i_s.
   case i_s of {
     seqStream tyob co sq.
@@ -4536,7 +4540,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice reduce_residual si
+      par_hint reduce_unit reduce_slice f reduce_residual si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4546,7 +4550,8 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual si
+      reduce_loop @d @b @a sh rep_b rep
+      par_hint reduce_unit reduce_slice f reduce_residual si
   };
 
 
@@ -4560,6 +4565,10 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       real_fold_list_dim @a @a rep rep f s z
   in
 
+  letfun
+    reduce_unit (dummy : NoneType) -> a = z
+  in
+
   case s of stream tyob par_hint i_s.
   case i_s of {
     seqStream tyob co sq.
@@ -4586,7 +4595,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
 
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice reduce_residual si
+      par_hint reduce_unit reduce_slice f reduce_residual si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4596,7 +4605,8 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual si
+      reduce_loop @d @b @a sh rep_b rep
+      par_hint reduce_unit reduce_slice f reduce_residual si
   };
 
 
@@ -4608,6 +4618,10 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     -- Perform a final reduction on partial results
     reduce_residual (s : Stream list_dim a) -> a =
       real_fold_list_dim @a @a rep rep f s z
+  in
+
+  letfun
+    reduce_unit (dummy : NoneType) -> a = z
   in
 
   case s of stream tyob par_hint i_s.
@@ -4635,7 +4649,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
                (idCoercion @d2) (Indexable_view @d2 sh2) vw in
       reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
-      par_hint reduce_slice reduce_residual si
+      par_hint reduce_unit reduce_slice f reduce_residual si
 
   ; ixStream @b tyob rep_b g si.
       letfun
@@ -4645,7 +4659,8 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                         (ixStream @d @a @b tyob rep_b g si) in
           shFold @d sh @a @a rep rep f local_s z
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint reduce_slice reduce_residual si
+      reduce_loop @d @b @a sh rep_b rep
+      par_hint reduce_unit reduce_slice f reduce_residual si
   };
 
 
@@ -4831,10 +4846,30 @@ collect_Stream @(d : box) @(k v r : box)
   in
 
   letfun
-    finalize_cursor (r_cursor : Boxed (Stored (cursor acc))) -> r =
+    reduce_unit (dummy : NoneType) -> acc_cursor =
+      case con_stuckBox @acc rep_acc init of
+        [reprSizeAlign @acc rep_acc] stuckBox tyob x.
+      con_boxed @(Stored (cursor acc)) (repr_cursor @acc)
+      (stored @(cursor acc) (toCursor @acc x))
+  in
+
+  letfun
+    finalize_cursor (r_cursor : acc_cursor) -> r =
       case r_cursor of [reprSizeAlign @(Stored (cursor acc)) (repr_cursor @acc)]
         boxed tyob (stored c).
       finalize_collect_reduction @acc @r rep_acc (fromCursor @acc c) finalizer
+  in
+
+  letfun
+    combine_cursors (x_cursor y_cursor : acc_cursor) -> acc_cursor =
+      case x_cursor of [reprSizeAlign @(Stored (cursor acc)) (repr_cursor @acc)]
+        boxed tyob (stored x).
+      case y_cursor of [reprSizeAlign @(Stored (cursor acc)) (repr_cursor @acc)]
+        boxed tyob (stored y).
+      case con_stuckBox @acc rep_acc
+           (combine (fromCursor @acc x) (fromCursor @acc y)) of
+        [reprSizeAlign @acc rep_acc] stuckBox tyob z.
+      con_boxed @(Stored (cursor acc)) (repr_cursor @acc) (stored @(cursor acc) (toCursor @acc z))
   in
 
   letfun
@@ -4884,7 +4919,7 @@ collect_Stream @(d : box) @(k v r : box)
           let r_cursor =
                 reduce_loop @d2 @(Stream list_dim stream_elem) @acc_cursor
                 sh2 rep_stream (repr_cursor @acc) par_hint
-                reduce_slice reduce_residual si in
+                reduce_unit reduce_slice combine_cursors reduce_residual si in
 
           finalize_cursor r_cursor
 
@@ -4899,7 +4934,7 @@ collect_Stream @(d : box) @(k v r : box)
           let r_cursor =
                 reduce_loop @d @b @acc_cursor
                 shape_dict rep_b (repr_cursor @acc) par_hint
-                reduce_slice reduce_residual si in
+                reduce_unit reduce_slice combine_cursors reduce_residual si in
 
           finalize_cursor r_cursor
       }
@@ -5249,7 +5284,9 @@ tabulate_list_seq @(a b : box)
 reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (par_hint : ParHint)
+  (reduce_unit : NoneType -> b)
   (reduce_slice : SomeIndexable d a -> b)
+  (reduce_pair : b -> b -> b)
   (reduce_residual : Stream list_dim b -> b)
   (input : SomeIndexable d a)
   -> b
@@ -5262,8 +5299,10 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
   case par_hint of {
     hintAny. do_seq None
   ; hintSeq. do_seq None
-  ; hintLocalPar. do_seq None
-  ; hintPar. reduce_loop_dist @d @a @b sh rep_a rep_b reduce_slice reduce_residual input
+  ; hintLocalPar.
+      reduce_loop_localpar @d @a @b sh rep_a rep_b reduce_unit reduce_slice reduce_pair input
+  ; hintPar.
+      reduce_loop_dist @d @a @b sh rep_a rep_b reduce_slice reduce_residual input
   };
 
 
@@ -5289,6 +5328,45 @@ tabulate_list_localpar @(a b : box)
   viewToList @b rep_b True
   (map_view @list_dim @a @b
    rep_a rep_b f (someIndexableToView @list_dim @a rep_a s));
+
+
+reduce_loop_localpar @(d : box) @(a b : box) (sh : ShapeDict d)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (reduce_unit : NoneType -> b)
+  (reduce_slice : SomeIndexable d a -> b)
+  (reduce_pair : b -> b -> b)
+  (input : SomeIndexable d a)
+  -> b
+  attribute(inline, inline_sequential) =
+
+  case input of someIndexable @t tyob co indexable container.
+
+  letfun
+    slice_input (off : BoxOffset d) (dom : d) -> SomeIndexable d a =
+      coerce @(SomeIndexable (shape t) a) @(SomeIndexable d a)
+      (ix_slice @t indexable @a rep_a container
+       (coerce @d @(shape t) dom)
+       (coerce @(BoxOffset d) @(BoxOffset (shape t)) off))
+  in
+
+  blocked_greduce @d @b
+  (shNoOffset @d sh)
+  (\ (off : BoxOffset d) (dom : d) -> MaybeVal (d, BoxOffset d, d).
+     case shSplit @d sh dom of {
+       justVal (dom1, off2, dom2).
+         -- Add the new and old offsets
+         justVal @(d, BoxOffset d, d) (dom1, shAddOffset @d sh off off2, dom2)
+     ; nothingVal.
+         nothingVal @(d, BoxOffset d, d)
+     })
+  reduce_pair
+
+  -- Perform local reduction
+  (\ (acc : b) (off : BoxOffset d) (local_dom : d) -> b.
+     reduce_pair acc (reduce_slice (slice_input off local_dom)))
+  reduce_unit
+
+  (coerce @(shape t) @d (ix_shape @t indexable @a container));
 
 
 -------------------------------------------------------------------------------
@@ -13834,6 +13912,7 @@ parallel_doall2 : forall M N : intindex.
      -> (int -> int -> Store)
      -> Store;
 
+{-
 -- Blocked parallel reduction, implemented in low-level.
 blocked_1d_reduce :
     forall N : intindex, acc : box.
@@ -13864,6 +13943,7 @@ blocked_1d_reduceip :
  -> (forall M : intindex. int -> FIInt M -> acc)
     -- ^ Generate and combine a value on a part of the domain
  -> acc;
+-}
 
 -- Blocked parallel loop
 blocked_doall :
@@ -13879,6 +13959,17 @@ blocked_doall2 :
  -> FIInt N
  -> (forall M N : intindex. int -> FIInt M -> int -> FIInt N -> Store)
  -> Store;
+
+-- General parallel reduction
+blocked_greduce :
+    forall d a : box.
+    BoxOffset d                         -- Identity offset
+ -> (BoxOffset d -> d -> MaybeVal (d, BoxOffset d, d)) -- Split and add offset
+ -> (a -> a -> a)                       -- Combine
+ -> (a -> BoxOffset d -> d -> a)        -- Reduce
+ -> (NoneType -> a)                     -- Unit (as a thunk)
+ -> d                                   -- Domain
+ -> a;                                  -- Result
 
 -- Blocked parallel loop over a PBTree
 blocked_PBTree_doall :

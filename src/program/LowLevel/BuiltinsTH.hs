@@ -425,16 +425,18 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_doall_mutable) |])
   --, (CoreName module_prim "for",
   --   Right [| coreBuiltin (SystemF.The_for) |])
-  , (CoreName module_prim "blocked_1d_reduce",
-     Right [| coreBuiltin (SystemF.The_blocked_1d_reduce) |])
-  , (CoreName module_prim "blocked_2d_reduce",
-     Right [| coreBuiltin (SystemF.The_blocked_2d_reduce) |])
-  , (CoreName module_prim "blocked_1d_reduceip",
-     Right [| coreBuiltin (SystemF.The_blocked_1d_reduceip) |])
+  --, (CoreName module_prim "blocked_1d_reduce",
+  --   Right [| coreBuiltin (SystemF.The_blocked_1d_reduce) |])
+  --, (CoreName module_prim "blocked_2d_reduce",
+  --   Right [| coreBuiltin (SystemF.The_blocked_2d_reduce) |])
+  --, (CoreName module_prim "blocked_1d_reduceip",
+  --   Right [| coreBuiltin (SystemF.The_blocked_1d_reduceip) |])
   , (CoreName module_prim "blocked_doall",
      Right [| coreBuiltin (SystemF.The_blocked_doall) |])
   , (CoreName module_prim "blocked_doall2",
      Right [| coreBuiltin (SystemF.The_blocked_doall2) |])
+  , (CoreName module_prim "blocked_greduce",
+     Right [| coreBuiltin (SystemF.The_blocked_greduce) |])    
   , (CoreName module_prim "blocked_PBTree_doall",
      Right [| coreBuiltin (SystemF.The_blocked_PBTree_doall) |])
 

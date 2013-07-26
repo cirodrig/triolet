@@ -555,6 +555,69 @@ procedure triolet_run_task (int32 length, pointer dat, pointer use_result)
   int32 0;
 };
 
+
+function blocked_greduce (owned zero_offset,
+                          owned split_fn,
+                          owned combine_fn,
+                          owned reduce_fn,
+                          owned unit_value,
+                          owned range) -> owned
+{
+  owned primcall triolet_C_greduce
+    (zero_offset, split_fn, combine_fn, reduce_fn, unit_value, range);
+};
+
+procedure greduce_range (owned reduce_fn, owned combine_fn,
+                         owned acc, owned off, owned range) -> owned
+{
+  x = owned call reduce_fn (acc, off, range);
+
+  // If an accumulator was given, combine with accumulator
+  if (acc == null as owned) {
+    x;
+  }
+  else {
+    owned call combine_fn (acc, x);
+  };
+};
+
+
+procedure greduce_split (owned split_fn, pointer out1, pointer off2,
+                         pointer out2, owned off, owned range) -> int
+{
+  typedef result_type = Maybe(Tuple3(owned, owned, owned));
+
+  Maybe(Tuple3(owned, owned, owned)) {is_just, just_value} =
+    Maybe(Tuple3(owned, owned, owned)) call split_fn (off, range);
+
+  if (is_just == MAYBE_JUST) {
+    // Save the fields
+    Tuple3(owned, owned, owned) {out1_value, off2_value, out2_value} = just_value;
+    !out1 = out1_value;
+    !off2 = off2_value;
+    !out2 = out2_value;
+
+    // Return 1
+    int 1;
+  }
+  else {
+    // No output; return 0
+    int 0;
+  };
+};
+
+procedure greduce_combine(owned combine_fn, owned x, owned y) -> owned
+{
+  owned call combine_fn(x, y);
+};
+
+procedure greduce_unit(owned unit_fn) -> owned
+{
+  owned call unit_fn(nil);
+};
+
+
+#if 0
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.
 function blocked_1d_reduce
@@ -639,6 +702,7 @@ procedure blocked_reduceip_reduce
   (pointer dat, owned x, owned y) -> owned {
   owned call (dat @! BlockedReduceIPData.reducer) (x, y);
 };
+#endif
 
 function inline blocked_doall
   (FinIndInt size, owned worker) -> unit {

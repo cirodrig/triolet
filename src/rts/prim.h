@@ -137,8 +137,30 @@ extern procedure core.internal.prim.triolet_run_task "triolet_run_task"
   (int32, pointer, pointer) -> int32;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Blocked 1D reduction
+// Generalized reduction
 
+extern function core.internal.prim.blocked_greduce
+  (owned, owned, owned, owned, owned, owned) -> owned;
+
+import procedure triolet_C_greduce(owned, owned, owned, owned, owned, owned) -> owned;
+
+// Functions called from the C side of the library
+extern procedure core.internal.prim.greduce_range
+  "greduce_range" (owned, owned, owned, owned, owned) -> owned;
+
+extern procedure core.internal.prim.greduce_split
+  "greduce_split" (owned, pointer, pointer, pointer, owned, owned) -> int;
+
+extern procedure core.internal.prim.greduce_combine
+  "greduce_combine" (owned, owned, owned) -> owned;
+
+extern procedure core.internal.prim.greduce_unit
+  "greduce_unit" (owned) -> owned;
+
+#if 0
+
+///////////////////////////////////////////////////////////////////////////////
+// Blocked 1D reduction
 extern function core.internal.prim.blocked_1d_reduce
   (FinIndInt, owned, owned, owned) -> owned;
 
@@ -183,6 +205,7 @@ extern procedure core.internal.prim.blocked_reduceip_generate_range
   "blocked_reduceip_generate_range" (pointer, int, int) -> owned;
 extern procedure core.internal.prim.blocked_reduceip_reduce
   "blocked_reduceip_reduce" (pointer, owned, owned) -> owned;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // Blocked 1D doall

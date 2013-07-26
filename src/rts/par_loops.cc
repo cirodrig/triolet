@@ -20,6 +20,161 @@ extern "C" {
 #endif
 
 /*****************************************************************************/
+/* Generalized parallel reduction */
+
+/* Functions written in low-level triolet */
+
+/* Do reduction over a range.
+ * If the given value is not NULL, combine with the given value. */
+extern "C" void *
+greduce_range(void *reduce_fn, void *combine_fn,
+              void *acc, void *off, void *range);
+
+/* Split a range.  Return 0 if not splittable. */
+extern "C" int
+greduce_split(void *split_fn, void **out1, void **off2, void **out2,
+              void *off, void *range);
+
+/* Combine reduction values */
+extern "C" void *
+greduce_combine(void *combine_fn, void *x, void *y);
+
+/* Create unit value */
+extern "C" void *
+greduce_unit(void *unit_fn);
+
+extern "C" void *
+triolet_C_greduce(void *zero_offset,
+                  void *split_fn,
+                  void *combine_fn,
+                  void *reduce_fn,
+                  void *unit_fn,
+                  void *range);
+
+#ifndef USE_TBB
+
+void *
+triolet_C_greduce(void *zero_offset,
+                  void *split_fn,
+                  void *combine_fn,
+                  void *reduce_fn,
+                  void *unit_fn,
+                  void *range)
+{
+  return greduce_range(reduce_fn, combine_fn, NULL, zero_offset, range);
+}
+
+#else
+
+// A domain, wrapped to satisfy the TBB range concept
+class GReduceRange
+{
+  // Constants
+  const void *split_fn;         // How to split a domain
+  const void *no_offset;        // The null offset
+
+  // Current value of this range as an (offset, domain) pair
+  void *offset;
+  void *value;
+
+  // Cached values produced by splitting this range.
+  // NULL if no values are cached.
+  // Either all are NULL, or all are references to objects.
+  void *split1;
+  void *offset2;
+  void *split2;
+
+  GReduceRange(const GReduceRange &other)
+    : split_fn(other.split_fn), no_offset(other.no_offset),
+      offset(other.offset), value(other.value),
+      split1(other.split1), offset2(other.offset2), split2(other.split2) {}
+
+  GReduceRange(const void *_split_fn,
+               const void *_no_offset,
+               const void *_value)
+    : split_fn(_split_fn), no_offset(_no_offset),
+      offset(_no_offset), value(_value),
+      split1(NULL), offset2(NULL), split2(NULL) {}
+
+  GReduceRange(GReduceRange &other, tbb::split)
+    : split_fn(other.split_fn), no_offset(_no_offset),
+      split1(NULL), split2(NULL)
+  {
+    // Ensure that divisible parts are calculated
+    if (other.split1 == NULL) other.is_divisible();
+
+    // This object's range is (offset, split1)
+    offset = other.offset;
+    value = other.split1;
+
+    // Other object's range is (offset2, split2)
+    other.offset = other.offset2;
+    other.value = other.split2;
+
+    // Clear cached split info
+    other.split1 = other.split2 = NULL;
+    other.offset2 = NULL;
+  }
+
+  bool empty(void) const { return false; }
+
+  bool is_divisible(void) const
+  {
+    int splittable = greduce_split(split_fn, &split1, &offset2, &split2,
+                                   offset, value);
+    if (!splittable) {
+      split1 = split2 = NULL;
+      offset2 = NULL;
+    }
+    return splittable;
+  }
+
+  void *getValue(void) const { return value; }
+};
+
+struct GReduceFunc
+{
+  const void *reduce_fn;
+  const void *combine_fn;
+
+  void *operator()(const GReduceRange &range, void *acc) {
+    return greduce_range(reduce_fn, combine_fn, acc, range.offset, range.value);
+  }
+};
+
+struct GReduceReduction
+{
+  const void *combine_fn;
+
+  void *operator()(void *x, void *y) {
+    return greduce_combine(combine_fn, x, y);
+  };
+};
+
+void *
+triolet_C_greduce(void *zero_offset,
+                  void *split_fn,
+                  void *combine_fn,
+                  void *reduce_fn,
+                  void *unit_fn,
+                  void *range)
+{
+  GReduceFunc tbb_reduce = {reduce_fn, combine_fn};
+  GReduceReduction tbb_reduction = {combine_fn};
+  GReduceRange tbb_range(split_fn, zero_offset, range);
+
+  void *p = tbb::parallel_reduce(tbb_range, tbb_reduce, tbb_reduction);
+
+  // If no value was produced, then return a unit value
+  if (p == NULL) {
+    return greduce_unit(unit_fn);
+  }
+}
+
+#endif
+
+#if 0
+/*****************************************************************************/
 /* Parallelized reduction */
 
 /* Functions written in low-level triolet */
@@ -296,6 +451,9 @@ triolet_C_blocked_reduceip(void *data_value, TrioletInt count)
 }
 
 #endif	// USE_TBB
+
+#endif
+
 
 /*****************************************************************************/
 /* Parallelized doall */

@@ -224,9 +224,12 @@ record Tuple6(a, b, c, d, e, f) {
   const f member6;
 };
 
+#define MAYBE_JUST    uint 0
+#define MAYBE_NOTHING uint 1
+
 // A Maybe object
 record Maybe(a) {
-  uint isjust;			// 0 = Nothing; 1 = Just
+  uint isjust;			// 0 = Just; 1 = Nothing
   a member;			// Valid if isjust
 };
 
