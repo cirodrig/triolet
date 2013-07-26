@@ -3951,6 +3951,34 @@ map_Stream2 @(d a b : box)
 map_Stream3 @(d a b : box)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (f : a -> b) (s : Stream d a) -> Stream d b
+  attribute(inline) =
+  case s of stream tyob_stream par_hint i_s.
+  case i_s of {
+    seqStream tyob co sq.
+      coerce @(Stream list_dim b) @(Stream d b)
+      (con_stream @list_dim @b par_hint
+       (con_seqStream @b (map_Seq @a @b f sq)))
+
+  ; splittableStream @d2 tyob co shape_d2 vw.
+      let rep_stream_a = repr_Box @(Stream list_dim a) in
+      let rep_stream_b = repr_Box @(Stream list_dim b) in
+      coerce @(Stream list_dim b) @(Stream d b)
+      (con_stream @list_dim @b par_hint
+       (con_splittableStream @b @d2 shape_d2
+        (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
+         rep_stream_a rep_stream_b
+         (map_Stream4 @list_dim @a @b rep_a rep_b f) vw)))
+
+  ; ixStream @c tyob rep transformer vw.
+      con_stream @d @b par_hint
+       (con_ixStream @d @b @c rep (\ (x : c) -> b. f (transformer x)) vw)
+  };
+
+
+-- FIXME: Handle recursive function inlining properly
+map_Stream4 @(d a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : Stream d a) -> Stream d b
   attribute(inline_never) =
   case s of stream tyob_stream par_hint i_s.
   case i_s of {
@@ -3967,7 +3995,7 @@ map_Stream3 @(d a b : box)
        (con_splittableStream @b @d2 shape_d2
         (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
          rep_stream_a rep_stream_b
-         (map_Stream3 @list_dim @a @b rep_a rep_b f) vw)))
+         (map_Stream4 @list_dim @a @b rep_a rep_b f) vw)))
 
   ; ixStream @c tyob rep transformer vw.
       con_stream @d @b par_hint
@@ -6600,6 +6628,45 @@ imp_fold_list_dim3 @(a : box)
   (s : Stream list_dim a)
   (init : Store)
   -> Store
+  attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case i_s of {
+    seqStream tyob co sq.
+      imp_fold_Seq @a combine sq init
+
+  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+      -- Outer loop over 'dom'
+      let off = boxIntValue 0 in
+      shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
+      (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
+
+         -- Inner loop
+         imp_fold_list_dim4 @a rep_a combine (gen outer_i) state)
+      init
+
+  ; ixStream @b tyob rep_b f si.
+      -- Loop over the indexable object
+      case map_view @list_dim @b @a rep_b rep_a f
+           (someIndexableToView @list_dim @b rep_b si) of
+        mk_view tyob dom gen.
+
+      let off = boxIntValue 0 in
+      foreach_list_dim dom off
+      (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
+         combine (gen outer_i) state)
+      init
+  };
+
+
+-- This function is recursive
+-- FIXME: Handle recursion properly
+imp_fold_list_dim4 @(a : box)
+  (rep_a : ReprBox a)
+  (combine : a -> Store -> Store)
+  (s : Stream list_dim a)
+  (init : Store)
+  -> Store
   attribute(inline_never) =
 
   case s of stream tyob par_hint i_s.
@@ -6614,7 +6681,7 @@ imp_fold_list_dim3 @(a : box)
       (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
 
          -- Inner loop
-         imp_fold_list_dim3 @a rep_a combine (gen outer_i) state)
+         imp_fold_list_dim4 @a rep_a combine (gen outer_i) state)
       init
 
   ; ixStream @b tyob rep_b f si.
