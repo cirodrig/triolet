@@ -70,8 +70,8 @@ triolet_C_greduce(void *zero_offset,
 class GReduceRange
 {
   // Constants
-  const void *split_fn;         // How to split a domain
-  const void *no_offset;        // The null offset
+  void *const split_fn;         // How to split a domain
+  void *const no_offset;        // The null offset
 
   // Current value of this range as an (offset, domain) pair
   void *offset;
@@ -80,24 +80,25 @@ class GReduceRange
   // Cached values produced by splitting this range.
   // NULL if no values are cached.
   // Either all are NULL, or all are references to objects.
-  void *split1;
-  void *offset2;
-  void *split2;
+  mutable void *split1;
+  mutable void *offset2;
+  mutable void *split2;
 
+public:
   GReduceRange(const GReduceRange &other)
     : split_fn(other.split_fn), no_offset(other.no_offset),
       offset(other.offset), value(other.value),
       split1(other.split1), offset2(other.offset2), split2(other.split2) {}
 
-  GReduceRange(const void *_split_fn,
-               const void *_no_offset,
-               const void *_value)
+  GReduceRange(void *_split_fn,
+               void *_no_offset,
+               void *_value)
     : split_fn(_split_fn), no_offset(_no_offset),
       offset(_no_offset), value(_value),
       split1(NULL), offset2(NULL), split2(NULL) {}
 
   GReduceRange(GReduceRange &other, tbb::split)
-    : split_fn(other.split_fn), no_offset(_no_offset),
+    : split_fn(other.split_fn), no_offset(other.no_offset),
       split1(NULL), split2(NULL)
   {
     // Ensure that divisible parts are calculated
@@ -129,24 +130,28 @@ class GReduceRange
     return splittable;
   }
 
+  void *getOffset(void) const { return offset; }
   void *getValue(void) const { return value; }
 };
 
 struct GReduceFunc
 {
-  const void *reduce_fn;
-  const void *combine_fn;
+  void *const reduce_fn;
+  void *const combine_fn;
 
-  void *operator()(const GReduceRange &range, void *acc) {
-    return greduce_range(reduce_fn, combine_fn, acc, range.offset, range.value);
+public:
+  void *operator()(const GReduceRange &range, void *acc) const {
+    return greduce_range(reduce_fn, combine_fn, acc,
+                         range.getOffset(), range.getValue());
   }
 };
 
 struct GReduceReduction
 {
-  const void *combine_fn;
+  void *const combine_fn;
 
-  void *operator()(void *x, void *y) {
+public:
+  void *operator()(void *x, void *y) const {
     return greduce_combine(combine_fn, x, y);
   };
 };
@@ -162,13 +167,15 @@ triolet_C_greduce(void *zero_offset,
   GReduceFunc tbb_reduce = {reduce_fn, combine_fn};
   GReduceReduction tbb_reduction = {combine_fn};
   GReduceRange tbb_range(split_fn, zero_offset, range);
+  void *identity_value = NULL;
 
-  void *p = tbb::parallel_reduce(tbb_range, tbb_reduce, tbb_reduction);
+  void *p = tbb::parallel_reduce(tbb_range, identity_value, tbb_reduce, tbb_reduction);
 
   // If no value was produced, then return a unit value
-  if (p == NULL) {
+  if (p == NULL)
     return greduce_unit(unit_fn);
-  }
+  else
+    return p;
 }
 
 #endif
@@ -487,6 +494,7 @@ struct BlockedDoer {
   void operator()(tbb::blocked_range<int> &range) const {
     int first = range.begin();
     int end = range.end();
+    //printf("BlDo %4d-%4d\n", first, end);
     blocked_doall_worker(data, first, end);
   }
 };

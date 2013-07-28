@@ -127,7 +127,7 @@ import procedure triolet_in_distributed_task() -> int32;
 import procedure triolet_MPITask_launch(int32, pointer) -> pointer;
 import procedure triolet_MPITask_wait(pointer, pointer) -> owned;
 
-extern function core.internal.prim.farm (FinIndInt, owned, owned) -> owned;
+extern function core.internal.prim.farm (FinIndInt, owned, uint32, owned) -> owned;
 
 extern procedure core.internal.prim.triolet_deserialize "triolet_deserialize"
   (uint32, pointer) -> owned;

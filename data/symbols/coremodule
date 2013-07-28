@@ -5362,8 +5362,8 @@ reduce_loop_localpar @(d : box) @(a b : box) (sh : ShapeDict d)
   reduce_pair
 
   -- Perform local reduction
-  (\ (acc : b) (off : BoxOffset d) (local_dom : d) -> b.
-     reduce_pair acc (reduce_slice (slice_input off local_dom)))
+  (\ (off : BoxOffset d) (local_dom : d) -> b.
+     reduce_slice (slice_input off local_dom))
   reduce_unit
 
   (coerce @(shape t) @d (ix_shape @t indexable @a container));
@@ -5389,7 +5389,7 @@ tabulate_list_dist @(a b : box)
 
   letfun
     worker (si : SomeIndexable list_dim a) -> dist_result =
-      tabulate_list_seq @a @b rep_a rep_b f
+      tabulate_list_localpar @a @b rep_a rep_b f
       (preserve_SomeIndexable @list_dim @a si)
   in
 
@@ -5532,7 +5532,7 @@ farm_SomeIndexable @(d : box) @(a b : box)
         boxedinfo stuckBox @(arr Nworkers (StuckRef b)) output_array_rep in
 
   let chunks : StuckBox (arr Nworkers (StuckRef b)) =
-        farm @Nworkers @b worker_count output_array_tyob worker_array in
+        farm @Nworkers @b worker_count output_array_tyob True worker_array in
 
   -- Concatenate the chunks
   case chunks of
@@ -13847,6 +13847,7 @@ doall_mutable : forall n : intindex.
 farm : forall N : intindex, a : box.
        FIInt N
     -> TypeObject (StuckBox (arr N (StuckRef a)))
+    -> bool
     -> StuckBox (arr N (Ref (NoneType -> a)))
     -> StuckBox (arr N (StuckRef a));
 
@@ -13966,7 +13967,7 @@ blocked_greduce :
     BoxOffset d                         -- Identity offset
  -> (BoxOffset d -> d -> MaybeVal (d, BoxOffset d, d)) -- Split and add offset
  -> (a -> a -> a)                       -- Combine
- -> (a -> BoxOffset d -> d -> a)        -- Reduce
+ -> (BoxOffset d -> d -> a)             -- Reduce
  -> (NoneType -> a)                     -- Unit (as a thunk)
  -> d                                   -- Domain
  -> a;                                  -- Result

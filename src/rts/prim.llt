@@ -424,11 +424,13 @@ function inline inDistributedTask (unit dummy) -> uint32 {
 
 #ifdef USE_MPI
 
-function farm (FinIndInt ntasks, owned rep_output, owned tasks) -> owned {
+function farm (FinIndInt ntasks, owned rep_output, uint32 is_parallel, owned tasks) -> owned {
   FinIndInt {n} = ntasks;
 
-  if (uint32 primcall triolet_in_distributed_task () as bool) {
-    // Already executing a farmed task; run sequentially
+  if (is_parallel == uint32 0 ||
+      uint32 primcall triolet_in_distributed_task () as bool) {
+    // Not running in parallel, or already executing a farmed task;
+    // run sequentially
     owned primcall farm_sequential (n, rep_output, tasks);
   }
   else {
@@ -483,7 +485,7 @@ procedure farm_parallel (int n, owned rep_output, owned tasks) -> owned {
 
 // Single-core sequential 'farm' for debugging
 
-function farm (FinIndInt ntasks, owned type_obj, owned tasks) -> owned {
+function farm (FinIndInt ntasks, owned type_obj, uint32 is_parallel, owned tasks) -> owned {
   FinIndInt {n} = ntasks;
 
   owned primcall farm_sequential (n, type_obj, tasks);
@@ -570,7 +572,7 @@ function blocked_greduce (owned zero_offset,
 procedure greduce_range (owned reduce_fn, owned combine_fn,
                          owned acc, owned off, owned range) -> owned
 {
-  x = owned call reduce_fn (acc, off, range);
+  x = owned call reduce_fn (off, range);
 
   // If an accumulator was given, combine with accumulator
   if (acc == null as owned) {
