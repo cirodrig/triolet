@@ -5174,15 +5174,23 @@ listCollector @(k v r : box)
   (\ (i : Boxed t2) (ret : OutPtr (arr N acc)) (s : Store)
      -> (v, Store).
      case i of [sa_t2] boxed tyob ([sa_int, sa_k] tuple2 (stored idx) i2).
-     let i2_box = bareToBox @(AsBare k) rep_k i2 in
-     c_read i2_box (subscript_out @N @acc sa_acc ret idx) s)
+
+     -- Bounds check; skip if out of bounds
+     if and (idx >=# 0) (idx <# size_int)
+     then let i2_box = bareToBox @(AsBare k) rep_k i2 in
+          c_read i2_box (subscript_out @N @acc sa_acc ret idx) s
+     else s)
 
   -- Store
   (\ (i : Boxed t2) (value : v) (ret : OutPtr (arr N acc)) (s : Store)
      -> Store.
      case i of [sa_t2] boxed tyob ([sa_int, sa_k] tuple2 (stored idx) i2).
-     let i2_box = bareToBox @(AsBare k) rep_k i2 in
-     c_write i2_box value (subscript_out @N @acc sa_acc ret idx) s)
+
+     -- Bounds check; skip if out of bounds
+     if and (idx >=# 0) (idx <# size_int)
+     then let i2_box = bareToBox @(AsBare k) rep_k i2 in
+          c_write i2_box value (subscript_out @N @acc sa_acc ret idx) s
+     else s)
 
   c_update
 
