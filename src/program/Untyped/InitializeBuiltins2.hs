@@ -470,6 +470,7 @@ tyConInitializers =
       , (TheTC_float,            Left SF.floatV)
       , (TheTC_bool,             Right The_bool)
       , (TheTC_NoneType,         Right The_NoneType)
+      , (TheTC_int64,            Left SF.int64V)
       , (TheTC_SliceObject,      Right The_SliceObject)
       , (TheTC_SomeIndexable,    Right The_SomeIndexable)
       , (TheTC_Subdomain,        Right The_Subdomain)
@@ -712,9 +713,11 @@ reprClass core_env tc_map = do
 mutableClass _ tc_map = do
   let int_instance =
         value_instance (lookupBuiltinVar SF.intV tc_map) (coreBuiltin The_Mutable_int)
+  let int64_instance =
+        value_instance (lookupBuiltinVar SF.int64V tc_map) (coreBuiltin The_Mutable_int64)
   let float_instance =
         value_instance (lookupBuiltinVar SF.intV tc_map) (coreBuiltin The_Mutable_float)
-  return [int_instance, float_instance]
+  return [int_instance, int64_instance, float_instance]
   where
     value_instance frontend_type sf_dict_con =
       return $ Instance frontend_type $ NewAbstractClassInstance make_expr
@@ -730,6 +733,10 @@ eqClass _ tc_map = do
         monomorphicClassInstance (lookupBuiltinVar SF.intV tc_map)
         [coreBuiltin The_EqDict_int_eq,
          coreBuiltin The_EqDict_int_ne]
+  let int64_instance =
+        monomorphicClassInstance (lookupBuiltinVar SF.int64V tc_map)
+        [coreBuiltin The_EqDict_int64_eq,
+         coreBuiltin The_EqDict_int64_ne]
   let float_instance =
         monomorphicClassInstance (lookupBuiltinVar SF.floatV tc_map)
         [coreBuiltin The_EqDict_float_eq,
@@ -757,7 +764,8 @@ eqClass _ tc_map = do
                instancePredicate TheTC_Eq (ConTy c)]
     in return (cst, Instance head body)
 
-  return [int_instance, float_instance, tuple2_instance, tuple3_instance]
+  return [int_instance, float_instance, int64_instance,
+          tuple2_instance, tuple3_instance]
 
 ordClass _ tc_map = do
   let int_instance =
@@ -766,6 +774,12 @@ ordClass _ tc_map = do
          coreBuiltin The_OrdDict_int_le,
          coreBuiltin The_OrdDict_int_gt,
          coreBuiltin The_OrdDict_int_ge]
+  let int64_instance =
+        monomorphicClassInstance (lookupBuiltinVar SF.int64V tc_map)
+        [coreBuiltin The_OrdDict_int64_lt,
+         coreBuiltin The_OrdDict_int64_le,
+         coreBuiltin The_OrdDict_int64_gt,
+         coreBuiltin The_OrdDict_int64_ge]
   let float_instance =
         monomorphicClassInstance (lookupBuiltinVar SF.floatV tc_map)
         [coreBuiltin The_OrdDict_float_lt,
@@ -785,7 +799,7 @@ ordClass _ tc_map = do
                instancePredicate TheTC_Ord (ConTy b)]
     in return (cst, Instance head body)
 
-  return [int_instance, float_instance, tuple2_instance]
+  return [int_instance, float_instance, int64_instance, tuple2_instance]
 
 functorClass _ tc_map = do
   let instances1 = [monomorphicClassInstance head methods
@@ -997,7 +1011,12 @@ additiveClass _ tc_map = do
         [coreBuiltin The_AdditiveDict_float_add,
          coreBuiltin The_AdditiveDict_float_sub,
          coreBuiltin The_AdditiveDict_float_negate,
-         coreBuiltin The_AdditiveDict_float_zero])]
+         coreBuiltin The_AdditiveDict_float_zero]),
+       (ConTy $ builtinTyCon TheTC_int64,
+        [coreBuiltin The_AdditiveDict_int64_add,
+         coreBuiltin The_AdditiveDict_int64_sub,
+         coreBuiltin The_AdditiveDict_int64_negate,
+         coreBuiltin The_AdditiveDict_int64_zero])]
 
 multiplicativeClass _ tc_map = do
   let instances =

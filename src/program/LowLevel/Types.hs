@@ -129,6 +129,7 @@ trioletFloatSize = S32
 trioletIntType, trioletUintType, trioletFloatType,
   trioletBoolType, trioletByteType, trioletNoneType :: PrimType
 trioletIntType = IntType Signed trioletIntSize
+trioletInt64Type = IntType Signed S64
 trioletUintType = IntType Unsigned trioletIntSize
 trioletFloatType = FloatType trioletFloatSize
 trioletBoolType = BoolType

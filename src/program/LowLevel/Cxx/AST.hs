@@ -35,8 +35,9 @@ data Type = NameType QName
           | FunType [Type] Type
 
 -- | Primitive and standard C types
-int32_tT, floatT, boolT, voidT :: Type
+int32_tT, int64_tT, floatT, boolT, voidT :: Type
 int32_tT = NameType $ plainQName "int32_t"
+int64_tT = NameType $ plainQName "int64_t"
 floatT = NameType $ plainQName "float"
 boolT = NameType $ plainQName "bool"
 voidT = NameType $ plainQName "void"

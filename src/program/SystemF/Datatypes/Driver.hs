@@ -29,7 +29,7 @@ import SystemF.Datatypes.TypeObject
 
 -- | Primitive value types.  These get special auto-generated definitions.
 primitiveValTypes :: [Var]
-primitiveValTypes = [intV, uintV, floatV]
+primitiveValTypes = [intV, uintV, floatV, int64V]
 
 -- | Compute layout information for all algebraic data types in the
 --   given environment.  The type environment is modified in-place

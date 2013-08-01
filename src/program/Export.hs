@@ -55,6 +55,7 @@ data ExportDataType =
     -- Plain old data types
   | TrioletNoneET                  -- ^ Triolet NoneType type
   | TrioletIntET                   -- ^ Triolet int type
+  | TrioletInt64ET                 -- ^ Triolet int64 type
   | TrioletFloatET                 -- ^ Triolet float type
   | TrioletBoolET                  -- ^ Triolet boolean type
   | CIntET                      -- ^ C int type
@@ -89,6 +90,7 @@ instance Show ExportDataType where
             shows ret
        TrioletNoneET -> showString "TrioletNoneET"
        TrioletIntET -> showString "TrioletIntET"
+       TrioletInt64ET -> showString "TrioletInt64ET"
        TrioletFloatET -> showString "TrioletFloatET"
        TrioletBoolET -> showString "TrioletBoolET"
        CIntET -> showString "CIntET"

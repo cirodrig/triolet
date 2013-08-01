@@ -38,6 +38,7 @@ pyonType (ArrayET n False ty) =
   in varApp op [pyonType ty]
 pyonType TrioletNoneET = VarT (coreBuiltin The_NoneType)
 pyonType TrioletIntET = intT
+pyonType TrioletInt64ET = int64T
 pyonType TrioletFloatET = floatT
 pyonType TrioletBoolET = VarT (coreBuiltin The_bool)
 
@@ -114,6 +115,7 @@ marshalCParameter ty =
      ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
      TrioletNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
+     TrioletInt64ET -> passParameterWithType (LL.PrimType LL.trioletInt64Type)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passParameterWithType (LL.PrimType LL.trioletBoolType)
 
@@ -126,6 +128,7 @@ demarshalCParameter ty =
      ArrayET _ _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
      TrioletNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
+     TrioletInt64ET -> passParameterWithType (LL.PrimType LL.trioletInt64Type)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passParameterWithType (LL.PrimType LL.trioletBoolType)
 
@@ -136,6 +139,7 @@ marshalCxxParameter ty =
   case ty
   of TrioletNoneET -> passParameterWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passParameterWithType (LL.PrimType LL.trioletIntType)
+     TrioletInt64ET -> passParameterWithType (LL.PrimType LL.trioletInt64Type)
      TrioletFloatET -> passParameterWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passParameterWithType (LL.PrimType LL.trioletBoolType)
      ListET _ _ -> passParameterWithType (LL.PrimType LL.CursorType)
@@ -195,6 +199,7 @@ marshalCReturn ty =
   case ty
   of TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
+     TrioletInt64ET -> passReturnWithType (LL.PrimType LL.trioletInt64Type)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> marshalBoolReturn
 
@@ -209,6 +214,7 @@ marshalCxxReturn ty =
   case ty
   of TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
+     TrioletInt64ET -> passReturnWithType (LL.PrimType LL.trioletInt64Type)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> marshalBoolReturn
      ListET _ _ -> passReturnBoxed
@@ -220,6 +226,7 @@ demarshalCReturn ty =
   case ty
   of TrioletNoneET -> passReturnWithType (LL.PrimType LL.UnitType)
      TrioletIntET -> passReturnWithType (LL.PrimType LL.trioletIntType)
+     TrioletInt64ET -> passReturnWithType (LL.PrimType LL.trioletInt64Type)
      TrioletFloatET -> passReturnWithType (LL.PrimType LL.trioletFloatType)
      TrioletBoolET -> passReturnWithType (LL.PrimType LL.trioletBoolType)
 
@@ -344,6 +351,7 @@ getCExportType ty = do
     Just (con, [])
       | con `isCoreBuiltin` The_NoneType -> return TrioletNoneET
       | con == intV -> return TrioletIntET
+      | con == int64V -> return TrioletInt64ET
       | con == floatV -> return TrioletFloatET
       | con `isCoreBuiltin` The_bool -> return TrioletBoolET
     Just (con, [arg])
@@ -365,6 +373,7 @@ getCxxExportType ty = do
     Just (con, [])
       | con `isCoreBuiltin` The_NoneType -> return TrioletNoneET
       | con == intV -> return TrioletIntET
+      | con == int64V -> return TrioletInt64ET
       | con == floatV -> return TrioletFloatET
       | con `isCoreBuiltin` The_bool -> return TrioletBoolET
     Just (con, [arg])

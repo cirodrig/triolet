@@ -818,6 +818,7 @@ mkWiredInTypeEnv = do
                (uintV, TyConTypeAssignment uint_data_type),
                (floatV, TyConTypeAssignment float_data_type),
                (byteV, TyConTypeAssignment byte_data_type),
+               (int64V, TyConTypeAssignment int64_data_type),
                (refV, TyConTypeAssignment ref_data_type),
                (ref_conV, DataConTypeAssignment ref_datacon_type),
                (store_conV, DataConTypeAssignment store_datacon_type),
@@ -944,7 +945,20 @@ mkWiredInTypeEnv = do
                , dataTypeDataConstructors = []}
       where
         byte_layout = unboxedDataTypeLayout [] []
-                      valInfo_byteV putByteV getByteV []
+                      valInfo_byteV putStoredByteV getStoredByteV []
+
+    int64_data_type =
+      DataType { dataTypeCon = int64V
+               , dataTypeParams = []
+               , dataTypeLayout = Just int64_layout
+               , dataTypeKind = ValK
+               , dataTypeIsAbstract = True
+               , dataTypeIsAlgebraic = False
+               , dataTypeIsSingleton = False
+               , dataTypeDataConstructors = []}
+      where
+        int64_layout = unboxedDataTypeLayout [] []
+                       valInfo_int64V putStoredInt64V getStoredInt64V []
 
     ref_data_type =
       DataType { dataTypeCon = refV

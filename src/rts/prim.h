@@ -4,6 +4,8 @@ import procedure sched_yield (int) -> ();
 extern function core.internal.prim.seqStore (unit, unit) -> (unit);
 extern function core.internal.prim.read_int (pointer, unit) -> U2Tuple(int, unit);
 extern function core.internal.prim.write_int (int, pointer, unit) -> unit;
+extern function core.internal.prim.read_int64 (pointer, unit) -> U2Tuple(int64, unit);
+extern function core.internal.prim.write_int64 (int64, pointer, unit) -> unit;
 extern function core.internal.prim.read_float (pointer, unit) -> U2Tuple(float, unit);
 extern function core.internal.prim.write_float (float, pointer, unit) -> unit;
 
@@ -57,9 +59,18 @@ extern function core.internal.prim.le_float (float, float) -> uint;
 extern function core.internal.prim.gt_float (float, float) -> uint;
 extern function core.internal.prim.ge_float (float, float) -> uint;
 
+extern function core.internal.prim.eq_int64 (int64, int64) -> uint;
+extern function core.internal.prim.ne_int64 (int64, int64) -> uint;
+extern function core.internal.prim.lt_int64 (int64, int64) -> uint;
+extern function core.internal.prim.le_int64 (int64, int64) -> uint;
+extern function core.internal.prim.gt_int64 (int64, int64) -> uint;
+extern function core.internal.prim.ge_int64 (int64, int64) -> uint;
+
 extern function core.internal.prim.negate_int (int) -> int;
 extern function core.internal.prim.floordiv_int (int, int) -> int;
 extern function core.internal.prim.mod_int (int, int) -> int;
+
+extern function core.internal.prim.negate_int64 (int64) -> int64;
 
 extern function core.internal.prim.negate_float (float) -> float;
 extern function core.internal.prim.fromint_float (int) -> float;

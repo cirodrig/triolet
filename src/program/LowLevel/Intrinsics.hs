@@ -46,6 +46,8 @@ lowerIntrinsicOp v
          uint_to_int)
       , (coreBuiltin The_intToUint,
          int_to_uint)
+      , (coreBuiltin The_intToInt64,
+         int_to_int64)
       , (coreBuiltin The_lshift,
          binary_int (PrimShiftL Signed S32))
       , (coreBuiltin The_rshift,
@@ -62,6 +64,10 @@ lowerIntrinsicOp v
          binary_int (PrimMinZ Signed S32))
       , (coreBuiltin The_maxI,
          binary_int (PrimMaxZ Signed S32))
+      , (coreBuiltin The_addI64,
+         binary_int64 (PrimAddZ Signed S64))
+      , (coreBuiltin The_subI64,
+         binary_int64 (PrimSubZ Signed S64))
       , (coreBuiltin The_addU,
          binary_uint (PrimAddZ Unsigned S32))
       , (coreBuiltin The_subU,
@@ -172,6 +178,12 @@ binary_int op =
   where
     int_type = PrimType (IntType Signed S32)
 
+binary_int64 op =
+  genLambdaOrCall1 [int64_type, int64_type] int64_type $ \params -> do
+    emitAtom1 int64_type $ PrimA op params
+  where
+    int64_type = PrimType (IntType Signed S64)
+
 binary_uint op =
   genLambdaOrCall1 [uint_type, uint_type] uint_type $ \params -> do
     emitAtom1 uint_type $ PrimA op params  
@@ -214,6 +226,14 @@ int_to_uint =
   where
     int_type = PrimType (IntType Signed S32)
     uint_type = PrimType (IntType Unsigned S32)
+
+-- | Cast signed integers
+int_to_int64 =
+  genLambdaOrCall1 [int_type] int64_type $ \params -> do
+    emitAtom1 int64_type $ PrimA (PrimExtendZ Signed S32 S64) params
+  where
+    int_type = PrimType (IntType Signed S32)
+    int64_type = PrimType (IntType Signed S64)
 
 id_float, id_int, empty_eff_tok, dead_reference, dead_box, proof_object ::
   (Monad m, Supplies m (Ident Var)) => [Val] -> Gen m Val

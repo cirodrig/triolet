@@ -40,11 +40,13 @@ boxedArrayT n t = NameType $ trioletName $ tmplQName ("BArray" ++ show n) [t]
 
 noneType = trioletName $ plainQName "NoneType"
 int      = trioletName $ plainQName "Int"
+int64    = trioletName $ plainQName "Int64"
 float    = trioletName $ plainQName "Float"
 bool     = trioletName $ plainQName "Bool"
 
 trioletNoneTypeT = NameType noneType
 trioletIntT = NameType int
+trioletInt64T = NameType int64
 trioletFloatT = NameType float
 trioletBoolT = NameType bool
 
@@ -56,6 +58,7 @@ isBareType (TupleET _)     = True
 isBareType (ListET _ _)    = True
 isBareType (ArrayET _ _ _) = True
 isBareType TrioletIntET    = False
+isBareType TrioletInt64ET  = False
 isBareType TrioletFloatET  = False
 isBareType TrioletBoolET   = False
 isBareType TrioletNoneET   = False
@@ -76,6 +79,7 @@ wrappedParamType (ListET True ts)     = boxedListT $ wrappedParamType ts
 wrappedParamType (ArrayET n False ts) = arrayT n $ wrappedParamType ts
 wrappedParamType (ArrayET n True ts)  = arrayT n $ wrappedParamType ts
 wrappedParamType TrioletIntET         = trioletIntT
+wrappedParamType TrioletInt64ET       = trioletInt64T
 wrappedParamType TrioletFloatET       = trioletFloatT
 wrappedParamType TrioletBoolET        = trioletBoolT
 wrappedParamType TrioletNoneET        = trioletNoneTypeT
@@ -85,6 +89,7 @@ wrappedParamType TrioletNoneET        = trioletNoneTypeT
 unwrappedParamType :: ExportDataType -> [Type]
 unwrappedParamType t | isBareType t = cursorParamTypes
 unwrappedParamType TrioletIntET    = [int32_tT]
+unwrappedParamType TrioletInt64ET  = [int64_tT]
 unwrappedParamType TrioletFloatET  = [floatT]
 unwrappedParamType TrioletBoolET   = [boolT]
 unwrappedParamType TrioletNoneET   = []
@@ -98,6 +103,7 @@ wrappedReturnType t = wrappedParamType t
 unwrappedReturnType :: ExportDataType -> Maybe Type
 unwrappedReturnType t | isBareType t = boxedReturnType
 unwrappedReturnType TrioletIntET    = Just int32_tT
+unwrappedReturnType TrioletInt64ET  = Just int64_tT
 unwrappedReturnType TrioletFloatET  = Just floatT
 unwrappedReturnType TrioletBoolET   = Just boolT
 unwrappedReturnType TrioletNoneET   = Nothing
@@ -168,6 +174,7 @@ wrapReturn export_type m_result_var
   | otherwise =
       case export_type
       of TrioletIntET -> construct int
+         TrioletInt64ET -> construct int64
          TrioletFloatET -> construct float
          TrioletBoolET -> construct bool
 

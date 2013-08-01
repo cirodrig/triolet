@@ -6,7 +6,7 @@ import qualified Language.Haskell.TH as TH
 -- | All predefined data type names recognized by the Triolet parser
 frontendSourceTypes :: [String] 
 frontendSourceTypes =
-  ["int", "float", "bool", "NoneType",
+  ["int", "float", "bool", "NoneType", "int64",
    "iter", "list",
    "array0", "array1", "array2", "array3",
    "blist", "barray1", "barray2", "barray3",

@@ -138,9 +138,27 @@ function inline putUnit (unit n, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function putPointer (pointer n, owned buf, unit dummy) -> unit {
+function inline putByte (uint8 n, owned buf, unit dummy) -> unit {
 #ifdef PRINT_PUTS
   () = () primcall triolet_db_int(int 205);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof uint8, alignof uint8);
+  !dst = n;
+  nil;
+};
+
+function inline putInt64 (int64 n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 206);
+#endif
+  dst = pointer primcall MkBuffer_allocate(buf, sizeof int64, alignof int64);
+  !dst = n;
+  nil;
+};
+
+function putPointer (pointer n, owned buf, unit dummy) -> unit {
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 207);
 #endif
   // Once the segment and offset are identified, send them
   letrec {
@@ -189,6 +207,14 @@ function inline putStoredFloat (cursor c, owned buf, unit dummy) -> unit {
   unit call putFloat (float load c, buf, dummy);
 };
 
+function inline putStoredByte (cursor c, owned buf, unit dummy) -> unit {
+  unit call putByte (uint8 load c, buf, dummy);
+};
+
+function inline putStoredInt64 (cursor c, owned buf, unit dummy) -> unit {
+  unit call putInt64 (int64 load c, buf, dummy);
+};
+
 function inline putStoredCursor (cursor c, owned buf, unit dummy) -> unit {
   unit call putCursor (cursor load c, buf, dummy);
 };
@@ -222,7 +248,7 @@ function putArrWithSerializer
 
 function putBoxedObject (owned x, owned buf, unit dummy) -> unit {
 #ifdef PRINT_PUTS
-  () = () primcall triolet_db_int(int 206);
+  () = () primcall triolet_db_int(int 208);
   () = () primcall triolet_db_pointer (x as pointer);
 #endif
   // If it's a global object, serialize the object's location in the global
@@ -331,7 +357,27 @@ function inline getFloat (cursor buffer) -> ReadResult(float) {
   (start, end) =
     (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof float, alignof float);
   n = float load start;
-  ReadResult(uint) {end, n};
+  ReadResult(float) {end, n};
+};
+
+function inline getByte (cursor buffer) -> ReadResult(uint8) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 105);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof uint8, alignof uint8);
+  n = uint8 load start;
+  ReadResult(uint8) {end, n};
+};
+
+function inline getInt64 (cursor buffer) -> ReadResult(int64) {
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 106);
+#endif
+  (start, end) =
+    (cursor, cursor) primcall ReadBuffer_advance (buffer, sizeof int64, alignof int64);
+  n = int64 load start;
+  ReadResult(int64) {end, n};
 };
 
 function inline getUnit (cursor buffer) -> ReadResult(unit) {
@@ -341,7 +387,7 @@ function inline getUnit (cursor buffer) -> ReadResult(unit) {
 
 function getPointer (cursor buffer) -> ReadResult(pointer) {
 #ifdef PRINT_GETS
-  () = () primcall triolet_db_int(int 105);
+  () = () primcall triolet_db_int(int 107);
 #endif
   // Receive a segment and offset
   ReadResult(uint) {buffer2, segment} =
@@ -406,6 +452,30 @@ function inline getStoredUint (cursor buffer) -> ReadResult(owned) {
 
 function inline getStoredFloat (cursor buffer) -> ReadResult(owned) {
   ReadResult(float) {end, n} = ReadResult(float) call getFloat(buffer);
+  letrec {
+    function write_result (pointer ret) -> unit {
+      !ret = n;
+      nil;
+    }
+  };
+
+  ReadResult(owned) {end, write_result};
+};
+
+function inline getStoredByte (cursor buffer) -> ReadResult(owned) {
+  ReadResult(uint8) {end, n} = ReadResult(uint8) call getByte(buffer);
+  letrec {
+    function write_result (pointer ret) -> unit {
+      !ret = n;
+      nil;
+    }
+  };
+
+  ReadResult(owned) {end, write_result};
+};
+
+function inline getStoredInt64 (cursor buffer) -> ReadResult(owned) {
+  ReadResult(int64) {end, n} = ReadResult(int64) call getInt64(buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;
@@ -484,7 +554,7 @@ function getArrWithSerializer
 
 function getBoxedObject (cursor buffer) -> ReadResult(owned) {
 #ifdef PRINT_GETS
-  () = () primcall triolet_db_int(int 106);
+  () = () primcall triolet_db_int(int 108);
 #endif
   // Get the control flag
   ReadResult(uint) {buffer2, control} =

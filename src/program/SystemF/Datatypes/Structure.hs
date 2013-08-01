@@ -162,12 +162,13 @@ computeStructure :: EvalMonad m => Type -> m Structure
 computeStructure t = liftTypeEvalM $ do
   t' <- reduceToWhnf t
   case fromVarApp t' of
-    -- Non-algebraic type constructors and Bool are handled specially
+    -- Non-algebraic type constructors are handled specially
     Just (con, [])
       | con == intV -> return $ PrimStruct trioletIntType
       | con == uintV -> return $ PrimStruct trioletUintType
       | con == floatV -> return $ PrimStruct trioletFloatType
       | con == byteV -> return $ PrimStruct trioletByteType
+      | con == int64V -> return $ PrimStruct trioletInt64Type
 
     Just (con, [arg])
       | con == cursorV -> return $ PrimStruct CursorType

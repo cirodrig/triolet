@@ -26,6 +26,8 @@ module LowLevel.Builtins
         the_prim_apply_u,
         the_prim_apply_i32_f,
         the_prim_apply_i32,
+        the_prim_apply_i64_f,
+        the_prim_apply_i64,
         the_prim_apply_f32_f,
         the_prim_apply_f32,
         the_prim_apply_p_f,

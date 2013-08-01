@@ -328,6 +328,8 @@ namespace Triolet {
 
   class Int;
 
+  class Int64;
+
   class Bool;
 
   class Float;
@@ -450,6 +452,20 @@ namespace Triolet {
       Int(const Stored<Int> &s);
       operator int32_t() { return nativeElement; }
       inline operator Boxed<Stored<Int> >() const;
+  };
+
+  /* Implementation of the Int64 wrapper */
+
+  class Int64 : public ValType {
+    public:
+      typedef int64_t type;
+      int64_t nativeElement;
+
+      Int64() : nativeElement(0) {}
+      Int64(int64_t i) : nativeElement(i) {}
+      Int64(const Stored<Int> &s);
+      operator int64_t() { return nativeElement; }
+      inline operator Boxed<Stored<Int64> >() const;
   };
 
   /* Implementation of the Bool wrapper */
@@ -2729,6 +2745,15 @@ namespace Triolet {
   {
     Incomplete<Boxed<Stored<Int> > > i;
     i.create(Stored<Int>::initializer());
+    i.get() = *this;
+    return i.freeze();
+  }
+
+  inline
+  Int64::operator Boxed<Stored<Int64> >() const
+  {
+    Incomplete<Boxed<Stored<Int64> > > i;
+    i.create(Stored<Int64>::initializer());
     i.get() = *this;
     return i.freeze();
   }

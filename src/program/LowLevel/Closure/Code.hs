@@ -685,6 +685,7 @@ genApply1 f x = do
   let op = case valType promoted_x
            of PrimType UnitType             -> llBuiltin the_prim_apply_u_f
               PrimType (IntType Signed S32) -> llBuiltin the_prim_apply_i32_f
+              PrimType (IntType Signed S64) -> llBuiltin the_prim_apply_i64_f
               PrimType (FloatType S32)      -> llBuiltin the_prim_apply_f32_f
               PrimType PointerType          -> llBuiltin the_prim_apply_p_f
               PrimType OwnedType            -> llBuiltin the_prim_apply_o_f
@@ -701,6 +702,7 @@ genApplyLast f x ret_ptr = do
   let op = case valType promoted_x
            of PrimType UnitType             -> llBuiltin the_prim_apply_u
               PrimType (IntType Signed S32) -> llBuiltin the_prim_apply_i32
+              PrimType (IntType Signed S64) -> llBuiltin the_prim_apply_i64
               PrimType (FloatType S32)      -> llBuiltin the_prim_apply_f32
               PrimType PointerType          -> llBuiltin the_prim_apply_p
               PrimType OwnedType            -> llBuiltin the_prim_apply_o

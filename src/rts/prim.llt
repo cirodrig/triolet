@@ -28,6 +28,15 @@ function inline write_int (int n, pointer p, unit _) -> unit {
   nil;
 };
 
+function inline read_int64 (pointer p, unit _) -> U2Tuple (int64, unit) {
+  U2Tuple (int64, unit) {int64 load p, nil};
+};
+
+function inline write_int64 (int64 n, pointer p, unit _) -> unit {
+  !p = n;
+  nil;
+};
+
 function inline read_float (pointer p, unit _) -> U2Tuple (float, unit) {
   U2Tuple (float, unit) {float load p, nil};
 };
@@ -227,8 +236,36 @@ function ge_float (float x, float y) -> uint {
   (x >= y) as uint;
 };
 
+function eq_int64 (int64 x, int64 y) -> uint {
+  (x == y) as uint;
+};
+
+function ne_int64 (int64 x, int64 y) -> uint {
+  (x != y) as uint;
+};
+
+function lt_int64 (int64 x, int64 y) -> uint {
+  (x < y) as uint;
+};
+
+function le_int64 (int64 x, int64 y) -> uint {
+  (x <= y) as uint;
+};
+
+function gt_int64 (int64 x, int64 y) -> uint {
+  (x > y) as uint;
+};
+
+function ge_int64 (int64 x, int64 y) -> uint {
+  (x >= y) as uint;
+};
+
 function negate_int (int x) -> int {
   int 0 - x;
+};
+
+function negate_int64 (int64 x) -> int64 {
+  int64 0 - x;
 };
 
 function floordiv_int(int x, int y) -> int {

@@ -32,7 +32,7 @@ predefinedVarDetails =
   [(name v, v) | v <- [valV, boxV, bareV, outV, intindexV, initV,
                        initConV, outPtrV,
                        cursorV, storeV, posInftyV, negInftyV,
-                       storedV, arrV, intV, uintV, floatV, byteV,
+                       storedV, arrV, intV, uintV, floatV, byteV, int64V,
                        refV,
                        stored_conV, ref_conV]]
   where

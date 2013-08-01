@@ -964,6 +964,26 @@ isZero_int (bx : Boxed (Stored int)) -> bool =
   unboxIntValue bx ==# 0;
 
 
+Mutable_int64 : Mutable (Stored int64) =
+  mutable @(Stored int64) (boxedinfo mutable @(Stored int64))
+  read_int64_helper write_int64_helper isZero_int64;
+
+read_int64_helper (p : OutPtr (Stored int64)) (s : Store)
+  -> (Boxed (Stored int64), Store) =
+  case read_int64 p s of (x, s2). (boxInt64Value x, s2);
+
+read_int64 :  OutPtr (Stored int64) -> Store -> (int64, Store);
+
+write_int64_helper (x : Boxed (Stored int64)) (p : OutPtr (Stored int64)) (s : Store)
+  -> Store =
+  write_int64 (unboxInt64Value x) p s;
+
+write_int64 :  int64 -> OutPtr (Stored int64) -> Store -> Store;
+
+isZero_int64 (bx : Boxed (Stored int64)) -> bool =
+  eqI64 (unboxInt64Value bx) (intToInt64 0);
+
+
 Mutable_float : Mutable (Stored float) =
   mutable @(Stored float) (boxedinfo mutable @(Stored float))
   read_float_helper write_float_helper isZero_float;
@@ -2254,6 +2274,8 @@ putBoxCoercion : forall a b : box. coerce @box a b -> MessageWriter attribute(bu
 putStoredInt : Stored int -> MessageWriter attribute(builtin);
 putStoredUint : Stored uint -> MessageWriter attribute(builtin);
 putStoredFloat : Stored float -> MessageWriter attribute(builtin);
+putStoredByte : Stored byte -> MessageWriter attribute(builtin);
+putStoredInt64 : Stored int64 -> MessageWriter attribute(builtin);
 putStoredCursor : forall a : bare. Stored (cursor a) -> MessageWriter attribute(builtin);
 
 putArrWithSerializer : forall n : intindex, a : bare.
@@ -2280,6 +2302,8 @@ getBoxCoercion : forall a b : box. MessageReader -> (MessageReader, coerce @box 
 getStoredInt : MessageReader -> (MessageReader, Init (Stored int)) attribute(builtin);
 getStoredUint : MessageReader -> (MessageReader, Init (Stored uint)) attribute(builtin);
 getStoredFloat : MessageReader -> (MessageReader, Init (Stored float)) attribute(builtin);
+getStoredByte : MessageReader -> (MessageReader, Init (Stored byte)) attribute(builtin);
+getStoredInt64 : MessageReader -> (MessageReader, Init (Stored int64)) attribute(builtin);
 getStoredCursor : forall a : bare. MessageReader -> (MessageReader, Init (Stored (cursor a))) attribute(builtin);
 
 getArrWithSerializer : forall n : intindex, a : bare.
@@ -2954,6 +2978,9 @@ repr_uint : Repr (Stored uint) attribute(inline, inline_final) =
 
 repr_float : Repr (Stored float) attribute(inline, inline_final) =
   repr_Stored @float (unboxedinfo float);
+
+repr_int64 : Repr (Stored int64) attribute(inline, inline_final) =
+  repr_Stored @int64 (unboxedinfo int64);
 
 repr_bool : Repr (Stored bool) attribute(inline, inline_final) =
   repr_Stored @bool (unboxedinfo bool);
@@ -8201,6 +8228,17 @@ EqDict_float_ne (bsx : Boxed (Stored float)) (bsy : Boxed (Stored float))
   attribute(inline) =
   boxBoolValue (neF (unboxFloatValue bsx) (unboxFloatValue bsy));
 
+EqDict_int64 : EqDict (Boxed (Stored int64));
+EqDict_int64_eq (bsx : Boxed (Stored int64)) (bsy : Boxed (Stored int64))
+  -> Boxed (Stored bool)
+  attribute(inline) =
+  boxBoolValue (eqI64 (unboxInt64Value bsx) (unboxInt64Value bsy));
+
+EqDict_int64_ne (bsx : Boxed (Stored int64)) (bsy : Boxed (Stored int64))
+  -> Boxed (Stored bool)
+  attribute(inline) =
+  boxBoolValue (neI64 (unboxInt64Value bsx) (unboxInt64Value bsy));
+
 EqDict_Tuple2 : forall a b : box. Repr (AsBare a) -> Repr (AsBare b) -> EqDict a -> EqDict b
              -> EqDict (Boxed (Tuple2 (AsBare a) (AsBare b)));
 EqDict_Tuple2_eq @(a b : box)
@@ -8352,6 +8390,33 @@ OrdDict_int_ge (eq_dict : EqDict (Boxed (Stored int)))
   (x y : Boxed (Stored int))
   -> Boxed (Stored bool) attribute(inline) =
   boxBoolValue (geI (unboxIntValue x) (unboxIntValue y));
+
+
+OrdDict_int64 : OrdDict (Boxed (Stored int64));
+
+
+OrdDict_int64_lt (eq_dict : EqDict (Boxed (Stored int64)))
+  (x y : Boxed (Stored int64))
+  -> Boxed (Stored bool) attribute(inline) =
+  boxBoolValue (ltI64 (unboxInt64Value x) (unboxInt64Value y));
+
+
+OrdDict_int64_le (eq_dict : EqDict (Boxed (Stored int64)))
+  (x y : Boxed (Stored int64))
+  -> Boxed (Stored bool) attribute(inline) =
+  boxBoolValue (leI64 (unboxInt64Value x) (unboxInt64Value y));
+
+
+OrdDict_int64_gt (eq_dict : EqDict (Boxed (Stored int64)))
+  (x y : Boxed (Stored int64))
+  -> Boxed (Stored bool) attribute(inline) =
+  boxBoolValue (gtI64 (unboxInt64Value x) (unboxInt64Value y));
+
+
+OrdDict_int64_ge (eq_dict : EqDict (Boxed (Stored int64)))
+  (x y : Boxed (Stored int64))
+  -> Boxed (Stored bool) attribute(inline) =
+  boxBoolValue (geI64 (unboxInt64Value x) (unboxInt64Value y));
 
 
 OrdDict_float : OrdDict (Boxed (Stored float));
@@ -8527,6 +8592,21 @@ AdditiveDict_float_negate (x : Boxed (Stored float)) -> Boxed (Stored float) =
   boxFloatValue (negF (unboxFloatValue x));
 
 AdditiveDict_float_zero : Boxed (Stored float) attribute(inline) = boxFloatValue 0.0;
+
+AdditiveDict_int64 : AdditiveDict (Boxed (Stored int64));
+AdditiveDict_int64_add (x : Boxed (Stored int64)) (y : Boxed (Stored int64))
+  -> Boxed (Stored int64) =
+  boxInt64Value (addI64 (unboxInt64Value x) (unboxInt64Value y));
+  
+AdditiveDict_int64_sub (x : Boxed (Stored int64)) (y : Boxed (Stored int64))
+  -> Boxed (Stored int64) =
+  boxInt64Value (subI64 (unboxInt64Value x) (unboxInt64Value y));
+
+AdditiveDict_int64_negate (x : Boxed (Stored int64)) -> Boxed (Stored int64) =
+  boxInt64Value (negI64 (unboxInt64Value x));
+
+AdditiveDict_int64_zero : Boxed (Stored int64) attribute(inline) =
+  boxInt64Value (intToInt64 0);
 
 AdditiveDict_Tuple2 : forall a b : box.
                       Repr (AsBare a) -> Repr (AsBare b)
@@ -9350,6 +9430,17 @@ unboxFloatValue (n : Boxed (Stored float)) -> float =
   case n of [reprSizeAlign @(Stored float) repr_float]
     boxed tyob (stored un). un;
 
+boxInt64Value (n : int64) -> Boxed (Stored int64) =
+  let rep_Sint = repr_Stored @int64 (unboxedinfo int64) in
+  boxed @(Stored int64)
+  (reprSizeAlign @(Stored int64) rep_Sint)
+  (boxedinfo boxed @(Stored int64) rep_Sint)
+  (stored @int64 n);
+
+unboxInt64Value (n : Boxed (Stored int64)) -> int64 =
+  case n of [reprSizeAlign @(Stored int64) repr_int64]
+    boxed tyob (stored un). un;
+
 boxBoolValue (n : bool) -> Boxed (Stored bool) =
   let rep_Sbool = repr_Stored @bool (unboxedinfo bool) in
   boxed @(Stored bool)
@@ -9455,9 +9546,21 @@ sinF : float -> float;
 cosF : float -> float;
 tanF : float -> float;
 
+eqI64 : int64 -> int64 -> bool;
+neI64 : int64 -> int64 -> bool;
+ltI64 : int64 -> int64 -> bool;
+leI64 : int64 -> int64 -> bool;
+gtI64 : int64 -> int64 -> bool;
+geI64 : int64 -> int64 -> bool;
+
+addI64 : int64 -> int64 -> int64;
+subI64 : int64 -> int64 -> int64;
+negI64 : int64 -> int64;
+zeroI64 : int64 = intToInt64 0;
 
 uintToInt : uint -> int attribute(builtin);
 intToUint : int -> uint attribute(builtin);
+intToInt64 : int -> int64;
 
 floor : float -> int;
 

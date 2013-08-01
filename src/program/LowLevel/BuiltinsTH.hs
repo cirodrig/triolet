@@ -129,6 +129,13 @@ builtinPrimitives =
      primFunctionType [PrimType OwnedType
                       , PrimType (IntType Signed S32)
                       , PrimType PointerType] [])
+  , (applyName "apply_i64_f",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType (IntType Signed S64)] [PrimType OwnedType])
+  , (applyName "apply_i64",
+     primFunctionType [PrimType OwnedType
+                      , PrimType (IntType Signed S64)
+                      , PrimType PointerType] [])
   , (applyName "apply_f32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (FloatType S32)] [PrimType OwnedType])
@@ -185,6 +192,10 @@ builtinFunctions =
      Right [| coreBuiltin SystemF.The_read_int |])
   , (CoreName module_prim "write_int",
      Right [| coreBuiltin SystemF.The_write_int |])
+  , (CoreName module_prim "read_int64",
+     Right [| coreBuiltin SystemF.The_read_int64 |])
+  , (CoreName module_prim "write_int64",
+     Right [| coreBuiltin SystemF.The_write_int64 |])
   , (CoreName module_prim "read_float",
      Right [| coreBuiltin SystemF.The_read_float |])
   , (CoreName module_prim "write_float",
@@ -318,6 +329,10 @@ builtinFunctions =
      Right [| SystemF.putStoredUintV |])
   , (CoreName module_buffer "putStoredFloat",
      Right [| SystemF.putStoredFloatV |])
+  , (CoreName module_buffer "putStoredByte",
+     Right [| SystemF.putStoredByteV |])
+  , (CoreName module_buffer "putStoredInt64",
+     Right [| SystemF.putStoredInt64V |])
   , (CoreName module_buffer "putStoredCursor",
      Right [| SystemF.putStoredCursorV |])
   , (CoreName module_buffer "putArrWithSerializer",
@@ -346,6 +361,10 @@ builtinFunctions =
      Right [| SystemF.getStoredUintV |])
   , (CoreName module_buffer "getStoredFloat",
      Right [| SystemF.getStoredFloatV |])
+  , (CoreName module_buffer "getStoredByte",
+     Right [| SystemF.getStoredByteV |])
+  , (CoreName module_buffer "getStoredInt64",
+     Right [| SystemF.getStoredInt64V |])
   , (CoreName module_buffer "getStoredCursor",
      Right [| SystemF.getStoredCursorV |])
   , (CoreName module_buffer "getArrWithSerializer",
@@ -445,6 +464,10 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_eqI) |])
   , (CoreName module_prim "ne_int",
      Right [| coreBuiltin (SystemF.The_neI) |])
+  , (CoreName module_prim "eq_int64",
+     Right [| coreBuiltin (SystemF.The_eqI64) |])
+  , (CoreName module_prim "ne_int64",
+     Right [| coreBuiltin (SystemF.The_neI64) |])
   , (CoreName module_prim "eq_float",
      Right [| coreBuiltin (SystemF.The_eqF) |])
   , (CoreName module_prim "ne_float",
@@ -457,6 +480,14 @@ builtinFunctions =
      Right [| coreBuiltin SystemF.The_gtI |])
   , (CoreName module_prim "ge_int",
      Right [| coreBuiltin SystemF.The_geI |])
+  , (CoreName module_prim "lt_int64",
+     Right [| coreBuiltin SystemF.The_ltI64 |])
+  , (CoreName module_prim "le_int64",
+     Right [| coreBuiltin SystemF.The_leI64 |])
+  , (CoreName module_prim "gt_int64",
+     Right [| coreBuiltin SystemF.The_gtI64 |])
+  , (CoreName module_prim "ge_int64",
+     Right [| coreBuiltin SystemF.The_geI64 |])
   , (CoreName module_prim "lt_float",
      Right [| coreBuiltin SystemF.The_ltF |])
   , (CoreName module_prim "le_float",
@@ -468,6 +499,8 @@ builtinFunctions =
     -- the_AdditiveDict_int_{add,sub} were replaced by intrinsics
   , (CoreName module_prim "negate_int",
      Right [| coreBuiltin (SystemF.The_negI) |])
+  , (CoreName module_prim "negate_int64",
+     Right [| coreBuiltin (SystemF.The_negI64) |])
     -- zero_int was replaced by a literal value
     -- the_AdditiveDict_float_{add,sub} were replaced by intrinsics
   , (CoreName module_prim "negate_float",
