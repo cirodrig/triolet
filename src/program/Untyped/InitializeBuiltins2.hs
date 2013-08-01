@@ -1032,7 +1032,11 @@ multiplicativeClass _ tc_map = do
        (ConTy $ builtinTyCon TheTC_float,
         [coreBuiltin The_MultiplicativeDict_float_mul,
          coreBuiltin The_MultiplicativeDict_float_fromInt,
-         coreBuiltin The_MultiplicativeDict_float_one])]
+         coreBuiltin The_MultiplicativeDict_float_one]),
+       (ConTy $ builtinTyCon TheTC_int64,
+        [coreBuiltin The_MultiplicativeDict_int64_mul,
+         coreBuiltin The_MultiplicativeDict_int64_fromInt,
+         coreBuiltin The_MultiplicativeDict_int64_one])]
 
 remainderClass _ tc_map = do
   let instances =

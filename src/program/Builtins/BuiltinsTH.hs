@@ -507,6 +507,7 @@ builtinVariableNames =
   , "addI64"
   , "subI64"
   , "negI64"
+  , "mulI64"
 
     -- Serialization
   , "putArrWithSerializer"
@@ -584,6 +585,10 @@ builtinVariableNames =
   , "MultiplicativeDict_float_mul"
   , "MultiplicativeDict_float_fromInt"
   , "MultiplicativeDict_float_one"
+  , "MultiplicativeDict_int64"
+  , "MultiplicativeDict_int64_mul"
+  , "MultiplicativeDict_int64_fromInt"
+  , "MultiplicativeDict_int64_one"
   , "RemainderDict_int_floordiv"
   , "RemainderDict_int_mod"
   , "RemainderDict_uint_floordiv"

@@ -5175,22 +5175,22 @@ listCollector @(k v r : box)
      -> (v, Store).
      case i of [sa_t2] boxed tyob ([sa_int, sa_k] tuple2 (stored idx) i2).
 
-     -- Bounds check; skip if out of bounds
+     -- Bounds check
      if and (idx >=# 0) (idx <# size_int)
      then let i2_box = bareToBox @(AsBare k) rep_k i2 in
           c_read i2_box (subscript_out @N @acc sa_acc ret idx) s
-     else s)
+     else except @(v, Store))
 
   -- Store
   (\ (i : Boxed t2) (value : v) (ret : OutPtr (arr N acc)) (s : Store)
      -> Store.
      case i of [sa_t2] boxed tyob ([sa_int, sa_k] tuple2 (stored idx) i2).
 
-     -- Bounds check; skip if out of bounds
+     -- Bounds check
      if and (idx >=# 0) (idx <# size_int)
      then let i2_box = bareToBox @(AsBare k) rep_k i2 in
           c_write i2_box value (subscript_out @N @acc sa_acc ret idx) s
-     else s)
+     else except @Store)
 
   c_update
 
@@ -8773,6 +8773,26 @@ MultiplicativeDict_float_fromInt (additive_dict : AdditiveDict (Boxed (Stored fl
   boxFloatValue (fromintF (unboxIntValue x));
 
 
+MultiplicativeDict_int64 : MultiplicativeDict (Boxed (Stored int64));
+
+MultiplicativeDict_int64_one (additive_dict : AdditiveDict (Boxed (Stored int64)))
+  -> Boxed (Stored int64) attribute(inline) =
+  boxInt64Value (intToInt64 1);
+
+
+MultiplicativeDict_int64_mul (additive_dict : AdditiveDict (Boxed (Stored int64)))
+  (x y : Boxed (Stored int64))
+  -> Boxed (Stored int64) attribute(inline) =
+  boxInt64Value (mulI64 (unboxInt64Value x) (unboxInt64Value y));
+
+
+-- Converting int to int is the identity transformation
+MultiplicativeDict_int64_fromInt (additive_dict : AdditiveDict (Boxed (Stored int64)))
+  (x : Boxed (Stored int))
+  -> Boxed (Stored int64) attribute(inline) =
+  boxInt64Value (intToInt64 (unboxIntValue x));
+
+
 RemainderDict_int_floordiv (mul_dict : MultiplicativeDict (Boxed (Stored int)))
   (x y : Boxed (Stored int))
   -> Boxed (Stored int) attribute(inline) =
@@ -9565,6 +9585,8 @@ addI64 : int64 -> int64 -> int64;
 subI64 : int64 -> int64 -> int64;
 negI64 : int64 -> int64;
 zeroI64 : int64 = intToInt64 0;
+
+mulI64 : int64 -> int64 -> int64;
 
 uintToInt : uint -> int attribute(builtin);
 intToUint : int -> uint attribute(builtin);
