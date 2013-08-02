@@ -1882,25 +1882,25 @@ namespace Triolet {
 /******************************************************************************/
 
   template<>
-  TriBoxPtr createValTypeInfo<Int>(void)
+  inline TriBoxPtr createValTypeInfo<Int>(void)
   {
     return triolet_typeObject_Stored_int();
   }
 
   template<>
-  TriBoxPtr createValTypeInfo<Float>(void)
+  inline TriBoxPtr createValTypeInfo<Float>(void)
   {
     return triolet_typeObject_Stored_float();
   }
 
   template<>
-  TriBoxPtr createValTypeInfo<Bool>(void)
+  inline TriBoxPtr createValTypeInfo<Bool>(void)
   {
     return triolet_typeObject_Stored_bool();
   }
 
   template<>
-  TriBoxPtr createValTypeInfo<NoneType>(void)
+  inline TriBoxPtr createValTypeInfo<NoneType>(void)
   {
     return triolet_typeObject_Stored_NoneType();
   }
