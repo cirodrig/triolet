@@ -396,7 +396,7 @@ findInterfaceFiles include_core = forM interface_files $ \fname -> do
     -- the compiler was built
     interface_files =
       ["memory_py.ti", "prim.ti", "structures.ti", "list.ti",
-       "inplace.ti", "effects.ti", "buffer.ti", "lazy.ti"] ++ 
+       "inplace.ti", "buffer.ti", "lazy.ti"] ++ 
       if include_core then ["coremodule.ti"] else []
    
 -- | Compile and generate an intermediate C file.
