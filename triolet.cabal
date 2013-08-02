@@ -19,7 +19,6 @@ Data-Files:
   include/triolet/Layout.h
   include/triolet/Base.h
   interfaces/memory_py.ti
-  interfaces/effects.ti
   interfaces/prim.ti
   interfaces/inplace.ti
   interfaces/structures.ti
