@@ -17,8 +17,8 @@ data Tok =
     IntTok !Integer
   | UIntTok !Integer
   | FloatTok {-# UNPACK #-} !Double
-  | IdentTok String
-  | OperTok String
+  | IdentTok !String
+  | OperTok !String
   | LBraceTok
   | RBraceTok
   | LBracketTok
@@ -116,6 +116,11 @@ data LexResult =
     TokenResult !Token
   | PushComment | PopComment
 
+-- | Take part of a string and force evaluation, so that the string is
+--   not retained.
+takeForce n s = let s' = take n s
+                in length s' `seq` s'
+
 -- Default routines for source position handling.
 --
 -- The parameter creates a bare token from a string.  This function then
@@ -140,8 +145,8 @@ mkUInt s n = case reads (take (n-1) s)
 mkFloat s n = case reads (take n s)
               of (n, []) : _ -> FloatTok n
                  _ -> throw $ LexerError noSourcePos "Cannot parse float"
-mkIdent s n = IdentTok (take n s)
-mkOper s n  = OperTok (take n s)
+mkIdent s n = IdentTok (takeForce n s)
+mkOper s n  = OperTok (takeForce n s)
 
 beginComment, endComment :: Lex
 beginComment = Lex $ \_ _ _ -> PushComment
