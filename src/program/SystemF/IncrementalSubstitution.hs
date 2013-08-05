@@ -297,16 +297,21 @@ freshenFullyExp' expression = do
       let p' = fromPatSM p
       in ExpM <$> (LetE inf p' <$> recurse val <*> assumePatM p' (recurse body))
     LetfunE inf defs body -> do
+      let def_types = map def_type $ defGroupMembers defs
+            where
+              def_type def =
+                let (!v)         = definiendum def
+                    FunSM f      = definiens def
+                    (!ty_params) = [b | TyPat b <- funTyParams f]
+                    (!param_tys) = map (patMType . fromPatSM) $ funParams f
+                    (!ret_ty)    = funReturn f
+                in (v, forallType ty_params $ funType param_tys ret_ty)
+      let assume_defs :: forall a. TypeEvalM b a -> TypeEvalM b a
+          assume_defs m = foldr assume_def m def_types
+            where
+              assume_def (v, t) m = assume v t m
       let freshen_defs = mapM (mapMDefiniens freshenFullyFun') defs
           freshen_body = recurse body
-          assume_defs :: forall a. TypeEvalM b a -> TypeEvalM b a
-          assume_defs m = foldr assume_def m (defGroupMembers defs)
-            where
-              assume_def def m =
-                let FunSM f = definiens def
-                    ty = forallType [b | TyPat b <- funTyParams f] $
-                         funType (map (patMType . fromPatSM) $ funParams f) (funReturn f)
-                in assume (definiendum def) ty m
 
       defs' <- case defs
                of NonRec _ -> freshen_defs
@@ -336,12 +341,12 @@ freshenFullyFun' (FunSM f) =
                         , funBody = body}
 
 freshenFullyAlt' :: forall b. BoxingMode b => AltSM -> TypeEvalM b AltM
-freshenFullyAlt' (AltSM alt) =
-  assumeBinders (deConExTypes $ altCon alt) $
-  assumeMaybePatM (fmap fromPatSM $ altTyObject alt) $ do
-  assumePatMs (map fromPatSM $ altParams alt) $ do
-    body <- freshenFullyExp' $ altBody alt
-    return $ AltM $ Alt { altCon = altCon alt
-                        , altTyObject = fmap fromPatSM $ altTyObject alt
-                        , altParams = map fromPatSM $ altParams alt
-                        , altBody = body}
+freshenFullyAlt' (AltSM (Alt decon ty_ob params body)) =
+  assumeBinders (deConExTypes decon) $
+  assumeMaybePatM (fmap fromPatSM ty_ob) $ do
+  assumePatMs (map fromPatSM params) $ do
+    body' <- freshenFullyExp' body
+    return $ AltM $ Alt { altCon = decon
+                        , altTyObject = fmap fromPatSM ty_ob
+                        , altParams = map fromPatSM params
+                        , altBody = body'}
