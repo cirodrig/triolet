@@ -128,6 +128,8 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("boxed", "Boxed", TypeLevel, True)
         , ("opaqueRef", "OpaqueRef", TypeLevel, True)
 
+        , ("listSection", "ListSection", TypeLevel, True) -- Has special serialization rules
+
           -- Type variables
         , ("cursorTypeParameter", "a", TypeLevel, False)
         , ("storedTypeParameter", "a", TypeLevel, False)
@@ -187,6 +189,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("putRef", "putRef", ObjectLevel, True)
         , ("putPointerlessObject", "putPointerlessObject", ObjectLevel, True)
         , ("putBoxedObject", "putBoxedObject", ObjectLevel, True)
+        , ("putListSection_optimized", "putListSection_optimized", ObjectLevel, True)
         , ("getInt", "getInt", ObjectLevel, True)
         , ("getUint", "getUint", ObjectLevel, True)
         , ("getUint8AsUint", "getUint8AsUint", ObjectLevel, True)

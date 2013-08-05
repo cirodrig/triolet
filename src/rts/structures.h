@@ -74,6 +74,7 @@ extern data pointer coremodule.barray1'T;
 extern data pointer coremodule.barray2'T;
 extern data pointer coremodule.barray3'T;
 extern function coremodule.boxed'T (owned) -> owned;
+extern function Builtin.ListSection'R (cursor, owned, unit) -> unit;
 
 extern procedure core.internal.structures.triolet_typeObject_Stored_int
   "triolet_typeObject_Stored_int" () -> owned;

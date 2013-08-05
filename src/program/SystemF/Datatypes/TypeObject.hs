@@ -645,7 +645,13 @@ sumRepr type_info ty tag alts = do
       size_param_types <- lift $ instantiateSizeParams dtype dtype_args
       size_params <- mapM get_dyn_info size_param_types
 
-      let serializer_var = dataTypeUnboxedSerializerVar dtype
+      let serializer_var =
+            -- Override the default serialization for some data types
+            -- TODO: Implement a more flexible override mechanism
+            case ()
+            of () | dataTypeCon dtype == listSectionV ->
+                      putListSection_optimizedV
+               _ -> dataTypeUnboxedSerializerVar dtype
           serializer_call = varAppE' serializer_var dtype_args size_params
       let deserializer_var = dataTypeUnboxedDeserializerVar dtype
           deserializer_call = varAppE' deserializer_var dtype_args size_params
