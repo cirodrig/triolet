@@ -46,6 +46,7 @@ module SystemF.MemoryIR
        )
 where
 
+import Control.DeepSeq
 import Control.Monad
 import Data.Maybe
   
@@ -120,6 +121,11 @@ type PatM = Pat Mem
 type ExpM = Exp Mem
 type AltM = Alt Mem
 type FunM = Fun Mem
+
+instance NFData (Pat Mem) where rnf (PatM b _) = rnf b -- Ignore uses
+instance NFData (Exp Mem) where rnf (ExpM e) = rnf e
+instance NFData (Alt Mem) where rnf (AltM a) = rnf a
+instance NFData (Fun Mem) where rnf (FunM f) = rnf f
 
 varE :: ExpInfo -> Var -> ExpM
 varE inf v = ExpM (VarE inf v)

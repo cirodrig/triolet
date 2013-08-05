@@ -23,6 +23,7 @@ where
 
 import Prelude hiding(mapM)
 import Control.Applicative
+import Control.DeepSeq
 import Control.Monad hiding(mapM)
 import Data.Traversable(mapM)
 
@@ -56,6 +57,11 @@ newtype instance Fun SM = FunSM {fromFunSM :: BaseFun SM}
 --   The substitution should be applied to the expression before 
 --   inspecting the expression.
 data instance Exp SM = ExpSM !Subst ExpM
+
+instance NFData (Pat SM) where rnf (PatSM p) = rnf p
+instance NFData (Alt SM) where rnf (AltSM a) = rnf a
+instance NFData (Fun SM) where rnf (FunSM f) = rnf f
+instance NFData (Exp SM) where rnf (ExpSM s e) = rnf s `seq` rnf e
 
 -- | 'PatSM' behaves like 'PatM'
 substitutePatSM :: EvalMonad m =>

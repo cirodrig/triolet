@@ -12,7 +12,7 @@ body is an expression ('Exp').  Values are bound by patterns ('TyPat', 'Pat')
 and case statements branch to alternatives ('Alt').
 -}
 
-{-# LANGUAGE DeriveDataTypeable, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE DeriveDataTypeable, FlexibleInstances, UndecidableInstances, FlexibleContexts #-}
 {-# OPTIONS_GHC -no-auto #-}
 module SystemF.Syntax
     (-- * Demand information
@@ -86,6 +86,7 @@ module SystemF.Syntax
     )
 where
 
+import Control.DeepSeq
 import Control.Monad
 import Data.Typeable
 import qualified Data.Foldable
@@ -250,6 +251,10 @@ data Lit =
   | FloatL {-# UNPACK #-} !Double !Type
   deriving(Typeable)
 
+instance NFData Lit where
+  rnf (IntL n t)   = rnf t
+  rnf (FloatL d t) = rnf t
+
 literalType :: Lit -> Type
 literalType (IntL _ t) = t
 literalType (FloatL _ t) = t
@@ -261,6 +266,9 @@ data ExpInfo =
     !Representation      -- Representation dictionary for this expression.
                          -- This is only used during elaboration; afterward,
                          -- it is always 'Nothing'.
+
+instance NFData ExpInfo where
+  rnf (ExpInfo _ _) = () -- ignore fields
 
 data Representation =
     NoRepresentation   -- ^ No representation information is available
@@ -332,6 +340,8 @@ data instance Pat SF = VarP Var Type
 
 -- | Type-level patterns
 newtype TyPat = TyPat Binder
+
+instance NFData TyPat where rnf (TyPat b) = rnf b
 
 tyPatVar :: TyPat -> Var
 tyPatVar (TyPat (v ::: _)) = v
@@ -431,6 +441,21 @@ data BaseExp s =
     , expElements :: [Exp s]
     }
 
+instance (NFData (Exp s), NFData (Alt s), NFData (Pat s), NFData (Fun s)) => NFData (BaseExp s) where
+  rnf e = 
+    case e
+    of VarE i v        -> rnf i `seq` rnf v
+       LitE i l        -> rnf i `seq` rnf l
+       ConE i c p t a  -> rnf i `seq` rnf c `seq` rnf p `seq` rnf t `seq` rnf a
+       AppE i o t a    -> rnf i `seq` rnf o `seq` rnf t `seq` rnf a
+       LamE i f        -> rnf i `seq` rnf f
+       LetE i b v e    -> rnf i `seq` rnf b `seq` rnf v `seq` rnf e
+       LetfunE i g b   -> rnf i `seq` rnf (defGroupMembers g) `seq` rnf b
+       CaseE i e p a   -> rnf i `seq` rnf e `seq` rnf p `seq` rnf a
+       ExceptE i t     -> rnf i `seq` rnf t
+       CoerceE i s t e -> rnf i `seq` rnf s `seq` rnf t `seq` rnf e
+       ArrayE i t e    -> rnf i `seq` rnf t `seq` rnf e
+
 data BaseAlt s =
   Alt { altCon :: !DeConInst
         -- | A pattern that binds a type object.  This is always 'Nothing' in  
@@ -440,6 +465,9 @@ data BaseAlt s =
       , altParams :: [Pat s]
       , altBody :: Exp s
       }
+
+instance (NFData (Exp s), NFData (Alt s), NFData (Pat s), NFData (Fun s)) => NFData (BaseAlt s) where
+  rnf (Alt con tyob params body) = rnf con `seq` rnf tyob `seq` rnf params `seq` rnf body
 
 getAltExTypes alt = deConExTypes $ altCon alt
 
@@ -452,6 +480,10 @@ type ConInstSummary = Maybe Var
 data ConInst =
     VarCon !Var [Type] [Type]
   | TupleCon [Type]
+
+instance NFData ConInst where
+  rnf (VarCon v ss ts) = rnf v `seq` rnf ss `seq` rnf ts
+  rnf (TupleCon ts) = rnf ts
 
 -- | Get a summary of the constructor.
 summarizeConstructor :: ConInst -> ConInstSummary
@@ -494,6 +526,10 @@ data DeConInst =
     VarDeCon !Var [Type] [Binder]
   | TupleDeCon [Type]
 
+instance NFData DeConInst where
+  rnf (VarDeCon v ts bs) = rnf v `seq` rnf ts `seq` rnf bs
+  rnf (TupleDeCon ts) = rnf ts
+
 -- | Get a summary of the deconstructor.
 summarizeDeconstructor :: DeConInst -> ConInstSummary
 summarizeDeconstructor (VarDeCon v _ _) = Just v
@@ -529,6 +565,10 @@ data BaseFun s =
       , funBody       :: Exp s
       }
 
+instance (NFData (Exp s), NFData (Alt s), NFData (Pat s), NFData (Fun s)) => NFData (BaseFun s) where
+  rnf (Fun inf ty_params params ret body) =
+    rnf inf `seq` rnf ty_params `seq` rnf params `seq` rnf ret `seq` rnf body
+
 -- | A constant value.
 --
 --   A global constant value may be defined; it will be created before 
@@ -550,6 +590,9 @@ data Def t s =
   , defAnnotation :: {-#UNPACK#-}!DefAnn
   , definiens :: t s
   }
+
+instance NFData (t s) => NFData (Def t s) where
+  rnf (Def v _ ens) = rnf v `seq` rnf ens
 
 -- | A function definition
 type FDef s = Def Fun s

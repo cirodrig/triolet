@@ -58,6 +58,7 @@ where
 
 import Prelude hiding(mapM, sequence)
 import Control.Applicative
+import Control.DeepSeq
 import Control.Monad hiding(mapM, sequence)
 import Control.Monad.Reader hiding(mapM, sequence)
 import qualified Data.IntSet as IntSet
@@ -94,10 +95,20 @@ import qualified Type.Substitute as Substitute
 --
 --   Variables may be renamed, or replaced by a new expression.
 --   Renaming preserves information associated with a 'VarE' term.
+--
+--   Substitutions containing value assignments are prone to space
+--   leaks.  To minimize leaks, functions that insert a 'ValAss' into 
+--   a substitution always force evaluation with 'rnf'.
 data ValAss = RenamedVar !Var
             | SubstitutedVar !ExpM
 
+instance NFData ValAss where
+  rnf (RenamedVar v)     = rnf v
+  rnf (SubstitutedVar e) = rnf e
+
 newtype ValSubst = S {unS :: IntMap.IntMap ValAss}
+
+instance NFData ValSubst where rnf (S m) = rnf m
 
 emptyV :: ValSubst
 emptyV = S IntMap.empty
@@ -106,10 +117,10 @@ nullV :: ValSubst -> Bool
 nullV (S s) = IntMap.null s
 
 singletonV :: Var -> ValAss -> ValSubst
-singletonV v t = S (IntMap.singleton (fromIdent $ varID v) t)
+singletonV v t = rnf t `seq` S (IntMap.singleton (fromIdent $ varID v) t)
 
 fromListV :: [(Var, ValAss)] -> ValSubst
-fromListV xs = S $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
+fromListV xs = S $ IntMap.fromList [rnf t `seq` (fromIdent $ varID v, t) | (v, t) <- xs]
 
 -- | Compute the union of two substitutions on disjoint sets of variables.
 --
@@ -131,12 +142,15 @@ s2 `composeV` s1 = do
       return $! case lookupV v (valueSubst s2)
                 of Nothing   -> ass
                    Just ass' -> ass'
-                   
-    substitute_in_assignment (SubstitutedVar e) =
-      liftM SubstitutedVar $ substitute s2 e
+
+    substitute_in_assignment (SubstitutedVar e) = do
+      e' <- substitute s2 e
+      -- Don't need to call 'rnf' here, since the old
+      -- and new substitutions were rnf'd
+      return $ SubstitutedVar e'
 
 extendV :: Var -> ValAss -> ValSubst -> ValSubst
-extendV v t (S s) = S (IntMap.insert (fromIdent $ varID v) t s)
+extendV v t (S s) = rnf t `seq` S (IntMap.insert (fromIdent $ varID v) t s)
 
 excludeV :: Var -> ValSubst -> ValSubst
 excludeV v (S s) = S (IntMap.delete (fromIdent $ varID v) s)
@@ -187,7 +201,7 @@ s2 `composePV` s1 = do
     substitute_in_assignment Nothing = return Nothing
 
 extendPV :: Var -> Maybe Var -> ValPartialSubst -> ValPartialSubst
-extendPV v t (PS s) = PS (IntMap.insert (fromIdent $ varID v) t s)
+extendPV v t (PS s) = rnf t `seq` PS (IntMap.insert (fromIdent $ varID v) t s)
 
 excludePV :: Var -> ValPartialSubst -> ValPartialSubst
 excludePV v (PS s) = PS (IntMap.delete (fromIdent $ varID v) s)
@@ -199,6 +213,8 @@ lookupPV v (PS m) = IntMap.lookup (fromIdent $ varID v) m
 
 -- | A combined value and type substitution
 data Subst = Subst {typeSubst :: !TypeSubst, valueSubst :: !ValSubst}
+
+instance NFData Subst where rnf (Subst t v) = rnf t `seq` rnf v
 
 emptySubst = Subst Substitute.empty emptyV
 
@@ -433,12 +449,12 @@ substituteValueBinder s (x ::: t) k = do
       -- Not in scope: remove from the substitution.
       -- This seems unnecessary, but can happen --
       -- "Secrets of the GHC Inliner" section 3.2.
-      let s' = modifyValueSubst (excludeV x) s
+      let !s' = modifyValueSubst (excludeV x) s
       assume x t' $ k s' (x ::: t')
     Just _  -> do
       -- In scope: rename and add to the substitution
       x' <- newClonedVar x
-      let s' = modifyValueSubst (extendV x (RenamedVar x')) s
+      let !s' = modifyValueSubst (extendV x (RenamedVar x')) s
       assume x' t' $ k s' (x' ::: t')
 
 substituteMaybePatM s Nothing  k = k s Nothing
@@ -504,11 +520,11 @@ substituteDefGroup subst_fun s g k =
        type_assignment <- lookupType v
        case type_assignment of
          Nothing ->
-           let s' = modifyValueSubst (excludeV v) s
+           let !s' = modifyValueSubst (excludeV v) s
            in return (s', v)
          Just _ -> do
            v' <- newClonedVar v
-           let s' = modifyValueSubst (extendV v (RenamedVar v')) s
+           let !s' = modifyValueSubst (extendV v (RenamedVar v')) s
            return (s', v')
 
 substituteDeConInst :: (EvalMonad m) =>
@@ -583,7 +599,7 @@ instance Substitutable Specificity where
     case spc
     of Decond decon spcs ->
          substituteDeConInst (partialTypeSubst s) decon $ \ts' decon' -> do
-           let s' = setTypePartialSubst ts' s
+           let !s' = setTypePartialSubst ts' s
            spcs' <- mapM (substitute s') spcs
            return $ Decond decon' spcs'
        
@@ -595,10 +611,11 @@ instance Substitutable Specificity where
          -- Rename 'v' if it's in scope
          type_assignment <- lookupType v
          (s', v') <- case type_assignment of
-           Nothing -> return (modifyValuePartialSubst (excludePV v) s, v)
+           Nothing -> let !s' = modifyValuePartialSubst (excludePV v) s
+                      in return (s', v)
            Just _  -> do
              v' <- newClonedVar v
-             let s' = modifyValuePartialSubst (extendPV v (Just v')) s
+             let !s' = modifyValuePartialSubst (extendPV v (Just v')) s
              return (s', v')
 
          -- Substitute the rest

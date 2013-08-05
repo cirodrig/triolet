@@ -4,6 +4,7 @@
 module Type.Substitute where
 
 import Prelude hiding(lookup, null, mapM)
+import Control.DeepSeq
 import Control.Monad hiding(mapM)
 import qualified Data.IntSet as IntSet
 import Data.List(tails)
@@ -32,6 +33,8 @@ class SubstitutionMap a where
 
 -- | A substitution of types for type variables
 data TypeSubst = S {unS :: IntMap.IntMap Type}
+
+instance NFData TypeSubst where rnf (S m) = rnf m
 
 empty :: TypeSubst
 empty = S IntMap.empty
@@ -102,12 +105,12 @@ substituteBinder rn (x ::: t) k = do
       -- Not in scope: remove from the substitution.
       -- This seems unnecessary, but can happen --
       -- "Secrets of the GHC Inliner" section 3.2.
-      let rn' = exclude x rn
+      let !rn' = exclude x rn
       assume x t' $ rn' `seq` k rn' (x ::: t')
     Just _  -> do
       -- In scope: rename and add to the substitution
       x' <- newClonedVar x
-      let rn' = extend x (VarT x') rn
+      let !rn' = extend x (VarT x') rn
       assume x' t' $ rn' `seq` k rn' (x' ::: t')
 
 substituteBinders :: EvalMonad m =>
