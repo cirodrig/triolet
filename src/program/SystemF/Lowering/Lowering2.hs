@@ -31,6 +31,7 @@ import qualified LowLevel.CodeTypes as LL
 import qualified LowLevel.Records as LL
 import qualified LowLevel.Print as LL
 import SystemF.Datatypes.Code hiding(runGen, SizeAlign, arraySize, unpackSizeAlign, addRecordPadding)
+import SystemF.Datatypes.Driver
 import SystemF.Datatypes.DynamicTypeInfo
 import SystemF.Datatypes.InfoCall
 import SystemF.Datatypes.Serialize
@@ -38,7 +39,6 @@ import SystemF.Datatypes.Structure
 import SystemF.Datatypes.Size
 import SystemF.Datatypes.Layout
 import SystemF.Datatypes.Util
---import SystemF.Lowering.Datatypes2
 import SystemF.Lowering.Marshaling
 import SystemF.Lowering.LowerMonad
 import qualified SystemF.DictEnv as DictEnv
@@ -533,7 +533,7 @@ lowerEntity (Lazy kind ll_ty ll_var) (DataEnt d) =
 -- | Lower a global definition group.
 --   The definitions and a list of exported functions are returned.
 lowerGlobalDefGroup :: DefGroup (GDef Mem)
-                    -> (LL.Group LL.GlobalDef -> [(LL.Var, ExportSig)] -> Lower a)
+                    -> ([LL.GlobalDef] -> [(LL.Var, ExportSig)] -> Lower a)
                     -> Lower a
 lowerGlobalDefGroup defgroup k = do
   g <- filterPredefinedDefs defgroup
@@ -548,7 +548,7 @@ lowerGlobalDefGroup' defgroup k =
        
        -- Add to environment and continue
        assume_variable (v, def) $
-         let defgroup' = LL.Rec lowered_defs
+         let defgroup' = lowered_defs
              new_exports = pick_exports [(v, def)]
          in k defgroup' new_exports
 
@@ -557,7 +557,7 @@ lowerGlobalDefGroup' defgroup k =
        vs <- mapM translateGlobalDefiniendum defs
        assume_variables (zip vs defs) $ do
          entities <- zipWithM lowerEntity vs (map definiens defs)
-         let defgroup' = LL.Rec $ concat entities
+         let defgroup' = concat entities
              exports = pick_exports $ zip vs defs
          k defgroup' exports
   where
@@ -575,9 +575,41 @@ lowerGlobalDefGroup' defgroup k =
           ent = definiens def
       in assumeTranslatedVariable name v (entityType ent) k
 
+-- | Translate the variables defined by some global definitions and add
+--   them to the environment.
+withGlobalDefinienda :: [GDef Mem] -> ([VarTranslation] -> Lower a) -> Lower a
+withGlobalDefinienda defs k = do
+  vs <- mapM translateGlobalDefiniendum defs
+  assume_variables (zip vs defs) (k vs)
+    where
+      assume_variables xs k = foldr assume_variable k xs
+
+      assume_variable (v, def) k =
+        let name = definiendum def
+            ent = definiens def
+        in assumeTranslatedVariable name v (entityType ent) k
+
+-- | Lower some global definitions.
+--
+--   Returns the lowered definitions and exported variables.
+lowerGlobalDefs :: [GDef Mem] -> [VarTranslation]
+                -> Lower ([LL.GlobalDef], [(LL.Var, ExportSig)])
+lowerGlobalDefs defs vs = do
+  entities <- zipWithM lowerEntity vs (map definiens defs)
+  let defgroup' = concat entities
+      exports = pick_exports $ zip vs defs
+  return (defgroup', exports)
+  where
+    pick_exports xs = [(translatedVar v, sig)
+                      | (v, d) <- xs, sig <- maybeToList $ export_sig d]
+      where
+        export_sig d
+          | defAnnExported $ defAnnotation d = Just TrioletExportSig
+          | otherwise                        = Nothing
+
 lowerExport :: ModuleName
             -> Export Mem
-            -> Lower (LL.FunDef, (LL.Var, ExportSig))
+            -> Lower (LL.GlobalDef, (LL.Var, ExportSig))
 lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
   -- Lower the given function.  The lowered function will be part of the  
   -- exported function.
@@ -590,7 +622,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
     case lang
     of CCall     -> define_c_fun exported_fun_name fun_def
        CPlusPlus -> define_cxx_fun exported_fun_name fun_def
-  return (fun_def, (LL.definiendum fun_def, export_sig))
+  return (LL.GlobalFunDef fun_def, (LL.definiendum fun_def, export_sig))
   where
     fun_type = functionType fun
 
@@ -621,21 +653,27 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       return (LL.Def v wrapped_fun, CXXExportSig cxx_export_sig)
 
 lowerModuleCode :: ModuleName 
-                -> [DefGroup (GDef Mem)]
+                -> [GDef Mem]
+                -> [VarTranslation]
                 -> [Export Mem]
-                -> Lower ([LL.Group LL.GlobalDef], [(LL.Var, ExportSig)])
-lowerModuleCode module_name defss exports = {-# SCC "lowerModuleCode" #-}
+                -> Lower ([LL.GlobalDef], [(LL.Var, ExportSig)])
+lowerModuleCode module_name defs def_vars exports = {-# SCC "lowerModuleCode" #-} do
+  (ll_defs, exported_defs) <- lowerGlobalDefs defs def_vars
+  ll_exports <- mapM (lowerExport module_name) exports
+  let (functions, signatures) = unzip ll_exports
+  return (ll_defs ++ functions, exported_defs ++ signatures)
+{- Old code for list of definition groups
   lower_definitions defss
   where
     lower_definitions (defs:defss) =
       lowerGlobalDefGroup defs $ \defs' exported_defs -> do
         (defss', export_sigs) <- lower_definitions defss
-        return (defs' : defss', exported_defs ++ export_sigs)
+        return (defs' ++ defss', exported_defs ++ export_sigs)
 
     lower_definitions [] = do
       ll_exports <- mapM (lowerExport module_name) exports
       let (functions, signatures) = unzip ll_exports
-      return ([LL.Rec (map LL.GlobalFunDef functions)], signatures)
+      return (map LL.GlobalFunDef functions, signatures)-}
 
 filterPredefinedDefs (NonRec def) = do
   is_defined <- checkPredefined $ definiendum def
@@ -646,6 +684,9 @@ filterPredefinedDefs (NonRec def) = do
 filterPredefinedDefs (Rec defs) = do
   is_defined <- mapM (checkPredefined . definiendum) defs
   return $ Rec [d | (False, d) <- zip is_defined defs]
+
+filterPredefinedDefsList defs =
+  filterM (liftM not . checkPredefined . definiendum) defs
 
 -- | Filter out 'v' if its label has a predefined low-level value.
 --   This shouldn't be necessary; we shouldn't have duplicate
@@ -697,6 +738,21 @@ assumeImports imps m = foldr assume_import m imps
     assume_import (LoweredImport v ty trans _) m =
       assumeTranslatedVariable v trans ty m
 
+-- | Get lowered variable names of overridden functions
+serializerOverrideFunctions :: Lower [(Var, (LL.Var, LL.Var))]
+serializerOverrideFunctions = mapM lower_serializers overriddenSerializerTypes
+  where
+    lower_serializers (tycon, (s, d)) = do
+      low_s <- lower s
+      low_d <- lower d
+      return (tycon, (low_s, low_d))
+
+    lower v = do
+      translation <- lookupVar v
+      case translation of
+        Variable v' -> return v'
+        Lazy {}     -> internalError "serializerOverrideFunctions"
+
 -- | Auto-generate serializer code and add it to the environment
 lowerSerializers :: Lower a -> Lower ([LL.GlobalDef], [(LL.Var, ExportSig)], a)
 lowerSerializers m = do
@@ -704,7 +760,8 @@ lowerSerializers m = do
     var_supply <- getVarSupply
     ll_var_supply <- getLLVarSupply
     tenv <- getTypeEnvironment
-    liftIO $ createAllSerializers ll_var_supply var_supply tenv
+    overrides <- serializerOverrideFunctions
+    liftIO $ createAllSerializers ll_var_supply var_supply tenv overrides
 
   x <- assume_serializers serializers m
   return (map snd serializers, map mk_export serializers, x)
@@ -745,7 +802,7 @@ importSerializers m = do
 -- When compiling the core module, lower serializer functions
 withSerializers True m = do
   (serializers, serializer_exports, (defs, exports)) <- lowerSerializers m
-  return ([], LL.Rec serializers : defs, serializer_exports ++ exports)
+  return ([], serializers ++ defs, serializer_exports ++ exports)
 
 -- Otherwise, import serializer functions
 withSerializers False m = importSerializers m
@@ -765,19 +822,29 @@ lowerModule is_coremodule
       global_map <- readInitGlobalVarIO the_loweringMap
       env <- initializeLowerEnv ll_var_supply global_map
 
-      let all_defs = if False
-                     then Rec imports : globals -- DEBUG: also lower imports
-                     else globals
+      let all_defgroups =
+            if False
+            then Rec imports : globals -- DEBUG: also lower imports
+            else globals
 
-      -- Create serializers and add them to the environment
+      -- Create serializers and add them to the environment.
+      -- Serializers may reference global variables and vice versa, so all
+      -- global definitions are merged into one list.
       let do_lowering = do
+            -- Merge all global definitions into one list.
+            -- Remove globals that are predefined.
+            -- (The predefined definition overrides the given one.)
+            all_defs <- filterPredefinedDefsList $
+                        concatMap defGroupMembers all_defgroups
+
             ll_imports <- lowerImports imports
             (ser_imports, ll_functions, ll_export_sigs) <-
-              assumeImports ll_imports $ 
+              assumeImports ll_imports $
+              withGlobalDefinienda all_defs $ \def_vars ->
               withSerializers is_coremodule $
-              lowerModuleCode mod_name all_defs exports
+              lowerModuleCode mod_name all_defs def_vars exports
             return (map lowLevelImport ll_imports ++ ser_imports,
-                    ll_functions,
+                    [LL.Rec ll_functions],
                     ll_export_sigs)
 
       runTypeEvalM (runLowering env do_lowering) var_supply global_types

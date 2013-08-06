@@ -63,8 +63,9 @@ record IsRef_mem {
 record Repr_mem {
   const owned header;
   const SA_mem sizealign;      // Size and alignment in bytes
-  const bool pointerless;      // True if object contains no pointers
   const IsRef_mem is_ref;      // Whether this 'Repr' describes a reference
+  const owned serializer;
+  const owned deserializer;
 };
 
 // Type object information stored in memory

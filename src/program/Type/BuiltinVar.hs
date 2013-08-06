@@ -210,6 +210,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("getRef", "getRef", ObjectLevel, True)
         , ("getPointerlessObject", "getPointerlessObject", ObjectLevel, True)
         , ("getBoxedObject", "getBoxedObject", ObjectLevel, True)
+        , ("getListSection_optimized", "getListSection_optimized", ObjectLevel, True)
 
           -- Global variables used for generating address arithmetic and
           -- size computation

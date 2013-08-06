@@ -1,6 +1,9 @@
 
 module SystemF.Datatypes.Driver
-       (computeDataTypeInfo, addLayoutVariablesToTypeEnvironment)
+       (overriddenSerializerTypes,
+        computeDataTypeInfo,
+        addLayoutVariablesToTypeEnvironment
+       )
 where
 
 import Control.DeepSeq
@@ -26,6 +29,16 @@ import SystemF.MemoryIR
 
 import SystemF.Datatypes.Structure
 import SystemF.Datatypes.TypeObject
+
+-- | Type constructors that do not use auto-generated serializer and
+--   deserializer functions.  The serializer and deserializer functions
+--   are explicitly defined.
+--   List of (tycon, (serializer, deserializer)) tuples.
+--
+--   This information is used when generating serializer/deserializer code.
+overriddenSerializerTypes :: [(Var, (Var, Var))]
+overriddenSerializerTypes =
+  [(listSectionV, (putListSection_optimizedV, getListSection_optimizedV))]
 
 -- | Primitive value types.  These get special auto-generated definitions.
 primitiveValTypes :: [Var]

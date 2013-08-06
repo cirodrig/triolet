@@ -27,6 +27,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.IntMap as IntMap
 import Data.List
+import qualified Data.Map as Map
 import Data.Maybe
 import Data.Monoid
 import Debug.Trace
@@ -587,8 +588,9 @@ infoToSizeParameters data_type xs =
 
 -- | Create all serializer functions for a given data type.
 --   Return a list of serializer functions and their low-level definitions.
-createSerializers :: DataType -> SizeComputing [(Var, L.GlobalDef)]
-createSerializers data_type = 
+createSerializers :: [(Var, (L.Var, L.Var))] -> DataType
+                  -> SizeComputing [(Var, L.GlobalDef)]
+createSerializers serializer_overrides data_type = 
   case dataTypeKind data_type
   of ValK -> createValTypeSerializers data_type
      BoxK -> createBoxedTypeSerializers data_type
@@ -596,7 +598,7 @@ createSerializers data_type =
        | dataTypeCon data_type == storedV -> 
            return []            -- No serializers for 'Stored'
        | otherwise ->
-           createBareTypeSerializers data_type
+           createBareTypeSerializers serializer_overrides data_type
 
 -- The below functions 'createBoxedTypeSerializers', etc. are very similar
 -- to one another, and they probably could be refactored to share a common
@@ -667,7 +669,7 @@ createBoxedTypeSerializers data_type =
      return [ (serializer, L.GlobalFunDef $ L.Def l_serializer serializer_fun)
             , (deserializer, L.GlobalFunDef $ L.Def l_deserializer deserializer_fun)]
 
-createBareTypeSerializers data_type = do
+createBareTypeSerializers serializer_overrides data_type = do
   let params = dataTypeParams data_type
       param_types = map (VarT . binderVar) params
       ty = dataTypeCon data_type `varApp` param_types
@@ -687,39 +689,53 @@ createBareTypeSerializers data_type = do
   serializer_fun <-
     parametricDefinition l_serializer (dataTypeParams data_type)
     info_types [PrimType CursorType, PrimType OwnedType, storeType]
-    [storeType] $ \ infos [obj, buffer, _] -> do
-      -- Compute layout information
-      sps <- infoToSizeParameters data_type (map L.VarV infos)
-      layout_dyn_info <- setupDynTypeInfo data_type param_types sps
-      s <- computeStructure ty
-      l <- computeLayout layout_dyn_info BareK s
+    [storeType] $ \ infos [obj, buffer, dummy] ->
+      case lookup (dataTypeCon data_type) serializer_overrides
+      of Just (s, _) ->
+           -- Call the override serializer function
+           emitAtom [storeType] $
+           L.closureCallA (L.VarV s)
+           (map L.VarV $ infos ++ [obj, buffer, dummy])
 
-      -- Set up dynamic serializer info
-      dyn_info <- setupSerializationInfo data_type param_types (map L.VarV infos)
+         Nothing -> do
+           -- Compute layout information
+           sps <- infoToSizeParameters data_type (map L.VarV infos)
+           layout_dyn_info <- setupDynTypeInfo data_type param_types sps
+           s <- computeStructure ty
+           l <- computeLayout layout_dyn_info BareK s
 
-      -- Serialize
-      serdes <- unboxedLayoutSerDes dyn_info BareK ty l
-      serialize serdes (L.VarV obj) (L.VarV buffer)
-      return [storeValue]
+           -- Set up dynamic serializer info
+           dyn_info <- setupSerializationInfo data_type param_types (map L.VarV infos)
+
+           -- Serialize
+           serdes <- unboxedLayoutSerDes dyn_info BareK ty l
+           serialize serdes (L.VarV obj) (L.VarV buffer)
+           return [storeValue]
 
   deserializer_fun <-
     parametricDefinition l_deserializer (dataTypeParams data_type)
     info_types [PrimType CursorType]
-    [readResultType (PrimType OwnedType)] $ \ infos [buffer] -> do
-      -- Compute layout information
-      sps <- infoToSizeParameters data_type (map L.VarV infos)
-      layout_dyn_info <- setupDynTypeInfo data_type param_types sps
-      s <- computeStructure ty
-      l <- computeLayout layout_dyn_info BareK s
+    [readResultType (PrimType OwnedType)] $ \ infos [buffer] ->
+      case lookup (dataTypeCon data_type) serializer_overrides
+      of Just (_, d) ->
+           -- Call the override deserializer function
+           emitAtom [readResultType (PrimType OwnedType)] $
+           L.closureCallA (L.VarV d) (map L.VarV $ infos ++ [buffer])
+         Nothing -> do
+           -- Compute layout information
+           sps <- infoToSizeParameters data_type (map L.VarV infos)
+           layout_dyn_info <- setupDynTypeInfo data_type param_types sps
+           s <- computeStructure ty
+           l <- computeLayout layout_dyn_info BareK s
 
-      -- Set up dynamic serializer info
-      dyn_info <- setupSerializationInfo data_type param_types (map L.VarV infos)
+           -- Set up dynamic serializer info
+           dyn_info <- setupSerializationInfo data_type param_types (map L.VarV infos)
 
-      -- Deserialize
-      serdes <- unboxedLayoutSerDes dyn_info BareK ty l
-      result <- deserialize serdes (L.VarV buffer)
-      x <- packDesResult result
-      return [x]
+           -- Deserialize
+           serdes <- unboxedLayoutSerDes dyn_info BareK ty l
+           result <- deserialize serdes (L.VarV buffer)
+           x <- packDesResult result
+           return [x]
 
   return [ (serializer, L.GlobalFunDef $ L.Def l_serializer serializer_fun)
          , (deserializer, L.GlobalFunDef $ L.Def l_deserializer deserializer_fun)]
@@ -795,13 +811,14 @@ createValTypeSerializers data_type = do
          , (deserializer, L.GlobalFunDef $ L.Def l_deserializer deserializer_fun)]
 
 createAllSerializers :: IdentSupply L.Var -> IdentSupply Var -> TypeEnv
+                     -> [(Var, (L.Var, L.Var))]
                      -> IO [(Var, L.GlobalDef)]
-createAllSerializers ll_ident_supply ident_supply tenv =
+createAllSerializers ll_ident_supply ident_supply tenv serializer_overrides =
   runTypeEvalM (runSC ll_ident_supply worker) ident_supply tenv
   where
     worker = do
       dtypes <- liftTypeEvalM get_algebraic_data_types
-      defs <- mapM createSerializers dtypes
+      defs <- mapM (createSerializers serializer_overrides) dtypes
       return $ concat defs
 
     get_algebraic_data_types :: UnboxedTypeEvalM [DataType]
