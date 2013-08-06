@@ -69,7 +69,7 @@ lowerIntrinsicOp v
       , (coreBuiltin The_subI64,
          binary_int64 (PrimSubZ Signed S64))
       , (coreBuiltin The_mulI64,
-         binary_int (PrimMulZ Signed S64))
+         binary_int64 (PrimMulZ Signed S64))
       , (coreBuiltin The_addU,
          binary_uint (PrimAddZ Unsigned S32))
       , (coreBuiltin The_subU,
