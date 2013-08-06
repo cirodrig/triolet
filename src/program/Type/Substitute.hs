@@ -43,13 +43,13 @@ null :: TypeSubst -> Bool
 null (S s) = IntMap.null s
 
 singleton :: Var -> Type -> TypeSubst
-singleton v t = S (IntMap.singleton (fromIdent $ varID v) t)
+singleton v t = rnf t `seq` S (IntMap.singleton (fromIdent $ varID v) t)
 
 fromList :: [(Var, Type)] -> TypeSubst
-fromList xs = S $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
+fromList xs = S $ IntMap.fromList [rnf t `seq` (fromIdent $ varID v, t) | (v, t) <- xs]
 
 fromBinderList :: [(Binder, Type)] -> TypeSubst
-fromBinderList xs = fromList [(v, t) | (v ::: _, t) <- xs]
+fromBinderList xs = fromList [rnf t `seq` (v, t) | (v ::: _, t) <- xs]
 
 -- | Compute the union of two substitutions on disjoint sets of variables.
 --
@@ -72,7 +72,7 @@ fromMap :: IntMap.IntMap Type -> TypeSubst
 fromMap = S
 
 extend :: Var -> Type -> TypeSubst -> TypeSubst
-extend v t (S s) = S (IntMap.insert (fromIdent $ varID v) t s)
+extend v t (S s) = rnf t `seq` S (IntMap.insert (fromIdent $ varID v) t s)
 
 exclude :: Var -> TypeSubst -> TypeSubst
 exclude v (S s) = S (IntMap.delete (fromIdent $ varID v) s)
