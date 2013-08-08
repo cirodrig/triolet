@@ -5379,9 +5379,11 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
     hintAny. do_seq None
   ; hintSeq. do_seq None
   ; hintLocalPar.
-      reduce_loop_localpar @d @a @b sh rep_a rep_b reduce_unit reduce_slice reduce_pair input
+      reduce_loop_localpar @d @a @b sh rep_a rep_b
+      reduce_unit reduce_slice reduce_pair input
   ; hintPar.
-      reduce_loop_dist @d @a @b sh rep_a rep_b reduce_slice reduce_residual input
+      reduce_loop_dist @d @a @b sh rep_a rep_b
+      reduce_unit reduce_slice reduce_residual reduce_pair input
   };
 
 
@@ -5515,15 +5517,19 @@ tabulate_list_dist @(a b : box)
 
 reduce_loop_dist @(d : box) @(a b : box)
   (sh : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (reduce_unit : NoneType -> b)
   (reduce_slice : SomeIndexable d a -> b)
   (reduce_residual : Stream list_dim b -> b)
+  (reduce_pair : b -> b -> b)
   (input : SomeIndexable d a)
   -> b
   attribute(inline, inline_sequential) =
 
   letfun
     worker (chunk : SomeIndexable d a) -> b =
-      reduce_slice (preserve_SomeIndexable @d @a chunk)
+      reduce_loop_localpar @d @a @b
+      sh rep_a rep_b reduce_unit reduce_slice reduce_pair
+      (preserve_SomeIndexable @d @a chunk)
   in
 
   -- Compute partial reductions in parallel
