@@ -3914,6 +3914,38 @@ Indexable_view2 @(sh : box) (sh_shape : ShapeDict sh)
 
 slice_view2 @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
   -> forall a : box. ReprBox a -> view d a -> d -> BoxOffset d -> SomeIndexable d a
+  attribute(inline) =
+  \ @(a : box)
+    (rep : ReprBox a) (v : view d a) (dom : d) (off : BoxOffset d)
+    -> SomeIndexable d a.
+
+    case v of mk_view tyob input_dom f.
+
+    -- Add offset onto an index before viewing
+    letfun g (i : BoxIndex d) -> a = f (shAppOffset @d sh_shape off i) in
+
+    con_someIndexable @d @a @(view d) (idCoercion @d)
+    (Indexable_view3 @d sh_shape)
+    (con_view @d @a dom g);
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+Indexable_view3 @(sh : box) (sh_shape : ShapeDict sh)
+  -> IndexableDict (view sh) attribute(inline) =
+
+  let f = Functor_view @sh in
+
+  indexableDict @(view sh) (boxedinfo indexableDict @(view sh))
+  f
+  (shape_view_real @sh)
+  (at_view @sh sh_shape f)
+  (slice_view3 @sh sh_shape f)
+  (preserve_view_real @sh);
+
+
+slice_view3 @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
+  -> forall a : box. ReprBox a -> view d a -> d -> BoxOffset d -> SomeIndexable d a
   attribute(inline_never) =
   slice_view @d sh_shape f;
 
