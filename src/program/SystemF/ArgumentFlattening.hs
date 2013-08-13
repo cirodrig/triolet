@@ -1166,6 +1166,8 @@ deadValue t = do
                n <- deadValue (VarT intV)
                let con = VarCon (coreBuiltin The_LinearMap) [] []
                return $ valConE' con [n, n]
+           | con `isCoreBuiltin` The_ParHint ->
+               return $ valConE' (VarCon (coreBuiltin The_hintAny) [] []) []
          (VarT con, [p])
            | con `isCoreBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor
