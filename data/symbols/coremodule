@@ -915,10 +915,10 @@ data IStream (sh a : box) : box
 
   -- As a collection of streams
   splittableStream @(sh2 : box)
-  (coerce @box sh list_dim, ShapeDict sh2, view sh2 (Stream list_dim a));
+  (coerce @box sh list_dim, ShapeDict sh2, RStream sh2 (Stream list_dim a));
 
   -- As a random-access object
-  ixStream @(b : box) (Repr (AsBare b), b -> a, SomeIndexable sh b);
+  ixStream (RStream sh a);
 };
 
 con_seqStream @(a : box) (sq : Seq a) -> IStream list_dim a attribute(inline) =
@@ -926,16 +926,27 @@ con_seqStream @(a : box) (sq : Seq a) -> IStream list_dim a attribute(inline) =
   (idCoercion @list_dim) sq;
 
 con_splittableStream @(a sh : box)
-  (d : ShapeDict sh) (v : view sh (Stream list_dim a))
+  (d : ShapeDict sh) (s : RStream sh (Stream list_dim a))
   -> IStream list_dim a attribute(inline) =
   splittableStream @list_dim @a @sh (boxedinfo splittableStream @list_dim @a)
-  (idCoercion @list_dim) d v;
+  (idCoercion @list_dim) d s;
 
-con_ixStream @(sh a b : box) (rep : ReprBox b) (f : b -> a) (v : SomeIndexable sh b)
+con_ixStream @(sh a : box) (s : RStream sh a)
   -> IStream sh a attribute(inline) =
-  ixStream @sh @a @b (boxedinfo ixStream @sh @a) rep f v;
+  ixStream @sh @a (boxedinfo ixStream @sh @a) s;
 
+-- A random-access stream.
+-- This is very similar to the encoding of the co-Yoneda lemma
+-- used for instance in Haskell.
+data RStream (sh a : box) : box
+{
+  rStream @(b : box) (Repr (AsBare b), b -> a, SomeIndexable sh b);
+};
 
+con_rStream @(sh a b : box)
+  (rep : ReprBox b) (f : b -> a) (v : SomeIndexable sh b)
+  -> (RStream sh a) attribute(inline) =
+  rStream @sh @a @b (boxedinfo rStream @sh @a) rep f v;
 
 -------------------------------------------------------------------------------
 -- Imperative computation support
@@ -3593,6 +3604,20 @@ viewToList @(a : box)
       ret)));
 
 
+viewToRStream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a) (vw : view d a)
+  -> RStream d a attribute(inline) =
+
+  con_rStream @d @a @a rep (\ (x : a) -> a. x)
+  (con_someIndexable @d @a @(view d) (idCoercion @d) (Indexable_view @d sh) vw);
+
+
+viewToSplittable @(d a : box)
+  (sh : ShapeDict d) (vw : view d (Stream list_dim a))
+  -> IStream list_dim a attribute(inline) =
+  con_splittableStream @a @d sh
+  (viewToRStream @d @(Stream list_dim a) sh (repr_Box @(Stream list_dim a)) vw);
+  
+
 someIndexableToView @(d a : box)
   (rep : ReprBox a) (si : SomeIndexable d a)
   -> view d a attribute(inline) =
@@ -3659,8 +3684,8 @@ streamToSequence @(a : box)
     seqStream tyob co sq. sq
   ; splittableStream @d2 tyob co shape_dict vw.
       flattenSplittable @d2 @a shape_dict vw
-  ; ixStream @b tyob rep f si.
-      map_Seq @b @a f (viewToSeq @b (someIndexableToView @list_dim @b rep si))
+  ; ixStream tyob rs.
+      rStreamToSeq @a rs
   };
 
 
@@ -3671,8 +3696,8 @@ streamToSequence2 @(a : box)
     seqStream tyob co sq. sq
   ; splittableStream @d2 tyob co shape_dict vw.
       flattenSplittable2 @d2 @a shape_dict vw
-  ; ixStream @b tyob rep f si.
-      map_Seq @b @a f (viewToSeq @b (someIndexableToView @list_dim @b rep si))
+  ; ixStream tyob rs.
+      rStreamToSeq @a rs
   };
 
 
@@ -3683,16 +3708,17 @@ streamToSequence3 @(a : box)
     seqStream tyob co sq. sq
   ; splittableStream @d2 tyob co shape_dict vw.
       flattenSplittable2 @d2 @a shape_dict vw
-  ; ixStream @b tyob rep f si.
-      map_Seq @b @a f (viewToSeq @b (someIndexableToView @list_dim @b rep si))
+  ; ixStream tyob rs.
+      rStreamToSeq @a rs
   };
 
 
 flattenSplittable @(d a : box)
-  (sh : ShapeDict d) (vw : view d (Stream list_dim a))
+  (sh : ShapeDict d) (rs : RStream d (Stream list_dim a))
   -> Seq a attribute(inline) =
 
-  case vw of mk_view tyob dom g.
+  case rs of rStream @b tyob rep f ix.
+  case someIndexableToView @d @b rep ix of mk_view tyob dom g.
 
   -- Traverse all indices in the view's domain
   let view_indices : Seq (BoxIndex d) =
@@ -3700,14 +3726,15 @@ flattenSplittable @(d a : box)
         (shFlatten @d sh @(BoxIndex d) (indices @d sh dom)) in
 
   bind_Seq @(BoxIndex d) @a view_indices
-  (\ (x : BoxIndex d) -> Seq a. streamToSequence2 @a (g x));
+  (\ (x : BoxIndex d) -> Seq a. streamToSequence2 @a (f (g x)));
 
 
 flattenSplittable2 @(d a : box)
-  (sh : ShapeDict d) (vw : view d (Stream list_dim a))
+  (sh : ShapeDict d) (rs : RStream d (Stream list_dim a))
   -> Seq a attribute(inline) =
 
-  case vw of mk_view tyob dom g.
+  case rs of rStream @b tyob rep f ix.
+  case someIndexableToView @d @b rep ix of mk_view tyob dom g.
 
   -- Traverse all indices in the view's domain
   let view_indices : Seq (BoxIndex d) =
@@ -3715,7 +3742,7 @@ flattenSplittable2 @(d a : box)
         (shFlatten @d sh @(BoxIndex d) (indices @d sh dom)) in
 
   bind_Seq @(BoxIndex d) @a view_indices
-  (\ (x : BoxIndex d) -> Seq a. streamToSequence3 @a (g x));
+  (\ (x : BoxIndex d) -> Seq a. streamToSequence3 @a (f (g x)));
 
 
 peel_Stream @(a r : box)
@@ -3749,13 +3776,16 @@ peel_Stream @(a r : box)
       ; nothing.
           empty_k None
       }
-  ; splittableStream @d tyob co sh vw.
+  ; splittableStream @d tyob co sh rs.
+      let vw = rStreamToView @d @(Stream list_dim a)
+               (repr_Box @(Stream list_dim a)) rs in
       shPeel @d sh @a @r rep_a (boxParHintValue par_hint) value_k empty_k vw
 
-  ; ixStream @b tyob rep_b f si.
-      peel_view_list_dim @a @r rep_a par_hint value_k empty_k
-      (map_view @list_dim @b @a rep_b rep_a f
-       (someIndexableToView @list_dim @b rep_b si))
+  ; ixStream tyob rs.
+      -- Convert to a view
+      let vw = rStreamToView @list_dim @a rep_a rs in
+
+      peel_view_list_dim @a @r rep_a par_hint value_k empty_k vw
   };
 
 
@@ -3836,7 +3866,8 @@ zipWith_view @(d a b c : box)
   (\ (x : BoxIndex d) -> c. f (g1 x) (g2 x));
 
 
-
+-- FIXME: This function is recursive via slice_view
+-- Handle recursion properly
 Indexable_view @(sh : box) (sh_shape : ShapeDict sh)
   -> IndexableDict (view sh) attribute(inline) =
 
@@ -3944,6 +3975,7 @@ Indexable_view3 @(sh : box) (sh_shape : ShapeDict sh)
   (preserve_view_real @sh);
 
 
+-- End recursion here, stop inlining
 slice_view3 @(d : box) (sh_shape : ShapeDict d) (f : FunctorDict (view d))
   -> forall a : box. ReprBox a -> view d a -> d -> BoxOffset d -> SomeIndexable d a
   attribute(inline_never) =
@@ -3974,9 +4006,10 @@ traverse_view_real @(sh a : box)
   (sh_shape : ShapeDict sh) (rep : ReprBox a) (vw : view sh a)
   -> Stream sh a attribute(inline) =
   con_stream @sh @a hintAny
-  (con_ixStream @sh @a @a rep (\ (x : a) -> a. x)
-   (con_someIndexable @sh @a @(view sh) (idCoercion @sh)
-    (Indexable_view @sh sh_shape) vw));
+  (con_ixStream @sh @a
+   (con_rStream @sh @a @a rep (\ (x : a) -> a. x)
+    (con_someIndexable @sh @a @(view sh) (idCoercion @sh)
+     (Indexable_view @sh sh_shape) vw)));
 
 
 build_view_real @(sh a : box) (sh_shape : ShapeDict sh) (s : Stream sh a)
@@ -3985,8 +4018,8 @@ build_view_real @(sh a : box) (sh_shape : ShapeDict sh) (s : Stream sh a)
   -- TODO
   case unStream @sh @a s of {
     seqStream tyob co sq. except @(view sh a)
-  ; splittableStream @sh2 tyob co shape_sh2 vw. except @(view sh a)
-  ; ixStream @c tyob rep transformer vw. except @(view sh a)
+  ; splittableStream @sh2 tyob co shape_sh2 rs. except @(view sh a)
+  ; ixStream tyob rs. except @(view sh a)
   };
 
 
@@ -4007,19 +4040,16 @@ map_Stream @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 vw.
-      let rep_stream_a = repr_Box @(Stream list_dim a) in
-      let rep_stream_b = repr_Box @(Stream list_dim b) in
+  ; splittableStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
        (con_splittableStream @b @d2 shape_d2
-        (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
-         rep_stream_a rep_stream_b
-         (map_Stream2 @list_dim @a @b rep_a rep_b f) vw)))
+        (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
+         (map_Stream2 @list_dim @a @b rep_a rep_b f) rs)))
 
-  ; ixStream @c tyob rep transformer vw.
+  ; ixStream tyob rs.
       con_stream @d @b par_hint
-       (con_ixStream @d @b @c rep (\ (x : c) -> b. f (transformer x)) vw)
+       (con_ixStream @d @b (map_RStream @d @a @b f rs))
   };
 
 -- FIXME: Handle recursive function inlining properly
@@ -4034,19 +4064,16 @@ map_Stream2 @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 vw.
-      let rep_stream_a = repr_Box @(Stream list_dim a) in
-      let rep_stream_b = repr_Box @(Stream list_dim b) in
+  ; splittableStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
        (con_splittableStream @b @d2 shape_d2
-        (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
-         rep_stream_a rep_stream_b
-         (map_Stream3 @list_dim @a @b rep_a rep_b f) vw)))
+        (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
+         (map_Stream3 @list_dim @a @b rep_a rep_b f) rs)))
 
-  ; ixStream @c tyob rep transformer vw.
+  ; ixStream tyob rs.
       con_stream @d @b par_hint
-       (con_ixStream @d @b @c rep (\ (x : c) -> b. f (transformer x)) vw)
+       (con_ixStream @d @b (map_RStream @d @a @b f rs))
   };
 
 
@@ -4062,19 +4089,16 @@ map_Stream3 @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 vw.
-      let rep_stream_a = repr_Box @(Stream list_dim a) in
-      let rep_stream_b = repr_Box @(Stream list_dim b) in
+  ; splittableStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
        (con_splittableStream @b @d2 shape_d2
-        (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
-         rep_stream_a rep_stream_b
-         (map_Stream4 @list_dim @a @b rep_a rep_b f) vw)))
+        (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
+         (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
 
-  ; ixStream @c tyob rep transformer vw.
+  ; ixStream tyob rs.
       con_stream @d @b par_hint
-       (con_ixStream @d @b @c rep (\ (x : c) -> b. f (transformer x)) vw)
+       (con_ixStream @d @b (map_RStream @d @a @b f rs))
   };
 
 
@@ -4090,19 +4114,16 @@ map_Stream4 @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 vw.
-      let rep_stream_a = repr_Box @(Stream list_dim a) in
-      let rep_stream_b = repr_Box @(Stream list_dim b) in
+  ; splittableStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
        (con_splittableStream @b @d2 shape_d2
-        (map_view @d2 @(Stream list_dim a) @(Stream list_dim b)
-         rep_stream_a rep_stream_b
-         (map_Stream4 @list_dim @a @b rep_a rep_b f) vw)))
+        (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
+         (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
 
-  ; ixStream @c tyob rep transformer vw.
+  ; ixStream tyob rs.
       con_stream @d @b par_hint
-       (con_ixStream @d @b @c rep (\ (x : c) -> b. f (transformer x)) vw)
+       (con_ixStream @d @b (map_RStream @d @a @b f rs))
   };
 
 
@@ -4231,10 +4252,11 @@ traverse_list @(a : box) (rep : ReprBox a) (lst : Boxed (list (AsBare a)))
   -> Stream list_dim a =
 
   con_stream @list_dim @a hintAny
-  (con_ixStream @list_dim @a @a rep (\(x : a) -> a. x)
-   (con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
-    (idCoercion @list_dim)
-    Indexable_ListSection (listToListSection @a rep lst)));
+  (con_ixStream @list_dim @a
+   (con_rStream @list_dim @a @a rep (\ (x : a) -> a. x)
+    (con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
+     (idCoercion @list_dim)
+     Indexable_ListSection (listToListSection @a rep lst))));
 
 
 build_list @(a : box) (rep : ReprBox a) (s : Stream list_dim a)
@@ -4250,7 +4272,7 @@ build_list @(a : box) (rep : ReprBox a) (s : Stream list_dim a)
       -- TODO
       except @(Boxed (list (AsBare a)))
 
-  ; ixStream @b tyob rep_b f si.
+  ; ixStream tybo (rStream @b tyob2 rep_b f si).
       tabulate_list @b @a rep_b rep par_hint f si
   };
 
@@ -4329,11 +4351,12 @@ traverse_ListSection @(a : box)
   (rep : ReprBox a) (s : Boxed (ListSection a)) -> Stream list_dim a =
 
   con_stream @list_dim @a hintAny
-  (con_ixStream @list_dim @a @a rep (\ (x : a) -> a. x)
-   (con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
-    (idCoercion @list_dim)
-    Indexable_ListSection
-    s));
+  (con_ixStream @list_dim @a
+   (con_rStream @list_dim @a @a rep (\ (x : a) -> a. x)
+    (con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
+     (idCoercion @list_dim)
+     Indexable_ListSection
+     s)));
 
 
 build_ListSection @(a : box)
@@ -4623,34 +4646,32 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
 
-  ; splittableStream @d2 tyob co sh2 vw.
-      let type inner_stream = Stream list_dim a in
-      let rep_stream = repr_Box @inner_stream in
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       letfun
-        reduce_slice (si : SomeIndexable d2 inner_stream) -> a =
+        reduce_slice (si : SomeIndexable d2 b) -> a =
           case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
-          let vw = indexableToView @t @inner_stream rep_stream ix container in
+          let vw = indexableToView @t @b rep_b ix container in
 
           -- Reduce over inner loop
-          let vw2 = map_view @d2 @inner_stream @a rep_stream rep
-                    (reduce_Stream2 @list_dim @a ShapeDict_list_dim rep f z)
-                    (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw) in
+          let vw2 = map_view @d2 @b @a rep_b rep
+                    (\ (x : b) -> a.
+                       reduce_Stream2 @list_dim @a ShapeDict_list_dim rep f z
+                       (extract x))
+                    (coerce @(view (shape t) b) @(view d2 b) vw) in
 
           -- Sequentially reduce the partial results for this loop
           let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
           shFold @d2 sh2 @a @a rep rep f local_s z
       in
-      let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
-               (idCoercion @d2) (Indexable_view @d2 sh2) vw in
-      reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
+      reduce_loop @d2 @b @a sh2 rep_b rep
       par_hint reduce_unit reduce_slice f reduce_residual si
 
-  ; ixStream @b tyob rep_b g si.
+  ; ixStream tyob (rStream @b tyob2 rep_b extract si).
       letfun
         reduce_slice (si : SomeIndexable d b) -> a =
           -- Sequentially reduce the partial results for this loop
           let local_s = con_stream @d @a hintSeq
-                        (ixStream @d @a @b tyob rep_b g si) in
+                        (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
           shFold @d sh @a @a rep rep f local_s z
       in
       reduce_loop @d @b @a sh rep_b rep
@@ -4677,35 +4698,32 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
 
-  ; splittableStream @d2 tyob co sh2 vw.
-      let type inner_stream = Stream list_dim a in
-      let rep_stream = repr_Box @inner_stream in
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       letfun
-        reduce_slice (si : SomeIndexable d2 inner_stream) -> a =
+        reduce_slice (si : SomeIndexable d2 b) -> a =
           case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
-          let vw = indexableToView @t @inner_stream rep_stream ix container in
+          let vw = indexableToView @t @b rep_b ix container in
 
           -- Reduce over inner loop
-          let vw2 = map_view @d2 @inner_stream @a rep_stream rep
-                    (reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z)
-                    (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw) in
+          let vw2 = map_view @d2 @b @a rep_b rep
+                    (\ (x : b) -> a.
+                       reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z
+                       (extract x))
+                    (coerce @(view (shape t) b) @(view d2 b) vw) in
 
           -- Sequentially reduce the partial results for this loop
           let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
           shFold @d2 sh2 @a @a rep rep f local_s z
       in
-      let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
-               (idCoercion @d2) (Indexable_view @d2 sh2) vw in
-
-      reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
+      reduce_loop @d2 @b @a sh2 rep_b rep
       par_hint reduce_unit reduce_slice f reduce_residual si
 
-  ; ixStream @b tyob rep_b g si.
+  ; ixStream tyob (rStream @b tyob2 rep_b extract si).
       letfun
         reduce_slice (si : SomeIndexable d b) -> a =
           -- Sequentially reduce the partial results for this loop
           let local_s = con_stream @d @a hintSeq
-                        (ixStream @d @a @b tyob rep_b g si) in
+                        (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
           shFold @d sh @a @a rep rep f local_s z
       in
       reduce_loop @d @b @a sh rep_b rep
@@ -4732,34 +4750,32 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
 
-  ; splittableStream @d2 tyob co sh2 vw.
-      let type inner_stream = Stream list_dim a in
-      let rep_stream = repr_Box @inner_stream in
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       letfun
-        reduce_slice (si : SomeIndexable d2 inner_stream) -> a =
+        reduce_slice (si : SomeIndexable d2 b) -> a =
           case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
-          let vw = indexableToView @t @inner_stream rep_stream ix container in
+          let vw = indexableToView @t @b rep_b ix container in
 
           -- Reduce over inner loop
-          let vw2 = map_view @d2 @inner_stream @a rep_stream rep
-                    (reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z)
-                    (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw) in
+          let vw2 = map_view @d2 @b @a rep_b rep
+                    (\ (x : b) -> a.
+                       reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z
+                       (extract x))
+                    (coerce @(view (shape t) b) @(view d2 b) vw) in
 
           -- Sequentially reduce the partial results for this loop
           let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
           shFold @d2 sh2 @a @a rep rep f local_s z
       in
-      let si = con_someIndexable @d2 @(Stream list_dim a) @(view d2)
-               (idCoercion @d2) (Indexable_view @d2 sh2) vw in
-      reduce_loop @d2 @(Stream list_dim a) @a sh2 rep_stream rep
+      reduce_loop @d2 @b @a sh2 rep_b rep
       par_hint reduce_unit reduce_slice f reduce_residual si
 
-  ; ixStream @b tyob rep_b g si.
+  ; ixStream tyob (rStream @b tyob2 rep_b extract si).
       letfun
         reduce_slice (si : SomeIndexable d b) -> a =
           -- Sequentially reduce the partial results for this loop
           let local_s = con_stream @d @a hintSeq
-                        (ixStream @d @a @b tyob rep_b g si) in
+                        (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
           shFold @d sh @a @a rep rep f local_s z
       in
       reduce_loop @d @b @a sh rep_b rep
@@ -5001,42 +5017,38 @@ collect_Stream @(d : box) @(k v r : box)
         seqStream tyob co sq.
           do_seq None
 
-      ; splittableStream @d2 tyob co sh2 vw.
-          let type inner_stream = Stream list_dim stream_elem in
-          let rep_stream = repr_Box @inner_stream in
+      ; splittableStream @d2 tyob co sh2 (rStream @dat tyob2 rep_dat extract si).
           letfun
-            reduce_slice (si : SomeIndexable d2 inner_stream) -> acc_cursor =
-              case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
-
+            reduce_slice (si : SomeIndexable d2 dat) -> acc_cursor =
               -- Convert the slice back to a stream
-              let vw = indexableToView @t @inner_stream rep_stream ix container in
               let s = con_stream @list_dim @stream_elem hintSeq
-                      (con_splittableStream @stream_elem @d2 sh2
-                       (coerce @(view (shape t) inner_stream) @(view d2 inner_stream) vw)) in
+                      (coerce @(IStream d stream_elem) @(IStream list_dim stream_elem)
+                       (splittableStream @d @stream_elem @d2 tyob co sh2
+                        (rStream @d2 @(Stream list_dim stream_elem) @dat
+                         tyob2 rep_dat extract si))) in
 
               -- Collect the slice sequentially
               collect_slice @list_dim ShapeDict_list_dim s
           in
-          let si = con_someIndexable @d2 @inner_stream @(view d2)
-                   (idCoercion @d2) (Indexable_view @d2 sh2) vw in
           let r_cursor =
-                reduce_loop @d2 @(Stream list_dim stream_elem) @acc_cursor
-                sh2 rep_stream (repr_cursor @acc) par_hint
+                reduce_loop @d2 @dat @acc_cursor
+                sh2 rep_dat (repr_cursor @acc) par_hint
                 reduce_unit reduce_slice combine_cursors reduce_residual si in
 
           finalize_cursor r_cursor
 
-      ; ixStream @b tyob rep_b g si.
+      ; ixStream tyob (rStream @dat tyob2 rep_dat extract si).
           letfun
-            reduce_slice (si : SomeIndexable d b) -> acc_cursor =
+            reduce_slice (si : SomeIndexable d dat) -> acc_cursor =
               -- Sequentially reduce the partial results for this loop
               let local_s = con_stream @d @stream_elem hintSeq
-                            (ixStream @d @stream_elem @b tyob rep_b g si) in
+                            (ixStream @d @stream_elem tyob
+                             (rStream @d @stream_elem @dat tyob2 rep_dat extract si)) in
               collect_slice @d shape_dict local_s
           in
           let r_cursor =
-                reduce_loop @d @b @acc_cursor
-                shape_dict rep_b (repr_cursor @acc) par_hint
+                reduce_loop @d @dat @acc_cursor
+                shape_dict rep_dat (repr_cursor @acc) par_hint
                 reduce_unit reduce_slice combine_cursors reduce_residual si in
 
           finalize_cursor r_cursor
@@ -6596,7 +6608,7 @@ real_peel_list_dim @(a r : box)
                      } in
                let remainder_input =
                      con_stream @list_dim @a (unboxParHintValue par_hint)
-                     (con_splittableStream @a @list_dim ShapeDict_list_dim
+                     (viewToSplittable @list_dim @a ShapeDict_list_dim
                       (con_view @list_dim @(Stream list_dim a) new_dom
                        (\ (j : Boxed (Stored int)) -> Stream list_dim a.
                           visit (boxIntValue (i +# unboxIntValue j))))) in
@@ -6680,33 +6692,17 @@ real_zipWith_list_dim @(a b c : box)
 
   case s1 of stream tyob par_hint1 i_s1.
   case i_s1 of {
-    ixStream @aprime tyob rep_aprime f1 si1.
+    ixStream tyob rs1.
       case s2 of stream tyob par_hint2 i_s2.
       case i_s2 of {
-        ixStream @bprime tyob rep_bprime f2 si2.
-          let type tuple = Boxed (Tuple2 (StuckRef aprime) (StuckRef bprime)) in
-          let rep_tuple = unboxedinfo Tuple2 @(StuckRef aprime) @(StuckRef bprime)
-                          (unboxedinfo StuckRef @aprime)
-                          (unboxedinfo StuckRef @bprime) in
-
-          letfun
-            call_f (t : tuple) -> c =
-              case unpack_Tuple2_box @aprime @bprime t of (x, y).
-              f (f1 x) (f2 y)
-          in
-
+        ixStream tyob rs2.
           -- The most restrictive parallelism hint determines amount of
           -- parallelism
           let par_hint = leastParHint par_hint1 par_hint2 in
 
           con_stream @list_dim @c par_hint
-          (con_ixStream @list_dim @c @tuple rep_tuple call_f
-           (con_someIndexable @list_dim @tuple @(Zip2Indexable list_dim)
-            (idCoercion @list_dim)
-            (Indexable_Zip2Indexable @list_dim ShapeDict_list_dim)
-            (zip_Indexable @list_dim @aprime @bprime @tuple ShapeDict_list_dim
-             rep_aprime rep_bprime
-             (pack_Tuple2_box @aprime @bprime) si1 si2)))
+          (con_ixStream @list_dim @c
+           (zipWith_RStream @list_dim @a @b @c ShapeDict_list_dim rep_a rep_b rep_c f rs1 rs2))
 
       ; seqStream tyob co sq. zip_using_sequences None
       ; splittableStream @d2 tyob co sh2 vw. zip_using_sequences None
@@ -6714,6 +6710,39 @@ real_zipWith_list_dim @(a b c : box)
     ; seqStream tyob co sq. zip_using_sequences None
     ; splittableStream @d2 tyob co sh2 vw. zip_using_sequences None
   };
+
+zipWith_RStream @(d : box) @(a b c : box)
+  (sh : ShapeDict d)
+  (rep_a : ReprBox a)
+  (rep_b : ReprBox b)
+  (rep_c : ReprBox c)
+  (f : a -> b -> c)
+  (s1 : RStream d a)
+  (s2 : RStream d b)
+  -> RStream d c
+  attribute(inline) =
+
+  case s1 of rStream @aprime tyob rep_aprime f1 si1.
+  case s2 of rStream @bprime tyob rep_bprime f2 si2.
+
+  let type tuple = Boxed (Tuple2 (StuckRef aprime) (StuckRef bprime)) in
+  let rep_tuple = unboxedinfo Tuple2 @(StuckRef aprime) @(StuckRef bprime)
+                  (unboxedinfo StuckRef @aprime)
+                  (unboxedinfo StuckRef @bprime) in
+
+  letfun
+    call_f (t : tuple) -> c =
+      case unpack_Tuple2_box @aprime @bprime t of (x, y).
+      f (f1 x) (f2 y)
+  in
+
+  con_rStream @d @c @tuple rep_tuple call_f
+  (con_someIndexable @d @tuple @(Zip2Indexable d)
+    (idCoercion @d)
+    (Indexable_Zip2Indexable @d sh)
+    (zip_Indexable @d @aprime @bprime @tuple sh
+     rep_aprime rep_bprime
+     (pack_Tuple2_box @aprime @bprime) si1 si2));
 
 
 fold_list_dim
@@ -6752,26 +6781,27 @@ imp_fold_list_dim @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+      case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
+
       -- Outer loop over 'dom'
       let off = boxIntValue 0 in
       shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
       (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
 
          -- Inner loop
-         imp_fold_list_dim2 @a rep_a combine (gen outer_i) state)
+         imp_fold_list_dim2 @a rep_a combine (extract (gen outer_i)) state)
       init
 
-  ; ixStream @b tyob rep_b f si.
+  ; ixStream tyob (rStream @b tyob2 rep_b f si).
+
       -- Loop over the indexable object
-      case map_view @list_dim @b @a rep_b rep_a f
-           (someIndexableToView @list_dim @b rep_b si) of
-        mk_view tyob dom gen.
+      case someIndexableToView @list_dim @b rep_b si of mk_view tyob dom gen.
 
       let off = boxIntValue 0 in
       foreach_list_dim dom off
       (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
-         combine (gen outer_i) state)
+         combine (f (gen outer_i)) state)
       init
   };
 
@@ -6791,26 +6821,27 @@ imp_fold_list_dim2 @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+      case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
+
       -- Outer loop over 'dom'
       let off = boxIntValue 0 in
       shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
       (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
 
          -- Inner loop
-         imp_fold_list_dim3 @a rep_a combine (gen outer_i) state)
+         imp_fold_list_dim3 @a rep_a combine (extract (gen outer_i)) state)
       init
 
-  ; ixStream @b tyob rep_b f si.
+  ; ixStream tyob (rStream @b tyob2 rep_b f si).
+
       -- Loop over the indexable object
-      case map_view @list_dim @b @a rep_b rep_a f
-           (someIndexableToView @list_dim @b rep_b si) of
-        mk_view tyob dom gen.
+      case someIndexableToView @list_dim @b rep_b si of mk_view tyob dom gen.
 
       let off = boxIntValue 0 in
       foreach_list_dim dom off
       (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
-         combine (gen outer_i) state)
+         combine (f (gen outer_i)) state)
       init
   };
 
@@ -6830,26 +6861,27 @@ imp_fold_list_dim3 @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+      case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
+
       -- Outer loop over 'dom'
       let off = boxIntValue 0 in
       shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
       (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
 
          -- Inner loop
-         imp_fold_list_dim4 @a rep_a combine (gen outer_i) state)
+         imp_fold_list_dim4 @a rep_a combine (extract (gen outer_i)) state)
       init
 
-  ; ixStream @b tyob rep_b f si.
+  ; ixStream tyob (rStream @b tyob2 rep_b f si).
+
       -- Loop over the indexable object
-      case map_view @list_dim @b @a rep_b rep_a f
-           (someIndexableToView @list_dim @b rep_b si) of
-        mk_view tyob dom gen.
+      case someIndexableToView @list_dim @b rep_b si of mk_view tyob dom gen.
 
       let off = boxIntValue 0 in
       foreach_list_dim dom off
       (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
-         combine (gen outer_i) state)
+         combine (f (gen outer_i)) state)
       init
   };
 
@@ -6869,26 +6901,27 @@ imp_fold_list_dim4 @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (mk_view tyob2 dom gen).
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+      case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
+
       -- Outer loop over 'dom'
       let off = boxIntValue 0 in
       shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
       (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
 
          -- Inner loop
-         imp_fold_list_dim4 @a rep_a combine (gen outer_i) state)
+         imp_fold_list_dim4 @a rep_a combine (extract (gen outer_i)) state)
       init
 
-  ; ixStream @b tyob rep_b f si.
+  ; ixStream tyob (rStream @b tyob2 rep_b f si).
+
       -- Loop over the indexable object
-      case map_view @list_dim @b @a rep_b rep_a f
-           (someIndexableToView @list_dim @b rep_b si) of
-        mk_view tyob dom gen.
+      case someIndexableToView @list_dim @b rep_b si of mk_view tyob dom gen.
 
       let off = boxIntValue 0 in
       foreach_list_dim dom off
       (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
-         combine (gen outer_i) state)
+         combine (f (gen outer_i)) state)
       init
   };
 
@@ -7084,7 +7117,7 @@ fold_chain_dim @(a acc : box)
 
   case s of stream tyob par_hint i_s.
   case i_s of {
-    ixStream @b tyob rep_b f (someIndexable @t tyob2 co ix_dict container).
+    ixStream tyob (rStream @b tyob2 rep_b f (someIndexable @t tyob3 co ix_dict container)).
       case coerce @(shape t) @chain_dim (ix_shape @t ix_dict @b container) of
         mk_chain_dim tyob domain_int.
 
@@ -7123,7 +7156,7 @@ imp_fold_chain_dim @(a : box)
 
   case s of stream tyob par_hint i_s.
   case i_s of {
-    ixStream @b tyob rep_b f (someIndexable @t tyob2 co ix_dict container).
+    ixStream tyob (rStream @b tyob2 rep_b f (someIndexable @t tyob3 co ix_dict container)).
       case coerce @(shape t) @chain_dim (ix_shape @t ix_dict @b container) of
         mk_chain_dim tyob domain_int.
 
@@ -14476,6 +14509,26 @@ Seq_from_llist @(a : box) (rep : Repr (AsBare a)) (l : llist (AsBare a))
   
 
 -------------------------------------------------------------------------------
+-- RStream functions
+
+map_RStream @(d a b : box) (f : a -> b) (rs : RStream d a)
+  -> RStream d b attribute(inline) =
+  case rs of rStream @c tyob rep g ix.
+  con_rStream @d @b @c rep (\ (x : c) -> b. f (g x)) ix;
+
+
+rStreamToSeq @(a : box) (rs : RStream list_dim a) -> Seq a attribute(inline) =
+  case rs of rStream @b tyob rep f si.
+  map_Seq @b @a f (viewToSeq @b (someIndexableToView @list_dim @b rep si));
+
+
+rStreamToView @(sh a : box) (rep_a : ReprBox a) (rs : RStream sh a)
+  -> view sh a attribute(inline) =
+  case rs of rStream @b tyob rep f si.
+  map_view @sh @b @a rep rep_a f (someIndexableToView @sh @b rep si);
+
+
+-------------------------------------------------------------------------------
 
 
 unit_Stream @(a : box) (x : a) -> Stream list_dim a
@@ -14515,22 +14568,28 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
               (bind_Seq @a @b sq
                (\ (x : a) -> Seq b. streamToSequence @b (t x)))
 
-          ; splittableStream @sh tyob co shape_sh (mk_view tyob2 dom f).
-              con_splittableStream @b @sh shape_sh
-              (con_view @sh @(Stream list_dim b) dom
-               (\ (i : BoxIndex sh) -> Stream list_dim b.
-                  bind_Stream2 @a @b (f i) t))
+          ; splittableStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
+              letfun
+                extract2 (x : c) -> Stream list_dim b =
+                  bind_Stream2 @a @b (extract x) t
+              in
 
-          ; ixStream @c tyob rep_c f
-            (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container).
+              con_splittableStream @b @sh shape_sh
+              (con_rStream @sh @(Stream list_dim b) @c rep_c extract2 si)
+
+          ; ixStream tyob (rStream @c tyob2 rep_c f
+                           (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container)).
               let dom = coerce @(shape s) @list_dim
                         (ix_shape @s ix @c container) in
               letfun
                 g (i : BoxIndex list_dim) -> Stream list_dim b =
                   t (f (ix_at @s ix @c rep_c container
                         (coerce @(BoxIndex list_dim) @(BoxIndex (shape s)) i))) in
+
               con_splittableStream @b @list_dim ShapeDict_list_dim
-              (con_view @list_dim @(Stream list_dim b) dom g)
+              (viewToRStream @list_dim @(Stream list_dim b) ShapeDict_list_dim
+               (repr_Box @(Stream list_dim b))
+               (con_view @list_dim @(Stream list_dim b) dom g))
           } in
   con_stream @list_dim @b par_hint u;
 
@@ -14545,22 +14604,28 @@ bind_Stream2 @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
               (bind_Seq @a @b sq
                (\ (x : a) -> Seq b. streamToSequence @b (t x)))
 
-          ; splittableStream @sh tyob co shape_sh (mk_view tyob2 dom f).
-              con_splittableStream @b @sh shape_sh
-              (con_view @sh @(Stream list_dim b) dom
-               (\ (i : BoxIndex sh) -> Stream list_dim b.
-                  bind_Stream2 @a @b (f i) t))
+          ; splittableStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
+              letfun
+                extract2 (x : c) -> Stream list_dim b =
+                  bind_Stream2 @a @b (extract x) t
+              in
 
-          ; ixStream @c tyob rep_c f
-            (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container).
+              con_splittableStream @b @sh shape_sh
+              (con_rStream @sh @(Stream list_dim b) @c rep_c extract2 si)
+
+          ; ixStream tyob (rStream @c tyob2 rep_c f
+                           (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container)).
               let dom = coerce @(shape s) @list_dim
                         (ix_shape @s ix @c container) in
               letfun
                 g (i : BoxIndex list_dim) -> Stream list_dim b =
                   t (f (ix_at @s ix @c rep_c container
                         (coerce @(BoxIndex list_dim) @(BoxIndex (shape s)) i))) in
+
               con_splittableStream @b @list_dim ShapeDict_list_dim
-              (con_view @list_dim @(Stream list_dim b) dom g)
+              (viewToRStream @list_dim @(Stream list_dim b) ShapeDict_list_dim
+               (repr_Box @(Stream list_dim b))
+               (con_view @list_dim @(Stream list_dim b) dom g))
           } in
   con_stream @list_dim @b par_hint u;
 
