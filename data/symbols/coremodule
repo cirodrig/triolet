@@ -4308,7 +4308,8 @@ shape_ListSection @(a : box) (s : Boxed (ListSection a)) -> list_dim =
 
 
 at_ListSection @(a : box)
-  (rep : ReprBox a) (s : Boxed (ListSection a)) (i : Boxed (Stored int)) -> a =
+  (rep : ReprBox a) (s : Boxed (ListSection a)) (i : Boxed (Stored int)) -> a
+  attribute(inline) =
 
   case s of [reprSizeAlign @(ListSection a) (unboxedinfo ListSection @a)]
             boxed tyob (listSection @N size rep sec).
@@ -4321,7 +4322,8 @@ at_ListSection @(a : box)
 slice_ListSection @(a : box)
   (rep : ReprBox a)
   (s : Boxed (ListSection a)) (d : list_dim) (o : Boxed (Stored int))
-  -> SomeIndexable list_dim a =
+  -> SomeIndexable list_dim a
+  attribute(inline) =
 
   case s of [reprSizeAlign @(ListSection a) (unboxedinfo ListSection @a)]
             boxed tyob (listSection @N size rep sec).
