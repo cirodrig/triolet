@@ -1123,6 +1123,60 @@ eliminateReconstructorTemplate scrutinee template body
         checkForCopyExpr var field_exp
 
 -------------------------------------------------------------------------------
+-- Eta-expansion of let expressions
+
+-- | Eta-expand a let expression so that other optimizations can inline it.
+--
+-- Given @let x = f e1 ... eN in c@, if we can see that the call is a partial
+-- application, then we convert it to a local function definition
+-- @letfun g y z = f e1 ... eN y z in c@.
+etaExpandLet :: ExpSM -> LR ExpSM
+etaExpandLet e =
+  cond e
+  [ do -- Is it of the form @let x = f e1 ... eN in c@?
+       LetE inf pat rhs body <- lift $ freshenHead e
+       AppE inf2 op ts es <- lift $ freshenHead rhs
+       VarE _ op_var <- lift $ freshenHead op
+
+       -- Is it an undersaturated application with at least one argument?
+       op_value <- lift $ lookupKnownValue op_var
+       let arity = absValueArity op_value
+       aguard $ length es > 0 && length es < arity
+
+       lift $ do es' <- mapM freshenFullyExp es
+                 body' <- freshenFullyExp body
+                 eta_expand inf inf2 (fromPatSM pat) op_var ts es' body'
+
+    -- Otherwise, do nothing
+  , lift $ return e]
+  where
+    eta_expand inf inf2 pat op_var ty_args args body = do
+      -- Compute types of eta-expanded parameters and return values
+      Just op_ty <- lookupType op_var
+      (ty_params, arg_tys, ret_ty) <- liftTypeEvalM $ deconForallFunType op_ty
+      let eta_arg_tys = drop (length args) arg_tys
+      (inst_arg_tys, inst_ret_ty) <-
+        instantiate_type ty_params ty_args (eta_arg_tys, ret_ty)
+      let n_arg_tys = length inst_arg_tys
+
+      -- Create a function
+      eta_params <- replicateM n_arg_tys $ newAnonymousVar ObjectLevel
+      let fun_params = [patM (v ::: t) | (v, t) <- zip eta_params inst_arg_tys]
+          call = varAppE inf2 op_var ty_args (args ++ map varE' eta_params)
+          fun = FunM $ Fun defaultExpInfo [] fun_params inst_ret_ty call
+                
+      -- Create a function binding
+      let def = modifyDefAnnotation (\a -> a {defAnnUses = patMDmd pat}) $
+                mkDef (patMVar pat) fun
+          bind_exp = ExpM $ LetfunE inf (NonRec def) body
+          
+      return $ deferEmptySubstitution bind_exp
+
+    instantiate_type ty_params ty_args x =
+      let subst = Substitute.fromBinderList $ zip ty_params ty_args
+      in substitute subst x
+
+-------------------------------------------------------------------------------
 -- Traversing code
 
 -- | Apply a substitution, then rewrite an expression.
@@ -1148,10 +1202,11 @@ rwExp expression =
       return (exp', topCode)
 
     -- Rewrite the expression.
-    -- First perform local restructuring, then simplify.
+    -- First perform local restructuring and eta-expansion, then simplify.
     rewrite expression = do
       ex2 <- ifFuel expression $ eliminateUselessCopying expression
-      ifElseFuel (substitute ex2) (simplify ex2)
+      ex3 <- ifFuel ex2 $ etaExpandLet ex2
+      ifElseFuel (substitute ex3) (simplify ex3)
 
     -- Simplify the expression.
     simplify expression = do

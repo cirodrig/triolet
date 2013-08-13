@@ -30,6 +30,7 @@ module SystemF.Simplifier.AbsValue
         AbsValue(..),
         AbsData(..),
         AbsProp(..),
+        absValueArity,
         funValue,
         lambdaValue,
         initializerValue,
@@ -834,6 +835,15 @@ funValue typarams params body =
   of TopAC -> topCode
      ReturnAC val | TopAV <- codeValue val -> topCode
      _ -> valueCode $ FunAV (AbsFun [b | TyPat b <- typarams] params body)
+
+-- | Get the arity of an abstract function value.
+--   If arity is unknown or the value does not represent a function,
+--   zero is returned.
+absValueArity :: AbsCode -> Int
+absValueArity c =
+  case codeValue c
+  of FunAV (AbsFun _ ps _) -> length ps
+     _                     -> 0
 
 -- | Construct an abstract value for a lambda expression.
 --
