@@ -9974,8 +9974,13 @@ inInterval (i : int) (iv : Interval) -> bool =
 
 
 -- Compute the intersection of two intervals.
+--
+-- This must be inlined late (postfinal) so that looping code
+-- gets optimized independently of the if-conditions in this
+-- function.  Inlining too early introduces join points that
+-- interfere with optimization.
 intersectInterval (iv1 : Interval) (iv2 : Interval) -> Interval
-  attribute(inline, inline_final) =
+  attribute(inline, inline_postfinal) =
   case iv1 of interval (l1 : MaybeVal int) (u1 : MaybeVal int).
   case iv2 of interval (l2 : MaybeVal int) (u2 : MaybeVal int).
 
