@@ -14584,19 +14584,14 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
               con_splittableStream @b @sh shape_sh
               (con_rStream @sh @(Stream list_dim b) @c rep_c extract2 si)
 
-          ; ixStream tyob (rStream @c tyob2 rep_c f
-                           (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container)).
-              let dom = coerce @(shape s) @list_dim
+          ; ixStream tyob (rStream @c tyob2 rep_c extract si).
+              let dom = case si of someIndexable @s tyob co ix container.
+                        coerce @(shape s) @list_dim
                         (ix_shape @s ix @c container) in
-              letfun
-                g (i : BoxIndex list_dim) -> Stream list_dim b =
-                  t (f (ix_at @s ix @c rep_c container
-                        (coerce @(BoxIndex list_dim) @(BoxIndex (shape s)) i))) in
+              letfun extract2 (x : c) -> Stream list_dim b = t (extract x) in
 
               con_splittableStream @b @list_dim ShapeDict_list_dim
-              (viewToRStream @list_dim @(Stream list_dim b) ShapeDict_list_dim
-               (repr_Box @(Stream list_dim b))
-               (con_view @list_dim @(Stream list_dim b) dom g))
+              (con_rStream @list_dim @(Stream list_dim b) @c rep_c extract2 si)
           } in
   con_stream @list_dim @b par_hint u;
 
@@ -14620,19 +14615,14 @@ bind_Stream2 @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
               con_splittableStream @b @sh shape_sh
               (con_rStream @sh @(Stream list_dim b) @c rep_c extract2 si)
 
-          ; ixStream tyob (rStream @c tyob2 rep_c f
-                           (someIndexable @s tyob (co : coerce @box (shape s) list_dim) ix container)).
-              let dom = coerce @(shape s) @list_dim
+          ; ixStream tyob (rStream @c tyob2 rep_c extract si).
+              let dom = case si of someIndexable @s tyob co ix container.
+                        coerce @(shape s) @list_dim
                         (ix_shape @s ix @c container) in
-              letfun
-                g (i : BoxIndex list_dim) -> Stream list_dim b =
-                  t (f (ix_at @s ix @c rep_c container
-                        (coerce @(BoxIndex list_dim) @(BoxIndex (shape s)) i))) in
+              letfun extract2 (x : c) -> Stream list_dim b = t (extract x) in
 
               con_splittableStream @b @list_dim ShapeDict_list_dim
-              (viewToRStream @list_dim @(Stream list_dim b) ShapeDict_list_dim
-               (repr_Box @(Stream list_dim b))
-               (con_view @list_dim @(Stream list_dim b) dom g))
+              (con_rStream @list_dim @(Stream list_dim b) @c rep_c extract2 si)
           } in
   con_stream @list_dim @b par_hint u;
 
