@@ -816,7 +816,9 @@ functorClass _ tc_map = do
   where
     monomorphic_instances =
       [(ConTy $ builtinTyCon TheTC_list,
-        [coreBuiltin The_map_list])
+        [coreBuiltin The_map_list]),
+       (ConTy $ builtinTyCon TheTC_array1,
+        [coreBuiltin The_map_array1])
       ]
 
 traversableClass _ tc_map = do
@@ -838,7 +840,10 @@ traversableClass _ tc_map = do
     monomorphic_instances =
       [(ConTy $ builtinTyCon TheTC_list,
         [coreBuiltin The_traverse_list,
-         coreBuiltin The_build_list])]
+         coreBuiltin The_build_list]),
+       (ConTy $ builtinTyCon TheTC_array1,
+        [coreBuiltin The_traverse_array1,
+         coreBuiltin The_build_array1])]
       {-
        (ConTy $ builtinTyCon TheTC_blist,
         [coreBuiltin The_TraversableDict_blist_traverse,
@@ -890,13 +895,31 @@ shapeClass _ tc_map = do
          coreBuiltin The_slice_list_dim,
          coreBuiltin The_split_list_dim,
          coreBuiltin The_splitN_list_dim,
+         coreBuiltin The_checkSubdomain_list_dim,
          coreBuiltin The_peel_list_dim,
          coreBuiltin The_flatten_list_dim,
          coreBuiltin The_generate_list_dim,
          coreBuiltin The_zipWith_list_dim,
          coreBuiltin The_fold_list_dim,
          coreBuiltin The_imp_fold_list_dim_wrapper,
-         coreBuiltin The_foreach_list_dim_wrapper])]
+         coreBuiltin The_foreach_list_dim_wrapper]),
+       (ConTy (builtinTyCon TheTC_dim1),
+        [coreBuiltin The_noOffset_dim1,
+         coreBuiltin The_addOffset_dim1,
+         coreBuiltin The_appOffset_dim1,
+         coreBuiltin The_intersect_dim1,
+         coreBuiltin The_member_dim1,
+         coreBuiltin The_slice_dim1,
+         coreBuiltin The_split_dim1,
+         coreBuiltin The_splitN_dim1,
+         coreBuiltin The_checkSubdomain_dim1,
+         coreBuiltin The_peel_dim1,
+         coreBuiltin The_flatten_dim1,
+         coreBuiltin The_generate_dim1,
+         coreBuiltin The_zipWith_dim1,
+         coreBuiltin The_fold_dim1,
+         coreBuiltin The_imp_fold_dim1_wrapper,
+         coreBuiltin The_foreach_dim1_wrapper])]
        {-(ConTy (builtinTyCon TheTC_dim0),
         [coreBuiltin The_ShapeDict_dim0_member,
          coreBuiltin The_ShapeDict_dim0_intersect,
@@ -958,7 +981,12 @@ indexableClass _ tc_map = do
         [coreBuiltin The_shape_list,
          coreBuiltin The_at_list,
          coreBuiltin The_slice_list,
-         coreBuiltin The_preserve_list])
+         coreBuiltin The_preserve_list]),
+       (ConTy $ builtinTyCon TheTC_array1,
+        [coreBuiltin The_shape_array1,
+         coreBuiltin The_at_array1,
+         coreBuiltin The_slice_array1,
+         coreBuiltin The_preserve_array1])
       ]
       {-
        (ConTy $ builtinTyCon TheTC_blist,
@@ -1088,49 +1116,49 @@ cartesianClass _ tc_map = do
   where
     monomorphic_instances =
       [(ConTy $ builtinTyCon TheTC_dim0,
-        [coreBuiltin The_CartesianDict_dim0_loBound,
-         coreBuiltin The_CartesianDict_dim0_hiBound,
-         coreBuiltin The_CartesianDict_dim0_stride,
-         coreBuiltin The_CartesianDict_dim0_arrayDomain,
-         coreBuiltin The_CartesianDict_dim0_displaceDomain,
-         coreBuiltin The_CartesianDict_dim0_multiplyDomain,
-         coreBuiltin The_CartesianDict_dim0_divideDomain,
-         coreBuiltin The_CartesianDict_dim0_multiplyIndex,
-         coreBuiltin The_CartesianDict_dim0_divideIndex,
-         coreBuiltin The_CartesianDict_dim0_unbounded]),
+        [coreBuiltin The_loBound_dim0,
+         coreBuiltin The_hiBound_dim0,
+         coreBuiltin The_stride_dim0,
+         coreBuiltin The_arrayDomain_dim0,
+         coreBuiltin The_displaceDomain_dim0,
+         coreBuiltin The_multiplyDomain_dim0,
+         coreBuiltin The_divideDomain_dim0,
+         coreBuiltin The_multiplyIndex_dim0,
+         coreBuiltin The_divideIndex_dim0,
+         coreBuiltin The_unbounded_dim0]),
        (ConTy $ builtinTyCon TheTC_dim1,
-        [coreBuiltin The_CartesianDict_dim1_loBound,
-         coreBuiltin The_CartesianDict_dim1_hiBound,
-         coreBuiltin The_CartesianDict_dim1_stride,
-         coreBuiltin The_CartesianDict_dim1_arrayDomain,
-         coreBuiltin The_CartesianDict_dim1_displaceDomain,
-         coreBuiltin The_CartesianDict_dim1_multiplyDomain,
-         coreBuiltin The_CartesianDict_dim1_divideDomain,
-         coreBuiltin The_CartesianDict_dim1_multiplyIndex,
-         coreBuiltin The_CartesianDict_dim1_divideIndex,
-         coreBuiltin The_CartesianDict_dim1_unbounded]),
+        [coreBuiltin The_loBound_dim1,
+         coreBuiltin The_hiBound_dim1,
+         coreBuiltin The_stride_dim1,
+         coreBuiltin The_arrayDomain_dim1,
+         coreBuiltin The_displaceDomain_dim1,
+         coreBuiltin The_multiplyDomain_dim1,
+         coreBuiltin The_divideDomain_dim1,
+         coreBuiltin The_multiplyIndex_dim1,
+         coreBuiltin The_divideIndex_dim1,
+         coreBuiltin The_unbounded_dim1]),
        (ConTy $ builtinTyCon TheTC_dim2,
-        [coreBuiltin The_CartesianDict_dim2_loBound,
-         coreBuiltin The_CartesianDict_dim2_hiBound,
-         coreBuiltin The_CartesianDict_dim2_stride,
-         coreBuiltin The_CartesianDict_dim2_arrayDomain,
-         coreBuiltin The_CartesianDict_dim2_displaceDomain,
-         coreBuiltin The_CartesianDict_dim2_multiplyDomain,
-         coreBuiltin The_CartesianDict_dim2_divideDomain,
-         coreBuiltin The_CartesianDict_dim2_multiplyIndex,
-         coreBuiltin The_CartesianDict_dim2_divideIndex,
-         coreBuiltin The_CartesianDict_dim2_unbounded]),
+        [coreBuiltin The_loBound_dim2,
+         coreBuiltin The_hiBound_dim2,
+         coreBuiltin The_stride_dim2,
+         coreBuiltin The_arrayDomain_dim2,
+         coreBuiltin The_displaceDomain_dim2,
+         coreBuiltin The_multiplyDomain_dim2,
+         coreBuiltin The_divideDomain_dim2,
+         coreBuiltin The_multiplyIndex_dim2,
+         coreBuiltin The_divideIndex_dim2,
+         coreBuiltin The_unbounded_dim2]),
        (ConTy $ builtinTyCon TheTC_dim3,
-        [coreBuiltin The_CartesianDict_dim3_loBound,
-         coreBuiltin The_CartesianDict_dim3_hiBound,
-         coreBuiltin The_CartesianDict_dim3_stride,
-         coreBuiltin The_CartesianDict_dim3_arrayDomain,
-         coreBuiltin The_CartesianDict_dim3_displaceDomain,
-         coreBuiltin The_CartesianDict_dim3_multiplyDomain,
-         coreBuiltin The_CartesianDict_dim3_divideDomain,
-         coreBuiltin The_CartesianDict_dim3_multiplyIndex,
-         coreBuiltin The_CartesianDict_dim3_divideIndex,
-         coreBuiltin The_CartesianDict_dim3_unbounded])]
+        [coreBuiltin The_loBound_dim3,
+         coreBuiltin The_hiBound_dim3,
+         coreBuiltin The_stride_dim3,
+         coreBuiltin The_arrayDomain_dim3,
+         coreBuiltin The_displaceDomain_dim3,
+         coreBuiltin The_multiplyDomain_dim3,
+         coreBuiltin The_divideDomain_dim3,
+         coreBuiltin The_multiplyIndex_dim3,
+         coreBuiltin The_divideIndex_dim3,
+         coreBuiltin The_unbounded_dim3])]
   
 
 -- | Create all type constructors
@@ -1306,8 +1334,8 @@ varInitializers =
       , (TheV_range, The_range)
       , (TheV_indices, The_fun_indices)
       , (TheV_len, The_len)
-      {-, (TheV_arrayRange, The_arrayRange)
-      , (TheV_chain, The_chain)
+      , (TheV_arrayRange, The_arrayRange)
+      {-, (TheV_chain, The_chain)
       , (TheV_singletonIter, The_singletonIter)
       , (TheV_width, The_width)
       , (TheV_height, The_height)
@@ -1385,9 +1413,9 @@ varInitializers =
 
       , (TheV_intersection,   TheTC_Shape,           3, "intersection")
       , (TheV_member,         TheTC_Shape,           4, "member")
-      , (TheV_flatten,        TheTC_Shape,           9, "flatten")
-      , (TheV_generate,       TheTC_Shape,           10, "generate")
-      , (TheV_zipWithStream,  TheTC_Shape,           11, "zipWithIter")
+      , (TheV_flatten,        TheTC_Shape,           10, "flatten")
+      , (TheV_generate,       TheTC_Shape,           11, "generate")
+      , (TheV_zipWithStream,  TheTC_Shape,           12, "zipWithIter")
 
       , (TheV_domain,         TheTC_Indexable,       0, "domain")
       --, (TheV_at_point,       TheTC_Indexable,       1, "at_point")
