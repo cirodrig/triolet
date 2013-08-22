@@ -2776,20 +2776,12 @@ arrayDescToDim1 @(N : intindex) (lb : int) (stride : int) (size : FIInt N)
 
 -- Convert a dim1 to the equivalent "size" fields of an array.
 dim1ToArraySize (shp : dim1) -> ArraySize attribute(inline) =
-  case shp of mk_dim1 tyob (iv : Interval) (m : LinearMap).
-  case iv of interval (lb : MaybeVal int) (ub : MaybeVal int).
+  case shp of mk_dim1 tyob (interval lb ub) (linearMap stride alignment).
   case lb of {
     justVal lb_i.
-      case ub of {
-        justVal ub_i.
-          case m of linearMap (stride : int) (alignment : int).
-          let size_i : int = (ub_i -# lb_i) //# stride in
-          case defineIntIndex size_i of
-            someIInt @(N : intindex) (size : FIInt N).
-          arraySize @N lb_i stride size
-      ; nothingVal.
-          except @ArraySize
-      }
+      let size_i = dim1Cardinality shp in
+      case defineIntIndex size_i of someIInt @(N : intindex) (size : FIInt N).
+      arraySize @N lb_i stride size
   ; nothingVal.
       except @ArraySize
   };
@@ -2862,6 +2854,7 @@ con_dim1 (iv : Interval) (lm : LinearMap) -> dim1 attribute(inline) =
   mk_dim1 (boxedinfo mk_dim1) iv lm;
 
 -- A two-dimensional domain.  The cross product of two domains.
+-- The fields are the projections into (y, x).
 data dim2 : box
 {
   mk_dim2 (dim1, dim1);
@@ -2871,6 +2864,7 @@ con_dim2 (x y : dim1) -> dim2 attribute(inline) =
   mk_dim2 (boxedinfo mk_dim2) x y;
 
 -- A three-dimensional domain.  The cross product of three domains.
+-- The fields are the projections into (z, y, x).
 data dim3 : box
 {
   mk_dim3 (dim1, dim1, dim1);
@@ -3092,6 +3086,39 @@ repr_EmptyReference : forall a : bare. Repr a;
 -- This is only used for coercions.  Since we don't have
 -- kind polymorphism, we cheat a bit on the type.
 repr_Coercion : forall a : val. Repr (Stored a);
+
+repr_index2 : Repr (Tuple2 (Stored int) (Stored int)) attribute(inline) =
+  unboxedinfo Tuple2 @(Stored int) @(Stored int) repr_int repr_int;
+
+pack_index2 (y x : int) -> Boxed (Tuple2 (Stored int) (Stored int))
+  attribute(inline) =
+
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+  let sa_tuple = reprSizeAlign @(Tuple2 (Stored int) (Stored int))
+                 (unboxedinfo Tuple2 @(Stored int) @(Stored int)
+                  repr_int repr_int) in
+  con_boxed @(Tuple2 (Stored int) (Stored int)) repr_index2
+  (tuple2 @(Stored int) @(Stored int) sa_int sa_int
+    (stored @int y) (stored @int x));
+
+
+unpack_index2 (idx : Boxed (Tuple2 (Stored int) (Stored int))) -> (int, int)
+  attribute(inline) =
+
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+  let sa_tuple = reprSizeAlign @(Tuple2 (Stored int) (Stored int))
+                 (unboxedinfo Tuple2 @(Stored int) @(Stored int)
+                  repr_int repr_int) in
+  case idx of
+    [sa_tuple] boxed tyob ([sa_int, sa_int] tuple2 (stored y) (stored x)).
+  (y, x);
+
+
+repr_slice2 : Repr (Tuple2 SliceObject SliceObject) =
+  unboxedinfo Tuple2 @SliceObject @SliceObject
+  (unboxedinfo SliceObject)
+  (unboxedinfo SliceObject);
+
 
 -- Wrapper functions to create Repr objects for the frontend
 
@@ -3626,6 +3653,31 @@ viewToArray1 @(a : box)
       arr1D_build @N @a_bare rep size is_parallel
       (\ (i : int) (ret : OutPtr a_bare) -> Store.
        asbare @a_bare rep (visit (boxIntValue (lb +# i *# stride))) ret)
+      ret)));
+
+
+viewToArray2 @(a : box)
+  (rep : ReprBox a) (is_parallel : bool) (vw : view dim2 a)
+  -> Boxed (array2 (AsBare a)) attribute(inline) =
+
+  let type a_bare = AsBare a in
+
+  case vw of mk_view tyob dom visit.
+  case dom of mk_dim2 tyob dom_y dom_x.
+  case dim1ToArraySize dom_y of arraySize @M lb_y stride_y size_y.
+  case dim1ToArraySize dom_x of arraySize @N lb_x stride_x size_x.
+
+  let rep_array = repr_arr @M @(arr N a_bare) size_y
+                  (repr_arr @N @a_bare size_x rep) in
+
+  con_boxed @(array2 a_bare) (unboxedinfo array2 @a_bare)
+  (mk_array2 @a_bare @M @N lb_y stride_y size_y lb_x stride_x size_x
+   (con_stuckBox @(arr M (arr N a_bare)) rep_array
+    (\ (ret : OutPtr (arr M (arr N a_bare))) -> Store.
+      arr2D_build @M @N @a_bare rep size_y size_x is_parallel
+      (\ (y x : int) (ret : OutPtr a_bare) -> Store.
+       let idx = pack_index2 (lb_y +# y *# stride_y) (lb_x +# x *# stride_x) in
+       asbare @a_bare rep (visit idx) ret)
       ret)));
 
 
@@ -4780,6 +4832,248 @@ preserve_array1_real @(a : box) (x : Boxed (array1 (AsBare a)))
   x;
 
 
+Functor_array2 : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))) =
+  functorDict @(\ (a : box). Boxed (array2 (AsBare a)))
+  (boxedinfo functorDict @(\ (a : box). Boxed (array2 (AsBare a))))
+  map_array2;
+
+
+map_array2 @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b)
+  (l : Boxed (array2 (AsBare a)))
+  -> Boxed (array2 (AsBare b)) attribute(inline) =
+
+  build_array2 @b rep_b
+  (map_Stream @dim2 @a @b rep_a rep_b f (traverse_array2 @a rep_a l));
+
+
+Indexable_array2 : IndexableDict (\ (a : box). Boxed (array2 (AsBare a))) =
+  indexableDict @(\ (a : box). Boxed (array2 (AsBare a)))
+  (boxedinfo indexableDict @(\ (a : box). Boxed (array2 (AsBare a))))
+  Functor_array2
+  shape_array2_real
+  at_array2_real
+  slice_array2_real
+  preserve_array2_real;
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+Indexable_array2_2 : IndexableDict (\ (a : box). Boxed (array2 (AsBare a))) =
+  indexableDict @(\ (a : box). Boxed (array2 (AsBare a)))
+  (boxedinfo indexableDict @(\ (a : box). Boxed (array2 (AsBare a))))
+  Functor_array2
+  shape_array2_real
+  at_array2_real
+  slice_array2_real_2
+  preserve_array2_real;
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+Indexable_array2_3 : IndexableDict (\ (a : box). Boxed (array2 (AsBare a))) =
+  indexableDict @(\ (a : box). Boxed (array2 (AsBare a)))
+  (boxedinfo indexableDict @(\ (a : box). Boxed (array2 (AsBare a))))
+  Functor_array2
+  shape_array2_real
+  at_array2_real
+  slice_array2_real_3
+  preserve_array2_real;
+
+
+shape_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
+  -> forall a : box. Boxed (array2 (AsBare a)) -> dim2 =
+  shape_array2_real;
+
+
+shape_array2_real @(a : box) (lst : Boxed (array2 (AsBare a)))
+  -> dim2 attribute(inline) =
+
+  case lst of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
+    boxed tyob (mk_array2 @M @N lb_y stride_y size_y lb_x stride_x size_x ayref).
+
+  con_dim2 (arrayDescToDim1 @M lb_y stride_y size_y)
+           (arrayDescToDim1 @N lb_x stride_x size_x);
+
+
+at_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
+  -> forall a : box.
+     ReprBox a -> Boxed (array2 (AsBare a)) -> BoxIndex dim2 -> a =
+  at_array2_real;
+
+
+at_array2_real @(a : box) (rep : ReprBox a)
+  (lst : Boxed (array2 (AsBare a))) (i : BoxIndex dim2)
+  -> a
+  attribute(inline) =
+
+  case lst of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
+    boxed tyob (mk_array2 @M @N lb_y stride_y size_y lb_x stride_x size_x ayref).
+
+  let type row_type = arr N (AsBare a) in
+  let rep_row = repr_arr @N @(AsBare a) size_x rep in
+  let rep_array = repr_arr @M @row_type size_y rep_row in
+  case ayref of [reprSizeAlign @(arr M row_type) rep_array] stuckBox tyob ay.
+
+  case unpack_index2 i of (y, x).
+  let real_y = (y -# lb_y) //# stride_y in
+  let real_x = (x -# lb_x) //# stride_x in
+
+  bareToBox @(AsBare a) rep
+  (subscript @N @(AsBare a) (reprSizeAlign @(AsBare a) rep)
+   (subscript @M @row_type (reprSizeAlign @row_type rep_row) ay real_y) real_x);
+
+
+slice_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
+  -> forall a : box. ReprBox a -> Boxed (array2 (AsBare a)) -> dim2 ->
+     Boxed (Stored NoneType) -> SomeIndexable dim2 a attribute(inline) =
+  slice_array2_real;
+
+
+slice_array2_real @(a : box) (rep : ReprBox a)
+  (lst : Boxed (array2 (AsBare a))) (d : dim2) (off : Boxed (Stored NoneType))
+  -> SomeIndexable dim2 a attribute(inline) =
+
+  case lst of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
+    boxed tyob (mk_array2 @M @N lb_y stride_y size_y lb_x stride_x size_x ayref).
+
+  let sa_a = reprSizeAlign @(AsBare a) rep in
+  let type row_type = arr N (AsBare a) in
+  let rep_row = repr_arr @N @(AsBare a) size_x rep in
+  let rep_array = repr_arr @M @row_type size_y rep_row in
+  case ayref of [reprSizeAlign @(arr M row_type) rep_array] stuckBox tyob ay.
+
+  case d of mk_dim2 tyob d_y d_x.
+  case dim1ToArraySize d_y of arraySize @Mslice slice_lb_y slice_stride_y slice_size_y.
+  case dim1ToArraySize d_x of arraySize @Nslice slice_lb_x slice_stride_x slice_size_x.
+
+  -- TODO: Use an array section if possible to avoid copying
+  -- Copy the array subset into a new array
+  let new_arr = build_array2 @a rep
+                (traverse_view_real @dim2 @a ShapeDict_dim2 rep
+                 (con_view @dim2 @a d
+                  (\ (b_ix : BoxIndex dim2) -> a.
+                     case unpack_index2 b_ix of (y, x).
+                     let real_y = (y -# lb_y) //# stride_y in
+                     let real_x = (x -# lb_x) //# stride_x in
+                     bareToBox @(AsBare a) rep
+                     (subscript @N @(AsBare a) (reprSizeAlign @(AsBare a) rep)
+                      (subscript @M @row_type (reprSizeAlign @row_type rep_row) ay real_y) real_x)))) in
+
+  con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
+  (idCoercion @dim2) Indexable_array2_2 new_arr;
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+slice_array2_real_2 @(a : box) (rep : ReprBox a)
+  (lst : Boxed (array2 (AsBare a))) (d : dim2) (off : Boxed (Stored NoneType))
+  -> SomeIndexable dim2 a attribute(inline) =
+
+  case lst of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
+    boxed tyob (mk_array2 @M @N lb_y stride_y size_y lb_x stride_x size_x ayref).
+
+  let sa_a = reprSizeAlign @(AsBare a) rep in
+  let type row_type = arr N (AsBare a) in
+  let rep_row = repr_arr @N @(AsBare a) size_x rep in
+  let rep_array = repr_arr @M @row_type size_y rep_row in
+  case ayref of [reprSizeAlign @(arr M row_type) rep_array] stuckBox tyob ay.
+
+  case d of mk_dim2 tyob d_y d_x.
+  case dim1ToArraySize d_y of arraySize @Mslice slice_lb_y slice_stride_y slice_size_y.
+  case dim1ToArraySize d_x of arraySize @Nslice slice_lb_x slice_stride_x slice_size_x.
+
+  -- TODO: Use an array section if possible to avoid copying
+  -- Copy the array subset into a new array
+  let new_arr = build_array2 @a rep
+                (traverse_view_real @dim2 @a ShapeDict_dim2 rep
+                 (con_view @dim2 @a d
+                  (\ (b_ix : BoxIndex dim2) -> a.
+                     case unpack_index2 b_ix of (y, x).
+                     let real_y = (y -# lb_y) //# stride_y in
+                     let real_x = (x -# lb_x) //# stride_x in
+                     bareToBox @(AsBare a) rep
+                     (subscript @N @(AsBare a) (reprSizeAlign @(AsBare a) rep)
+                      (subscript @M @row_type (reprSizeAlign @row_type rep_row) ay real_y) real_x)))) in
+
+  con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
+  (idCoercion @dim2) Indexable_array2_3 new_arr;
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+slice_array2_real_3 @(a : box) (rep : ReprBox a)
+  (lst : Boxed (array2 (AsBare a))) (d : dim2) (off : Boxed (Stored NoneType))
+  -> SomeIndexable dim2 a attribute(inline_never) =
+
+  case lst of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
+    boxed tyob (mk_array2 @M @N lb_y stride_y size_y lb_x stride_x size_x ayref).
+
+  let sa_a = reprSizeAlign @(AsBare a) rep in
+  let type row_type = arr N (AsBare a) in
+  let rep_row = repr_arr @N @(AsBare a) size_x rep in
+  let rep_array = repr_arr @M @row_type size_y rep_row in
+  case ayref of [reprSizeAlign @(arr M row_type) rep_array] stuckBox tyob ay.
+
+  case d of mk_dim2 tyob d_y d_x.
+  case dim1ToArraySize d_y of arraySize @Mslice slice_lb_y slice_stride_y slice_size_y.
+  case dim1ToArraySize d_x of arraySize @Nslice slice_lb_x slice_stride_x slice_size_x.
+
+  -- TODO: Use an array section if possible to avoid copying
+  -- Copy the array subset into a new array
+  let new_arr = build_array2 @a rep
+                (traverse_view_real @dim2 @a ShapeDict_dim2 rep
+                 (con_view @dim2 @a d
+                  (\ (b_ix : BoxIndex dim2) -> a.
+                     case unpack_index2 b_ix of (y, x).
+                     let real_y = (y -# lb_y) //# stride_y in
+                     let real_x = (x -# lb_x) //# stride_x in
+                     bareToBox @(AsBare a) rep
+                     (subscript @N @(AsBare a) (reprSizeAlign @(AsBare a) rep)
+                      (subscript @M @row_type (reprSizeAlign @row_type rep_row) ay real_y) real_x)))) in
+
+  con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
+  (idCoercion @dim2) Indexable_array2_3 new_arr;
+
+
+preserve_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
+  -> forall a : box. Boxed (array2 (AsBare a)) -> Boxed (array2 (AsBare a)) =
+  preserve_array2_real;
+
+
+Traversable_array2 : TraversableDict (\ (a : box). Boxed (array2 (AsBare a))) =
+  traversableDict @(\ (a : box). Boxed (array2 (AsBare a)))
+  (boxedinfo traversableDict @(\ (a : box). Boxed (array2 (AsBare a))))
+  traverse_array2 build_array2;
+
+
+traverse_array2 @(a : box) (rep : ReprBox a) (lst : Boxed (array2 (AsBare a)))
+  -> Stream dim2 a =
+
+  con_stream @dim2 @a hintAny
+  (con_ixStream @dim2 @a
+   (con_rStream @dim2 @a @a rep (\ (x : a) -> a. x)
+    (con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
+     (idCoercion @dim2)
+     Indexable_array2 lst)));
+
+
+build_array2 @(a : box) (rep : ReprBox a) (s : Stream dim2 a)
+  -> Boxed (array2 (AsBare a)) attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case fromIxStream @dim2 @a i_s of rStream @b tyob rep_b f si.
+  tabulate_array2 @b @a rep_b rep par_hint f si;
+
+
+-- There is no advantage to disabling optimization on array2s
+preserve_array2_real @(a : box) (x : Boxed (array2 (AsBare a)))
+  -> Boxed (array2 (AsBare a)) attribute(inline) =
+  x;
+
+
+
 llistLength @(a : box) (rep_a : ReprBox a) (l : llist (AsBare a)) -> int
   attribute(inline) =
 
@@ -5722,6 +6016,34 @@ tabulate_array1_seq @(a b : box)
    rep_a rep_b f (someIndexableToView @dim1 @a rep_a s));
 
 
+tabulate_array2 @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (par_hint : ParHint)
+  (f : a -> b) (s : SomeIndexable dim2 a) -> Boxed (array2 (AsBare b))
+  attribute(inline, inline_sequential) =
+
+  letfun do_seq (dummy : NoneType) -> Boxed (array2 (AsBare b)) =
+    tabulate_array2_seq @a @b rep_a rep_b f s
+  in
+
+  case par_hint of {
+    hintAny. do_seq None
+  ; hintSeq. do_seq None
+  ; hintLocalPar. tabulate_array2_localpar @a @b rep_a rep_b f s
+  ; hintPar. tabulate_array2_localpar @a @b rep_a rep_b f s
+  };
+
+
+tabulate_array2_seq @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : SomeIndexable dim2 a) -> Boxed (array2 (AsBare b))
+  attribute(inline, inline_sequential) =
+
+  viewToArray2 @b rep_b False
+  (map_view @dim2 @a @b
+   rep_a rep_b f (someIndexableToView @dim2 @a rep_a s));
+
+
 reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (par_hint : ParHint)
@@ -5782,6 +6104,16 @@ tabulate_array1_localpar @(a b : box)
   viewToArray1 @b rep_b True
   (map_view @dim1 @a @b
    rep_a rep_b f (someIndexableToView @dim1 @a rep_a s));
+
+
+tabulate_array2_localpar @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : SomeIndexable dim2 a) -> Boxed (array2 (AsBare b))
+  attribute(inline, inline_sequential) =
+
+  viewToArray2 @b rep_b True
+  (map_view @dim2 @a @b
+   rep_a rep_b f (someIndexableToView @dim2 @a rep_a s));
 
 
 reduce_loop_localpar @(d : box) @(a b : box) (sh : ShapeDict d)
@@ -8114,338 +8446,409 @@ foreach_dim1
   go lo init;
 
 
-{-
-
-ShapeDict_dim1_flatten @(a : box)
-  (rep : Repr (AsBare a)) (s : Stream dim1 a) -> Stream list_dim a
-  attribute(inline, inline_dimensionality) =
-  case s of mk_view tyob dom f.
-
-  -- Compute the size of the list
-  case dom of mk_dim1 tyob (interval lb ub) (linearMap stride alignment).
-  case case lb of {
-         justVal lb_i.
-           case ub of {
-             justVal ub_i.
-               -- Bounded list
-               (justVal @int ((ub_i -# lb_i) //# stride),
-                linearMap stride lb_i)
-           ; nothingVal.
-               -- Unbounded list
-               (nothingVal @int,
-                linearMap stride lb_i)
-         }
-       ; nothingVal. except @(MaybeVal int, LinearMap)
-       } of
-    (list_size : MaybeVal int, list_map : LinearMap).
-
-  con_viewStream @a
-  (view_generate @list_dim
-   ShapeDict_list_dim @a
-   rep (con_list_dim list_size)
-   (\ (ix : Boxed (Stored int)) -> a.
-      let ix_u = unboxIntValue ix in
-      let ix2 = boxIntValue (evalLM ix_u list_map) in
-      f ix2));
-
-
-ShapeDict_dim1_generate @(a : box)
-  (rep : Repr (AsBare a)) (dom : dim1) (f : AsBox (index dim1) -> a)
-  -> Stream dim1 a attribute(inline) =
-  view_generate @dim1
-  ShapeDict_dim1 @a rep dom f;
-
-
-ShapeDict_dim1_map @(a b : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (transformer : a -> b)
-  (s : Stream dim1 a)
-  -> Stream dim1 b attribute(inline) =
-  view_map @dim1
-  ShapeDict_dim1 @a @b repr_a repr_b transformer s;
-
-
-ShapeDict_dim1_zipWith @(a b c : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c))
-  (transformer : a -> b -> c)
-  (sa : Stream dim1 a)
-  (sb : Stream dim1 b)
-  -> Stream dim1 c attribute(inline) =
-  view_zipWith @dim1 ShapeDict_dim1 @a @b @c
-  repr_a repr_b repr_c transformer sa sb;
-
-
-ShapeDict_dim1_zipWith3 @(a b c d : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d))
-  (transformer : a -> b -> c -> d)
-  (sa : Stream dim1 a)
-  (sb : Stream dim1 b)
-  (sc : Stream dim1 c)
-  -> Stream dim1 d attribute(inline) =
-  view_zipWith3 @dim1 ShapeDict_dim1 @a @b @c @d
-  repr_a repr_b repr_c repr_d transformer sa sb sc;
-
-
-ShapeDict_dim1_zipWith4 @(a b c d e : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d))
-  (repr_e : Repr (AsBare e))
-  (transformer : a -> b -> c -> d -> e)
-  (sa : Stream dim1 a)
-  (sb : Stream dim1 b)
-  (sc : Stream dim1 c)
-  (sd : Stream dim1 d)
-  -> Stream dim1 e attribute(inline) =
-  view_zipWith4 @dim1 ShapeDict_dim1 @a @b @c @d @e
-  repr_a repr_b repr_c repr_d repr_e transformer sa sb sc sd;
-
-
-ShapeDict_dim1_slice @(t : box -> box) @(a : box)
-  (is_dim1 : coerce @box (shape t) dim1)
-  (indexable : IndexableDict t)
-  (rep : Repr (AsBare a))
-  (container : t a)
-  (slice_argument : AsBox (slice dim1))
-  -> view dim1 a attribute(inline) =
-  case indexable of indexableDict tyob at_index get_shape.
-
-  -- Compute the slice's domain
-  let dom : dim1 = coerce @(shape t) @dim1 (get_shape @a container) in
-  case slice_argument of [reprSizeAlign @SliceObject (unboxedinfo SliceObject)]
-    boxed tyob u_slice_argument.
-  let slice_dom = internalApplyArraySlice u_slice_argument dom in
-
-  view_generate @dim1
-  ShapeDict_dim1 @a rep slice_dom
-  (\ (i : AsBox (index dim1)) -> a.
-    at_index @a rep container (coerce @(AsBox (index dim1)) @(AsBox (index (shape t))) i));
--}
-
-{- REPLACED BY NEW STREAM CODE
-
 ShapeDict_dim2 : ShapeDict dim2 =
   shapeDict @dim2 (boxedinfo shapeDict @dim2)
   repr_index2
+  repr_NoneType
   repr_slice2
-  ShapeDict_dim2_member
-  ShapeDict_dim2_intersect
-  ShapeDict_dim2_flatten
-  ShapeDict_dim2_generate
-  ShapeDict_dim2_map
-  ShapeDict_dim2_zipWith
-  ShapeDict_dim2_zipWith3
-  ShapeDict_dim2_zipWith4
-  ShapeDict_dim2_slice;
+  real_noOffset_dim2
+  real_addOffset_dim2
+  real_appOffset_dim2
+  real_intersect_dim2
+  real_member_dim2
+  real_slice_dim2
+  real_split_dim2
+  real_splitN_dim2
+  real_checkSubdomain_dim2
+  real_peel_dim2
+  real_flatten_dim2
+  real_generate_dim2
+  real_zipWith_dim2
+  real_fold_dim2
+  real_imp_fold_dim2_wrapper
+  real_foreach_dim2_wrapper;
 
-repr_index2 : Repr (Tuple2 (Stored int) (Stored int)) =
-  unboxedinfo Tuple2 @(Stored int) @(Stored int) repr_int repr_int;
+-- FIXME: Handle recursion properly
+-- This function is needed to break a recursive cycle
+ShapeDict_dim2_loop_breaker (dummy : NoneType)
+  -> ShapeDict dim2 attribute(inline_never) =
+  ShapeDict_dim2;
 
-repr_slice2 : Repr (Tuple2 SliceObject SliceObject) =
-  unboxedinfo Tuple2 @SliceObject @SliceObject
-  (unboxedinfo SliceObject)
-  (unboxedinfo SliceObject);
 
-ShapeDict_dim2_member (dom : dim2) (ix : AsBox (index dim2))
-  -> Boxed (Stored bool) =
-  -- Take the conjunction of x and y membership conditions
+imp_fold_dim2_wrapper
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> ImperativeFoldFunction dim2 attribute(inline) =
+  real_imp_fold_dim2_wrapper;
+
+
+real_imp_fold_dim2_wrapper : ImperativeFoldFunction dim2 attribute(inline) =
+  imperativeFoldFunction @dim2 imp_fold_dim2;
+
+
+foreach_dim2_wrapper
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> ImperativeForeachFunction dim2 attribute(inline) =
+  real_foreach_dim2_wrapper;
+
+
+real_foreach_dim2_wrapper : ImperativeForeachFunction dim2 attribute(inline) =
+  imperativeForeachFunction @dim2 foreach_dim2;
+
+
+noOffset_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> Boxed (Stored NoneType) attribute(inline) =
+  real_noOffset_dim2;
+
+
+real_noOffset_dim2 : Boxed (Stored NoneType) attribute(inline) =
+  boxNoneValue None;
+
+
+addOffset_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> BoxOffset dim2 -> BoxOffset dim2 -> BoxOffset dim2 attribute(inline) =
+  real_addOffset_dim2;
+
+
+real_addOffset_dim2 (x y : BoxOffset dim2) -> BoxOffset dim2 = x;
+
+
+appOffset_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> BoxOffset dim2 -> BoxIndex dim2 -> BoxIndex dim2 attribute(inline) =
+  real_appOffset_dim2;
+
+
+real_appOffset_dim2 (x : BoxOffset dim2) (y : BoxIndex dim2) -> BoxIndex dim2 = y;
+
+
+intersect_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> dim2 -> dim2 -> dim2 attribute(inline) =
+  real_intersect_dim2;
+
+real_intersect_dim2 (d e : dim2) -> dim2 attribute(inline, inline_final) =
+  case d of mk_dim2 tyob d_y d_x.
+  case e of mk_dim2 tyob e_y e_x.
+  con_dim2 (real_intersect_dim1 d_y e_y) (real_intersect_dim1 d_x e_x);
+
+
+member_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> BoxIndex dim2 -> dim2 -> bool attribute(inline) =
+  real_member_dim2;
+
+
+real_member_dim2 (ix : Boxed (Tuple2 (Stored int) (Stored int))) (dom : dim2)
+  -> bool attribute(inline) =
+
+  let rep_tuple = unboxedinfo Tuple2 @(Stored int) @(Stored int) repr_int repr_int in
+  let sa_tuple = reprSizeAlign @(Tuple2 (Stored int) (Stored int)) rep_tuple in
   let sa_int = reprSizeAlign @(Stored int) repr_int in
-  case dom of mk_dim2 tyob (dom_y : dim1) (dom_x : dim1).
-  case ix of [reprSizeAlign @(index dim2) repr_index2]
-    boxed tyob ([sa_int, sa_int] tuple2 (stored u_ix_y) (stored u_ix_x)).
-  if unboxBoolValue (ShapeDict_dim1_member dom_y (boxIntValue u_ix_y))
-  then ShapeDict_dim1_member dom_x (boxIntValue u_ix_x)
-  else boxBoolValue False;
-
-
-ShapeDict_dim2_intersect (domA : dim2) (domB : dim2) -> dim2 =
-  -- Take the intersection in each dimension
-  case domA of mk_dim2 tyob (domA_y : dim1) (domA_x : dim1).
-  case domB of mk_dim2 tyob (domB_y : dim1) (domB_x : dim1).
-  con_dim2 (real_intersect_dim1 domA_y domB_y)
-           (real_intersect_dim1 domA_x domB_x);
-
-
-ShapeDict_dim2_generate @(a : box)
-  (rep : Repr (AsBare a)) (dom : dim2) (f : AsBox (index dim2) -> a)
-  -> Stream dim2 a attribute(inline) =
-  view_generate @dim2 ShapeDict_dim2 @a rep dom f;
-
-
-ShapeDict_dim2_flatten_helper
-  (iv_y : Interval)
-  (iv_x : Interval)
-  (stride_y : int)
-  (stride_x : int)
-  -> (list_dim, MaybeVal int, int, int)
-  attribute(inline, inline_final) =
-
-  case iv_x of interval (lb_x : MaybeVal int) (ub_x : MaybeVal int).
-  case iv_y of interval (lb_y : MaybeVal int) (ub_y : MaybeVal int).
-
-  -- Lower bound must be finite
-  case lb_x of {
-    justVal (lb_x_i : int).
-      case ub_x of {
-        justVal (ub_x_i : int).
-          -- Domain has finite x extent
-          let count_x : int = (ub_x_i -# lb_x_i) //# stride_x in
-
-          case lb_y of {
-            justVal (lb_y_i : int).
-
-              -- Compute the number of points in the domain
-              let list_size : MaybeVal int =
-                    case ub_y of {
-                      justVal (ub_y_i : int).
-                        -- Domain is bounded on all sides
-                        let count_y : int = (ub_y_i -# lb_y_i) //# stride_y in
-                        justVal @int (count_x *# count_y)
-                    ; nothingVal.
-
-                        -- Domain is unbounded in the y-dimension
-                        nothingVal @int
-                    } in
-
-              (con_list_dim list_size, justVal @int count_x, lb_y_i, lb_x_i)
-            ; nothingVal.
-                except @(list_dim, MaybeVal int, int, int)
-            }
-
-      ; nothingVal.
-          -- Domain has infinite x extent
-          case lb_y of {
-            justVal (lb_y_i : int).
-              (con_list_dim (nothingVal @int), nothingVal @int, lb_y_i, lb_x_i)
-
-          ; nothingVal.
-              except @(list_dim, MaybeVal int, int, int)
-          }
-      }
-
-  ; nothingVal.
-      except @(list_dim, MaybeVal int, int, int)
-  };
-
-
-ShapeDict_dim2_flatten_helper2 (i : int) (divisor : MaybeVal int) -> (int, int)
-  attribute(inline, inline_final) =
-  case divisor of {
-    justVal (count_x : int). (i //# count_x, i %# count_x)
-  ; nothingVal. (0, i)
-  };
-
-ShapeDict_dim2_flatten @(a : box)
-  (rep : Repr (AsBare a)) (s : Stream dim2 a) -> Stream list_dim a
-  attribute(inline, inline_dimensionality) =
-  case s of mk_view tyob (mk_dim2 tyob2 dom_y dom_x) f.
-  case dom_x of mk_dim1 tyob iv_x lm_x.
-  case dom_y of mk_dim1 tyob iv_y lm_y.
-  case iv_x of interval lb_x ub_x.
-  case iv_y of interval lb_y ub_y.
-  case lm_x of linearMap stride_x alignment_x.
-  case lm_y of linearMap stride_y alignment_y.
-
-  -- Compute stream dimensions and indices
-  case ShapeDict_dim2_flatten_helper iv_y iv_x stride_y stride_x
-  of (flattened_size : list_dim, divisor : MaybeVal int, lb_y_i : int, lb_x_i : int).
-
-  con_viewStream @a
-  (con_view @list_dim @a flattened_size
-   (\ (bi : Boxed (Stored int)) -> a.
-      -- Linearize the index
-      let i = unboxIntValue bi in
-      case ShapeDict_dim2_flatten_helper2 i divisor
-      of (i_y : int, i_x : int).
-
-      -- Apply the stride to get an index in the domain
-      let dim2_i_y : int = lb_y_i +# i_y *# stride_y in 
-      let dim2_i_x : int = lb_x_i +# i_x *# stride_x in 
-
-      let type index2d = Tuple2 (Stored int) (Stored int) in
-      let sa_int = reprSizeAlign @(Stored int) repr_int in
-      let ix2 = con_boxed @index2d
-                (unboxedinfo Tuple2 @(Stored int) @(Stored int) repr_int repr_int)
-                (tuple2 @(Stored int) @(Stored int) sa_int sa_int
-                 (stored @int dim2_i_y) (stored @int dim2_i_x)) in
-      f ix2));
-
-
-ShapeDict_dim2_map @(a b : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (transformer : a -> b)
-  (s : Stream dim2 a)
-  -> Stream dim2 b attribute(inline) =
-  view_map @dim2
-  ShapeDict_dim2 @a @b repr_a repr_b transformer s;
-
-
-ShapeDict_dim2_zipWith @(a b c : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b)) (repr_c : Repr (AsBare c))
-  (transformer : a -> b -> c)
-  (sa : Stream dim2 a)
-  (sb : Stream dim2 b)
-  -> Stream dim2 c attribute(inline) =
-  view_zipWith @dim2 ShapeDict_dim2 @a @b @c
-  repr_a repr_b repr_c transformer sa sb;
-
-
-ShapeDict_dim2_zipWith3 @(a b c d : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d))
-  (transformer : a -> b -> c -> d)
-  (sa : Stream dim2 a)
-  (sb : Stream dim2 b)
-  (sc : Stream dim2 c)
-  -> Stream dim2 d attribute(inline) =
-  view_zipWith3 @dim2 ShapeDict_dim2 @a @b @c @d
-  repr_a repr_b repr_c repr_d transformer sa sb sc;
-
-
-ShapeDict_dim2_zipWith4 @(a b c d e : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d))
-  (repr_e : Repr (AsBare e))
-  (transformer : a -> b -> c -> d -> e)
-  (sa : Stream dim2 a)
-  (sb : Stream dim2 b)
-  (sc : Stream dim2 c)
-  (sd : Stream dim2 d)
-  -> Stream dim2 e attribute(inline) =
-  view_zipWith4 @dim2 ShapeDict_dim2 @a @b @c @d @e
-  repr_a repr_b repr_c repr_d repr_e transformer sa sb sc sd;
-
-
-ShapeDict_dim2_slice @(t : box -> box) @(a : box)
-  (is_dim2 : coerce @box (shape t) dim2)
-  (indexable : IndexableDict t)
-  (rep : Repr (AsBare a))
-  (container : t a)
-  (slice_argument : AsBox (slice dim2))
-  -> view dim2 a attribute(inline) =
-  case indexable of indexableDict tyob at_index get_shape.
-
-  -- Compute the slice's domain
-  let rep_slice = unboxedinfo SliceObject in
-  let rep_tuple = unboxedinfo Tuple2 @SliceObject @SliceObject rep_slice rep_slice in
-  let sa_tuple = reprSizeAlign @(Tuple2 SliceObject SliceObject) rep_tuple in
-  let sa_slice = reprSizeAlign @SliceObject rep_slice in
-  case slice_argument of [sa_tuple]
-    boxed tyob ([sa_slice, sa_slice] tuple2 slice_y slice_x).
-
-  let dom : dim2 = coerce @(shape t) @dim2 (get_shape @a container) in
+  case ix of [sa_tuple] boxed tyob ([sa_int, sa_int] tuple2 (stored ix_y) (stored ix_x)).
   case dom of mk_dim2 tyob dom_y dom_x.
-  let slice_dom : dim2 =
-        con_dim2 (internalApplyArraySlice slice_y dom_y)
-                 (internalApplyArraySlice slice_x dom_x) in
 
-  view_generate @dim2
-  ShapeDict_dim2 @a rep slice_dom
-  (\ (i : AsBox (index dim2)) -> a.
-    at_index @a rep container
-    (coerce @(AsBox (index dim2)) @(AsBox (index (shape t))) i));
+  -- Point must be a member in both projections
+  if real_member_dim1 (boxIntValue ix_y) dom_y
+  then real_member_dim1 (boxIntValue ix_x) dom_x
+  else False;
 
+
+slice_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> BoxSlice dim2 -> dim2 -> (BoxOffset dim2, dim2) attribute(inline) =
+  real_slice_dim2;
+
+
+real_slice_dim2 (s : BoxSlice dim2) (d : dim2)
+  -> (BoxOffset dim2, dim2) attribute(inline) =
+  let sa_slice = reprSizeAlign @SliceObject (unboxedinfo SliceObject) in
+  case s of [reprSizeAlign @(Tuple2 SliceObject SliceObject) repr_slice2]
+            boxed tyob ([sa_slice, sa_slice] tuple2 slice_y slice_x).
+  case d of mk_dim2 tyob d_y d_x.
+  let new_d = con_dim2 (internalApplyArraySlice slice_y d_y) (internalApplyArraySlice slice_x d_x) in
+  (boxNoneValue None, new_d);
+
+
+split_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> dim2 -> MaybeVal (dim2, Boxed (Stored NoneType), dim2) attribute(inline) =
+  real_split_dim2;
+
+
+real_split_dim2 (d : dim2)
+  -> MaybeVal (dim2, Boxed (Stored NoneType), dim2)
+  attribute(inline, inline_final) =
+
+  case d of mk_dim2 tyob d_y d_x.
+
+  -- Split along larger dimension
+  if dim1Cardinality d_x >=# dim1Cardinality d_y
+  then
+    case real_split_dim1 d_x of {
+      justVal (l, off, r).
+        justVal @(dim2, Boxed (Stored NoneType), dim2)
+        (con_dim2 d_y l, off, con_dim2 d_y r)
+    ; nothingVal.
+        nothingVal @(dim2, Boxed (Stored NoneType), dim2)
+    }
+  else
+    case real_split_dim1 d_y of {
+      justVal (l, off, r).
+        justVal @(dim2, Boxed (Stored NoneType), dim2)
+        (con_dim2 l d_x, off, con_dim2 r d_x)
+    ; nothingVal.
+        nothingVal @(dim2, Boxed (Stored NoneType), dim2)
+    };
+
+
+splitN_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> int -> dim2 -> view list_dim (Subdomain dim2) attribute(inline) =
+  real_splitN_dim2;
+
+
+real_splitN_dim2 (n : int) (dom : dim2)
+  -> view list_dim (Subdomain dim2) attribute(inline) =
+
+  case dom of mk_dim2 tyob d_y d_x.
+
+  -- Split along larger dimension
+  if dim1Cardinality d_x >=# dim1Cardinality d_y
+  then
+    let split_along_x = real_splitN_dim1 n d_x in
+    map_view @list_dim @(Subdomain dim1) @(Subdomain dim2)
+    (repr_Box @(Subdomain dim1)) (repr_Box @(Subdomain dim2))
+    (\ (subd : Subdomain dim1) -> Subdomain dim2.
+       case subd of subdomain tyob off subd_x.
+       con_subdomain @dim2 off (con_dim2 d_y subd_x))
+    split_along_x
+  else
+    let split_along_y = real_splitN_dim1 n d_y in
+    map_view @list_dim @(Subdomain dim1) @(Subdomain dim2)
+    (repr_Box @(Subdomain dim1)) (repr_Box @(Subdomain dim2))
+    (\ (subd : Subdomain dim1) -> Subdomain dim2.
+       case subd of subdomain tyob off subd_y.
+       con_subdomain @dim2 off (con_dim2 subd_y d_x))
+    split_along_y;
+
+
+checkSubdomain_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> dim2 -> dim2 -> bool attribute(inline) =
+  real_checkSubdomain_dim2;
+
+
+real_checkSubdomain_dim2
+  (d subd : dim2) -> bool attribute(inline) =
+
+  case d of mk_dim2 tyob d_y d_x.
+  case subd of mk_dim2 tyob subd_y subd_x.
+
+  if real_checkSubdomain_dim1 d_y subd_y
+  then real_checkSubdomain_dim1 d_x subd_x
+  else False;
+
+
+peel_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+   -> forall a r : box.
+      ReprBox a -> Boxed (Stored ParHint) ->
+      (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
+      view dim2 (Stream list_dim a) -> r attribute(inline) =
+  real_peel_dim2;
+
+
+real_peel_dim2 @(a r : box)
+  (rep_a : ReprBox a) (par_hint : Boxed (Stored ParHint))
+  (value_k : a -> Stream list_dim a -> r) (empty_k : NoneType -> r)
+  (vw : view dim2 (Stream list_dim a))
+  -> r attribute(inline, inline_sequential) =
+
+  -- TODO
+  except @r;
+
+
+flatten_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> forall a : box. Stream dim2 a -> Stream list_dim a attribute(inline) =
+  real_flatten_dim2;
+
+
+real_flatten_dim2 @(a : box) (s : Stream dim2 a)
+  -> Stream list_dim a attribute(inline) =
+
+  -- Flatten by creating a splittable stream
+  case s of stream tyob par_hint i_s.
+  let rs = fromIxStream @dim2 @a i_s in
+  con_stream @list_dim @a par_hint
+  (con_splittableStream @a @dim2
+   (ShapeDict_dim2_loop_breaker None)
+   (map_RStream @dim2 @a @(Stream list_dim a) (unit_Stream @a) rs));
+
+
+generate_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> forall a : box.
+     Repr (AsBare a) -> BoxOffset dim2 -> dim2 ->
+     (BoxIndex dim2 -> a) -> Stream dim2 a
+  attribute(inline) =
+  real_generate_dim2;
+
+
+real_generate_dim2 @(a : box)
+  (rep_a : ReprBox a)
+  (off : BoxOffset dim2) (dom : dim2) (g : BoxIndex dim2 -> a)
+  -> Stream dim2 a attribute(inline) =
+
+  -- Create and traverse a view.
+  -- The offset is always None, so ignore it.
+  let vw = con_view @dim2 @a dom g in
+  traverse_view_real @dim2 @a (ShapeDict_dim2_loop_breaker None) rep_a vw;
+
+
+zipWith_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> forall a b c : box.
+     Repr (AsBare a) -> Repr (AsBare b) -> Repr (AsBare c) ->
+     (a -> b -> c) ->
+     Stream dim2 a -> Stream dim2 b -> Stream dim2 c
+  attribute(inline) =
+  real_zipWith_dim2;
+
+
+real_zipWith_dim2 @(a b c : box)
+  (rep_a : ReprBox a)
+  (rep_b : ReprBox b)
+  (rep_c : ReprBox c)
+  (f : a -> b -> c)
+  (s1 : Stream dim2 a)
+  (s2 : Stream dim2 b)
+  -> Stream dim2 c
+  attribute(inline) =
+
+  case s1 of stream tyob par_hint1 i_s1.
+  let rs1 = fromIxStream @dim2 @a i_s1 in
+  case s2 of stream tyob par_hint2 i_s2.
+  let rs2 = fromIxStream @dim2 @b i_s2 in
+
+  let par_hint = leastParHint par_hint1 par_hint2 in
+
+  con_stream @dim2 @c par_hint
+  (con_ixStream @dim2 @c
+   (zipWith_RStream @dim2 @a @b @c
+    (ShapeDict_dim2_loop_breaker None) rep_a rep_b rep_c f rs1 rs2));
+
+
+fold_dim2
+  (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
+  -> forall a acc : box.
+     Repr (AsBare a) -> Repr (AsBare acc) ->
+     (a -> acc -> acc) -> Stream dim2 a -> acc -> acc
+  attribute(inline) =
+
+  real_fold_dim2;
+
+
+real_fold_dim2 @(a acc : box)
+  (rep_a : ReprBox a)
+  (rep_acc : ReprBox acc)
+  (combine : a -> acc -> acc)
+  (s : Stream dim2 a)
+  (init : acc)
+  -> acc
+  attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case rStreamToView @dim2 @a rep_a (fromIxStream @dim2 @a i_s) of
+    mk_view tyob dom get.
+
+  -- Loop over the elements of the domain
+  case dom of mk_dim2 tyob dom_y dom_x.
+  case dom_y of mk_dim1 tyob (interval m_lo_y m_hi_y) (linearMap stride_y alignment_y).
+  case dom_x of mk_dim1 tyob (interval m_lo_x m_hi_x) (linearMap stride_x alignment_x).
+  let lo_y = case m_lo_y of {justVal n. n; nothingVal. except @int} in
+  let hi_y = case m_hi_y of {justVal n. n; nothingVal. except @int} in
+  let lo_x = case m_lo_x of {justVal n. n; nothingVal. except @int} in
+  let hi_x = case m_hi_x of {justVal n. n; nothingVal. except @int} in
+
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+
+  letfun {
+    go2 (y x : int) (accumulator : acc) -> acc =
+      if x <# hi_x
+      then let idx = con_boxed @(Tuple2 (Stored int) (Stored int))
+                     repr_index2
+                     (tuple2 @(Stored int) @(Stored int) sa_int sa_int
+                       (stored @int y) (stored @int x)) in
+           go2 y (x +# stride_x) (combine (get idx) accumulator)
+      else accumulator
+
+  ; go1 (y : int) (accumulator : acc) -> acc =
+      if y <# hi_y
+      then let accumulator2 = go2 y lo_x accumulator in
+           go1 (y +# stride_y) accumulator2
+      else accumulator
+  } in
+  go1 lo_y init;
+
+
+imp_fold_dim2 @(a : box)
+  (rep_a : ReprBox a)
+  (combine : a -> Store -> Store)
+  (s : Stream dim2 a)
+  (init : Store)
+  -> Store
+  attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case rStreamToView @dim2 @a rep_a (fromIxStream @dim2 @a i_s) of
+    mk_view tyob dom get.
+
+  foreach_dim2 dom (boxNoneValue None)
+  (\ (i : BoxIndex dim2) (s : Store) -> Store. combine (get i) s)
+  init;
+
+
+foreach_dim2
+  (dom : dim2)
+  (off : BoxOffset dim2)
+  (combine : BoxIndex dim2 -> Store -> Store)
+  (init : Store)
+  -> Store attribute(inline) =
+
+  -- Loop over the elements of the domain
+  case dom of mk_dim2 tyob dom_y dom_x.
+  case dom_y of mk_dim1 tyob (interval m_lo_y m_hi_y) (linearMap stride_y alignment_y).
+  case dom_x of mk_dim1 tyob (interval m_lo_x m_hi_x) (linearMap stride_x alignment_x).
+  let lo_y = case m_lo_y of {justVal n. n; nothingVal. except @int} in
+  let hi_y = case m_hi_y of {justVal n. n; nothingVal. except @int} in
+  let lo_x = case m_lo_x of {justVal n. n; nothingVal. except @int} in
+  let hi_x = case m_hi_x of {justVal n. n; nothingVal. except @int} in
+
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+
+  letfun {
+    go2 (y x : int) (state : Store) -> Store =
+      if x <# hi_x
+      then let idx = con_boxed @(Tuple2 (Stored int) (Stored int))
+                     repr_index2
+                     (tuple2 @(Stored int) @(Stored int) sa_int sa_int
+                       (stored @int y) (stored @int x)) in
+           go2 y (x +# stride_x) (combine idx state)
+      else state
+
+  ; go1 (y : int) (state : Store) -> Store =
+      if y <# hi_y
+      then let state2 = go2 y lo_x state in
+           go1 (y +# stride_y) state
+      else state
+  } in
+  go1 lo_y init;
+
+
+{-
 
 ShapeDict_dim3 : ShapeDict dim3 =
   shapeDict @dim3 (boxedinfo shapeDict @dim3)
@@ -10852,6 +11255,22 @@ isEmptyInterval (iv : Interval) -> bool =
       ; nothingVal. False
     }
   ; nothingVal. False
+  };
+
+
+-- Get the number of points in an interval.  Error if interval is not finite.
+dim1Cardinality (d : dim1) -> int attribute(inline) =
+  case d of mk_dim1 tyob (interval lb ub) (linearMap stride alignment).
+  case lb of {
+    justVal lb_i.
+      case ub of {
+        justVal ub_i.
+          (ub_i -# lb_i) //# stride
+      ; nothingVal.
+          except @int
+      }
+  ; nothingVal.
+      except @int
   };
 
 
@@ -13572,21 +13991,35 @@ arr1D_build @(N : intindex) @(a : bare)
 
 arr2D_build @(M N : intindex) @(a : bare)
   (rep : Repr a)
-  (size_y : FIInt M) (size_x : FIInt N) (f : int -> int -> Init a)
+  (size_y : FIInt M) (size_x : FIInt N)
+  (is_parallel : bool)
+  (f : int -> int -> Init a)
   (arr_ptr : OutPtr (arr M (arr N a)))
   -> Store
   attribute(inline) =
 
+  let sa = reprSizeAlign @a rep in
   let row_repr : Repr (arr N a) = unboxedinfo arr @N @a size_x rep in
-  doall @M size_y
-  (\ (y : int) -> Store.
-     doall @N size_x
-     (\ (x : int) -> Store.
-        f y x
-        (subscript_out @N @a (reprSizeAlign @a rep)
-         (subscript_out @M @(arr N a) (reprSizeAlign @(arr N a) row_repr)
-          arr_ptr y) x)));
+  let row_sa = reprSizeAlign @(arr N a) row_repr in
 
+  -- Call either 'parallel_doall' or 'doall'
+  if is_parallel
+  then
+    parallel_doall @M size_y
+    (\ (y : int) -> Store.
+       doall @N size_x
+       (\ (x : int) -> Store.
+          f y x
+          (subscript_out @N @a sa
+           (subscript_out @M @(arr N a) row_sa arr_ptr y) x)))
+  else
+    doall @M size_y
+    (\ (y : int) -> Store.
+       doall @N size_x
+       (\ (x : int) -> Store.
+          f y x
+          (subscript_out @N @a sa
+           (subscript_out @M @(arr N a) row_sa arr_ptr y) x)));
 
 arr3D_build @(L M N : intindex) @(a : bare)
   (rep : Repr a)

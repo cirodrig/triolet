@@ -818,7 +818,9 @@ functorClass _ tc_map = do
       [(ConTy $ builtinTyCon TheTC_list,
         [coreBuiltin The_map_list]),
        (ConTy $ builtinTyCon TheTC_array1,
-        [coreBuiltin The_map_array1])
+        [coreBuiltin The_map_array1]),
+       (ConTy $ builtinTyCon TheTC_array2,
+        [coreBuiltin The_map_array2])
       ]
 
 traversableClass _ tc_map = do
@@ -843,7 +845,11 @@ traversableClass _ tc_map = do
          coreBuiltin The_build_list]),
        (ConTy $ builtinTyCon TheTC_array1,
         [coreBuiltin The_traverse_array1,
-         coreBuiltin The_build_array1])]
+         coreBuiltin The_build_array1]),
+       (ConTy $ builtinTyCon TheTC_array2,
+        [coreBuiltin The_traverse_array2,
+         coreBuiltin The_build_array2])
+      ]
       {-
        (ConTy $ builtinTyCon TheTC_blist,
         [coreBuiltin The_TraversableDict_blist_traverse,
@@ -919,47 +925,25 @@ shapeClass _ tc_map = do
          coreBuiltin The_zipWith_dim1,
          coreBuiltin The_fold_dim1,
          coreBuiltin The_imp_fold_dim1_wrapper,
-         coreBuiltin The_foreach_dim1_wrapper])]
-       {-(ConTy (builtinTyCon TheTC_dim0),
-        [coreBuiltin The_ShapeDict_dim0_member,
-         coreBuiltin The_ShapeDict_dim0_intersect,
-         coreBuiltin The_ShapeDict_dim0_flatten,
-         coreBuiltin The_ShapeDict_dim0_generate,
-         coreBuiltin The_ShapeDict_dim0_map,
-         coreBuiltin The_ShapeDict_dim0_zipWith,
-         coreBuiltin The_ShapeDict_dim0_zipWith3,
-         coreBuiltin The_ShapeDict_dim0_zipWith4,
-         coreBuiltin The_ShapeDict_dim0_slice]),
-       (ConTy (builtinTyCon TheTC_dim1),
-        [coreBuiltin The_ShapeDict_dim1_member,
-         coreBuiltin The_ShapeDict_dim1_intersect,
-         coreBuiltin The_ShapeDict_dim1_flatten,
-         coreBuiltin The_ShapeDict_dim1_generate,
-         coreBuiltin The_ShapeDict_dim1_map,
-         coreBuiltin The_ShapeDict_dim1_zipWith,
-         coreBuiltin The_ShapeDict_dim1_zipWith3,
-         coreBuiltin The_ShapeDict_dim1_zipWith4,
-         coreBuiltin The_ShapeDict_dim1_slice]),
+         coreBuiltin The_foreach_dim1_wrapper]),
        (ConTy (builtinTyCon TheTC_dim2),
-        [coreBuiltin The_ShapeDict_dim2_member,
-         coreBuiltin The_ShapeDict_dim2_intersect,
-         coreBuiltin The_ShapeDict_dim2_flatten,
-         coreBuiltin The_ShapeDict_dim2_generate,
-         coreBuiltin The_ShapeDict_dim2_map,
-         coreBuiltin The_ShapeDict_dim2_zipWith,
-         coreBuiltin The_ShapeDict_dim2_zipWith3,
-         coreBuiltin The_ShapeDict_dim2_zipWith4,
-         coreBuiltin The_ShapeDict_dim2_slice]),
-       (ConTy (builtinTyCon TheTC_dim3),
-        [coreBuiltin The_ShapeDict_dim3_member,
-         coreBuiltin The_ShapeDict_dim3_intersect,
-         coreBuiltin The_ShapeDict_dim3_flatten,
-         coreBuiltin The_ShapeDict_dim3_generate,
-         coreBuiltin The_ShapeDict_dim3_map,
-         coreBuiltin The_ShapeDict_dim3_zipWith,
-         coreBuiltin The_ShapeDict_dim3_zipWith3,
-         coreBuiltin The_ShapeDict_dim3_zipWith4,
-         coreBuiltin The_ShapeDict_dim3_slice])]-}
+        [coreBuiltin The_noOffset_dim2,
+         coreBuiltin The_addOffset_dim2,
+         coreBuiltin The_appOffset_dim2,
+         coreBuiltin The_intersect_dim2,
+         coreBuiltin The_member_dim2,
+         coreBuiltin The_slice_dim2,
+         coreBuiltin The_split_dim2,
+         coreBuiltin The_splitN_dim2,
+         coreBuiltin The_checkSubdomain_dim2,
+         coreBuiltin The_peel_dim2,
+         coreBuiltin The_flatten_dim2,
+         coreBuiltin The_generate_dim2,
+         coreBuiltin The_zipWith_dim2,
+         coreBuiltin The_fold_dim2,
+         coreBuiltin The_imp_fold_dim2_wrapper,
+         coreBuiltin The_foreach_dim2_wrapper])
+      ]
 
 indexableClass _ tc_map = do
   let instances =
@@ -986,7 +970,12 @@ indexableClass _ tc_map = do
         [coreBuiltin The_shape_array1,
          coreBuiltin The_at_array1,
          coreBuiltin The_slice_array1,
-         coreBuiltin The_preserve_array1])
+         coreBuiltin The_preserve_array1]),
+       (ConTy $ builtinTyCon TheTC_array2,
+        [coreBuiltin The_shape_array2,
+         coreBuiltin The_at_array2,
+         coreBuiltin The_slice_array2,
+         coreBuiltin The_preserve_array2])
       ]
       {-
        (ConTy $ builtinTyCon TheTC_blist,
