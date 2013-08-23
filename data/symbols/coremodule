@@ -4102,7 +4102,15 @@ build_view_real @(sh a : box) (sh_shape : ShapeDict sh) (s : Stream sh a)
   case unStream @sh @a s of {
     seqStream tyob co sq. except @(view sh a)
   ; splittableStream @sh2 tyob co shape_sh2 rs. except @(view sh a)
-  ; ixStream tyob rs. except @(view sh a)
+  ; ixStream tyob (rStream @b tyob rep_b extract si).
+      case si of someIndexable @t tyob co indexable container.
+      let dom = ix_shape @t indexable @b container in
+      letfun
+        get (idx : BoxIndex sh) -> a =
+          extract (ix_at @t indexable @b rep_b container
+                   (coerce @(BoxIndex sh) @(BoxIndex (shape t)) idx))
+      in
+      con_view @sh @a (coerce @(shape t) @sh dom) get
   };
 
 
@@ -14311,34 +14319,112 @@ safeSlice @(t : box -> box) @(a : box)
   let sliced_object = ix_slice @t indexable @a rep container dom off in
   someIndexableToView @(shape t) @a rep sliced_object;
 
-{-
+
 rows @(t : box -> box) @(a : box)
   (indexable : IndexableDict t)
   (shape_is_dim2 : coerce @box (shape t) dim2)
-  (rep : Repr (AsBare a))
+  (rep : ReprBox a)
   (container : t a)
   -> view dim1 (view dim1 a)
   attribute(inline) =
-  case indexable of indexableDict tyob at_index get_shape.
-  case coerce @(shape t) @dim2 (get_shape @a container) of
+
+  let at_index = ix_at @t indexable in
+
+  case coerce @(shape t) @dim2 (ix_shape @t indexable @a container) of
     mk_dim2 tyob (shape_y : dim1) (shape_x : dim1).
 
-  let rep_tuple = unboxedinfo Tuple2 @(Stored int) @(Stored int) repr_int repr_int in
   let sa_int = reprSizeAlign @(Stored int) repr_int in
+  let none_val = boxNoneValue None in
 
-  view_generate @dim1
-  ShapeDict_dim1 @(view dim1 a)
-  (repr_Box @(view dim1 a)) shape_y
-  (\ (s_y : Boxed (Stored int)) -> view dim1 a.
-    view_generate @dim1 ShapeDict_dim1
-    @a rep shape_x
-    (\ (s_x : Boxed (Stored int)) -> a.
-      let ix = con_boxed @(index dim2) rep_tuple
-               (tuple2 @(Stored int) @(Stored int) sa_int sa_int
-                (asbare @(Stored int) repr_int s_y)
-                (asbare @(Stored int) repr_int s_x)) in
-      at_index @a rep container
-      (coerce @(Boxed (index dim2)) @(AsBox (index (shape t))) ix)));
+  -- Create a view over all y
+  build_view_real @dim1 @(view dim1 a) ShapeDict_dim1
+  (real_generate_dim1 @(view dim1 a)
+   (repr_Box @(view dim1 a)) none_val shape_y
+   (\ (y : BoxIndex dim1) -> view dim1 a.
+
+      -- Create a view over all x
+      build_view_real @dim1 @a ShapeDict_dim1
+      (real_generate_dim1 @a rep none_val shape_x
+       (\ (x : BoxIndex dim1) -> a.
+
+          -- Read from the data structure at (y, x)
+          let idx = pack_index2 (unboxIntValue y) (unboxIntValue x) in
+          at_index @a rep container
+          (coerce @(BoxIndex dim2) @(BoxIndex (shape t)) idx)))));
+
+
+outerproduct @(t u : box -> box) @(a b : box)
+  (traversable_t : TraversableDict t)
+  (traversable_u : TraversableDict u)
+  (t_is_linear : coerce @box (shape t) dim1)
+  (u_is_linear : coerce @box (shape u) dim1)
+  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
+  (container_t : t a)
+  (container_u : u b)
+  -> Stream dim2 (Boxed (Tuple2 (AsBare a) (AsBare b)))
+  attribute(inline) =
+
+  case traversable_t of traversableDict tyob traverseT buildT.
+  case traversable_u of traversableDict tyob traverseU buildU.
+
+  let sa : Stream dim1 a =
+        coerce @(Stream (shape t) a) @(Stream dim1 a)
+        (traverseT @a repr_a container_t) in
+  let sb : Stream dim1 b =
+        coerce @(Stream (shape u) b) @(Stream dim1 b)
+        (traverseU @b repr_b container_u) in
+
+  outerproduct_Stream @a @b repr_a repr_b sa sb;
+
+
+outerproduct_Stream @(a b : box)
+  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
+  (sa : Stream dim1 a)
+  (sb : Stream dim1 b)
+  -> Stream dim2 (Boxed (Tuple2 (AsBare a) (AsBare b)))
+  attribute(inline) =
+
+  let type Sint = Stored int in
+  let type out_type = Boxed (Tuple2 (AsBare a) (AsBare b)) in
+  let out_repr = unboxedinfo Tuple2 @(AsBare a) @(AsBare b) repr_a repr_b in
+
+  case sa of stream tyob hint_a i_sa.
+  case sb of stream tyob hint_b i_sb.
+  let par_hint = leastParHint hint_a hint_b in
+
+  case fromIxStream @dim1 @a i_sa of
+    rStream @a2 tyob rep_a2 extractA (someIndexable @tA tyob2 co ixA containerA).
+  case fromIxStream @dim1 @b i_sb of
+    rStream @b2 tyob rep_b2 extractB (someIndexable @tB tyob2 co ixB containerB).
+
+  -- Compute dimensions of the result
+  let dom = con_dim2 (coerce @(shape tA) @dim1 (ix_shape @tA ixA @a2 containerA))
+                     (coerce @(shape tB) @dim1 (ix_shape @tB ixB @b2 containerB)) in
+
+  letfun
+    getA (idx : BoxIndex dim1) -> a =
+      extractA (ix_at @tA ixA @a2 rep_a2 containerA
+                (coerce @(BoxIndex dim1) @(BoxIndex (shape tA)) idx)) in
+
+  letfun
+    getB (idx : BoxIndex dim1) -> b =
+      extractB (ix_at @tB ixB @b2 rep_b2 containerB
+                (coerce @(BoxIndex dim1) @(BoxIndex (shape tB)) idx)) in
+
+  real_generate_dim2 @out_type out_repr (boxNoneValue None) dom
+  (\ (idx : BoxIndex dim2) -> out_type.
+     case unpack_index2 idx of (idx_y, idx_x).
+     let valueA = getA (boxIntValue idx_y) in
+     let valueB = getB (boxIntValue idx_x) in
+
+     con_boxed @(Tuple2 (AsBare a) (AsBare b)) out_repr
+     (tuple2 @(AsBare a) @(AsBare b)
+      (reprSizeAlign @(AsBare a) repr_a)
+      (reprSizeAlign @(AsBare b) repr_b)
+      (asbare @(AsBare a) repr_a valueA) (asbare @(AsBare b) repr_b valueB)));
+
+
+{-
   
 
 cols @(t : box -> box) @(a : box)
@@ -14370,64 +14456,6 @@ cols @(t : box -> box) @(a : box)
        (coerce @(Boxed (index dim2)) @(AsBox (index (shape t))) ix)));
 
 
-outerproduct @(t u : box -> box) @(a b : box)
-  (traversable_t : TraversableDict t)
-  (traversable_u : TraversableDict u)
-  (t_is_linear : coerce @box (shape t) dim1)
-  (u_is_linear : coerce @box (shape u) dim1)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (container_t : t a)
-  (container_u : u b)
-  -> Stream dim2 (Boxed (Tuple2 (AsBare a) (AsBare b)))
-  attribute(inline) =
-
-  case traversable_t of traversableDict tyob traverseT buildT.
-  case traversable_u of traversableDict tyob traverseU buildU.
-
-  let sa : Stream dim1 a =
-        coerce @(Stream (shape t) a) @(Stream dim1 a)
-        (traverseT @a repr_a container_t) in
-  let sb : Stream dim1 b =
-        coerce @(Stream (shape u) b) @(Stream dim1 b)
-        (traverseU @b repr_b container_u) in
-
-  outerproductStream @a @b repr_a repr_b sa sb;
-
-
-outerproductStream @(a b : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (sa : Stream dim1 a)
-  (sb : Stream dim1 b)
-  -> Stream dim2 (Boxed (Tuple2 (AsBare a) (AsBare b)))
-  attribute(inline, inline_dimensionality) =
-
-  case sa of mk_view tyob domA fA.
-  case sb of mk_view tyob domB fB.
-
-  let type Sint = Stored int in
-  let type out_type = Tuple2 (AsBare a) (AsBare b) in
-
-  view_generate @dim2 ShapeDict_dim2 @(Boxed out_type)
-  (unboxedinfo Tuple2 @(AsBare a) @(AsBare b) repr_a repr_b)
-  (con_dim2 domA domB)
-  (\ (ix : Boxed (Tuple2 Sint Sint)) -> Boxed out_type.
-
-    -- Index each view with one component of the index
-    let rep_tuple = unboxedinfo Tuple2 @(Stored int) @(Stored int) repr_int repr_int in
-    let sa_tuple = reprSizeAlign @(Tuple2 (Stored int) (Stored int)) rep_tuple in
-    let sa_int = reprSizeAlign @(Stored int) repr_int in
-    case ix of [sa_tuple]
-      boxed tyob ([sa_int, sa_int] tuple2 (stored ix_y) (stored ix_x)).
-
-    let valueA = fA (boxIntValue ix_y) in
-    let valueB = fB (boxIntValue ix_x) in
-
-    con_boxed @(Tuple2 (AsBare a) (AsBare b))
-    (unboxedinfo Tuple2 @(AsBare a) @(AsBare b) repr_a repr_b)
-    (tuple2 @(AsBare a) @(AsBare b)
-     (reprSizeAlign @(AsBare a) repr_a)
-     (reprSizeAlign @(AsBare b) repr_b)
-     (asbare @(AsBare a) repr_a valueA) (asbare @(AsBare b) repr_b valueB)));
 -}
 {-
 transpose : forall t : box -> box, a : box.

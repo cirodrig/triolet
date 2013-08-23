@@ -795,7 +795,6 @@ builtinVariableNames =
   , "rows"
   , "cols"
   , "outerproduct"
-  , "outerproductStream"
   , "transpose"
   , "boxedPermute1D"
   , "permute1D"
