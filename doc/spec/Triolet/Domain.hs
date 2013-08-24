@@ -23,6 +23,9 @@ data ListDim = ListDim !(Maybe Int)
 -- | The domain of nonempty subsets of 'Bool'
 data ChainDim = ChainBoth | ChainFirst | ChainLast
 
+-- | The domain of a guarded term; holds zero or one value
+data GuardDim = GuardKeep | GuardSkip
+
 -- Exists in coremodule, named "dim0"
 data Dim0 = Dim0
 
@@ -41,6 +44,7 @@ type family Index d
 
 type instance Index ListDim = Int
 type instance Index ChainDim = Bool
+type instance Index GuardDim = ()
 type instance Index Dim0 = ()
 type instance Index Dim1 = Int
 type instance Index Dim2 = (Int, Int)
@@ -50,6 +54,7 @@ type family Offset d
 
 type instance Offset ListDim = Int
 type instance Offset ChainDim = ()
+type instance Offset GuardDim = ()
 type instance Offset Dim0 = ()
 type instance Offset Dim1 = ()
 type instance Offset Dim2 = ()

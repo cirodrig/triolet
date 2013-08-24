@@ -107,3 +107,6 @@ unit_Seq x =
   let f True  = Yield False x
       f False = Done
   in Seq True f
+
+empty_Seq :: Seq a
+empty_Seq = Seq () (\_ -> Done)
