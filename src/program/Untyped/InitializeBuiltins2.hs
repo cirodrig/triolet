@@ -908,7 +908,8 @@ shapeClass _ tc_map = do
          coreBuiltin The_zipWith_list_dim,
          coreBuiltin The_fold_list_dim,
          coreBuiltin The_imp_fold_list_dim_wrapper,
-         coreBuiltin The_foreach_list_dim_wrapper]),
+         coreBuiltin The_foreach_list_dim_wrapper,
+         coreBuiltin The_foreachSeq_list_dim]),
        (ConTy (builtinTyCon TheTC_dim1),
         [coreBuiltin The_noOffset_dim1,
          coreBuiltin The_addOffset_dim1,
@@ -925,7 +926,8 @@ shapeClass _ tc_map = do
          coreBuiltin The_zipWith_dim1,
          coreBuiltin The_fold_dim1,
          coreBuiltin The_imp_fold_dim1_wrapper,
-         coreBuiltin The_foreach_dim1_wrapper]),
+         coreBuiltin The_foreach_dim1_wrapper,
+         coreBuiltin The_foreachSeq_dim1]),
        (ConTy (builtinTyCon TheTC_dim2),
         [coreBuiltin The_noOffset_dim2,
          coreBuiltin The_addOffset_dim2,
@@ -942,7 +944,8 @@ shapeClass _ tc_map = do
          coreBuiltin The_zipWith_dim2,
          coreBuiltin The_fold_dim2,
          coreBuiltin The_imp_fold_dim2_wrapper,
-         coreBuiltin The_foreach_dim2_wrapper])
+         coreBuiltin The_foreach_dim2_wrapper,
+         coreBuiltin The_foreachSeq_dim2])
       ]
 
 indexableClass _ tc_map = do

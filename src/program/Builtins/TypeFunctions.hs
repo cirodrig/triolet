@@ -383,6 +383,7 @@ indexPureTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_guard_dim op -> return none_type
            | isBuiltin bi The_chain_dim op -> return bool_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return int_type
@@ -405,6 +406,7 @@ indexMemTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_guard_dim op -> return none_type
            | isBuiltin bi The_chain_dim op -> return bool_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return int_type
@@ -432,6 +434,7 @@ offsetPureTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_guard_dim op -> return none_type
            | isBuiltin bi The_chain_dim op -> return none_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return none_type
@@ -451,6 +454,7 @@ offsetMemTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return int_type
+           | isBuiltin bi The_guard_dim op -> return none_type
            | isBuiltin bi The_chain_dim op -> return none_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return none_type
@@ -473,6 +477,7 @@ slicePureTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return slice_type
+           | isBuiltin bi The_guard_dim op -> return none_type
            | isBuiltin bi The_chain_dim op -> return chain_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return slice_type
@@ -497,6 +502,7 @@ sliceMemTF bi = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | isBuiltin bi The_list_dim op -> return slice_type
+           | isBuiltin bi The_guard_dim op -> return none_type
            | isBuiltin bi The_chain_dim op -> reduceToWhnf chain_type
            | isBuiltin bi The_dim0 op -> return none_type
            | isBuiltin bi The_dim1 op -> return slice_type
