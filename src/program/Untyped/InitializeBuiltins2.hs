@@ -1407,7 +1407,7 @@ varInitializers =
       , (TheV_zipWithStream,  TheTC_Shape,           12, "zipWithIter")
 
       , (TheV_domain,         TheTC_Indexable,       0, "domain")
-      --, (TheV_at_point,       TheTC_Indexable,       1, "at_point")
+      , (TheV_unsafeIndex,    TheTC_Indexable,       1, "unsafeIndex")
       --, (TheV_at_point,       TheTC_Indexable,       1, "at_point")
 
       , (TheV___add__,        TheTC_Additive,        0, "__add__")

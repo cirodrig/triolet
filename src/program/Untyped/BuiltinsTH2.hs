@@ -126,6 +126,7 @@ frontendSourceGlobals =
   , "__gt__"
   , "__ge__"
   , "domain"
+  , "unsafeIndex"
   , "intersection"
   , "flatten"
   , "iter"
