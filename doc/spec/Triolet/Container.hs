@@ -128,11 +128,11 @@ data Shape d =
   , sh_generate  :: forall a. Offset d -> d -> (Index d -> a) -> Stream d a
   , sh_zipWith   :: forall a b c. (a -> b -> c)
                  -> Stream d a -> Stream d b -> Stream d c
-  , sh_stepper   :: d -> Seq (Index d)
   , sh_fold      :: forall a acc. (a -> acc -> acc)
                  -> Stream d a -> acc -> acc
   , sh_foreach   :: forall acc.
                     d -> Offset d -> (Index d -> acc -> acc) -> acc -> acc
+  , sh_foreachSeq :: forall a. d -> (Index d -> Seq a) -> Seq a
   }
 
 -------------------------------------------------------------------------------
@@ -514,7 +514,7 @@ flattenSplittable :: forall d a.
                      Shape d -> RStream d (Stream ListDim a) -> Seq a
 flattenSplittable sh (RStream (f :: b -> Stream ListDim a) ix) =
   let View dom g = someIndexableToView ix
-  in bind_Seq (sh_stepper sh dom) (\x -> asSequence $ f $ g x)
+  in sh_foreachSeq sh dom (\x -> asSequence $ f $ g x)
 
 -- flattenChain :: Stream ListDim a -> Stream ListDim a -> Seq a
 -- flattenChain s1 s2 = concat_Seq (asSequence s1) (asSequence s2)
@@ -544,9 +544,9 @@ shape_GuardDim =
   , sh_flatten = flatten_GuardDim
   , sh_generate = generate_GuardDim 
   , sh_zipWith = zipWith_GuardDim 
-  , sh_stepper = stepper_GuardDim
   , sh_fold = fold_GuardDim
   , sh_foreach = foreach_GuardDim
+  , sh_foreachSeq = foreachSeq_GuardDim
   }
 
 addOffset_GuardDim _ _ = ()
@@ -577,9 +577,6 @@ generate_GuardDim _ dom get =
 
 zipWith_GuardDim _ _ _ = undefined -- Not used
 
-stepper_GuardDim GuardKeep = unit_Seq ()
-stepper_GuardDim GuardSkip = empty_Seq
-
 fold_GuardDim f (Stream _ s) x =
   case s
   of IxStream (RStream get (SomeIndexable ix container)) ->
@@ -591,6 +588,8 @@ foreach_GuardDim dom _ elim x =
   case dom
   of GuardKeep -> elim () x
      GuardSkip -> x
+
+foreachSeq_GuardDim g k = guard_Seq (guardToBool g) $ k ()
 
 shape_ListDim :: Shape ListDim
 shape_ListDim =
@@ -606,9 +605,9 @@ shape_ListDim =
   , sh_flatten = flatten_ListDim
   , sh_generate = generate_ListDim 
   , sh_zipWith = zipWith_ListDim 
-  , sh_stepper = stepper_ListDim
   , sh_fold = fold_ListDim
   , sh_foreach = foreach_ListDim
+  , sh_foreachSeq = foreachSeq_ListDim
   }
 
 addOffset_ListDim o p = o + p
@@ -740,11 +739,6 @@ zipWith_RStream sh f (RStream f1 i1) (RStream f2 i2) =
           of SomeIndexable ix2 c2 ->
                RStream f' $ zip2Indexable sh ix1 ix2 tup c1 c2
 
-stepper_ListDim (ListDim b) =
-  let g i | case b of Just n -> i >= n = Done
-          | otherwise                  = Yield (i+1) i
-  in Seq 0 g
-
 fold_ListDim :: (a -> acc -> acc) -> Stream ListDim a -> acc -> acc
 {-# INLINE fold_ListDim #-}
 fold_ListDim f s x = fold_Seq f (asSequence s) x
@@ -761,6 +755,13 @@ foreach_ListDim (ListDim bound) off gen init =
                       then step (i+1) (gen i x)
                       else x
        in step start init
+
+foreachSeq_ListDim (ListDim b) sq =
+  let g i
+        | case b of Just n -> i >= n = Done
+        | otherwise                  = Yield (i+1) i
+  in bind_Seq (Seq 0 g) sq
+
 
 -------------------------------------------------------------------------------
 -- Streams
@@ -845,7 +846,7 @@ guard b s@(Stream h i_s) =
           of SeqStream sq -> SeqStream $ guard_Seq b sq
              Splittable sh rs -> Splittable sh $ map_RStream (guard b) rs
              IxStream rs ->
-               let dom = if b then GuardKeep else GuardSkip
+               let dom = boolToGuard b
                    rs2 = viewToRStream shape_GuardDim $ View dom (\_ -> s)
                in Splittable shape_GuardDim rs2
   in Stream h u

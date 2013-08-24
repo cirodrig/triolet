@@ -26,6 +26,14 @@ data ChainDim = ChainBoth | ChainFirst | ChainLast
 -- | The domain of a guarded term; holds zero or one value
 data GuardDim = GuardKeep | GuardSkip
 
+boolToGuard :: Bool -> GuardDim
+boolToGuard True = GuardKeep
+boolToGuard False = GuardSkip
+
+guardToBool :: GuardDim -> Bool
+guardToBool GuardKeep = True
+guardToBool GuardSkip = False
+
 -- Exists in coremodule, named "dim0"
 data Dim0 = Dim0
 
