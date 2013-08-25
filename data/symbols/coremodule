@@ -941,7 +941,7 @@ data IStream (sh a : box) : box
   seqStream (coerce @box sh list_dim, Seq a);
 
   -- As a collection of streams
-  splittableStream @(sh2 : box)
+  nestedStream @(sh2 : box)
   (coerce @box sh list_dim, ShapeDict sh2, RStream sh2 (Stream list_dim a));
 
   -- As a random-access object
@@ -952,10 +952,10 @@ con_seqStream @(a : box) (sq : Seq a) -> IStream list_dim a attribute(inline) =
   seqStream @list_dim @a (boxedinfo seqStream @list_dim @a)
   (idCoercion @list_dim) sq;
 
-con_splittableStream @(a sh : box)
+con_nestedStream @(a sh : box)
   (d : ShapeDict sh) (s : RStream sh (Stream list_dim a))
   -> IStream list_dim a attribute(inline) =
-  splittableStream @list_dim @a @sh (boxedinfo splittableStream @list_dim @a)
+  nestedStream @list_dim @a @sh (boxedinfo nestedStream @list_dim @a)
   (idCoercion @list_dim) d s;
 
 con_ixStream @(sh a : box) (s : RStream sh a)
@@ -3743,7 +3743,7 @@ viewToRStream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a) (vw : view d a)
 viewToSplittable @(d a : box)
   (sh : ShapeDict d) (vw : view d (Stream list_dim a))
   -> IStream list_dim a attribute(inline) =
-  con_splittableStream @a @d sh
+  con_nestedStream @a @d sh
   (viewToRStream @d @(Stream list_dim a) sh (repr_Box @(Stream list_dim a)) vw);
   
 
@@ -3817,7 +3817,7 @@ streamToSequence @(a : box)
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. sq
-  ; splittableStream @d2 tyob co shape_dict vw.
+  ; nestedStream @d2 tyob co shape_dict vw.
       flattenSplittable @d2 @a shape_dict vw
   ; ixStream tyob rs.
       rStreamToSeq @a rs
@@ -3829,7 +3829,7 @@ streamToSequence2 @(a : box)
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. sq
-  ; splittableStream @d2 tyob co shape_dict vw.
+  ; nestedStream @d2 tyob co shape_dict vw.
       flattenSplittable2 @d2 @a shape_dict vw
   ; ixStream tyob rs.
       rStreamToSeq @a rs
@@ -3841,7 +3841,7 @@ streamToSequence3 @(a : box)
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. sq
-  ; splittableStream @d2 tyob co shape_dict vw.
+  ; nestedStream @d2 tyob co shape_dict vw.
       flattenSplittable2 @d2 @a shape_dict vw
   ; ixStream tyob rs.
       rStreamToSeq @a rs
@@ -3911,7 +3911,7 @@ peel_Stream @(a r : box)
       ; nothing.
           empty_k None
       }
-  ; splittableStream @d tyob co sh rs.
+  ; nestedStream @d tyob co sh rs.
       let vw = rStreamToView @d @(Stream list_dim a)
                (repr_Box @(Stream list_dim a)) rs in
       shPeel @d sh @a @r rep_a (boxParHintValue par_hint) value_k empty_k vw
@@ -4150,7 +4150,7 @@ build_view_real @(sh a : box) (sh_shape : ShapeDict sh) (s : Stream sh a)
   -- TODO
   case unStream @sh @a s of {
     seqStream tyob co sq. except @(view sh a)
-  ; splittableStream @sh2 tyob co shape_sh2 rs. except @(view sh a)
+  ; nestedStream @sh2 tyob co shape_sh2 rs. except @(view sh a)
   ; ixStream tyob (rStream @b tyob rep_b extract si).
       case si of someIndexable @t tyob co indexable container.
       let dom = ix_shape @t indexable @b container in
@@ -4180,10 +4180,10 @@ map_Stream @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 rs.
+  ; nestedStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
-       (con_splittableStream @b @d2 shape_d2
+       (con_nestedStream @b @d2 shape_d2
         (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
          (map_Stream2 @list_dim @a @b rep_a rep_b f) rs)))
 
@@ -4204,10 +4204,10 @@ map_Stream2 @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 rs.
+  ; nestedStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
-       (con_splittableStream @b @d2 shape_d2
+       (con_nestedStream @b @d2 shape_d2
         (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
          (map_Stream3 @list_dim @a @b rep_a rep_b f) rs)))
 
@@ -4229,10 +4229,10 @@ map_Stream3 @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 rs.
+  ; nestedStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
-       (con_splittableStream @b @d2 shape_d2
+       (con_nestedStream @b @d2 shape_d2
         (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
          (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
 
@@ -4254,10 +4254,10 @@ map_Stream4 @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_seqStream @b (map_Seq @a @b f sq)))
 
-  ; splittableStream @d2 tyob co shape_d2 rs.
+  ; nestedStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
-       (con_splittableStream @b @d2 shape_d2
+       (con_nestedStream @b @d2 shape_d2
         (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
          (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
 
@@ -4408,7 +4408,7 @@ build_list @(a : box) (rep : ReprBox a) (s : Stream list_dim a)
       -- TODO
       except @(Boxed (list (AsBare a)))
 
-  ; splittableStream @d tyob co shape_dict vw.
+  ; nestedStream @d tyob co shape_dict vw.
       -- TODO
       except @(Boxed (list (AsBare a)))
 
@@ -5249,7 +5249,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       let input_domain = someIndexableShape @d2 @b si in
 
       letfun
@@ -5314,7 +5314,7 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       let input_domain = someIndexableShape @d2 @b si in
       letfun
         reduce_slice (si : SomeIndexable d2 b) -> a =
@@ -5378,7 +5378,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       let input_domain = someIndexableShape @d2 @b si in
       letfun
         reduce_slice (si : SomeIndexable d2 b) -> a =
@@ -5442,7 +5442,7 @@ reduce_Stream4 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       let input_domain = someIndexableShape @d2 @b si in
       letfun
         reduce_slice (si : SomeIndexable d2 b) -> a =
@@ -5721,13 +5721,13 @@ collect_Stream @(d : box) @(k v r : box)
         seqStream tyob co sq.
           do_seq None
 
-      ; splittableStream @d2 tyob co sh2 (rStream @dat tyob2 rep_dat extract si).
+      ; nestedStream @d2 tyob co sh2 (rStream @dat tyob2 rep_dat extract si).
           letfun
             reduce_slice (si : SomeIndexable d2 dat) -> acc_cursor =
               -- Convert the slice back to a stream
               let s = con_stream @list_dim @stream_elem hintSeq
                       (coerce @(IStream d stream_elem) @(IStream list_dim stream_elem)
-                       (splittableStream @d @stream_elem @d2 tyob co sh2
+                       (nestedStream @d @stream_elem @d2 tyob co sh2
                         (rStream @d2 @(Stream list_dim stream_elem) @dat
                          tyob2 rep_dat extract si))) in
 
@@ -7315,7 +7315,7 @@ real_flatten_guard_dim @(a : box) (rep : ReprBox a) (s : Stream guard_dim a)
   case s of stream tyob par_hint i_s.
   let rs = fromIxStream @guard_dim @a i_s in
   con_stream @list_dim @a par_hint
-  (con_splittableStream @a @guard_dim
+  (con_nestedStream @a @guard_dim
    (ShapeDict_guard_dim_loop_breaker None)
    (map_RStream @guard_dim @a @(Stream list_dim a) (unit_Stream @a rep) rs));
 
@@ -7823,10 +7823,10 @@ real_zipWith_list_dim @(a b c : box)
            (zipWith_RStream @list_dim @a @b @c ShapeDict_list_dim rep_a rep_b rep_c f rs1 rs2))
 
       ; seqStream tyob co sq. zip_using_sequences None
-      ; splittableStream @d2 tyob co sh2 vw. zip_using_sequences None
+      ; nestedStream @d2 tyob co sh2 vw. zip_using_sequences None
       }
     ; seqStream tyob co sq. zip_using_sequences None
-    ; splittableStream @d2 tyob co sh2 vw. zip_using_sequences None
+    ; nestedStream @d2 tyob co sh2 vw. zip_using_sequences None
   };
 
 
@@ -7850,7 +7850,7 @@ real_fold_list_dim @(a acc : box)
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. fold_Seq @a @acc combine sq init
-  ; splittableStream @d tyob co sh rs.
+  ; nestedStream @d tyob co sh rs.
       let rep_stream = repr_Box @(Stream list_dim a) in
       let outer_stream : Stream d (Stream list_dim a) =
             traverse_view_real @d @(Stream list_dim a) sh rep_stream
@@ -7889,7 +7889,7 @@ real_fold_list_dim2 @(a acc : box)
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. fold_Seq @a @acc combine sq init
-  ; splittableStream @d tyob co sh rs.
+  ; nestedStream @d tyob co sh rs.
       let rep_stream = repr_Box @(Stream list_dim a) in
       let outer_stream : Stream d (Stream list_dim a) =
             traverse_view_real @d @(Stream list_dim a) sh rep_stream
@@ -7927,7 +7927,7 @@ real_fold_list_dim3 @(a acc : box)
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. fold_Seq @a @acc combine sq init
-  ; splittableStream @d tyob co sh rs.
+  ; nestedStream @d tyob co sh rs.
       let rep_stream = repr_Box @(Stream list_dim a) in
       let outer_stream : Stream d (Stream list_dim a) =
             traverse_view_real @d @(Stream list_dim a) sh rep_stream
@@ -7969,7 +7969,7 @@ imp_fold_list_dim @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
 
       -- Outer loop over 'dom'
@@ -8009,7 +8009,7 @@ imp_fold_list_dim2 @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
 
       -- Outer loop over 'dom'
@@ -8049,7 +8049,7 @@ imp_fold_list_dim3 @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
 
       -- Outer loop over 'dom'
@@ -8089,7 +8089,7 @@ imp_fold_list_dim4 @(a : box)
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
 
-  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+  ; nestedStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
       case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
 
       -- Outer loop over 'dom'
@@ -8338,7 +8338,7 @@ fold_chain_dim @(a acc : box)
 
     -- Only the ixStream constructor is possible
   ; seqStream tyob co sq. except @acc
-  ; splittableStream @sh tyob co ix si. except @acc
+  ; nestedStream @sh tyob co ix si. except @acc
   };
 
 
@@ -8377,7 +8377,7 @@ imp_fold_chain_dim @(a : box)
 
     -- Only the ixStream constructor is possible
   ; seqStream tyob co sq. except @Store
-  ; splittableStream @sh tyob co ix si. except @Store
+  ; nestedStream @sh tyob co ix si. except @Store
   };
 
 
@@ -8982,7 +8982,7 @@ real_flatten_dim1 @(a : box) (rep : ReprBox a) (s : Stream dim1 a)
   case s of stream tyob par_hint i_s.
   let rs = fromIxStream @dim1 @a i_s in
   con_stream @list_dim @a par_hint
-  (con_splittableStream @a @dim1
+  (con_nestedStream @a @dim1
    (ShapeDict_dim1_loop_breaker None)
    (map_RStream @dim1 @a @(Stream list_dim a) (unit_Stream @a rep) rs));
 
@@ -9382,7 +9382,7 @@ real_flatten_dim2 @(a : box) (rep : ReprBox a) (s : Stream dim2 a)
   case s of stream tyob par_hint i_s.
   let rs = fromIxStream @dim2 @a i_s in
   con_stream @list_dim @a par_hint
-  (con_splittableStream @a @dim2
+  (con_nestedStream @a @dim2
    (ShapeDict_dim2_loop_breaker None)
    (map_RStream @dim2 @a @(Stream list_dim a) (unit_Stream @a rep) rs));
 
@@ -16679,7 +16679,7 @@ fromIxStream @(sh a : box) (s : IStream sh a)
 
   case s of {
     ixStream tyob rs. rs
-  ; splittableStream @d2 tyob co sh2 rs. except @(RStream sh a)
+  ; nestedStream @d2 tyob co sh2 rs. except @(RStream sh a)
   ; seqStream tyob co sq. except @(RStream sh a)
   };
 
@@ -16713,12 +16713,12 @@ guard_Stream @(a : box) (condition : bool) (s : Stream list_dim a)
              seqStream tyob co sq.
                con_seqStream @a (guard_Seq @a condition sq)
 
-           ; splittableStream @d2 tyob co sh_d2 rs.
-               splittableStream @list_dim @a @d2 tyob co sh_d2
+           ; nestedStream @d2 tyob co sh_d2 rs.
+               nestedStream @list_dim @a @d2 tyob co sh_d2
                (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim a) (guard_Stream2 @a condition) rs)
 
            ; ixStream tyob rs.
-               con_splittableStream @a @guard_dim ShapeDict_guard_dim
+               con_nestedStream @a @guard_dim ShapeDict_guard_dim
                (viewToRStream @guard_dim @(Stream list_dim a)
                 ShapeDict_guard_dim (repr_Box @(Stream list_dim a))
                 (con_view @guard_dim @(Stream list_dim a)
@@ -16738,12 +16738,12 @@ guard_Stream2 @(a : box) (condition : bool) (s : Stream list_dim a)
              seqStream tyob co sq.
                con_seqStream @a (guard_Seq @a condition sq)
 
-           ; splittableStream @d2 tyob co sh_d2 rs.
-               splittableStream @list_dim @a @d2 tyob co sh_d2
+           ; nestedStream @d2 tyob co sh_d2 rs.
+               nestedStream @list_dim @a @d2 tyob co sh_d2
                (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim a) (guard_Stream2 @a condition) rs)
 
            ; ixStream tyob rs.
-               con_splittableStream @a @guard_dim ShapeDict_guard_dim
+               con_nestedStream @a @guard_dim ShapeDict_guard_dim
                (viewToRStream @guard_dim @(Stream list_dim a)
                 ShapeDict_guard_dim (repr_Box @(Stream list_dim a))
                 (con_view @guard_dim @(Stream list_dim a)
@@ -16774,13 +16774,13 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
               (bind_Seq @a @b sq
                (\ (x : a) -> Seq b. streamToSequence @b (t x)))
 
-          ; splittableStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
+          ; nestedStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
               letfun
                 extract2 (x : c) -> Stream list_dim b =
                   bind_Stream2 @a @b (extract x) t
               in
 
-              con_splittableStream @b @sh shape_sh
+              con_nestedStream @b @sh shape_sh
               (con_rStream @sh @(Stream list_dim b) @c rep_c extract2 si)
 
           ; ixStream tyob (rStream @c tyob2 rep_c extract si).
@@ -16789,7 +16789,7 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
                         (ix_shape @s ix @c container) in
               letfun extract2 (x : c) -> Stream list_dim b = t (extract x) in
 
-              con_splittableStream @b @list_dim ShapeDict_list_dim
+              con_nestedStream @b @list_dim ShapeDict_list_dim
               (con_rStream @list_dim @(Stream list_dim b) @c rep_c extract2 si)
           } in
   con_stream @list_dim @b par_hint u;
@@ -16805,13 +16805,13 @@ bind_Stream2 @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
               (bind_Seq @a @b sq
                (\ (x : a) -> Seq b. streamToSequence @b (t x)))
 
-          ; splittableStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
+          ; nestedStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
               letfun
                 extract2 (x : c) -> Stream list_dim b =
                   bind_Stream2 @a @b (extract x) t
               in
 
-              con_splittableStream @b @sh shape_sh
+              con_nestedStream @b @sh shape_sh
               (con_rStream @sh @(Stream list_dim b) @c rep_c extract2 si)
 
           ; ixStream tyob (rStream @c tyob2 rep_c extract si).
@@ -16820,7 +16820,7 @@ bind_Stream2 @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
                         (ix_shape @s ix @c container) in
               letfun extract2 (x : c) -> Stream list_dim b = t (extract x) in
 
-              con_splittableStream @b @list_dim ShapeDict_list_dim
+              con_nestedStream @b @list_dim ShapeDict_list_dim
               (con_rStream @list_dim @(Stream list_dim b) @c rep_c extract2 si)
           } in
   con_stream @list_dim @b par_hint u;
