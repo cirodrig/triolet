@@ -624,7 +624,7 @@ data ShapeDict (d : box) : box
    (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
    view d (Stream list_dim a) -> r,
    -- flatten
-   forall a : box. Stream d a -> Stream list_dim a,
+   forall a : box. Repr (AsBare a) -> Stream d a -> Stream list_dim a,
    -- generate
    forall a : box.
    Repr (AsBare a) -> BoxOffset d -> d -> (BoxIndex d -> a) -> Stream d a,
@@ -757,7 +757,7 @@ shPeel @(d : box) (sh : ShapeDict d)
     peel;
 
 shFlatten @(d : box) (sh : ShapeDict d)
-   -> forall a : box. Stream d a -> Stream list_dim a attribute(inline) =
+   -> forall a : box. ReprBox a -> Stream d a -> Stream list_dim a attribute(inline) =
     case sh of shapeDict tyob rep_i rep_o rep_s
                noOff addOff appOff intersect member sl split splitN
                checkSubdomain peel flat gen zipWith
@@ -3852,13 +3852,13 @@ flattenSplittable @(d a : box)
   (sh : ShapeDict d) (rs : RStream d (Stream list_dim a))
   -> Seq a attribute(inline) =
 
-  case rs of rStream @b tyob rep f ix.
-  case someIndexableToView @d @b rep ix of mk_view tyob dom g.
+  case rs of rStream @b tyob rep_b f ix.
+  case someIndexableToView @d @b rep_b ix of mk_view tyob dom g.
 
   -- Traverse all indices in the view's domain
   let view_indices : Seq (BoxIndex d) =
         streamToSequence2 @(BoxIndex d)
-        (shFlatten @d sh @(BoxIndex d) (indices @d sh dom)) in
+        (shFlatten @d sh @(BoxIndex d) (shRepIndex @d sh) (indices @d sh dom)) in
 
   bind_Seq @(BoxIndex d) @a view_indices
   (\ (x : BoxIndex d) -> Seq a. streamToSequence2 @a (f (g x)));
@@ -3868,13 +3868,13 @@ flattenSplittable2 @(d a : box)
   (sh : ShapeDict d) (rs : RStream d (Stream list_dim a))
   -> Seq a attribute(inline) =
 
-  case rs of rStream @b tyob rep f ix.
-  case someIndexableToView @d @b rep ix of mk_view tyob dom g.
+  case rs of rStream @b tyob rep_b f ix.
+  case someIndexableToView @d @b rep_b ix of mk_view tyob dom g.
 
   -- Traverse all indices in the view's domain
   let view_indices : Seq (BoxIndex d) =
         streamToSequence3 @(BoxIndex d)
-        (shFlatten @d sh @(BoxIndex d) (indices @d sh dom)) in
+        (shFlatten @d sh @(BoxIndex d) (shRepIndex @d sh) (indices @d sh dom)) in
 
   bind_Seq @(BoxIndex d) @a view_indices
   (\ (x : BoxIndex d) -> Seq a. streamToSequence3 @a (f (g x)));
@@ -5361,6 +5361,70 @@ reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
 
 -- FIXME: handle recursive functions properly
 reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
+  (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline) =
+
+  letfun
+    -- Perform a final reduction on partial results
+    reduce_residual (s : Stream list_dim a) -> a =
+      real_fold_list_dim @a @a rep rep f s z
+  in
+
+  letfun
+    reduce_unit (dummy : NoneType) -> a = z
+  in
+
+  case s of stream tyob par_hint i_s.
+  case i_s of {
+    seqStream tyob co sq.
+      fold_Seq @a @a f sq z
+
+  ; splittableStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
+      let input_domain = someIndexableShape @d2 @b si in
+      letfun
+        reduce_slice (si : SomeIndexable d2 b) -> a =
+          -- Check the domain
+          let slice_domain = someIndexableShape @d2 @b si in
+          if shCheckSubdomain @d2 sh2 input_domain slice_domain
+          then
+            case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
+            let vw = indexableToView @t @b rep_b ix container in
+
+            -- Reduce over inner loop
+            let vw2 = map_view @d2 @b @a rep_b rep
+                      (\ (x : b) -> a.
+                         reduce_Stream4 @list_dim @a ShapeDict_list_dim rep f z
+                         (extract x))
+                      (coerce @(view (shape t) b) @(view d2 b) vw) in
+
+            -- Sequentially reduce the partial results for this loop
+            let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
+            shFold @d2 sh2 @a @a rep rep f local_s z
+          else except @a
+      in
+      reduce_loop @d2 @b @a sh2 rep_b rep par_hint
+      reduce_unit reduce_slice f reduce_residual si
+
+  ; ixStream tyob (rStream @b tyob2 rep_b extract si).
+      let input_domain = someIndexableShape @d @b si in
+      letfun
+        reduce_slice (si : SomeIndexable d b) -> a =
+          -- Check the domain
+          let slice_domain = someIndexableShape @d @b si in
+          if shCheckSubdomain @d sh input_domain slice_domain
+          then
+            -- Sequentially reduce the partial results for this loop
+            let local_s = con_stream @d @a hintSeq
+                          (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
+            shFold @d sh @a @a rep rep f local_s z
+          else except @a
+      in
+      reduce_loop @d @b @a sh rep_b rep par_hint
+      reduce_unit reduce_slice f reduce_residual si
+  };
+
+
+-- FIXME: handle recursive functions properly
+reduce_Stream4 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline_never) =
 
   letfun
@@ -5392,7 +5456,7 @@ reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
             -- Reduce over inner loop
             let vw2 = map_view @d2 @b @a rep_b rep
                       (\ (x : b) -> a.
-                         reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z
+                         reduce_Stream4 @list_dim @a ShapeDict_list_dim rep f z
                          (extract x))
                       (coerce @(view (shape t) b) @(view d2 b) vw) in
 
@@ -7240,12 +7304,12 @@ real_peel_guard_dim @(a r : box)
 
 flatten_guard_dim
   (r1 : Repr (index guard_dim)) (r2 : Repr (offset guard_dim)) (r3 : Repr (slice guard_dim))
-  -> forall a : box. Stream guard_dim a -> Stream list_dim a
+  -> forall a : box. ReprBox a -> Stream guard_dim a -> Stream list_dim a
   attribute(inline) =
   real_flatten_guard_dim;
 
 
-real_flatten_guard_dim @(a : box) (s : Stream guard_dim a)
+real_flatten_guard_dim @(a : box) (rep : ReprBox a) (s : Stream guard_dim a)
   -> Stream list_dim a attribute(inline) =
 
   case s of stream tyob par_hint i_s.
@@ -7253,7 +7317,7 @@ real_flatten_guard_dim @(a : box) (s : Stream guard_dim a)
   con_stream @list_dim @a par_hint
   (con_splittableStream @a @guard_dim
    (ShapeDict_guard_dim_loop_breaker None)
-   (map_RStream @guard_dim @a @(Stream list_dim a) (unit_Stream @a) rs));
+   (map_RStream @guard_dim @a @(Stream list_dim a) (unit_Stream @a rep) rs));
 
 
 generate_guard_dim
@@ -7681,12 +7745,13 @@ real_peel_list_dim @(a r : box)
 
 flatten_list_dim
   (r1 : Repr (index list_dim)) (r2 : Repr (offset list_dim)) (r3 : Repr (slice list_dim))
-  -> forall a : box. Stream list_dim a -> Stream list_dim a
+  -> forall a : box. ReprBox a -> Stream list_dim a -> Stream list_dim a
   attribute(inline) =
   real_flatten_list_dim;
 
 
-real_flatten_list_dim @(a : box) (s : Stream list_dim a) -> Stream list_dim a =
+real_flatten_list_dim @(a : box) (rep : ReprBox a) (s : Stream list_dim a)
+  -> Stream list_dim a =
   s;
 
 
@@ -7697,6 +7762,7 @@ generate_list_dim
      (BoxIndex list_dim -> a) -> Stream list_dim a
   attribute(inline) =
   real_generate_list_dim;
+
 
 real_generate_list_dim @(a : box)
   (rep_a : ReprBox a)
@@ -7782,7 +7848,110 @@ real_fold_list_dim @(a acc : box)
   -> acc
   attribute(inline) =
 
-  fold_Seq @a @acc combine (streamToSequence @a s) init;
+  case unStream @list_dim @a s of {
+    seqStream tyob co sq. fold_Seq @a @acc combine sq init
+  ; splittableStream @d tyob co sh rs.
+      let rep_stream = repr_Box @(Stream list_dim a) in
+      let outer_stream : Stream d (Stream list_dim a) =
+            traverse_view_real @d @(Stream list_dim a) sh rep_stream
+            (rStreamToView @d @(Stream list_dim a) rep_stream rs) in
+
+      -- Outer loop over 'dom'
+      shFold @d sh @(Stream list_dim a) @acc rep_stream rep_acc
+      (\ (s : Stream list_dim a) (x : acc) -> acc.
+         -- Inner loop
+         real_fold_list_dim2 @a @acc rep_a rep_acc combine s x)
+      outer_stream
+      init
+  ; ixStream tyob rs.
+      case rStreamToView @list_dim @a rep_a rs of mk_view tyob dom gen.
+      case dom of mk_list_dim tyob bound.
+      -- Loop over 'dom'
+      letfun
+        foldit (i : int) (x : acc) -> acc =
+          if case bound of {justVal n. i <# n; nothingVal. True}
+          then combine (gen (boxIntValue i)) x
+          else x
+      in
+        foldit 0 init      
+  };
+  --fold_Seq @a @acc combine (streamToSequence @a s) init;
+
+
+real_fold_list_dim2 @(a acc : box)
+  (rep_a : ReprBox a)
+  (rep_acc : ReprBox acc)
+  (combine : a -> acc -> acc)
+  (s : Stream list_dim a)
+  (init : acc)
+  -> acc
+  attribute(inline) =
+
+  case unStream @list_dim @a s of {
+    seqStream tyob co sq. fold_Seq @a @acc combine sq init
+  ; splittableStream @d tyob co sh rs.
+      let rep_stream = repr_Box @(Stream list_dim a) in
+      let outer_stream : Stream d (Stream list_dim a) =
+            traverse_view_real @d @(Stream list_dim a) sh rep_stream
+            (rStreamToView @d @(Stream list_dim a) rep_stream rs) in
+
+      -- Outer loop over 'dom'
+      shFold @d sh @(Stream list_dim a) @acc rep_stream rep_acc
+      (\ (s : Stream list_dim a) (x : acc) -> acc.
+         -- Inner loop
+         real_fold_list_dim3 @a @acc rep_a rep_acc combine s x)
+      outer_stream
+      init
+  ; ixStream tyob rs.
+      case rStreamToView @list_dim @a rep_a rs of mk_view tyob dom gen.
+      case dom of mk_list_dim tyob bound.
+      -- Loop over 'dom'
+      letfun
+        foldit (i : int) (x : acc) -> acc =
+          if case bound of {justVal n. i <# n; nothingVal. True}
+          then combine (gen (boxIntValue i)) x
+          else x
+      in
+        foldit 0 init      
+  };
+
+
+real_fold_list_dim3 @(a acc : box)
+  (rep_a : ReprBox a)
+  (rep_acc : ReprBox acc)
+  (combine : a -> acc -> acc)
+  (s : Stream list_dim a)
+  (init : acc)
+  -> acc
+  attribute(inline_never) =
+
+  case unStream @list_dim @a s of {
+    seqStream tyob co sq. fold_Seq @a @acc combine sq init
+  ; splittableStream @d tyob co sh rs.
+      let rep_stream = repr_Box @(Stream list_dim a) in
+      let outer_stream : Stream d (Stream list_dim a) =
+            traverse_view_real @d @(Stream list_dim a) sh rep_stream
+            (rStreamToView @d @(Stream list_dim a) rep_stream rs) in
+
+      -- Outer loop over 'dom'
+      shFold @d sh @(Stream list_dim a) @acc rep_stream rep_acc
+      (\ (s : Stream list_dim a) (x : acc) -> acc.
+         -- Inner loop
+         real_fold_list_dim3 @a @acc rep_a rep_acc combine s x)
+      outer_stream
+      init
+  ; ixStream tyob rs.
+      case rStreamToView @list_dim @a rep_a rs of mk_view tyob dom gen.
+      case dom of mk_list_dim tyob bound.
+      -- Loop over 'dom'
+      letfun
+        foldit (i : int) (x : acc) -> acc =
+          if case bound of {justVal n. i <# n; nothingVal. True}
+          then combine (gen (boxIntValue i)) x
+          else x
+      in
+        foldit 0 init      
+  };
 
 
 -- This function is recursive
@@ -8103,7 +8272,7 @@ peel_chain_dim @(a r : box)
   except @r;
 
 
-flatten_chain_dim @(a : box) (s : Stream chain_dim a)
+flatten_chain_dim @(a : box) (rep : ReprBox a) (s : Stream chain_dim a)
   -> Stream list_dim a attribute(inline) =
 
   -- TODO
@@ -8231,9 +8400,6 @@ foreachSeq_chain_dim @(a : box)
   -- TODO
   except @(Seq a);
 
-{-
--- dim0 classes not currently implemented
-
 ShapeDict_dim0 : ShapeDict dim0 =
   shapeDict @dim0 (boxedinfo shapeDict @dim0)
   repr_NoneType
@@ -8247,13 +8413,41 @@ ShapeDict_dim0 : ShapeDict dim0 =
   real_slice_dim0
   real_split_dim0
   real_splitN_dim0
+  real_checkSubdomain_dim0
   real_peel_dim0
   real_flatten_dim0
   real_generate_dim0
   real_zipWith_dim0
   real_fold_dim0
-  real_imp_fold_dim0
-  real_foreach_dim0;
+  real_imp_fold_dim0_wrapper
+  real_foreach_dim0_wrapper
+  real_foreachSeq_dim0;
+
+
+-- This is to avoid recursion
+-- FIXME: handle recursion properly
+ShapeDict_dim0_loop_breaker (dummy : NoneType) -> ShapeDict dim0 attribute(inline_never) =
+  ShapeDict_dim0;
+
+
+imp_fold_dim0_wrapper
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> ImperativeFoldFunction dim0 attribute(inline) =
+  real_imp_fold_dim0_wrapper;
+
+
+real_imp_fold_dim0_wrapper : ImperativeFoldFunction dim0 attribute(inline) =
+  imperativeFoldFunction @dim0 imp_fold_dim0;
+
+
+foreach_dim0_wrapper
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> ImperativeForeachFunction dim0 attribute(inline) =
+  real_foreach_dim0_wrapper;
+
+
+real_foreach_dim0_wrapper : ImperativeForeachFunction dim0 attribute(inline) =
+  imperativeForeachFunction @dim0 foreach_dim0;
 
 
 noOffset_dim0
@@ -8269,7 +8463,7 @@ real_noOffset_dim0 : Boxed (Stored NoneType) attribute(inline) =
 -- The same function works as both 'addOffset_dim0' and 'appOffset_dim0'.
 addOffset_dim0
   (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
-  ->  Boxed (Stored NoneType)) -> Boxed (Stored NoneType)) -> Boxed (Stored NoneType) =
+  ->  Boxed (Stored NoneType) -> Boxed (Stored NoneType) -> Boxed (Stored NoneType) =
   real_addOffset_dim0;
 
 
@@ -8289,7 +8483,7 @@ real_intersect_dim0 (x y : dim0) -> dim0 = x;
 
 member_dim0
   (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
-  -> Boxed (Stored NoneType)) -> dim0 -> bool =
+  -> Boxed (Stored NoneType) -> dim0 -> bool =
   real_member_dim0;
 
 
@@ -8299,7 +8493,7 @@ real_member_dim0 (ix : Boxed (Stored NoneType)) (dom : dim0) -> bool =
 
 slice_dim0
   (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
-  -> Boxed (Stored NoneType)) -> dim0 -> (Boxed (Stored NoneType), dim0) =
+  -> Boxed (Stored NoneType) -> dim0 -> (Boxed (Stored NoneType), dim0) =
   real_slice_dim0;
 
 
@@ -8336,113 +8530,173 @@ real_splitN_dim0 (n : int) (dom : dim0) -> view list_dim (Subdomain dim0) =
      con_subdomain @dim0 (boxNoneValue None) dom);
 
 
+checkSubdomain_dim0
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> dim0 -> dim0 -> bool attribute(inline) =
+  real_checkSubdomain_dim0;
+
+
+real_checkSubdomain_dim0
+  (d subd : dim0) -> bool attribute(inline) =
+
+  -- All dim0s are equal
+  True;
+
 peel_dim0
   (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
   -> forall a r : box.
      Repr (AsBare a) -> Boxed (Stored ParHint) ->
      (a -> Stream list_dim a -> r) -> (NoneType -> r) ->
-     view dim0 (Stream list_dim a) -> r
+     view dim0 (Stream list_dim a) -> r =
+  real_peel_dim0;
 
-ShapeDict_dim0_member (d : dim0) (i : Boxed (index dim0))
-  -> Boxed (Stored bool) attribute(inline) =
-  boxBoolValue True;
 
-ShapeDict_dim0_intersect (d : dim0) (x : dim0) -> dim0 attribute(inline) =
-  d;
+real_peel_dim0 @(a r : box)
+  (rep : Repr (AsBare a))
+  (par_hint : Boxed (Stored ParHint))
+  (value_k : a -> Stream list_dim a -> r)
+  (empty_k : NoneType -> r)
+  (vw : view dim0 (Stream list_dim a)) -> r attribute(inline) =
 
-ShapeDict_dim0_generate @(a : box)
-  (rep : Repr (AsBare a)) (d : dim0) (f : Boxed (Stored NoneType) -> a)
+  case vw of mk_view tyob dom f.
+  peel_Stream @a @r rep value_k empty_k (f (boxNoneValue None));
+
+
+generate_dim0
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> forall a : box. ReprBox a -> BoxOffset dim0 -> dim0 -> (Boxed (Stored NoneType) -> a)
   -> Stream dim0 a attribute(inline) =
-  con_view @dim0 @a con_dim0 f;
+  real_generate_dim0;
 
-ShapeDict_dim0_flatten @(a : box) (rep : Repr (AsBare a)) (s : Stream dim0 a)
+
+real_generate_dim0 @(a : box)
+  (rep : Repr (AsBare a)) (off : BoxOffset dim0) (d : dim0)
+  (f : Boxed (Stored NoneType) -> a)
+  -> Stream dim0 a attribute(inline) =
+  traverse_view_real @dim0 @a (ShapeDict_dim0_loop_breaker None) rep
+  (con_view @dim0 @a con_dim0 f);
+
+
+flatten_dim0
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> forall a : box. ReprBox a -> Stream dim0 a -> Stream list_dim a attribute(inline) =
+  real_flatten_dim0;
+
+
+real_flatten_dim0 @(a : box) (rep : Repr (AsBare a)) (s : Stream dim0 a)
   -> Stream list_dim a attribute(inline) =
-  case s of mk_view tyob (d : dim0) (f : Boxed (Stored NoneType) -> a).
+  case rStreamToView @dim0 @a rep
+       (fromIxStream @dim0 @a (unStream @dim0 @a s)) of
+    mk_view tyob d f.
 
+  -- Create a 1D list view
   let d : list_dim = con_list_dim (justVal @int 1) in
 
-  ShapeDict_list_dim_generate @a rep d
+  real_generate_list_dim @a rep (boxIntValue 0) d
   (\ (i : Boxed (Stored int)) -> a. f (boxNoneValue None));
 
 
-ShapeDict_dim0_map @(a b : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (transformer : a -> b)
+zipWith_dim0
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> forall a b c : box.
+     Repr (AsBare a) -> Repr (AsBare b) -> Repr (AsBare c) ->
+     (a -> b -> c) ->
+     Stream dim0 a -> Stream dim0 b -> Stream dim0 c
+  attribute(inline) =
+  real_zipWith_dim0;
+
+
+real_zipWith_dim0 @(a b c : box)
+  (rep_a : ReprBox a)
+  (rep_b : ReprBox b)
+  (rep_c : ReprBox c)
+  (f : a -> b -> c)
+  (s1 : Stream dim0 a)
+  (s2 : Stream dim0 b)
+  -> Stream dim0 c
+  attribute(inline) =
+
+  case s1 of stream tyob par_hint1 i_s1.
+  let rs1 = fromIxStream @dim0 @a i_s1 in
+  case s2 of stream tyob par_hint2 i_s2.
+  let rs2 = fromIxStream @dim0 @b i_s2 in
+
+  let par_hint = leastParHint par_hint1 par_hint2 in
+
+  con_stream @dim0 @c par_hint
+  (con_ixStream @dim0 @c
+   (zipWith_RStream @dim0 @a @b @c
+    (ShapeDict_dim0_loop_breaker None) rep_a rep_b rep_c f rs1 rs2));
+
+
+fold_dim0
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> forall a acc : box.
+     Repr (AsBare a) -> Repr (AsBare acc) ->
+     (a -> acc -> acc) -> Stream dim0 a -> acc -> acc
+  attribute(inline) =
+
+  real_fold_dim0;
+
+
+real_fold_dim0 @(a acc : box)
+  (rep_a : ReprBox a)
+  (rep_acc : ReprBox acc)
+  (combine : a -> acc -> acc)
   (s : Stream dim0 a)
-  -> Stream dim0 b attribute(inline) =
-  case s of mk_view tyob (d : dim0) (f : Boxed (Stored NoneType) -> a).
-  con_view @dim0 @b d
-  (\ (i : Boxed (Stored NoneType)) -> b.
-    transformer (f (boxNoneValue None)));
+  (init : acc)
+  -> acc
+  attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case rStreamToView @dim0 @a rep_a (fromIxStream @dim0 @a i_s) of
+    mk_view tyob dom get.
+
+  -- Apply the combining function to the value
+  combine (get (boxNoneValue None)) init;
 
 
-ShapeDict_dim0_zipWith @(a b c : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b)) (repr_c : Repr (AsBare c))
-  (transformer : a -> b -> c)
-  (sA : Stream dim0 a)
-  (sB : Stream dim0 b)
-  -> Stream dim0 c attribute(inline) =
-  case sA of mk_view tyob (dA : dim0) fA.
-  case sB of mk_view tyob (dB : dim0) fB.
-  con_view @dim0 @c dA
-  (\ (i : Boxed (Stored NoneType)) -> c.
-    transformer (fA (boxNoneValue None)) (fB (boxNoneValue None)));
+imp_fold_dim0 @(a : box)
+  (rep_a : ReprBox a)
+  (combine : a -> Store -> Store)
+  (s : Stream dim0 a)
+  (init : Store)
+  -> Store
+  attribute(inline) =
+
+  case s of stream tyob par_hint i_s.
+  case rStreamToView @dim0 @a rep_a (fromIxStream @dim0 @a i_s) of
+    mk_view tyob dom get.
+
+  foreach_dim0 dom (boxNoneValue None)
+  (\ (i : BoxIndex dim0) (s : Store) -> Store. combine (get i) s)
+  init;
 
 
-ShapeDict_dim0_zipWith3 @(a b c d : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d))
-  (transformer : a -> b -> c -> d)
-  (sA : Stream dim0 a)
-  (sB : Stream dim0 b)
-  (sC : Stream dim0 c)
-  -> Stream dim0 d attribute(inline) =
-  case sA of mk_view tyob (dA : dim0) fA.
-  case sB of mk_view tyob (dB : dim0) fB.
-  case sC of mk_view tyob (dC : dim0) fC.
-  con_view @dim0 @d dA
-  (\ (i : Boxed (Stored NoneType)) -> d.
-    transformer (fA (boxNoneValue None))
-                (fB (boxNoneValue None))
-                (fC (boxNoneValue None)));
+foreach_dim0
+  (dom : dim0)
+  (off : BoxOffset dim0)
+  (combine : BoxIndex dim0 -> Store -> Store)
+  (init : Store)
+  -> Store attribute(inline) =
+
+  combine (boxNoneValue None) init;
 
 
-ShapeDict_dim0_zipWith4 @(a b c d e : box)
-  (repr_a : Repr (AsBare a)) (repr_b : Repr (AsBare b))
-  (repr_c : Repr (AsBare c)) (repr_d : Repr (AsBare d)) (repr_e : Repr (AsBare e))
-  (transformer : a -> b -> c -> d -> e)
-  (sA : Stream dim0 a)
-  (sB : Stream dim0 b)
-  (sC : Stream dim0 c)
-  (sD : Stream dim0 d)
-  -> Stream dim0 e attribute(inline) =
-  case sA of mk_view tyob (dA : dim0) fA.
-  case sB of mk_view tyob (dB : dim0) fB.
-  case sC of mk_view tyob (dC : dim0) fC.
-  case sD of mk_view tyob (dD : dim0) fD.
-  con_view @dim0 @e dA
-  (\ (i : Boxed (Stored NoneType)) -> e.
-    transformer (fA (boxNoneValue None))
-                (fB (boxNoneValue None))
-                (fC (boxNoneValue None))
-                (fD (boxNoneValue None)));
+foreachSeq_dim0
+  (r1 : Repr (index dim0)) (r2 : Repr (offset dim0)) (r3 : Repr (slice dim0))
+  -> forall a : box. dim0 -> (BoxIndex dim0 -> Seq a) -> Seq a
+  attribute(inline) =
+  real_foreachSeq_dim0;
 
 
-ShapeDict_dim0_slice @(t : box -> box) @(a : box)
-  (has_shape : coerce @box (shape t) dim0)
-  (indexable : IndexableDict t)
-  (rep : Repr (AsBare a))
-  (container : t a)
-  (sl : AsBox (slice dim0))
-  -> view dim0 a attribute(inline) =
-  case indexable of indexableDict tyob at_index get_shape.
+real_foreachSeq_dim0 @(a : box)
+  (dom : dim0)
+  (k : BoxIndex dim0 -> Seq a)
+  -> Seq a attribute(inline, inline_sequential) =
 
-  con_view @dim0 @a con_dim0
-  (\ (ix : Boxed (Stored NoneType)) -> a.
-    at_index @a rep container
-    (coerce @(AsBox (index dim0)) @(AsBox (index (shape t))) ix));
+  k (boxNoneValue None);
 
--}
 
 ShapeDict_dim1 : ShapeDict dim1 =
   shapeDict @dim1 (boxedinfo shapeDict @dim1)
@@ -8717,11 +8971,11 @@ real_peel_dim1 @(a r : box)
 
 flatten_dim1
   (r1 : Repr (index dim1)) (r2 : Repr (offset dim1)) (r3 : Repr (slice dim1))
-  -> forall a : box. Stream dim1 a -> Stream list_dim a attribute(inline) =
+  -> forall a : box. ReprBox a -> Stream dim1 a -> Stream list_dim a attribute(inline) =
   real_flatten_dim1;
 
 
-real_flatten_dim1 @(a : box) (s : Stream dim1 a)
+real_flatten_dim1 @(a : box) (rep : ReprBox a) (s : Stream dim1 a)
   -> Stream list_dim a attribute(inline) =
 
   -- Flatten by creating a splittable stream
@@ -8730,7 +8984,7 @@ real_flatten_dim1 @(a : box) (s : Stream dim1 a)
   con_stream @list_dim @a par_hint
   (con_splittableStream @a @dim1
    (ShapeDict_dim1_loop_breaker None)
-   (map_RStream @dim1 @a @(Stream list_dim a) (unit_Stream @a) rs));
+   (map_RStream @dim1 @a @(Stream list_dim a) (unit_Stream @a rep) rs));
 
 
 generate_dim1
@@ -9117,11 +9371,11 @@ real_peel_dim2 @(a r : box)
 
 flatten_dim2
   (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
-  -> forall a : box. Stream dim2 a -> Stream list_dim a attribute(inline) =
+  -> forall a : box. ReprBox a -> Stream dim2 a -> Stream list_dim a attribute(inline) =
   real_flatten_dim2;
 
 
-real_flatten_dim2 @(a : box) (s : Stream dim2 a)
+real_flatten_dim2 @(a : box) (rep : ReprBox a) (s : Stream dim2 a)
   -> Stream list_dim a attribute(inline) =
 
   -- Flatten by creating a splittable stream
@@ -9130,7 +9384,7 @@ real_flatten_dim2 @(a : box) (s : Stream dim2 a)
   con_stream @list_dim @a par_hint
   (con_splittableStream @a @dim2
    (ShapeDict_dim2_loop_breaker None)
-   (map_RStream @dim2 @a @(Stream list_dim a) (unit_Stream @a) rs));
+   (map_RStream @dim2 @a @(Stream list_dim a) (unit_Stream @a rep) rs));
 
 
 generate_dim2
@@ -13238,7 +13492,7 @@ reduce1 @(t : box -> box) @(a : box)
 
   case traversable of traversableDict tyob traverse build.
 
-  let flat_stream = shFlatten @(shape t) sh @a (traverse @a rep x) in
+  let flat_stream = shFlatten @(shape t) sh @a rep (traverse @a rep x) in
 
   peel_Stream @a @a rep
   (\ (init : a) (s : Stream list_dim a) -> a.
@@ -13274,7 +13528,7 @@ filter @(t : box -> box) @(a : box)
              (traverse @a rep x) in
 
   let s_out = coerce @(Stream list_dim a) @(Stream (shape t) a)
-              (filter_Stream @a test s_in) in
+              (filter_Stream @a rep test s_in) in
 
   build @a rep s_out;
 
@@ -16432,9 +16686,15 @@ fromIxStream @(sh a : box) (s : IStream sh a)
 -------------------------------------------------------------------------------
 
 
-unit_Stream @(a : box) (x : a) -> Stream list_dim a
+unit_Stream @(a : box) (rep : ReprBox a) (x : a) -> Stream list_dim a
   attribute(inline, inline_sequential) =
 
+  {-
+  -- Create a dim0 stream
+  let vw = con_view @dim0 @a con_dim0
+           (\ (idx : Boxed (Stored NoneType)) -> a. x) in
+  traverse_view_real @list_dim @a ShapeDict_list_dim rep vw;
+  -}  
   con_stream @list_dim @a hintSeq (con_seqStream @a (unit_Seq @a x));
 
 
@@ -16493,12 +16753,13 @@ guard_Stream2 @(a : box) (condition : bool) (s : Stream list_dim a)
   in con_stream @list_dim @a par_hint s2;
 
 
-filter_Stream @(a : box) (test : a -> Boxed (Stored bool)) (s : Stream list_dim a)
+filter_Stream @(a : box) (rep : ReprBox a)
+  (test : a -> Boxed (Stored bool)) (s : Stream list_dim a)
   -> Stream list_dim a attribute(inline) =
 
   bind_Stream @a @a s
   (\ (x : a) -> Stream list_dim a.
-     guard_Stream @a (unboxBoolValue (test x)) (unit_Stream @a x));
+     guard_Stream @a (unboxBoolValue (test x)) (unit_Stream @a rep x));
 
 
 -- This function is recursive
