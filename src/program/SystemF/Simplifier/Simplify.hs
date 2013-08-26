@@ -49,6 +49,7 @@ import SystemF.Simplifier.Rewrite
 import SystemF.Simplifier.AbsValue
 import SystemF.Simplifier.StreamExp
 
+import Common.ConPattern
 import Common.Error
 import Common.Identifier
 import Common.MonadLogic
@@ -299,11 +300,13 @@ class Definiens t where
 instance Definiens Fun where
   definiensInfo = funInfo . fromFunM
   definiensIsInliningCandidate = isInliningCandidate
-  definiensValue (Def v _ f) = do
+  definiensValue (Def v ann f) = do
     let fun_info = funInfo $ fromFunM f
     env <- getKnownValues
     fun_code <- liftTypeEvalM $ lambdaValue env f
-    return $ labelCodeVar v $ labelCode (ExpM $ LamE fun_info f) fun_code
+    return $ setInlinePattern (defAnnInlinePattern ann) $ 
+      labelCodeVar v $
+      labelCode (ExpM $ LamE fun_info f) fun_code
   definiensTypeSM = functionTypeSM
 
 instance Definiens Ent where
@@ -1489,8 +1492,11 @@ rwAppWithOperator' inf op op_val ty_args args =
        consumeFuel >> inline_function_call op f
      _ ->
        case codeExp op_val
-       of Just (ExpM (LamE _ f)) ->
-            trace_inlining $ consumeFuel >> inline_function_call op f
+       of Just (ExpM (LamE _ f)) -> do
+            inlining_ok <- checkCallsiteInlining (codeInlineHint op_val) args
+            if inlining_ok
+              then trace_inlining $ consumeFuel >> inline_function_call op f
+              else unknown_app
 
           -- Use special rewrite semantics for built-in functions
           Just (ExpM (VarE _ op_var))
@@ -1534,10 +1540,100 @@ rwAppWithOperator' inf op op_val ty_args args =
 
     -- Change this to print out the names of direct-called functions that
     -- get inlined
+    {-trace_inlining x =
+      case codeTrivialExp op_val
+      of Just e -> do
+           arg_cons <- mapM lookupSimpleExpDataConstructor args
+           traceShow (text "Inlining" <+> pprExp e <+>
+                      maybe Text.PrettyPrint.HughesPJ.empty (text . showConPatterns) (inlConPattern $ codeInlineHint op_val) <+> text "with" <+>
+                      int (length ty_args) <+> text "type arguments," <+>
+                      int (length args) <+> text "arguments, and" <+>
+                      text "constructors" <+> sep arg_cons) x-}
+
     trace_inlining x = x
-    {-
-    trace_inlining x = traceShow (text "Inlining" <+> pprExp op) x
-    -}
+
+-- | Check whether inlining is profitable based on information specific to 
+--   a call site.  A 'False' return value prevents inlining. 
+--   A 'True' return value permits inlining.
+--
+--   When inlining structurally recursive functions, this check is important
+--   to ensure that the function is not inlined infinitely.
+checkCallsiteInlining :: InlineHint -> [ExpSM] -> LR Bool
+
+-- If no call pattern is givne, then do not restrict inlining
+checkCallsiteInlining (InlineHint Nothing) _ = return True
+
+checkCallsiteInlining (InlineHint (Just con_patterns)) args =
+  if length args < length con_patterns
+  then return False
+  else andM $ zipWith checkConPattern con_patterns args
+
+-- | Verify that the given expression satisfies the constructor pattern.
+checkConPattern :: ConPattern -> ExpSM -> LR Bool
+checkConPattern pattern expression = check_exp pattern expression
+  where
+    check_exp AnyTerm e = return True
+    check_exp AnyConTerm e = check_exp_head e Nothing
+    check_exp (ConTerm ps) e = check_exp_head e (Just ps)
+
+    -- Check whether an expression matches an 'AnyConTerm' or a 
+    -- 'ConTerm ps'.  The 'ConTerm' patterns are given as the second argument.
+    check_exp_head :: ExpSM -> Maybe ConPatterns -> LR Bool
+    check_exp_head e field_patterns = do
+      e' <- freshenHead e
+      case e' of
+        VarE _ v -> do
+          -- Look up the variable's known value to see if it's an
+          -- application of a known constructor
+          av <- lookupKnownValue v
+          check_abs_value_head av field_patterns
+        ConE _ _ _ _ fs ->
+          -- Check the fields
+          check_exps fs field_patterns
+        _ -> return False
+
+    check_abs_value AnyTerm e = return True
+    check_abs_value AnyConTerm e = check_abs_value_head e Nothing
+    check_abs_value (ConTerm ps) e = check_abs_value_head e (Just ps)
+
+    check_abs_value_head av field_patterns =
+      case codeValue av of
+        DataAV dat ->
+          check_abs_values (dataFields dat) field_patterns
+        _ -> return False
+
+    -- No restriction on field values
+    check_abs_values fields Nothing = return True
+    
+    check_abs_values fields (Just field_patterns)
+      | length fields /= length field_patterns =
+          internalError "checkConPattern: inconsistent annotation detected"
+      | otherwise =
+          andM $ zipWith check_abs_value field_patterns fields
+
+    check_exps fields Nothing = return True
+    
+    check_exps fields (Just field_patterns) 
+      | length fields /= length field_patterns =
+          internalError "checkConPattern: inconsistent annotation detected"
+      | otherwise =
+          andM $ zipWith check_exp field_patterns fields
+
+-- | Look up the known data constructor value of an expression that's a data
+--   constructor application or variable.
+lookupSimpleExpDataConstructor :: ExpSM -> LR Doc
+lookupSimpleExpDataConstructor e = do
+  e' <- freshenHead e
+  case e' of
+    VarE _ v -> do
+      kv <- lookupKnownValue v
+      case codeValue kv of
+        DataAV dat -> return $ pprAbsCode kv
+        _ -> return (text "?")
+    ConE _ con _ _ _ -> return $ case summarizeConstructor con
+                                 of Just v -> text "Constructed" <+> pprVar v
+                                    Nothing -> text "Constructed tuple"
+    _ -> return (text "?")
 
 -- | Special simplification rules for applications of built-in functions.
 --   The key is the variable ID of the function name.

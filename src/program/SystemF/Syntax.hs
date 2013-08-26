@@ -96,6 +96,7 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.Traversable
 
+import Common.ConPattern
 import Common.Error
 import Common.Label
 import Common.SourcePos
@@ -625,9 +626,15 @@ mkWrapperDef original_ann v f = let
 mkWorkerDef :: DefAnn -> Var -> t s -> Def t s
 mkWorkerDef original_ann v f = let
   annotation =
-    defaultDefAnn { -- Inherit inlining-related properties
+    defaultDefAnn { -- Inherit inlining-related properties.
+                    -- Can't inherit inlining patterns, since they may no 
+                    -- longer be valid after this transformation. 
+                    -- If there was an inlining pattern, then mark the
+                    -- annotation 'InlineNever' to avoid runaway inlining.
                     defAnnInlinePhase = defAnnInlinePhase original_ann
-                  , defAnnInlineRequest = defAnnInlineRequest original_ann
+                  , defAnnInlineRequest = if isNothing $ defAnnInlinePattern original_ann
+                                          then defAnnInlineRequest original_ann
+                                          else InlNever
                   , defAnnJoinPoint = defAnnJoinPoint original_ann
                   }
   in Def v annotation f
@@ -656,6 +663,10 @@ data DefAnn =
     -- | A tag controlling how aggressively to inline
   , defAnnInlineRequest :: !InliningEagerness
 
+    -- | An optional tag restricting whether to inline based on parameter
+    --   values at the callsite
+  , defAnnInlinePattern :: !(Maybe ConPatterns)
+
     -- | True for functions that are very cheap to re-execute.
   , defAnnConlike :: !Bool
 
@@ -681,7 +692,8 @@ data DefAnn =
 
 defaultDefAnn :: DefAnn
 defaultDefAnn =
-  DefAnn InlNormal InlConservatively False False False (Dmd ManyUnsafe Used) False
+  DefAnn InlNormal InlConservatively Nothing
+         False False False (Dmd ManyUnsafe Used) False
 
 -- | An annotation controlling when a function may be inlined.
 --

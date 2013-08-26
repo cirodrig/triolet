@@ -47,6 +47,7 @@ fromVarAttrs attrs =
     interpret st InlineSequentialAttr = st
     interpret st InlineFinalAttr = st
     interpret st InlinePostfinalAttr = st
+    interpret st (InlineStructAttr _) = st
 
     -- Ignore builtin attribute
     interpret st BuiltinAttr = st

@@ -18,6 +18,7 @@ import Text.ParserCombinators.Parsec((<|>), (<?>), unexpected, choice,
 
 import CParser2.AST
 import CParser2.Lexer
+import Common.ConPattern
 import Common.SourcePos as PySrcPos
 
 -- | The parser type
@@ -170,7 +171,22 @@ attr = do
        ("inline_sequential", return InlineSequentialAttr),
        ("inline_final", return InlineFinalAttr),
        ("inline_postfinal", return InlinePostfinalAttr),
+       ("inline_struct", InlineStructAttr <$> parens conPatterns),
        ("builtin", return BuiltinAttr)]
+
+-- | Constructor patterns appearing in an attribute
+conPatterns :: P ConPatterns
+conPatterns = many conPattern
+
+conPattern :: P ConPattern
+conPattern = do
+  ident <- identifier
+
+  -- Identifiers are special in this context
+  case ident of
+    "T" -> return AnyTerm
+    "C" -> return AnyConTerm
+    "D" -> ConTerm <$> parens conPatterns
 
 -------------------------------------------------------------------------------
 -- * Type parsing

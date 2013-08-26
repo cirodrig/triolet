@@ -111,7 +111,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("float", "float", TypeLevel, False)
         , ("byte", "byte", TypeLevel, False)
         , ("int64", "int64", TypeLevel, False)
-
+          
         , ("asBox", "AsBox", TypeLevel, True)
         , ("asBare", "AsBare", TypeLevel, True)
         , ("bool", "bool", TypeLevel, True)

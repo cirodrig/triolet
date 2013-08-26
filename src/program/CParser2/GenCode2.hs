@@ -116,6 +116,9 @@ defAttributes attrs ann =
     insert_attribute InlinePostfinalAttr ann =
       ann {SystemF.defAnnInlinePhase = SystemF.InlPostfinal}
 
+    insert_attribute (InlineStructAttr x) ann =
+      ann {SystemF.defAnnInlinePattern = Just x}
+
     -- The 'builtin' attribute is only used during parsing
     insert_attribute BuiltinAttr ann =
       ann

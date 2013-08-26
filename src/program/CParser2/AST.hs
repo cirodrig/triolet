@@ -12,6 +12,7 @@ import Control.Monad
 import Data.Foldable
 import Data.Traversable
 
+import Common.ConPattern
 import Common.Error
 import Common.Identifier
 import Common.SourcePos
@@ -61,6 +62,8 @@ data Attribute ix =
                                     --   the final optimization phase
   | InlinePostfinalAttr             -- ^ Definition should not be inlined until
                                     --   after redundant copying is removed
+  | InlineStructAttr !ConPatterns   -- ^ Restrict inlining to instances where 
+                                    --   arguments match the given pattern.
   | BuiltinAttr                     -- ^ Definition of a built-in variable.
                                     --   This attribute controls name
                                     --   resolution.
@@ -78,6 +81,7 @@ castAttribute InlineNeverAttr = InlineNeverAttr
 castAttribute InlineSequentialAttr = InlineSequentialAttr
 castAttribute InlineFinalAttr = InlineFinalAttr
 castAttribute InlinePostfinalAttr = InlinePostfinalAttr
+castAttribute (InlineStructAttr x) = (InlineStructAttr x)
 castAttribute BuiltinAttr = BuiltinAttr
 castAttribute _ = internalError "castAttribute"
 

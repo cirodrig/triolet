@@ -25,6 +25,7 @@ where
 
 import Text.PrettyPrint.HughesPJ
 
+import Common.ConPattern
 import Common.PrecDoc
 import Common.Label
 import SystemF.Demand
@@ -268,7 +269,7 @@ pprFunPrecFlags is_lambda flags (FunM fun) =
 pprDefAnn :: DefAnn -> Doc
 pprDefAnn ann =
   brackets $ sep $ punctuate (text ",") $
-  filter (not . isEmpty) [inl_doc, join_doc, phase_doc, call_doc, uses_doc]
+  filter (not . isEmpty) [inl_doc, pattern_doc, join_doc, phase_doc, call_doc, uses_doc]
   where
     phase_doc =
       case defAnnInlinePhase ann
@@ -278,6 +279,10 @@ pprDefAnn ann =
       case defAnnInlineRequest ann
       of InlConservatively -> empty
          x -> text (show x)
+    pattern_doc =
+      case defAnnInlinePattern ann
+      of Nothing -> empty
+         Just ps -> text (showConPatterns ps)
     conlike_doc =
       if defAnnConlike ann
       then text "conlike"

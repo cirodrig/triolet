@@ -17,12 +17,14 @@ module SystemF.Simplifier.AbsValue
         topCode,
         isTopCode,
         valueCode,
+        setInlinePattern,
         labelCode,
         labelCodeVar,
         relabelCodeVar,
         codeExp,
         codeTrivialExp,
         codeValue,
+        codeInlineHint,
         litCode,
         trueCode, falseCode,
         varEqualityTestCode,
@@ -33,6 +35,8 @@ module SystemF.Simplifier.AbsValue
         absValueArity,
         funValue,
         lambdaValue,
+        InlineHint(..),
+        defaultInlineHint,
         initializerValue,
         scrutineeDataValue,
         AbsComputation(..),
@@ -72,6 +76,7 @@ import Data.Traversable
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
+import Common.ConPattern
 import Common.Error
 import Common.Identifier
 import Common.MonadLogic
@@ -98,6 +103,18 @@ renameMany f rn (x:xs) k =
 
 renameMany _ rn [] k = k rn []
 
+-- | Inlining hints associated with an abstract value.
+data InlineHint =
+  InlineHint
+  { -- | If a pattern is given, then restrict inlining according to the
+    --   pattern.  Inline at a callsite only when the arguments satisfy
+    --   the pattern.
+    inlConPattern :: !(Maybe ConPatterns)
+  }
+
+defaultInlineHint = InlineHint Nothing
+
+
 -- | An abstract value labeled with a piece of code and/or a variable.
 --
 --   The label retrieved with 'codeExp' or 'codeTrivialExp' is an
@@ -115,21 +132,27 @@ renameMany _ rn [] k = k rn []
 --   explicitly stored.  Note that the abstract value (not the label) is
 --   given priority when creating an expression.
 data AbsCode =
-  AbsCode { _codeLabel :: !(Maybe ExpM)
+  AbsCode { _codeLabel    :: !(Maybe ExpM)
           , _codeVarLabel :: !(Maybe Var)
-          , _codeValue :: !AbsValue
+          , _codeInlining :: !InlineHint
+          , _codeValue    :: !AbsValue
           }
 
 -- | The least precise 'AbsCode' value.
 topCode :: AbsCode
-topCode = AbsCode Nothing Nothing TopAV
+topCode = AbsCode Nothing Nothing defaultInlineHint TopAV
 
-isTopCode (AbsCode Nothing Nothing TopAV) = True
+isTopCode (AbsCode Nothing Nothing _ TopAV) = True
 isTopCode _ = False
 
 -- | Create an 'AbsCode' from an 'AbsValue'.  The created code is not labeled.
 valueCode :: AbsValue -> AbsCode
-valueCode v = AbsCode Nothing Nothing v
+valueCode v = AbsCode Nothing Nothing defaultInlineHint v
+
+-- | Attach an inline pattern to an abstract value
+setInlinePattern :: Maybe ConPatterns -> AbsCode -> AbsCode
+setInlinePattern mp code =
+  code {_codeInlining = (_codeInlining code) {inlConPattern = mp}}
 
 -- | Attach a label to an 'AbsCode', to be retrieved with 'codeExp'.
 labelCode :: ExpM -> AbsCode -> AbsCode
@@ -140,7 +163,8 @@ labelCode lab code = code {_codeLabel = Just lab}
 labelCodeVar :: Var -> AbsCode -> AbsCode
 labelCodeVar v code
   | isJust $ codeTrivialExp code = code
-  | TopAV <- _codeValue code = AbsCode (_codeLabel code) Nothing (VarAV v)
+  | TopAV <- _codeValue code =
+      AbsCode (_codeLabel code) Nothing (_codeInlining code) (VarAV v)
   | otherwise = code {_codeVarLabel = Just v}
 
 -- | Attach a variable label to an 'AbsCode', to be retrieved with
@@ -185,6 +209,9 @@ codeTrivialExp code =
 
 codeValue :: AbsCode -> AbsValue
 codeValue = _codeValue
+
+codeInlineHint :: AbsCode -> InlineHint
+codeInlineHint = _codeInlining
 
 litCode :: Lit -> AbsCode
 litCode l = valueCode $ LitAV l
@@ -265,9 +292,9 @@ sequenceComputations xs f
 
 data AbsFun =
   AbsFun
-  { afunTyParams :: [Binder]
-  , afunParams   :: [PatM]
-  , afunBody     :: AbsComputation
+  { afunTyParams  :: [Binder]
+  , afunParams    :: [PatM]
+  , afunBody      :: AbsComputation
   }
 
 -- | An abstract data value.  Fields correspond to the fields of 'ConE'.
@@ -314,15 +341,15 @@ data AbsProp =
 -- Printing
 
 pprAbsCode :: AbsCode -> Doc
-pprAbsCode (AbsCode Nothing Nothing val) = pprAbsValue val
-pprAbsCode (AbsCode lab var val) =
+pprAbsCode (AbsCode Nothing Nothing hint val) = pprInlineHint hint <+> pprAbsValue val
+pprAbsCode (AbsCode lab var hint val) =
   let lab_doc =
         case (lab, var)
         of (Just lab, Nothing) -> pprExp lab
            (Nothing, Just v)   -> pprVar v
            (Just lab, Just v)  -> pprVar v <+> text "=" <+> pprExp lab
       val_doc = pprAbsValue val
-  in braces lab_doc $$ text "~=" <+> val_doc
+  in pprInlineHint hint <+> braces lab_doc $$ text "~=" <+> val_doc
 
 pprAbsValue TopAV = text "TOP"
 pprAbsValue (VarAV v) = pprVar v
@@ -344,7 +371,10 @@ pprAbsFun (AbsFun ty_params params body) =
       params_doc = [parens (pprVar (patMVar p) <+> colon <+> pprType (patMType p))
                    | p <- params]
   in hang (text "lambda" <+> sep (ty_params_doc ++ params_doc) <> text ".") 4 $
-     pprAbsComputation body
+      pprAbsComputation body
+
+pprInlineHint (InlineHint Nothing) = empty
+pprInlineHint (InlineHint (Just p)) = text "INLINE_STRUCT" <+> text (showConPatterns p)
 
 pprAbsData (AbsData (VarCon op ty_args ex_types) sps ty_ob fs) =
   let op_doc = text "<" <> pprVar op <> text ">"
@@ -643,7 +673,8 @@ instance Substitutable AbsCode where
            of Nothing -> return Nothing
               Just e -> runMaybeT $ substituteExp s e
     value <- substitute s (_codeValue code)
-    return $ AbsCode label var_label value
+    let inl = _codeInlining code -- Don't substitute inlining hints
+    return $ AbsCode label var_label inl value
 
 instance Substitutable AbsValue where
   type Substitution AbsValue = AbsSubst

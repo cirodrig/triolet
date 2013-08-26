@@ -75,6 +75,7 @@ Executable triolet
     Builtins.BuiltinsTH
     Builtins.Builtins
     Builtins.TypeFunctions
+    Common.ConPattern
     Common.Error
     Common.Identifier
     Common.Label
