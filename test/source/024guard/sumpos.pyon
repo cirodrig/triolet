@@ -1,7 +1,5 @@
 
-def sum(xs): return reduce(lambda x, y: x + y, 0, xs)
-
 def sumpos(xs):
 	return sum(x for x in xs if x > 0)
 
-export ccall sumpos : list(int) -> int
+export cplusplus sumpos : list(int) -> int
