@@ -639,6 +639,7 @@ worthPreInlining dmd ty expr =
         case multiplicity dmd
         of OnceSafe -> inlckTrue
            OnceUnsafe -> inlckTrivial `inlckOr`
+                         inlckPartialApp `inlckOr`
                          inlckFunction `inlckOr`
                          inlckConlike
            _ -> inlckTrivial
@@ -676,6 +677,14 @@ inlckAnd a b dmd e = a dmd e >&&> b dmd e
 -- | Is the expression trivial?
 inlckTrivial :: InlineCheck
 inlckTrivial _ e = return $ isTrivialExp e
+
+-- | Is the expression a type application?
+--   Since type applications have no cost, it's better to inline them.
+inlckPartialApp :: InlineCheck
+inlckPartialApp _ (ExpM (AppE inf (ExpM (VarE _ _)) ty_args [])) =
+  return True
+
+inlckPartialApp _ _ = return False
 
 -- | Is the expression a lambda function?
 inlckFunction :: InlineCheck
