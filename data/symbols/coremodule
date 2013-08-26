@@ -4226,12 +4226,12 @@ Functor_Stream @(d : box) -> FunctorDict (Stream d) attribute(inline) =
   functorDict @(Stream d) (boxedinfo functorDict @(Stream d)) (map_Stream @d);
 
 
--- There are two copies of this function to work around inlining restrictions
--- FIXME: Handle recursive function inlining properly
 map_Stream @(d a b : box)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (f : a -> b) (s : Stream d a) -> Stream d b
-  attribute(inline) =
+  attribute(inline,
+            inline_struct(T T T D(T C)) -- Stream constructor is known
+           ) =
   case s of stream tyob_stream par_hint i_s.
   case i_s of {
     seqStream tyob co sq.
@@ -4244,109 +4244,14 @@ map_Stream @(d a b : box)
       (con_stream @list_dim @b par_hint
        (con_nestedIxStream @b @d2 shape_d2
         (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream2 @list_dim @a @b rep_a rep_b f) rs)))
+         (map_Stream @list_dim @a @b rep_a rep_b f) rs)))
 
   ; nestedSeqStream tyob co rs.
       coerce @(Stream list_dim b) @(Stream d b)
       (con_stream @list_dim @b par_hint
        (con_nestedSeqStream @b
         (map_Seq @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream2 @list_dim @a @b rep_a rep_b f) rs)))
-
-  ; ixStream tyob rs.
-      con_stream @d @b par_hint
-       (con_ixStream @d @b (map_RStream @d @a @b f rs))
-  };
-
--- FIXME: Handle recursive function inlining properly
-map_Stream2 @(d a b : box)
-  (rep_a : ReprBox a) (rep_b : ReprBox b)
-  (f : a -> b) (s : Stream d a) -> Stream d b
-  attribute(inline) =
-  case s of stream tyob_stream par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_seqStream @b (map_Seq @a @b f sq)))
-
-  ; nestedIxStream @d2 tyob co shape_d2 rs.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_nestedIxStream @b @d2 shape_d2
-        (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream3 @list_dim @a @b rep_a rep_b f) rs)))
-
-  ; nestedSeqStream tyob co rs.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_nestedSeqStream @b
-        (map_Seq @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream3 @list_dim @a @b rep_a rep_b f) rs)))
-
-  ; ixStream tyob rs.
-      con_stream @d @b par_hint
-       (con_ixStream @d @b (map_RStream @d @a @b f rs))
-  };
-
-
--- FIXME: Handle recursive function inlining properly
-map_Stream3 @(d a b : box)
-  (rep_a : ReprBox a) (rep_b : ReprBox b)
-  (f : a -> b) (s : Stream d a) -> Stream d b
-  attribute(inline) =
-  case s of stream tyob_stream par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_seqStream @b (map_Seq @a @b f sq)))
-
-  ; nestedIxStream @d2 tyob co shape_d2 rs.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_nestedIxStream @b @d2 shape_d2
-        (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
-
-  ; nestedSeqStream tyob co rs.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_nestedSeqStream @b
-        (map_Seq @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
-
-  ; ixStream tyob rs.
-      con_stream @d @b par_hint
-       (con_ixStream @d @b (map_RStream @d @a @b f rs))
-  };
-
-
--- FIXME: Handle recursive function inlining properly
-map_Stream4 @(d a b : box)
-  (rep_a : ReprBox a) (rep_b : ReprBox b)
-  (f : a -> b) (s : Stream d a) -> Stream d b
-  attribute(inline_never) =
-  case s of stream tyob_stream par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_seqStream @b (map_Seq @a @b f sq)))
-
-  ; nestedIxStream @d2 tyob co shape_d2 rs.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_nestedIxStream @b @d2 shape_d2
-        (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
-
-  ; nestedSeqStream tyob co rs.
-      coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
-       (con_nestedSeqStream @b
-        (map_Seq @(Stream list_dim a) @(Stream list_dim b)
-         (map_Stream4 @list_dim @a @b rep_a rep_b f) rs)))
+         (map_Stream @list_dim @a @b rep_a rep_b f) rs)))
 
   ; ixStream tyob rs.
       con_stream @d @b par_hint
@@ -5321,7 +5226,6 @@ chain @(a : box) (s1 s2 : Stream list_dim a) -> Stream list_dim a =
   -- TODO
   except @(Stream list_dim a);
 
--- FIXME: handle recursive functions properly
 reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a)
   -> a attribute(inline,
@@ -5398,229 +5302,6 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       reduce_unit reduce_slice f reduce_residual si
   };
 
-
-{-
--- FIXME: handle recursive functions properly
-reduce_Stream2 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
-  (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline) =
-
-  letfun
-    -- Perform a final reduction on partial results
-    reduce_residual (s : Stream list_dim a) -> a =
-      real_fold_list_dim @a @a rep rep f s z
-  in
-
-  letfun
-    reduce_unit (dummy : NoneType) -> a = z
-  in
-
-  case s of stream tyob par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      fold_Seq @a @a f sq z
-
-  ; nestedIxStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
-      let input_domain = someIndexableShape @d2 @b si in
-      letfun
-        reduce_slice (si : SomeIndexable d2 b) -> a =
-          -- Check the domain
-          let slice_domain = someIndexableShape @d2 @b si in
-          if shCheckSubdomain @d2 sh2 input_domain slice_domain
-          then
-            case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
-            let vw = indexableToView @t @b rep_b ix container in
-
-            -- Reduce over inner loop
-            let vw2 = map_view @d2 @b @a rep_b rep
-                      (\ (x : b) -> a.
-                         reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z
-                         (extract x))
-                      (coerce @(view (shape t) b) @(view d2 b) vw) in
-
-            -- Sequentially reduce the partial results for this loop
-            let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
-            shFold @d2 sh2 @a @a rep rep f local_s z
-          else except @a
-      in
-      reduce_loop @d2 @b @a sh2 rep_b rep par_hint
-      reduce_unit reduce_slice f reduce_residual si
-
-  ; nestedSeqStream tyob co sq.
-      -- Sequential fold over the sequence
-      fold_Seq @(Stream list_dim a) @a
-      (\ (inner_stream : Stream list_dim a) (ac : a) -> a.
-         -- Recursively reduce inner stream
-         let inner_value =
-               reduce_Stream3 @list_dim @a ShapeDict_list_dim rep f z inner_stream in
-         f ac inner_value)
-      sq z
-
-  ; ixStream tyob (rStream @b tyob2 rep_b extract si).
-      let input_domain = someIndexableShape @d @b si in
-      letfun
-        reduce_slice (si : SomeIndexable d b) -> a =
-          -- Check the domain
-          let slice_domain = someIndexableShape @d @b si in
-          if shCheckSubdomain @d sh input_domain slice_domain
-          then
-            -- Sequentially reduce the partial results for this loop
-            let local_s = con_stream @d @a hintSeq
-                          (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
-            shFold @d sh @a @a rep rep f local_s z
-          else except @a
-      in
-      reduce_loop @d @b @a sh rep_b rep par_hint
-      reduce_unit reduce_slice f reduce_residual si
-  };
-
-
--- FIXME: handle recursive functions properly
-reduce_Stream3 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
-  (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline) =
-
-  letfun
-    -- Perform a final reduction on partial results
-    reduce_residual (s : Stream list_dim a) -> a =
-      real_fold_list_dim @a @a rep rep f s z
-  in
-
-  letfun
-    reduce_unit (dummy : NoneType) -> a = z
-  in
-
-  case s of stream tyob par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      fold_Seq @a @a f sq z
-
-  ; nestedIxStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
-      let input_domain = someIndexableShape @d2 @b si in
-      letfun
-        reduce_slice (si : SomeIndexable d2 b) -> a =
-          -- Check the domain
-          let slice_domain = someIndexableShape @d2 @b si in
-          if shCheckSubdomain @d2 sh2 input_domain slice_domain
-          then
-            case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
-            let vw = indexableToView @t @b rep_b ix container in
-
-            -- Reduce over inner loop
-            let vw2 = map_view @d2 @b @a rep_b rep
-                      (\ (x : b) -> a.
-                         reduce_Stream4 @list_dim @a ShapeDict_list_dim rep f z
-                         (extract x))
-                      (coerce @(view (shape t) b) @(view d2 b) vw) in
-
-            -- Sequentially reduce the partial results for this loop
-            let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
-            shFold @d2 sh2 @a @a rep rep f local_s z
-          else except @a
-      in
-      reduce_loop @d2 @b @a sh2 rep_b rep par_hint
-      reduce_unit reduce_slice f reduce_residual si
-
-  ; nestedSeqStream tyob co sq.
-      -- Sequential fold over the sequence
-      fold_Seq @(Stream list_dim a) @a
-      (\ (inner_stream : Stream list_dim a) (ac : a) -> a.
-         -- Recursively reduce inner stream
-         let inner_value =
-               reduce_Stream4 @list_dim @a ShapeDict_list_dim rep f z inner_stream in
-         f ac inner_value)
-      sq z
-
-  ; ixStream tyob (rStream @b tyob2 rep_b extract si).
-      let input_domain = someIndexableShape @d @b si in
-      letfun
-        reduce_slice (si : SomeIndexable d b) -> a =
-          -- Check the domain
-          let slice_domain = someIndexableShape @d @b si in
-          if shCheckSubdomain @d sh input_domain slice_domain
-          then
-            -- Sequentially reduce the partial results for this loop
-            let local_s = con_stream @d @a hintSeq
-                          (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
-            shFold @d sh @a @a rep rep f local_s z
-          else except @a
-      in
-      reduce_loop @d @b @a sh rep_b rep par_hint
-      reduce_unit reduce_slice f reduce_residual si
-  };
-
-
--- FIXME: handle recursive functions properly
-reduce_Stream4 @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
-  (f : a -> a -> a) (z : a) (s : Stream d a) -> a attribute(inline_never) =
-
-  letfun
-    -- Perform a final reduction on partial results
-    reduce_residual (s : Stream list_dim a) -> a =
-      real_fold_list_dim @a @a rep rep f s z
-  in
-
-  letfun
-    reduce_unit (dummy : NoneType) -> a = z
-  in
-
-  case s of stream tyob par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      fold_Seq @a @a f sq z
-
-  ; nestedIxStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
-      let input_domain = someIndexableShape @d2 @b si in
-      letfun
-        reduce_slice (si : SomeIndexable d2 b) -> a =
-          -- Check the domain
-          let slice_domain = someIndexableShape @d2 @b si in
-          if shCheckSubdomain @d2 sh2 input_domain slice_domain
-          then
-            case si of someIndexable @t tyob (co : coerce @box (shape t) d2) ix container.
-            let vw = indexableToView @t @b rep_b ix container in
-
-            -- Reduce over inner loop
-            let vw2 = map_view @d2 @b @a rep_b rep
-                      (\ (x : b) -> a.
-                         reduce_Stream4 @list_dim @a ShapeDict_list_dim rep f z
-                         (extract x))
-                      (coerce @(view (shape t) b) @(view d2 b) vw) in
-
-            -- Sequentially reduce the partial results for this loop
-            let local_s = traverse_view_real @d2 @a sh2 rep vw2 in
-            shFold @d2 sh2 @a @a rep rep f local_s z
-          else except @a
-      in
-      reduce_loop @d2 @b @a sh2 rep_b rep par_hint
-      reduce_unit reduce_slice f reduce_residual si
-
-  ; nestedSeqStream tyob co sq.
-      -- Sequential fold over the sequence
-      fold_Seq @(Stream list_dim a) @a
-      (\ (inner_stream : Stream list_dim a) (ac : a) -> a.
-         -- Recursively reduce inner stream
-         let inner_value =
-               reduce_Stream4 @list_dim @a ShapeDict_list_dim rep f z inner_stream in
-         f ac inner_value)
-      sq z
-
-  ; ixStream tyob (rStream @b tyob2 rep_b extract si).
-      let input_domain = someIndexableShape @d @b si in
-      letfun
-        reduce_slice (si : SomeIndexable d b) -> a =
-          -- Check the domain
-          let slice_domain = someIndexableShape @d @b si in
-          if shCheckSubdomain @d sh input_domain slice_domain
-          then
-            -- Sequentially reduce the partial results for this loop
-            let local_s = con_stream @d @a hintSeq
-                          (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
-            shFold @d sh @a @a rep rep f local_s z
-          else except @a
-      in
-      reduce_loop @d @b @a sh rep_b rep par_hint
-      reduce_unit reduce_slice f reduce_residual si
-  };
--}
 
 -------------------------------------------------------------------------------
 -- Collectors
@@ -7980,6 +7661,7 @@ fold_list_dim
 
   real_fold_list_dim;
 
+
 real_fold_list_dim @(a acc : box)
   (rep_a : ReprBox a)
   (rep_acc : ReprBox acc)
@@ -7987,7 +7669,9 @@ real_fold_list_dim @(a acc : box)
   (s : Stream list_dim a)
   (init : acc)
   -> acc
-  attribute(inline) =
+  attribute(inline,
+            inline_struct(T T T D(T C) T) -- Inline if stream constructor known
+           ) =
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. fold_Seq @a @acc combine sq init
@@ -8002,7 +7686,7 @@ real_fold_list_dim @(a acc : box)
       shFold @d sh @(Stream list_dim a) @acc rep_stream rep_acc
       (\ (s : Stream list_dim a) (x : acc) -> acc.
          -- Inner loop
-         real_fold_list_dim2 @a @acc rep_a rep_acc combine s x)
+         real_fold_list_dim @a @acc rep_a rep_acc combine s x)
       outer_stream
       init
 
@@ -8010,7 +7694,7 @@ real_fold_list_dim @(a acc : box)
      -- Nested fold
      fold_Seq @(Stream list_dim a) @acc
      (\ (s : Stream list_dim a) (local_init : acc) -> acc.
-        real_fold_list_dim2 @a @acc rep_a rep_acc combine s local_init)
+        real_fold_list_dim @a @acc rep_a rep_acc combine s local_init)
      sq init
 
   ; ixStream tyob rs.
@@ -8028,109 +7712,15 @@ real_fold_list_dim @(a acc : box)
   --fold_Seq @a @acc combine (streamToSequence @a s) init;
 
 
-real_fold_list_dim2 @(a acc : box)
-  (rep_a : ReprBox a)
-  (rep_acc : ReprBox acc)
-  (combine : a -> acc -> acc)
-  (s : Stream list_dim a)
-  (init : acc)
-  -> acc
-  attribute(inline) =
-
-  case unStream @list_dim @a s of {
-    seqStream tyob co sq. fold_Seq @a @acc combine sq init
-
-  ; nestedIxStream @d tyob co sh rs.
-      let rep_stream = repr_Box @(Stream list_dim a) in
-      let outer_stream : Stream d (Stream list_dim a) =
-            traverse_view_real @d @(Stream list_dim a) sh rep_stream
-            (rStreamToView @d @(Stream list_dim a) rs) in
-
-      -- Outer loop over 'dom'
-      shFold @d sh @(Stream list_dim a) @acc rep_stream rep_acc
-      (\ (s : Stream list_dim a) (x : acc) -> acc.
-         -- Inner loop
-         real_fold_list_dim3 @a @acc rep_a rep_acc combine s x)
-      outer_stream
-      init
-
-  ; nestedSeqStream tyob co sq.
-     -- Nested fold
-     fold_Seq @(Stream list_dim a) @acc
-     (\ (s : Stream list_dim a) (local_init : acc) -> acc.
-        real_fold_list_dim3 @a @acc rep_a rep_acc combine s local_init)
-     sq init
-
-  ; ixStream tyob rs.
-      case rStreamToView @list_dim @a rs of mk_view tyob dom gen.
-      case dom of mk_list_dim tyob bound.
-      -- Loop over 'dom'
-      letfun
-        foldit (i : int) (x : acc) -> acc =
-          if case bound of {justVal n. i <# n; nothingVal. True}
-          then foldit (i +# 1) (combine (gen (boxIntValue i)) x)
-          else x
-      in
-        foldit 0 init      
-  };
-
-
-real_fold_list_dim3 @(a acc : box)
-  (rep_a : ReprBox a)
-  (rep_acc : ReprBox acc)
-  (combine : a -> acc -> acc)
-  (s : Stream list_dim a)
-  (init : acc)
-  -> acc
-  attribute(inline_never) =
-
-  case unStream @list_dim @a s of {
-    seqStream tyob co sq. fold_Seq @a @acc combine sq init
-
-  ; nestedIxStream @d tyob co sh rs.
-      let rep_stream = repr_Box @(Stream list_dim a) in
-      let outer_stream : Stream d (Stream list_dim a) =
-            traverse_view_real @d @(Stream list_dim a) sh rep_stream
-            (rStreamToView @d @(Stream list_dim a) rs) in
-
-      -- Outer loop over 'dom'
-      shFold @d sh @(Stream list_dim a) @acc rep_stream rep_acc
-      (\ (s : Stream list_dim a) (x : acc) -> acc.
-         -- Inner loop
-         real_fold_list_dim3 @a @acc rep_a rep_acc combine s x)
-      outer_stream
-      init
-
-  ; nestedSeqStream tyob co sq.
-     -- Nested fold
-     fold_Seq @(Stream list_dim a) @acc
-     (\ (s : Stream list_dim a) (local_init : acc) -> acc.
-        real_fold_list_dim3 @a @acc rep_a rep_acc combine s local_init)
-     sq init
-
-  ; ixStream tyob rs.
-      case rStreamToView @list_dim @a rs of mk_view tyob dom gen.
-      case dom of mk_list_dim tyob bound.
-      -- Loop over 'dom'
-      letfun
-        foldit (i : int) (x : acc) -> acc =
-          if case bound of {justVal n. i <# n; nothingVal. True}
-          then foldit (i +# 1) (combine (gen (boxIntValue i)) x)
-          else x
-      in
-        foldit 0 init      
-  };
-
-
--- This function is recursive
--- FIXME: Handle recursion properly
 imp_fold_list_dim @(a : box)
   (rep_a : ReprBox a)
   (combine : a -> Store -> Store)
   (s : Stream list_dim a)
   (init : Store)
   -> Store
-  attribute(inline) =
+  attribute(inline,
+            inline_struct(T T D(T C) T) -- Stream constructor is known
+           ) =
 
   case s of stream tyob par_hint i_s.
   case i_s of {
@@ -8146,155 +7736,14 @@ imp_fold_list_dim @(a : box)
       (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
 
          -- Inner loop
-         imp_fold_list_dim2 @a rep_a combine (extract (gen outer_i)) state)
+         imp_fold_list_dim @a rep_a combine (extract (gen outer_i)) state)
       init
 
   ; nestedSeqStream tyob co sq.
      -- Nested fold
      imp_fold_Seq @(Stream list_dim a)
      (\ (s : Stream list_dim a) (local_state : Store) -> Store.
-        imp_fold_list_dim2 @a rep_a combine s local_state)
-     sq init
-
-  ; ixStream tyob (rStream @b tyob2 rep_b f si).
-
-      -- Loop over the indexable object
-      case someIndexableToView @list_dim @b rep_b si of mk_view tyob dom gen.
-
-      let off = boxIntValue 0 in
-      foreach_list_dim dom off
-      (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
-         combine (f (gen outer_i)) state)
-      init
-  };
-
-
--- This function is recursive
--- FIXME: Handle recursion properly
-imp_fold_list_dim2 @(a : box)
-  (rep_a : ReprBox a)
-  (combine : a -> Store -> Store)
-  (s : Stream list_dim a)
-  (init : Store)
-  -> Store
-  attribute(inline) =
-
-  case s of stream tyob par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      imp_fold_Seq @a combine sq init
-
-  ; nestedIxStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
-      case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
-
-      -- Outer loop over 'dom'
-      let off = boxIntValue 0 in
-      shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
-      (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
-
-         -- Inner loop
-         imp_fold_list_dim3 @a rep_a combine (extract (gen outer_i)) state)
-      init
-
-  ; nestedSeqStream tyob co sq.
-     -- Nested fold
-     imp_fold_Seq @(Stream list_dim a)
-     (\ (s : Stream list_dim a) (local_state : Store) -> Store.
-        imp_fold_list_dim3 @a rep_a combine s local_state)
-     sq init
-
-  ; ixStream tyob (rStream @b tyob2 rep_b f si).
-
-      -- Loop over the indexable object
-      case someIndexableToView @list_dim @b rep_b si of mk_view tyob dom gen.
-
-      let off = boxIntValue 0 in
-      foreach_list_dim dom off
-      (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
-         combine (f (gen outer_i)) state)
-      init
-  };
-
-
--- This function is recursive
--- FIXME: Handle recursion properly
-imp_fold_list_dim3 @(a : box)
-  (rep_a : ReprBox a)
-  (combine : a -> Store -> Store)
-  (s : Stream list_dim a)
-  (init : Store)
-  -> Store
-  attribute(inline) =
-
-  case s of stream tyob par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      imp_fold_Seq @a combine sq init
-
-  ; nestedIxStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
-      case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
-
-      -- Outer loop over 'dom'
-      let off = boxIntValue 0 in
-      shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
-      (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
-
-         -- Inner loop
-         imp_fold_list_dim4 @a rep_a combine (extract (gen outer_i)) state)
-      init
-
-  ; nestedSeqStream tyob co sq.
-     -- Nested fold
-     imp_fold_Seq @(Stream list_dim a)
-     (\ (s : Stream list_dim a) (local_state : Store) -> Store.
-        imp_fold_list_dim4 @a rep_a combine s local_state)
-     sq init
-
-  ; ixStream tyob (rStream @b tyob2 rep_b f si).
-
-      -- Loop over the indexable object
-      case someIndexableToView @list_dim @b rep_b si of mk_view tyob dom gen.
-
-      let off = boxIntValue 0 in
-      foreach_list_dim dom off
-      (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
-         combine (f (gen outer_i)) state)
-      init
-  };
-
-
--- This function is recursive
--- FIXME: Handle recursion properly
-imp_fold_list_dim4 @(a : box)
-  (rep_a : ReprBox a)
-  (combine : a -> Store -> Store)
-  (s : Stream list_dim a)
-  (init : Store)
-  -> Store
-  attribute(inline_never) =
-
-  case s of stream tyob par_hint i_s.
-  case i_s of {
-    seqStream tyob co sq.
-      imp_fold_Seq @a combine sq init
-
-  ; nestedIxStream @d2 tyob co sh2 (rStream @b tyob2 rep_b extract si).
-      case someIndexableToView @d2 @b rep_b si of mk_view tyob2 dom gen.
-
-      -- Outer loop over 'dom'
-      let off = boxIntValue 0 in
-      shForeach @d2 sh2 dom (shNoOffset @d2 sh2)
-      (\ (outer_i : BoxIndex d2) (state : Store) -> Store.
-
-         -- Inner loop
-         imp_fold_list_dim4 @a rep_a combine (extract (gen outer_i)) state)
-      init
-
-  ; nestedSeqStream tyob co sq.
-     -- Nested fold
-     imp_fold_Seq @(Stream list_dim a)
-     (\ (s : Stream list_dim a) (local_state : Store) -> Store.
-        imp_fold_list_dim4 @a rep_a combine s local_state)
+        imp_fold_list_dim @a rep_a combine s local_state)
      sq init
 
   ; ixStream tyob (rStream @b tyob2 rep_b f si).
@@ -16902,10 +16351,13 @@ empty_Stream @(a : box)
   con_stream @list_dim @a hintSeq (con_seqStream @a (empty_Seq @a));
 
 
--- This function is recursive
--- FIXME: Handle recursive function inlining properly
-guard_Stream @(a : box) (rep : ReprBox a) (condition : bool) (s : Stream list_dim a)
-  -> Stream list_dim a attribute(inline, inline_sequential) =
+guard_Stream @(a : box) (rep : ReprBox a) (condition : bool)
+  (s : Stream list_dim a)
+  -> Stream list_dim a
+  attribute(inline,
+            inline_sequential,
+            inline_struct(T T D(T C)) -- Inline if stream constructor is known
+           ) =
 
   case s of stream tyob par_hint i_s.
   let s2 = case i_s of {
@@ -16916,44 +16368,13 @@ guard_Stream @(a : box) (rep : ReprBox a) (condition : bool) (s : Stream list_di
                -- Push the guard down
                nestedIxStream @list_dim @a @d2 tyob co sh_d2
                (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim a)
-                (guard_Stream2 @a rep condition) rs)
+                (guard_Stream @a rep condition) rs)
 
            ; nestedSeqStream tyob co sq.
                -- Push the guard down
                nestedSeqStream @list_dim @a tyob co
                (map_Seq @(Stream list_dim a) @(Stream list_dim a)
-                (guard_Stream2 @a rep condition) sq)
-
-           ; ixStream tyob rs.
-               con_nestedIxStream @a @list_dim ShapeDict_list_dim
-               (map_RStream @list_dim @a @(Stream list_dim a)
-                (\ (x : a) -> Stream list_dim a.
-                   con_stream @list_dim @a hintAny
-                   (con_seqStream @a
-                    (guard_Seq @a condition (unit_Seq @a x))))
-                rs)
-           }
-  in con_stream @list_dim @a par_hint s2;
-
-
--- This function is recursive
--- FIXME: Handle recursive function inlining properly
-guard_Stream2 @(a : box) (rep : ReprBox a) (condition : bool) (s : Stream list_dim a)
-  -> Stream list_dim a attribute(inline_never) =
-
-  case s of stream tyob par_hint i_s.
-  let s2 = case i_s of {
-             seqStream tyob co sq.
-               con_seqStream @a (guard_Seq @a condition sq)
-
-           ; nestedIxStream @d2 tyob co sh_d2 rs.
-               nestedIxStream @list_dim @a @d2 tyob co sh_d2
-               (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim a) (guard_Stream2 @a rep condition) rs)
-
-           ; nestedSeqStream tyob co sq.
-               -- Push the guard down
-               nestedSeqStream @list_dim @a tyob co
-               (map_Seq @(Stream list_dim a) @(Stream list_dim a) (guard_Stream2 @a rep condition) sq)
+                (guard_Stream @a rep condition) sq)
 
            ; ixStream tyob rs.
                con_nestedIxStream @a @list_dim ShapeDict_list_dim
@@ -16976,10 +16397,11 @@ filter_Stream @(a : box) (rep : ReprBox a)
      guard_Stream @a rep (unboxBoolValue (test x)) (unit_Stream @a rep x));
 
 
--- This function is recursive
--- FIXME: handle recursive functions properly
 bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
-  -> Stream list_dim b attribute(inline) =
+  -> Stream list_dim b
+  attribute(inline,
+            inline_struct(D(T C) T) -- Inline if stream constructor is known
+           ) =
 
   case s of stream tyob par_hint i_s.
   let u = case i_s of {
@@ -16993,7 +16415,7 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
           ; nestedIxStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
               letfun
                 extract2 (x : c) -> Stream list_dim b =
-                  bind_Stream2 @a @b (extract x) t
+                  bind_Stream @a @b (extract x) t
               in
 
               con_nestedIxStream @b @sh shape_sh
@@ -17002,48 +16424,7 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
           ; nestedSeqStream tyob co sq.
              letfun
                transform (x : Stream list_dim a) -> Stream list_dim b =
-                 bind_Stream2 @a @b x t
-              in
-              con_nestedSeqStream @b
-              (map_Seq @(Stream list_dim a) @(Stream list_dim b) transform sq)
-
-          ; ixStream tyob (rStream @c tyob2 rep_c extract si).
-              let dom = case si of someIndexable @s tyob co ix container.
-                        coerce @(shape s) @list_dim
-                        (ix_shape @s ix @c container) in
-              letfun extract2 (x : c) -> Stream list_dim b = t (extract x) in
-
-              con_nestedIxStream @b @list_dim ShapeDict_list_dim
-              (con_rStream @list_dim @(Stream list_dim b) @c rep_c extract2 si)
-          } in
-  con_stream @list_dim @b par_hint u;
-
-
-bind_Stream2 @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
-  -> Stream list_dim b attribute(inline_never) =
-
-  case s of stream tyob par_hint i_s.
-  let u = case i_s of {
-            seqStream tyob co sq.
-              con_nestedSeqStream @b
-              (map_Seq @a @(Stream list_dim b) t sq)
-              {-con_seqStream @b
-              (bind_Seq @a @b sq
-               (\ (x : a) -> Seq b. streamToSequence @b (t x)))-}
-
-          ; nestedIxStream @sh tyob co shape_sh (rStream @c tyob2 rep_c extract si).
-              letfun
-                extract2 (x : c) -> Stream list_dim b =
-                  bind_Stream2 @a @b (extract x) t
-              in
-
-              con_nestedIxStream @b @sh shape_sh
-              (con_rStream @sh @(Stream list_dim b) @c rep_c extract2 si)
-
-          ; nestedSeqStream tyob co sq.
-             letfun
-               transform (x : Stream list_dim a) -> Stream list_dim b =
-                 bind_Stream2 @a @b x t
+                 bind_Stream @a @b x t
               in
               con_nestedSeqStream @b
               (map_Seq @(Stream list_dim a) @(Stream list_dim b) transform sq)
