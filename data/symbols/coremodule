@@ -4258,7 +4258,6 @@ map_Stream @(d a b : box)
        (con_ixStream @d @b (map_RStream @d @a @b f rs))
   };
 
-
 Traversable_Stream @(sh : box)
   -> TraversableDict (Stream sh) attribute(inline) =
   traversableDict @(Stream sh)
@@ -4640,6 +4639,45 @@ Indexable_Zip2Indexable3 @(d : box) (sh : ShapeDict d)
 slice_Zip2Indexable3 @(domain : box) (sh : ShapeDict domain)
   -> forall a : box. ReprBox a -> Zip2Indexable domain a -> domain
      -> BoxOffset domain -> SomeIndexable domain a
+  attribute(inline) =
+
+  \ @(a : box)
+    (rep : ReprBox a) (x : Zip2Indexable domain a)
+    (dom : domain) (off : BoxOffset domain)
+    -> SomeIndexable domain a.
+
+    case x of zip2Indexable @c @d tyob rep_c rep_d f si1 si2.
+    case si1 of someIndexable @s tyob c1 ix1 container1.
+    case si2 of someIndexable @t tyob c2 ix2 container2.
+    
+    con_someIndexable @domain @a @(Zip2Indexable domain)
+    (idCoercion @domain)
+    (Indexable_Zip2Indexable4 @domain sh)
+    (con_zip2Indexable @domain @a @c @d rep_c rep_d f
+     (coerce @(SomeIndexable (shape s) c) @(SomeIndexable domain c)
+      (ix_slice @s ix1 @c rep_c container1
+       (coerce @domain @(shape s) dom)
+       (coerce @(AsBox (offset domain)) @(AsBox (offset (shape s))) off)))
+     (coerce @(SomeIndexable (shape t) d) @(SomeIndexable domain d)
+      (ix_slice @t ix2 @d rep_d container2
+       (coerce @domain @(shape t) dom)
+       (coerce @(AsBox (offset domain)) @(AsBox (offset (shape t))) off))));
+
+
+-- Workaround for inlining
+-- FIXME: Handle recursion properly
+Indexable_Zip2Indexable4 @(d : box) (sh : ShapeDict d)
+  -> IndexableDict (Zip2Indexable d) =
+  indexableDict @(Zip2Indexable d) (boxedinfo indexableDict @(Zip2Indexable d))
+  (Functor_Zip2Indexable @d)
+  (shape_Zip2Indexable @d sh)
+  (at_Zip2Indexable @d sh)
+  (slice_Zip2Indexable4 @d sh)
+  (preserve_Zip2Indexable @d sh);
+
+slice_Zip2Indexable4 @(domain : box) (sh : ShapeDict domain)
+  -> forall a : box. ReprBox a -> Zip2Indexable domain a -> domain
+     -> BoxOffset domain -> SomeIndexable domain a
   attribute(inline_never) =
 
   \ @(a : box)
@@ -4653,7 +4691,7 @@ slice_Zip2Indexable3 @(domain : box) (sh : ShapeDict domain)
     
     con_someIndexable @domain @a @(Zip2Indexable domain)
     (idCoercion @domain)
-    (Indexable_Zip2Indexable3 @domain sh)
+    (Indexable_Zip2Indexable4 @domain sh)
     (con_zip2Indexable @domain @a @c @d rep_c rep_d f
      (coerce @(SomeIndexable (shape s) c) @(SomeIndexable domain c)
       (ix_slice @s ix1 @c rep_c container1
