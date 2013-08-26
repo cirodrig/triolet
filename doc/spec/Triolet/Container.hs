@@ -188,7 +188,7 @@ build_View sh s =
        case i_s
        of IxStream rs -> rStreamToView rs
           SeqStream _ -> via_array ()
-          Splittable _ _ -> via_array ()
+          NestedIxStream _ _ -> via_array ()
   where
     -- Write to an array, then create a view into the array
     via_array :: forall. d ~ ListDim => () -> View ListDim a
@@ -272,7 +272,7 @@ build_List s =
   of Stream _ i_s ->
        case i_s
        of SeqStream s -> from_seq s
-          Splittable sh rs -> from_seq (flattenSplittable sh rs)
+          NestedIxStream sh rs -> from_seq (flattenNestedIxStream sh rs)
           IxStream (RStream f ix) -> tabulate_List f ix
   where
     -- Implemented with a primitive array-appending function in Triolet;
@@ -497,8 +497,8 @@ rStreamToView (RStream f ix) = map_View f (someIndexableToView ix)
 viewToRStream :: Shape d -> View d a -> RStream d a
 viewToRStream sh vw = RStream id (SomeIndexable (indexable_View sh) vw)
 
-viewToSplittable :: Shape d -> View d (Stream ListDim a) -> IStream ListDim a 
-viewToSplittable sh vw = Splittable sh $ viewToRStream sh vw
+viewToNestedIxStream :: Shape d -> View d (Stream ListDim a) -> IStream ListDim a 
+viewToNestedIxStream sh vw = NestedIxStream sh $ viewToRStream sh vw
 
 map_RStream :: (a -> b) -> RStream d a -> RStream d b
 map_RStream f (RStream g x) = RStream (f . g) x
@@ -510,9 +510,9 @@ viewToStream sh vw =
 -}
 
 
-flattenSplittable :: forall d a.
+flattenNestedIxStream :: forall d a.
                      Shape d -> RStream d (Stream ListDim a) -> Seq a
-flattenSplittable sh (RStream (f :: b -> Stream ListDim a) ix) =
+flattenNestedIxStream sh (RStream (f :: b -> Stream ListDim a) ix) =
   let View dom g = someIndexableToView ix
   in sh_foreachSeq sh dom (\x -> asSequence $ f $ g x)
 
@@ -568,7 +568,7 @@ peel_GuardDim h val emp (View d g) =
 
 flatten_GuardDim :: Stream GuardDim a -> Stream ListDim a
 flatten_GuardDim (Stream par_hint (IxStream rs)) =
-  Stream par_hint $ Splittable shape_GuardDim $ map_RStream unit rs
+  Stream par_hint $ NestedIxStream shape_GuardDim $ map_RStream unit rs
 
 generate_GuardDim :: Offset GuardDim -> GuardDim -> (Index GuardDim -> a)
                   -> Stream GuardDim a
@@ -663,7 +663,7 @@ peelStream val_k emp_k (Stream h i_s) =
                      of Just (x, sq') -> val_k x (Stream h $ SeqStream sq')
                         Nothing       -> emp_k ()
 
-     Splittable shp rs -> sh_peel shp h val_k emp_k (rStreamToView rs)
+     NestedIxStream shp rs -> sh_peel shp h val_k emp_k (rStreamToView rs)
 
      IxStream rs ->
        let View dom visit = rStreamToView rs
@@ -690,7 +690,7 @@ peel_ListDim hint val_k emp_k (View (ListDim bound) visit) =
                                     Just n  -> ListDim (Just (n - i))
                        remainder_input =
                          Stream hint $
-                         viewToSplittable shape_ListDim $
+                         viewToNestedIxStream shape_ListDim $
                          View new_dom (\j -> visit (i + j))
                        remainder = chain s remainder_input
                    in val_k v remainder
@@ -710,7 +710,7 @@ map_ListDim :: (a -> b) -> Stream ListDim a -> Stream ListDim b
 map_ListDim f (Stream h s) =
   case s
   of SeqStream s -> Stream h $ SeqStream (map_Seq f s)
-     Splittable shp rs -> Stream h $ Splittable shp $ map_RStream (map_Stream f) rs
+     NestedIxStream shp rs -> Stream h $ NestedIxStream shp $ map_RStream (map_Stream f) rs
      IxStream rs -> Stream h $ IxStream $ map_RStream f rs
 
 zipWith_ListDim :: forall a b c.
@@ -741,7 +741,21 @@ zipWith_RStream sh f (RStream f1 i1) (RStream f2 i2) =
 
 fold_ListDim :: (a -> acc -> acc) -> Stream ListDim a -> acc -> acc
 {-# INLINE fold_ListDim #-}
-fold_ListDim f s x = fold_Seq f (asSequence s) x
+fold_ListDim f (Stream par_hint i_s) init =
+  case i_s
+  of SeqStream sq -> fold_Seq f sq init
+     NestedIxStream sh rs ->
+       let outer_stream = traverse_View sh $ rStreamToView rs
+       in sh_fold sh (\inner_s x -> fold_ListDim f inner_s x) outer_stream init
+     NestedSeqStream sq ->
+       fold_Seq (\s local_init -> fold_ListDim f s local_init) sq init
+     IxStream rs ->
+       let View (ListDim bound) get = rStreamToView rs
+           foldit i x =
+             if case bound of {Just n -> i < n; Nothing -> True}
+             then foldit (i+1) (f (get i) x)
+             else x
+       in foldit 0 init
 
 foreach_ListDim :: forall acc.
                    ListDim -> Int -> (Int -> acc -> acc) -> acc -> acc
@@ -788,7 +802,9 @@ data IStream d a where
   SeqStream :: Seq a -> IStream ListDim a
 
   -- | Partitionable sequences
-  Splittable :: Shape d2 -> RStream d2 (Stream ListDim a) -> IStream ListDim a
+  NestedIxStream :: Shape d2 -> RStream d2 (Stream ListDim a) -> IStream ListDim a
+
+  NestedSeqStream :: Seq (Stream ListDim a) -> IStream ListDim a
 
   -- | Random-access sequences.
   --   We try to make the 'SomeIndexable' a manifest data structure,
@@ -797,9 +813,14 @@ data IStream d a where
   --   is deferred until when the stream is actually executed.
   IxStream :: RStream d a -> IStream d a
 
+type instance Domain (Stream d) = d
+
 -- | A random-access stream
 data RStream d a where
   RStream :: (b -> a) -> SomeIndexable d b -> RStream d a
+
+traversable_Stream :: Traversable (Stream d)
+traversable_Stream = Traversable id id
 
 indices :: Shape d -> d -> Stream d (Index d)
 indices shp dom = sh_generate shp (sh_noOffset shp) dom id
@@ -807,7 +828,7 @@ indices shp dom = sh_generate shp (sh_noOffset shp) dom id
 chain :: Stream ListDim a -> Stream ListDim a -> Stream ListDim a
 chain s1 s2 =
   stream $
-  viewToSplittable shape_ChainDim $
+  viewToNestedIxStream shape_ChainDim $
   View ChainBoth (\i -> case i
                         of False -> s1
                            True  -> s2)
@@ -819,7 +840,7 @@ map_Stream :: (a -> b) -> Stream d a -> Stream d b
 map_Stream f (Stream h s) =
   let u = case s
           of SeqStream sq -> SeqStream $ map_Seq f sq
-             Splittable sh vw -> Splittable sh $ map_RStream (map_Stream f) vw
+             NestedIxStream sh vw -> NestedIxStream sh $ map_RStream (map_Stream f) vw
              IxStream rs -> IxStream $ map_RStream f rs
   in Stream h u
 
@@ -829,7 +850,7 @@ asSequence (Stream _ s) = asSequenceI s
 
 asSequenceI :: IStream ListDim a -> Seq a
 asSequenceI (SeqStream s) = s
-asSequenceI (Splittable sh v) = flattenSplittable sh v
+asSequenceI (NestedIxStream sh v) = flattenNestedIxStream sh v
 asSequenceI (IxStream rs) = rStreamToSeq rs
 
 
@@ -840,62 +861,73 @@ empty :: Stream ListDim a
 empty = stream $ IxStream $ viewToRStream shape_ListDim $
         View (ListDim (Just 0)) (\_ -> error "empty")
 
-guard :: Bool -> Stream ListDim a -> Stream ListDim a
-guard b s@(Stream h i_s) =
+guard_Stream :: Bool -> Stream ListDim a -> Stream ListDim a
+guard_Stream b s@(Stream h i_s) =
   let u = case i_s
           of SeqStream sq -> SeqStream $ guard_Seq b sq
-             Splittable sh rs -> Splittable sh $ map_RStream (guard b) rs
+             NestedIxStream sh rs ->
+               NestedIxStream sh $ map_RStream (guard_Stream b) rs
+             NestedSeqStream sq ->
+               NestedSeqStream $ map_Seq (guard_Stream b) sq
              IxStream rs ->
-               let dom = boolToGuard b
-                   rs2 = viewToRStream shape_GuardDim $ View dom (\_ -> s)
-               in Splittable shape_GuardDim rs2
+               NestedIxStream shape_ListDim $
+               map_RStream (stream . SeqStream . guard_Seq b . unit_Seq) rs
   in Stream h u
 
-filter :: (a -> Bool) -> Stream ListDim a -> Stream ListDim a
-filter f s = bind s (\x -> guard (f x) (unit x))
+filter :: Domain t ~ ListDim => Traversable t -> (a -> Bool) -> t a -> t a
+filter traversable test x =
+  trv_build traversable $ filter_Stream test $ trv_traverse traversable x
+
+filter_Stream :: (a -> Bool) -> Stream ListDim a -> Stream ListDim a
+filter_Stream f s = bind s (\x -> guard_Stream (f x) (unit x))
 
 bind :: Stream ListDim a -> (a -> Stream ListDim b) -> Stream ListDim b
 bind (Stream h s) k =
   let u = case s
           of SeqStream sq -> SeqStream $ bind_Seq sq (\x -> asSequence (k x))
-             Splittable sh (RStream f ix) ->
+             NestedIxStream sh (RStream f ix) ->
                let f' x = bind (f x) k
-               in Splittable sh (RStream f' ix)
+               in NestedIxStream sh (RStream f' ix)
              IxStream (RStream f (SomeIndexable ix x)) -> 
                let dom = ix_shape ix x
                    g i = k (f $ ix_at ix x i)
-               in Splittable shape_ListDim $ viewToRStream shape_ListDim $ View dom g
+               in NestedIxStream shape_ListDim $ viewToRStream shape_ListDim $ View dom g
   in Stream h u
 
 -- RECURSIVE
 reduce_Stream :: forall d a. Shape d -> (a -> a -> a) -> a -> Stream d a -> a
 reduce_Stream sh f z (Stream par_hint s) =
   let reduce_unit () = z
-      reduce_residual = undefined
+      reduce_residual s = fold_ListDim f s z
   in case s
      of SeqStream sq ->
           fold_Seq f sq z
 
-        Splittable (sh_local :: Shape d')
+        NestedIxStream (sh_local :: Shape d')
                    (RStream (g :: b -> Stream ListDim a)
                             (splittable_data :: SomeIndexable d' b)) ->
-          let reduce_chunk :: SomeIndexable d' b -> a
-              reduce_chunk si =
+          let reduce_slice :: SomeIndexable d' b -> a
+              reduce_slice si =
                 reduce_Stream sh f z $
                 Stream HintSeq $
-                Splittable sh_local (RStream g si)
-          in reduce sh_local par_hint reduce_unit
-             reduce_chunk f reduce_residual splittable_data
+                NestedIxStream sh_local (RStream g si)
+          in reduce_loop sh_local par_hint reduce_unit
+             reduce_slice f reduce_residual splittable_data
 
         IxStream (RStream g splittable_data) ->
-          let reduce_chunk si =
-                reduce_Stream sh f z $
-                Stream HintSeq $ IxStream (RStream g si)
-          in reduce sh par_hint reduce_unit
-             reduce_chunk f reduce_residual splittable_data
+          let reduce_slice si =
+                let local_s = Stream HintSeq $
+                              IxStream (RStream g si)
+                in sh_fold sh f local_s z
+          in reduce_loop sh par_hint reduce_unit
+             reduce_slice f reduce_residual splittable_data
+
+sum :: Num a => Shape (Domain t) -> Traversable t -> t a -> a
+sum sh traversable x =
+  reduce_Stream sh (+) 0 $ trv_traverse traversable x
 
 -- | Parallelizable reduction
-reduce :: forall d a b.
+reduce_loop :: forall d a b.
           Shape d
        -> ParHint
        -> (() -> b)                -- reduce unit
@@ -904,7 +936,7 @@ reduce :: forall d a b.
        -> (Stream ListDim b -> b)  -- reduce residual
        -> SomeIndexable d a
        -> b
-reduce sh par_hint reduce_none reduce_slice reduce_item reduce_resiudal si =
+reduce_loop sh par_hint reduce_none reduce_slice reduce_item reduce_resiudal si =
   reduce_slice si
 
 -- | Distributed reduction
@@ -960,11 +992,11 @@ doallPar :: Shape d -> (a -> Store -> Store) -> Stream d a -> Store -> Store
 doallPar sh gen s store =
   case s
   of SeqStream _ -> doallSeq sh gen s store
-     Splittable sh' (View dom visit) ->
+     NestedIxStream sh' (View dom visit) ->
        let generator (local_dom, local_off) =
              let local_view =
                    View local_dom (\i -> visit (sh_appOffset sh' local_off i))
-             in doallSeq sh' gen (Splittable sh' local_view)
+             in doallSeq sh' gen (NestedIxStream sh' local_view)
        in blockedDoall (splitter sh') generator (dom, sh_noOffset sh') store
      IxStream transform (SomeIndexable ix i) ->
        let generator (local_dom, local_off) =
@@ -987,12 +1019,12 @@ reduceFoldPar :: forall a b c d.
 reduceFoldPar sh f r wrap z s =
   case s
   of SeqStream _ -> wrap (sh_fold sh f s)
-     Splittable (sh' :: Shape d') (View dom visit) ->
+     NestedIxStream (sh' :: Shape d') (View dom visit) ->
        let generator :: forall. (d', Offset d') -> c
            generator (local_dom, local_off) =
              let local_view =
                    View local_dom (\i -> visit (sh_appOffset sh' local_off i))
-             in wrap (sh_fold sh f (Splittable sh' local_view))
+             in wrap (sh_fold sh f (NestedIxStream sh' local_view))
        in blockedReduce (splitter sh') r z generator (dom, sh_noOffset sh')
 
 -- | Parallel reduction
@@ -1000,11 +1032,11 @@ reducePar :: Shape d -> (a -> a -> a) -> a -> Stream d a -> a
 reducePar sh f z s = 
   case s
   of SeqStream _ -> reduceSeq sh f z s
-     Splittable sh' (View dom visit) ->
+     NestedIxStream sh' (View dom visit) ->
        let generator (local_dom, local_off) =
              let local_view =
                    View local_dom (\i -> visit (sh_appOffset sh' local_off i))
-             in reduceSeq sh f z (Splittable sh' local_view)
+             in reduceSeq sh f z (NestedIxStream sh' local_view)
        in blockedReduce (splitter sh') f z generator (dom, sh_noOffset sh')
 
 reduceSeq :: Shape d -> (a -> a -> a) -> a -> Stream d a -> a
