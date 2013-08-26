@@ -365,13 +365,42 @@ cseStm statement =
                 Rec defs   -> withDefs defgroup $ liftM Rec $ mapM cseDef defs
        lift . emitLetrec =<< runCSEF cse_defs
        withDefs defgroup $ cseStm stm
-     SwitchE scr alts ->
-       cseVal' scr >>= evaluate_switch alts
+     SwitchE scr alts -> cseSwitch scr alts
      ReturnE atom -> do
        (atom', _) <- cseAtom atom
        return (ReturnE atom')
      ThrowE val -> do
        liftM ThrowE (cseVal' val)
+  where
+    assign_variable v Nothing = return ()
+    assign_variable v (Just e) = modifyCSEEnv $ updateCSEEnv v e
+    
+    -- Inserted for debugging.  Verify that the function's calling convention
+    -- and its type match.
+    check_def f_var f x =
+      case funConvention f
+      of PrimCall | varType f_var == PrimType PointerType -> x
+         ClosureCall | varType f_var == PrimType OwnedType -> x
+         _ -> internalError "cseStm: Lambda function has wrong type"
+
+cseSwitch scr alts = do
+  scr1 <- cseVal' scr
+
+  -- See SWITCH_OF_SELECT
+  env <- getCSEEnv
+  let unpacked_scr =
+        case scr1
+        of VarV v -> case cseGetValue v env 
+                     of Just expr -> constantSelectValues env expr
+                        Nothing -> Nothing
+           _ -> Nothing
+  let (scr2, alts2) =
+        case unpacked_scr
+        of Just (cond, true_lit, false_lit) ->
+             (cond, remapBoolAlts true_lit false_lit alts)
+           Nothing -> (scr1, alts)
+
+  evaluate_switch alts2 scr2
   where
     -- Scrutinee of switch statement is statically known.
     -- Replace the switch statement with the branch that will be executed.
@@ -391,16 +420,29 @@ cseStm statement =
           stm' <- runCSEF $ evalCSE rt $ cseStm stm
           return (lit, stm')
 
-    assign_variable v Nothing = return ()
-    assign_variable v (Just e) = modifyCSEEnv $ updateCSEEnv v e
-    
-    -- Inserted for debugging.  Verify that the function's calling convention
-    -- and its type match.
-    check_def f_var f x =
-      case funConvention f
-      of PrimCall | varType f_var == PrimType PointerType -> x
-         ClosureCall | varType f_var == PrimType OwnedType -> x
-         _ -> internalError "cseStm: Lambda function has wrong type"
+-- SWITCH_OF_SELECT
+--
+-- 'cseSwitch' simplifies a switch-of-select into a switch on the
+-- boolean condition. 
+--
+-- > x <- select c 1 0
+-- > switch x
+-- >  1: foo
+-- >  0: bar
+--
+-- becomes
+--
+-- > switch c
+-- >  true: foo
+-- >  false: bar
+
+-- | Change the tags on alternatives in a switch expression
+remapBoolAlts t f alts = mapMaybe pick_key alts
+  where
+    pick_key (key, stm)
+      | key == t = Just (BoolL True, stm)
+      | key == f = Just (BoolL False, stm)
+      | otherwise = Nothing     -- Unreachable
 
 cseDef :: FunDef -> CSEF FunDef
 cseDef (Def v f) = Def v <$> cseFun f

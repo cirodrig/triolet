@@ -16,11 +16,13 @@ module LowLevel.Expr
         cseFindVar,
         cseFindExpr,
         cseGetExprValue,
+        cseGetValue,
         interpretVal,
         interpretPrim,
         interpretStore,
         isZeroAtomExpr,
         isOneAtomExpr,
+        constantSelectValues,
         generateExprAtom
        )
 where
@@ -91,6 +93,9 @@ data UnOp =
   | NegateZOp !Signedness !Size
     deriving(Eq, Ord)
 
+-- | Details for the select operator 'PrimSelect'.
+data SelectOp = SelectOp ValueType
+
 -- | A pure expression.
 data Expr =
     VarExpr !Var
@@ -101,6 +106,7 @@ data Expr =
   | CAExpr !CAOp [Expr]
   | BinExpr !BinOp Expr Expr
   | UnExpr !UnOp Expr
+  | SelectExpr !SelectOp Expr Expr Expr
     -- | Get the current top-level function's frame pointer.  Within a given
     --   top-level function, this will always return the same value.
   | GetFramePExpr
@@ -113,6 +119,9 @@ litExpr = LitExpr
 
 appExpr :: Int -> Expr -> [Expr] -> Expr
 appExpr = AppExpr
+
+selectExpr :: ValueType -> Expr -> Expr -> Expr -> Expr
+selectExpr ty cond t f = SelectExpr (SelectOp ty) cond t f
 
 fromAppExpr :: Expr -> Maybe (Int, Expr, [Expr])
 fromAppExpr (AppExpr n op args) = Just (n, op, args)
@@ -175,6 +184,8 @@ pprExpr (CAExpr op args) = foldr1 (\x y -> x <+> pprInfixCAOp op <+> y) $
                            map pprExprParens args
 pprExpr (BinExpr op l r) = pprBinOp op <+> pprExprParens l <+> pprExprParens r
 pprExpr (UnExpr op e) = pprUnOp op <+> pprExprParens e
+pprExpr (SelectExpr (SelectOp ty) cond t f) =
+  text "Select" <+> pprExprParens cond <+> pprExprParens t <+> pprExprParens f
 pprExpr GetFramePExpr = text "GetFrameP"
 
 -- | A lookup trie for matching expressions.
@@ -188,6 +199,7 @@ data TrieNode v =
   , tCA  :: Map.Map CAOp (ListTrie TrieNode v)
   , tBin :: Map.Map BinOp (TrieNode (TrieNode v))
   , tUn  :: Map.Map UnOp (TrieNode v)
+  , tSel :: Map.Map ValueType (TrieNode (TrieNode (TrieNode v)))
   , tGetFrameP :: Maybe v
   }
 
@@ -221,6 +233,17 @@ mapMaybeSub2 :: (Trie t, Trie t', Trie t'') =>
             -> t'' (t' (t v)) -> t'' (t' (t v))
 mapMaybeSub2 f g =
   mapMaybeWithKey (\k'' -> Just . mapMaybeWithKey (\k' -> Just . mapMaybeWithKey (\k -> f (g k'' k' k))))
+
+mapMaybeSub3 :: (Trie t, Trie t', Trie t'', Trie t''') =>
+               (k -> v -> Maybe v)
+            -> (Key t''' -> Key t'' -> Key t' -> Key t -> k)
+            -> t''' (t'' (t' (t v))) -> t''' (t'' (t' (t v)))
+mapMaybeSub3 f g =
+  mapMaybeWithKey (\k''' ->
+  Just . mapMaybeWithKey (\k'' ->
+  Just . mapMaybeWithKey (\k' ->
+  Just . mapMaybeWithKey (\k ->
+  f (g k''' k'' k' k)))))
 
 instance Trie Maybe where
   type Key Maybe = ()
@@ -294,9 +317,10 @@ instance Trie TrieNode where
     , tCA = empty
     , tBin = empty
     , tUn = empty
+    , tSel = empty
     , tGetFrameP = Nothing
     }
-  toList (TrieNode var_t lit_t app_t ca_t bin_t un_t get_frame_p_t) =
+  toList (TrieNode var_t lit_t app_t ca_t bin_t un_t sel_t get_frame_p_t) =
     [(VarExpr var, v)  | (var, v) <- toList var_t] ++
     [(LitExpr lit, v)  | (lit, v) <- toList lit_t] ++
     [(AppExpr n e es, v) | (n, m) <- toList app_t, (e:es, v) <- toList m] ++
@@ -306,6 +330,10 @@ instance Trie TrieNode where
                          , (r, v) <- toList m2] ++
     [(UnExpr op e, v) | (op, m) <- toList un_t
                       , (e, v) <- toList m] ++
+    [(SelectExpr (SelectOp ty) c t f, v) | (ty, m1) <- toList sel_t
+                                         , (c, m2) <- toList m1
+                                         , (t, m3) <- toList m2
+                                         , (f, v) <- toList m3] ++
     [(GetFramePExpr, v) | v <- maybeToList $ get_frame_p_t]
   alter f k tr = updateTrieNode (alter f) k tr
   insert k v tr = updateTrieNode (\k -> insert k v) k tr
@@ -317,6 +345,7 @@ instance Trie TrieNode where
        CAExpr op es -> lookup2 op es $ tCA tr
        BinExpr op e1 e2 -> lookup3 op e1 e2 $ tBin tr
        UnExpr op e -> lookup2 op e $ tUn tr
+       SelectExpr (SelectOp ty) cond t f -> lookup4 ty cond t f $ tSel tr
        GetFramePExpr -> tGetFrameP tr
     where
       lookup2 :: (Trie t1, Trie t2) =>
@@ -327,6 +356,11 @@ instance Trie TrieNode where
                  Key t1 -> Key t2 -> Key t3 -> t1 (t2 (t3 v)) -> Maybe v
       lookup3 k1 k2 k3 = lookup k3 <=< lookup k2 <=< lookup k1
 
+      lookup4 :: (Trie t1, Trie t2, Trie t3, Trie t4) =>
+                 Key t1 -> Key t2 -> Key t3 -> Key t4 -> t1 (t2 (t3 (t4 v)))
+              -> Maybe v
+      lookup4 k1 k2 k3 k4 = lookup k4 <=< lookup k3 <=< lookup k2 <=< lookup k1
+
   mapMaybeWithKey f tr =
     tr { tVar = mapMaybeWithKey (f . VarExpr) $ tVar tr
        , tLit = mapMaybeWithKey (f . LitExpr) $ tLit tr
@@ -334,6 +368,7 @@ instance Trie TrieNode where
        , tCA  = mapMaybeSub f CAExpr $ tCA tr
        , tBin = mapMaybeSub2 f BinExpr $ tBin tr
        , tUn  = mapMaybeSub f UnExpr $ tUn tr
+       , tSel = mapMaybeSub3 f (\o c t f -> SelectExpr (SelectOp o) c t f) $ tSel tr
        , tGetFrameP = mapMaybeWithKey (f . const GetFramePExpr) $ tGetFrameP tr}
 
 updateTrieNode :: forall v.
@@ -347,6 +382,7 @@ updateTrieNode f k tr =
      CAExpr op es -> tr {tCA = alter2 op es $ tCA tr}
      BinExpr op e1 e2 -> tr {tBin = alter3 op e1 e2 $ tBin tr}
      UnExpr op e -> tr {tUn = alter2 op e $ tUn tr}
+     SelectExpr (SelectOp ty) c t f -> tr {tSel = alter4 ty c t f $ tSel tr}
      GetFramePExpr -> tr {tGetFrameP = f () $ tGetFrameP tr}
   where
     alter2 :: forall t1 t2. (Trie t1, Trie t2) =>
@@ -356,6 +392,11 @@ updateTrieNode f k tr =
     alter3 :: forall t1 t2 t3. (Trie t1, Trie t2, Trie t3) =>
               Key t3 -> Key t2 -> Key t1 -> t3 (t2 (t1 v)) -> t3 (t2 (t1 v))
     alter3 k1 k2 k3 = alterSub k1 $ alterSub k2 $ f k3
+
+    alter4 :: forall t1 t2 t3 t4. (Trie t1, Trie t2, Trie t3, Trie t4) =>
+              Key t4 -> Key t3 -> Key t2 -> Key t1
+           -> t4 (t3 (t2 (t1 v))) -> t4 (t3 (t2 (t1 v)))
+    alter4 k1 k2 k3 k4 = alterSub k1 $ alterSub k2 $ alterSub k3 $ f k4
 
 -------------------------------------------------------------------------------
 
@@ -447,6 +488,9 @@ isReducible expression =
                           CastZOp {} -> False
                           CastFromOwnedOp {} -> True
                           NegateZOp {} -> True
+     -- Select expressions are used for simplifying switch statements.
+     -- Treat them as reducible so they can be looked up.
+     SelectExpr {} -> True
      GetFramePExpr -> False
 
 -- | Find an available value that's equal to the given variable.  If no value
@@ -490,6 +534,7 @@ interpretPrim env op args = fmap (simplify env) $
      PrimModZ sgn sz -> Just $ binary (ModZOp sgn sz)
      PrimMaxZ sgn sz -> Just $ ca (MaxZOp sgn sz)
      PrimCmpZ sgn sz op -> Just $ binary (CmpZOp sgn sz op)
+     PrimSelect t    -> Just $ select (SelectOp t)
      PrimAddP t      -> Just $ binary (AddPOp t)
      PrimAnd         -> Just $ ca AndOp
      PrimOr          -> Just $ ca OrOp
@@ -505,6 +550,11 @@ interpretPrim env op args = fmap (simplify env) $
     debug (Just e) = traceShow msg $ Just e
       where
         msg = pprPrim op <+> hsep (map (parens . pprExpr) args) $$ pprExpr e
+
+    select sop =
+      case args
+      of [c, t, f] -> SelectExpr sop c t f
+         _ -> internalError "interpretPrim"
 
     ca caop =
       case args
@@ -570,6 +620,21 @@ isOneAtomExpr expr =
        case unpackLoadExpr expr
        of Just (_, base, offset) -> isZeroAtomExpr base
      UnExpr _ arg -> isZeroAtomExpr arg
+     SelectExpr _ _ _ _ -> False
+
+-- | Deconstruct a select expression if both possible results are 
+--   literals, and not equal to each other.
+--
+--   The not-equal test implies that the condition can be inferred from the
+--   result.
+constantSelectValues :: CSEEnv -> Expr -> Maybe (Val, Lit, Lit)
+constantSelectValues env (SelectExpr _ cond (LitExpr t) (LitExpr f)) 
+  | t /= f =
+      case cseGetExprValue cond env
+      of Nothing  -> Nothing
+         Just val -> Just (fromCSEVal val, t, f)
+
+constantSelectValues _ e = Nothing
 
 generateExprAtom :: forall m. Supplies m (Ident Var) => Expr -> Gen m Atom
 generateExprAtom expression =
@@ -682,12 +747,13 @@ simplify env expression =
 
 simplify' expression =
   case expression
-  of VarExpr v        -> expression
-     LitExpr _        -> expression
-     CAExpr op es     -> simplifyCA op es
-     BinExpr op e1 e2 -> simplifyBinary op e1 e2
-     UnExpr op e      -> simplifyUnary op e
-     GetFramePExpr    -> GetFramePExpr
+  of VarExpr v           -> expression
+     LitExpr _           -> expression
+     CAExpr op es        -> simplifyCA op es
+     BinExpr op e1 e2    -> simplifyBinary op e1 e2
+     UnExpr op e         -> simplifyUnary op e
+     SelectExpr op c t f -> expression
+     GetFramePExpr       -> GetFramePExpr
 
 simplifyCA op es =
   let flat_es = flatten op es
@@ -873,11 +939,6 @@ simplifyUnary op arg =
     -- Double negation cancels
     negateE (UnExpr (NegateZOp _ _) arg) = arg
     negateE e                            = UnExpr op e
-
-       {-
-  case runWriter $ canonicalize env expression
-  of (e, Any True)  -> Simplified e
-     (e, Any False) -> Translated e-}
 
 {-
 -- | Indicate that something was changed during simplification, making the
