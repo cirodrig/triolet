@@ -2707,7 +2707,8 @@ data list (a : bare) : bare
   (FIInt n, StuckBox (arr n a));
 };
 
--- A list section is a sub-list that's treated like a list
+-- A list section is a sub-list that's treated like a list.
+-- The @Repr (AsBare a)@ field is used by run-time marshaling code.
 data ListSection (a : box) : bare attribute(builtin)
 {
   listSection @(n : intindex) (FIInt n, Repr (AsBare a), cursor (arr n (AsBare a)));
@@ -4477,11 +4478,25 @@ slice_ListSection @(a : box)
    (listSection @a @M slice_size rep sliced_array));
 
 
--- Don't deconstruct ListSections that are used in distributed computation
+-- Don't deconstruct ListSections that are used in distributed computation.
 preserve_ListSection @(a : box) (x : Boxed (ListSection a))
   -> Boxed (ListSection a) attribute(inline) =
 
-  preserve @(Boxed (ListSection a)) x;
+  let repr_ListSection = unboxedinfo ListSection @a in
+  let sa_ListSection = reprSizeAlign @(ListSection a) repr_ListSection in
+
+  case x of [sa_ListSection] boxed tyob (listSection @N count rep ay_ref).
+
+  -- Prevent it from being deconstructed prior to this program point
+  let x2 = preserve @(Boxed (ListSection a)) x in
+
+  -- Now deconstruct and rebuild the ListSection, using the old Repr object.
+  -- This allows optimizations to propagate the Repr object.
+  case x2 of
+    [sa_ListSection] boxed tyob (listSection @N count unused_rep ay_ref).
+
+  con_boxed @(ListSection a) repr_ListSection
+  (listSection @a @N count rep ay_ref);
 
 
 traverse_ListSection @(a : box)
