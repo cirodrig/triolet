@@ -4,4 +4,4 @@ def nred(xs, ys):
 	return reduce(lambda x, y: x + y, 0, (sin(x) * sin(y)
                                               for x in xs for y in ys))
 
-export ccall nred : list(float) * list(float) -> float
+export cplusplus nred : list(float) * list(float) -> float

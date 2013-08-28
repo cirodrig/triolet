@@ -1,8 +1,8 @@
 TestConfig {
   synopsis	 = "Reduction on nested loops",
-  trioletSources	 = ["nested.pyon"],
+  trioletSources	 = ["nested.tri"],
   lltrioletSources  = [],
-  cSources	 = ["main.c"],
-  cxxSources	 = [],
+  cSources	 = [],
+  cxxSources	 = ["main.cc"],
   expectedResult = ShouldPrint "ok"
 }
