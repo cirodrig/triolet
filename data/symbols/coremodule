@@ -3821,8 +3821,11 @@ zip_Indexable @(d : box) @(a b c : box)
 
 -- This function is recursive via flattenSplittable
 -- FIXME: Handle recursive function inlining properly
-streamToSequence @(a : box)
-  (s : Stream list_dim a) -> Seq a attribute(inline) =
+streamToSequence @(a : box) (s : Stream list_dim a)
+  -> Seq a
+  attribute(inline,
+            inline_struct(D(T C)) -- Stream constructor must be known
+           ) =
 
   case unStream @list_dim @a s of {
     seqStream tyob co sq. sq
@@ -3830,17 +3833,17 @@ streamToSequence @(a : box)
   ; nestedIxStream @d2 tyob co shape_dict rs.
       case rStreamToView @d2 @(Stream list_dim a) rs of mk_view tyob dom f.
       shForeachSeq @d2 shape_dict @a dom
-      (\ (x : BoxIndex d2) -> Seq a. streamToSequence2 @a (f x))
+      (\ (x : BoxIndex d2) -> Seq a. streamToSequence @a (f x))
 
   ; nestedSeqStream tyob co sq.
       bind_Seq @(Stream list_dim a) @a sq
-      (\ (x : Stream list_dim a) -> Seq a. streamToSequence2 @a x)
+      (\ (x : Stream list_dim a) -> Seq a. streamToSequence @a x)
 
   ; ixStream tyob rs.
       rStreamToSeq @a rs
   };
 
-
+{-
 streamToSequence2 @(a : box)
   (s : Stream list_dim a) -> Seq a attribute(inline) =
 
@@ -3879,7 +3882,7 @@ streamToSequence3 @(a : box)
   ; ixStream tyob rs.
       rStreamToSeq @a rs
   };
-
+-}
 
 {-
 -- These functions are obsolete 
@@ -4574,13 +4577,24 @@ slice_Zip2Indexable @(domain : box) (sh : ShapeDict domain)
     (dom : domain) (off : BoxOffset domain)
     -> SomeIndexable domain a.
 
+    slice_Zip2Indexable_real @domain @a sh rep x dom off;
+
+
+slice_Zip2Indexable_real @(domain a : box) (sh : ShapeDict domain)
+  (rep : ReprBox a) (x : Zip2Indexable domain a)
+  (dom : domain) (off : BoxOffset domain)
+  -> SomeIndexable domain a
+  attribute(inline,
+            inline_struct(T T D(T T T T T) T T) -- Inline if object is known
+           ) =
+
     case x of zip2Indexable @c @d tyob rep_c rep_d f si1 si2.
     case si1 of someIndexable @s tyob c1 ix1 container1.
     case si2 of someIndexable @t tyob c2 ix2 container2.
     
     con_someIndexable @domain @a @(Zip2Indexable domain)
     (idCoercion @domain)
-    (Indexable_Zip2Indexable2 @domain sh)
+    (Indexable_Zip2Indexable @domain sh)
     (con_zip2Indexable @domain @a @c @d rep_c rep_d f
      (coerce @(SomeIndexable (shape s) c) @(SomeIndexable domain c)
       (ix_slice @s ix1 @c rep_c container1
@@ -4601,6 +4615,7 @@ preserve_Zip2Indexable @(d : box) (sh : ShapeDict d)
     (preserve_SomeIndexable @d @b c1) (preserve_SomeIndexable @d @c c2);
 
 
+{-
 -- Workaround for inlining
 -- FIXME: Handle recursion properly
 Indexable_Zip2Indexable2 @(d : box) (sh : ShapeDict d)
@@ -4716,7 +4731,7 @@ slice_Zip2Indexable4 @(domain : box) (sh : ShapeDict domain)
       (ix_slice @t ix2 @d rep_d container2
        (coerce @domain @(shape t) dom)
        (coerce @(AsBox (offset domain)) @(AsBox (offset (shape t))) off))));
-
+-}
 
 Functor_array1 : FunctorDict (\ (a : box). Boxed (array1 (AsBare a))) =
   functorDict @(\ (a : box). Boxed (array1 (AsBare a)))
