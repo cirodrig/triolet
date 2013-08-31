@@ -36,7 +36,7 @@ import Type.Eval
 
 class Dataflow a where
   -- | The least element.  This is the most specific possible value,
-  --   and the identity element of 'joinPar' and 'joinSeq'.
+  --   and the identity element of 'joinSeq'.
   bottom :: a
 
   -- | Join two elements derived from mutually exclusive code paths
@@ -60,8 +60,24 @@ instance (Dataflow a, Dataflow b) => Dataflow (a, b) where
 
 instance Dataflow a => Dataflow (IntMap.IntMap a) where
   bottom = IntMap.empty
-  joinPar m1 m2 = IntMap.unionWith joinPar m1 m2
+  -- Must join map values with 'bottom' if found in only one of the two maps
+  joinPar m1 m2 = mergeMaps (joinPar bottom) (joinPar bottom) joinPar m1 m2
   joinSeq m1 m2 = IntMap.unionWith joinSeq m1 m2
+
+-- | Temporary data structure for merging 'IntMap's
+data Merge a = MergeLeft a | MergeRight a | MergeBoth a a
+
+merge l _ _ (MergeLeft x)   = l x
+merge _ r _ (MergeRight y)  = r y
+merge _ _ b (MergeBoth x y) = b x y
+
+-- | Merge two maps, applying @l@ to values present in only the first map,
+--   @r@ to values present only in the second, and @b@ to combine values present in both
+mergeMaps l r b m1 m2 =
+  let m1' = IntMap.map MergeLeft m1
+      m2' = IntMap.map MergeRight m2
+      tuple (MergeLeft x) (MergeRight y) = MergeBoth x y
+  in IntMap.map (merge l r b) $ IntMap.unionWith tuple m1' m2'
 
 showDmd (Dmd m s) =
   "[" ++ showMultiplicity m ++ ":" ++ showSpecificity s ++ "]"
