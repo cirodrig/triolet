@@ -348,7 +348,9 @@ copy @(a : bare) (r : Repr a) (x : a) (y : OutPtr a)
 
 -- Convert from boxed to bare
 asbox @(a : bare) (r : Repr a) (x : Init a)
-  -> AsBox a attribute(inline, inline_sequential) =
+  -> AsBox a attribute(inline, inline_sequential,
+                       inline_struct(C T)
+                      ) =
   case r of repr tyob sa isref put get.
   case isref of {
     notAReference co.
@@ -363,11 +365,13 @@ asbox @(a : bare) (r : Repr a) (x : Init a)
       case coerce @a @(Ref b) y of ref z.
       coerce @b @(AsBox a) z
   };
-  
+
 
 -- Convert from bare to boxed
 asbare @(a : bare) (r : Repr a) (x : AsBox a) (ret : OutPtr a) -> Store
-  attribute(inline, inline_sequential) =
+  attribute(inline, inline_sequential,
+            inline_struct(C T)
+           ) =
 
   case r of repr tyob sa isref put get.
   case isref of {
