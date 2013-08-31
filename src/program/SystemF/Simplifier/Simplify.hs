@@ -1149,11 +1149,15 @@ etaExpandLet e =
        LetE inf pat rhs body <- lift $ freshenHead e
        AppE inf2 op ts es <- lift $ freshenHead rhs
        VarE _ op_var <- lift $ freshenHead op
+       aguard $ length es > 0
 
        -- Is it an undersaturated application with at least one argument?
+       -- Check the same label that would be used for inlining.
        op_value <- lift $ lookupKnownValue op_var
-       let arity = absValueArity op_value
-       aguard $ length es > 0 && length es < arity
+       aguard $ fromMaybe False $ do
+         inlinable_exp <- codeExp op_value
+         arity <- lambdaExpArity inlinable_exp
+         return $ length es < arity
 
        lift $ do es' <- mapM freshenFullyExp es
                  body' <- freshenFullyExp body
@@ -1187,6 +1191,11 @@ etaExpandLet e =
     instantiate_type ty_params ty_args x =
       let subst = Substitute.fromBinderList $ zip ty_params ty_args
       in substitute subst x
+
+-- | Get the arity of a lambda expression.
+--   Return @Nothing@ if not a lambda expression.
+lambdaExpArity (ExpM (LamE _ f)) = Just $ length $ funParams (fromFunM f)
+lambdaExpArity _ = Nothing
 
 -------------------------------------------------------------------------------
 -- Traversing code
