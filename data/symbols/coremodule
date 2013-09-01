@@ -5998,7 +5998,7 @@ tabulate_array2 @(a b : box)
     hintAny. do_seq None
   ; hintSeq. do_seq None
   ; hintLocalPar. tabulate_array2_localpar @a @b rep_a rep_b f s
-  ; hintPar. tabulate_array2_localpar @a @b rep_a rep_b f s
+  ; hintPar. tabulate_array2_dist @a @b rep_a rep_b f s
   };
 
 
@@ -6133,8 +6133,6 @@ tabulate_list_dist @(a b : box)
   attribute(inline, inline_sequential) =
 
   let original_domain = someIndexableShape @list_dim @a s in
-  case list_dimToFIInt original_domain of someIInt @Nelems list_length.
-
   let type dist_result = Boxed (list (AsBare b)) in
 
   letfun
@@ -6180,8 +6178,57 @@ tabulate_list_dist @(a b : box)
       list_ref
   in
 
-  concatenate_with_offsets @b @Nelems @Nworkers
-  rep_b list_length worker_count get_chunk_offset get_chunk_list;
+  concatenate_with_offsets @b @Nworkers
+  rep_b original_domain worker_count get_chunk_offset get_chunk_list;
+
+
+-- Distributed version of 'tabulate'
+tabulate_array2_dist @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : SomeIndexable dim2 a) -> Boxed (array2 (AsBare b))
+  attribute(inline, inline_sequential) =
+
+  let original_domain = someIndexableShape @dim2 @a s in
+  let type dist_result = Boxed (array2 (AsBare b)) in
+
+  letfun
+    worker (si : SomeIndexable dim2 a) -> dist_result =
+      tabulate_array2_localpar @a @b rep_a rep_b f
+      (preserve_SomeIndexable @dim2 @a si)
+  in
+
+  case farm_SomeIndexable @dim2 @a @dist_result
+       ShapeDict_dim2 rep_a (unboxedinfo array2 @(AsBare b)) worker s of
+    (dist_sizes, chunks).
+
+  case chunks of
+    [reprSizeAlign @(list (StuckRef dist_result)) (unboxedinfo list @(StuckRef dist_result))]
+    boxed tyob (make_list @Nworkers worker_count chunks).
+
+  let output_array_rep : Repr (arr Nworkers (StuckRef dist_result)) =
+        repr_arr @Nworkers @(StuckRef dist_result) worker_count
+        (unboxedinfo StuckRef @dist_result) in
+
+  -- Concatenate the chunks
+  case chunks of
+    [reprSizeAlign @(arr Nworkers (StuckRef dist_result)) output_array_rep]
+    stuckBox tyob chunk_array.
+
+  case dist_sizes of mk_view tyob dist_sizes_dom get_dist_size.
+
+  let rep_output_list = unboxedinfo StuckRef @dist_result in
+  let sa_output_list = reprSizeAlign @(StuckRef dist_result) rep_output_list in
+
+  letfun
+    get_chunk_list (i : int) -> Boxed (array2 (AsBare b)) =
+      case subscript @Nworkers @(StuckRef dist_result)
+           sa_output_list chunk_array i of
+        stuckRef aref.
+      aref
+  in
+
+  concatenate_array2_with_offsets @b @Nworkers
+  rep_b original_domain worker_count get_chunk_list;
 
 
 reduce_loop_dist @(d : box) @(a b : box)
@@ -6336,9 +6383,9 @@ distribute_Indexable @(d : box) @(a b : box)
 -- Concatenate a collection of lists, where the list offsets and output size 
 -- are known.  The offsets and lists must have the same length, and the offsets
 -- must be correct, else memory corruption will occur.
-concatenate_with_offsets @(a : box) @(Nelems Nworkers : intindex)
+concatenate_with_offsets @(a : box) @(Nworkers : intindex)
   (rep : ReprBox a)
-  (elem_count : FIInt Nelems)
+  (dom : list_dim)
   (worker_count : FIInt Nworkers)
   (get_offset : int -> int)
   (get_list : int -> Boxed (list (AsBare a)))
@@ -6348,6 +6395,7 @@ concatenate_with_offsets @(a : box) @(Nelems Nworkers : intindex)
   let rep_list = unboxedinfo list @(AsBare a) in
   let sa_list = reprSizeAlign @(list (AsBare a)) rep_list in
 
+  case list_dimToFIInt dom of someIInt @Nelems elem_count.
   let type output_arr = arr Nelems (AsBare a) in
   let rep_output_arr = repr_arr @Nelems @(AsBare a) elem_count rep in
   let sa_a = reprSizeAlign @(AsBare a) rep in
@@ -6372,6 +6420,69 @@ concatenate_with_offsets @(a : box) @(Nelems Nworkers : intindex)
         -- Copy this chunk to the output array
         copy @(arr M (AsBare a)) chunk_arr_rep chunk_ay
         (subarray_out @Nelems @M @(AsBare a) sa_a ret off)))));
+
+
+-- Concatenate a collection of lists, where the list offsets and output size 
+-- are known.  The offsets and lists must have the same length, and the offsets
+-- must be correct, else memory corruption will occur.
+concatenate_array2_with_offsets @(a : box) @(Nworkers : intindex)
+  (rep : ReprBox a)
+  (dom : dim2)
+  (worker_count : FIInt Nworkers)
+  (get_list : int -> Boxed (array2 (AsBare a)))
+  -> Boxed (array2 (AsBare a))
+  attribute(inline) =
+
+  let rep_array2 = unboxedinfo array2 @(AsBare a) in
+  let sa_array2 = reprSizeAlign @(array2 (AsBare a)) rep_array2 in
+
+  case dom of mk_dim2 tyob dom_y dom_x.
+  case dim1ToArraySize dom_y of arraySize @(M : intindex) lb_y stride_y size_y.
+  case dim1ToArraySize dom_x of arraySize @(N : intindex) lb_x stride_x size_x.
+
+  let type output_arr = arr M (arr N (AsBare a)) in
+  let rep_output_row = repr_arr @N @(AsBare a) size_x rep in
+  let sa_output_row = reprSizeAlign @(arr N (AsBare a)) rep_output_row in
+  let rep_output_arr = repr_arr @M @(arr N (AsBare a)) size_y rep_output_row in
+  let sa_a = reprSizeAlign @(AsBare a) rep in
+
+  con_boxed @(array2 (AsBare a)) rep_array2
+  (mk_array2 @(AsBare a) @M @N lb_y stride_y size_y lb_x stride_x size_x
+   (con_stuckBox @output_arr rep_output_arr
+    (\ (ret : OutPtr output_arr) -> Store.
+
+      -- For each chunk, in parallel
+      doall @Nworkers worker_count
+      (\ (chunk_i : int) -> Store.
+
+        case get_list chunk_i of
+          [sa_array2] boxed tyob
+          (mk_array2 @Mc @Nc lb_y_c stride_y_c size_y_c
+                             lb_x_c stride_x_c size_x_c
+                             chunk_ayref).
+
+        let chunk_row_rep = repr_arr @Nc @(AsBare a) size_x_c rep in
+        let sa_chunk_row = reprSizeAlign @(arr Nc (AsBare a)) chunk_row_rep in
+        let chunk_arr_rep = repr_arr @Mc @(arr Nc (AsBare a)) size_y_c chunk_row_rep in
+        case chunk_ayref of [reprSizeAlign @(arr Mc (arr Nc (AsBare a))) chunk_arr_rep]
+          stuckBox tyob chunk_ay.
+
+        -- Copy this chunk to the output array
+        doall @Mc size_y_c
+        (\ (elem_y : int) -> Store.
+          let chunk_y = lb_y_c +# stride_y_c *# elem_y in
+          let output_y = (chunk_y -# lb_y) //# stride_y in
+
+          -- TODO: Optimize the stride=1 case by block-copying rows
+          doall @Nc size_x_c
+          (\ (elem_x : int) -> Store.
+            let chunk_x = lb_x_c +# stride_x_c *# elem_x in
+            let output_x = (chunk_x -# lb_x) //# stride_x in
+            copy @(AsBare a) rep
+            (subscript @Nc @(AsBare a) sa_a
+             (subscript @Mc @(arr Nc (AsBare a)) sa_chunk_row chunk_ay elem_y) elem_x)
+            (subscript_out @N @(AsBare a) sa_a
+             (subscript_out @M @(arr N (AsBare a)) sa_output_row ret output_y) output_x)))))));
   
 
 {- REPLACED BY NEW STREAM CODE
