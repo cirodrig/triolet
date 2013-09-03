@@ -1814,10 +1814,15 @@ rwIntEqApp inf [] [arg1, arg2] = do
     can't_simplify =
       return (appE inf eq_op [] [arg1', arg2'], topCode)
 
-    rewrite_value_prop var lit =
+    rewrite_value_prop_lit var lit =
       -- Can't simplify.  However, if the result is True, then 
       -- we can replace 'var' by 'lit'.
-      return (appE inf eq_op [] [arg1', arg2'], varEqualityTestCode var lit)
+      return (appE inf eq_op [] [arg1', arg2'], varLitEqualityTestCode var lit)
+
+    rewrite_value_prop_var var var2 =
+      -- Can't simplify.  However, if the result is True, then 
+      -- we can replace 'var' by 'lit'.
+      return (appE inf eq_op [] [arg1', arg2'], varVarEqualityTestCode var var2)
 
     -- Since this is an int equality test, literal arguments are integers
     -- and we can evaluate them immediately.
@@ -1841,12 +1846,12 @@ rwIntEqApp inf [] [arg1, arg2] = do
         Just (ExpM (VarE _ v2))
           -- The expression @x == x@ is always true
           | v1 == v2            -> return_true
-          | otherwise           -> can't_simplify
-        Just (ExpM (LitE _ l2)) -> rewrite_value_prop v1 l2
+          | otherwise           -> rewrite_value_prop_var v1 v2
+        Just (ExpM (LitE _ l2)) -> rewrite_value_prop_lit v1 l2
         _                       -> can't_simplify
     Just (ExpM (LitE _ l1)) ->
       case codeTrivialExp val2 of
-        Just (ExpM (VarE _ v2)) -> rewrite_value_prop v2 l1
+        Just (ExpM (VarE _ v2)) -> rewrite_value_prop_lit v2 l1
         Just (ExpM (LitE _ l2)) -> test_equality l1 l2
         _                       -> can't_simplify
     _ -> can't_simplify

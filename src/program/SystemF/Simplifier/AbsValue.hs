@@ -27,7 +27,8 @@ module SystemF.Simplifier.AbsValue
         codeInlineHint,
         litCode,
         trueCode, falseCode,
-        varEqualityTestCode,
+        varVarEqualityTestCode,
+        varLitEqualityTestCode,
         conjunctionCode,
         AbsValue(..),
         AbsData(..),
@@ -222,11 +223,17 @@ trueCode =
 falseCode =
   valueCode $ DataAV $ valAbsData (VarCon (coreBuiltin The_False) [] []) []
 
--- | Create abstract code of the boolean expression @v == L@ for some variable
---   @v@ and literal @L@.
-varEqualityTestCode :: Var -> Lit -> AbsCode
-varEqualityTestCode v l =
+-- | Create abstract code of the boolean expression @v == L@ for some
+--   variable @v@ and literal @L@.
+varLitEqualityTestCode :: Var -> Lit -> AbsCode
+varLitEqualityTestCode v l =
   valueCode $ BoolAV $ AbsValueProp v (litCode l)
+
+-- | Create abstract code of the boolean expression @v == v'@ for some
+--   variables @v@ and @v'@.
+varVarEqualityTestCode :: Var -> Var -> AbsCode
+varVarEqualityTestCode v v2 =
+  valueCode $ BoolAV $ AbsValueProp v (valueCode $ VarAV v2)
 
 conjunctionCode :: AbsCode -> AbsCode -> AbsCode
 conjunctionCode c1 c2 =
