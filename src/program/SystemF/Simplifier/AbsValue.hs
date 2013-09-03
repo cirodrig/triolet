@@ -23,6 +23,7 @@ module SystemF.Simplifier.AbsValue
         relabelCodeVar,
         codeExp,
         codeTrivialExp,
+        codeTrivialOrInlinedExp,
         codeValue,
         codeInlineHint,
         litCode,
@@ -197,6 +198,9 @@ codeTrivialExp code =
        case _codeValue code
        of LitAV l -> Just $ ExpM (LitE defaultExpInfo l)
           VarAV v -> Just $ ExpM (VarE defaultExpInfo v)
+          TyAppAV op ty_args
+            | Just op_e <- codeTrivialExp op ->
+                Just $ ExpM (AppE defaultExpInfo op_e ty_args [])
           DataAV d
             | Just True <- fromBoolData d -> Just $ trueE defaultExpInfo
             | Just False <- fromBoolData d -> Just $ falseE defaultExpInfo
@@ -207,6 +211,16 @@ codeTrivialExp code =
                     of ExpM (LitE {}) -> Just exp
                        ExpM (VarE {}) -> Just exp
                        _ -> Nothing
+
+-- | Convert an 'AbsCode' to an expression if it can be represented by a
+--   trivial expression or it is being pre-inlined.
+codeTrivialOrInlinedExp :: AbsCode -> Maybe ExpM
+codeTrivialOrInlinedExp code =
+  case codeTrivialExp code
+  of Just e  -> Just e
+     Nothing -> case codeValue code
+                of InlinedAV e -> Just e
+                   _           -> Nothing
 
 codeValue :: AbsCode -> AbsValue
 codeValue = _codeValue
@@ -256,6 +270,7 @@ data AbsValue =
   | VarAV !Var                  -- ^ A variable
   | LitAV !Lit                  -- ^ A literal
   | FunAV !AbsFun               -- ^ A function
+  | TyAppAV !AbsCode [Type]     -- ^ A type application
   | DataAV !AbsData             -- ^ A fully applied constructor
   | HeapAV !AbsHeap             -- ^ A heap fragment
   | BoolAV !AbsProp             -- ^ A boolean value carrying the truth
@@ -362,6 +377,9 @@ pprAbsValue TopAV = text "TOP"
 pprAbsValue (VarAV v) = pprVar v
 pprAbsValue (LitAV l) = pprLit l
 pprAbsValue (FunAV f) = pprAbsFun f
+pprAbsValue (TyAppAV op args) =
+  sep (parens (pprAbsCode op) : map pprType args)
+
 pprAbsValue (DataAV d) = pprAbsData d
 pprAbsValue (HeapAV hp) = pprAbsHeap hp
 pprAbsValue (BoolAV b) = text "BOOL" <> parens (pprAbsProp b)
@@ -641,6 +659,9 @@ substituteAbsValue s value =
                    Just val -> return val
      LitAV _ -> return value
      FunAV f -> FunAV `liftM` substitute s f
+     TyAppAV op args -> TyAppAV `liftM`
+                        substitute s op `ap`
+                        substitute (typeSubst s) args
      DataAV d -> DataAV `liftM` substitute s d
      HeapAV h -> do
        -- Substitute the heap map; the result may be unrepresentable 
@@ -787,12 +808,29 @@ lookupAbstractValue v (AbsEnv m) =
 --   Application should only occur in a well-typed manner.  An error is raised
 --   otherwise.
 applyCode :: AbsCode -> [Type] -> [AbsCode] -> UnboxedTypeEvalM AbsComputation
-applyCode fun ty_args fields =
-  case codeValue fun
-  of TopAV   -> return TopAC
-     VarAV _ -> return TopAC    -- Don't attempt to represent it precisely
-     FunAV f -> applyAbsFun f ty_args fields
-     _       -> internalError "applyCode: Type error detected"
+applyCode fun ty_args fields
+  | null ty_args && null fields =
+      return $ ReturnAC fun
+
+  | null fields =
+      case codeValue fun
+      of TopAV   -> return TopAC
+         VarAV _ -> return $ ReturnAC $ type_app fun ty_args
+         FunAV f -> applyAbsFun f ty_args []
+         TyAppAV fun' ty_args' -> applyCode fun' (ty_args' ++ ty_args) []
+         InlinedAV _ -> return TopAC
+         _       -> internalError "applyCode: Type error detected"
+
+  | otherwise =
+      case codeValue fun
+      of TopAV   -> return TopAC
+         VarAV _ -> return TopAC    -- Don't attempt to represent it precisely
+         FunAV f -> applyAbsFun f ty_args fields
+         TyAppAV fun' ty_args' -> applyCode fun' (ty_args' ++ ty_args) fields
+         InlinedAV _ -> return TopAC
+         _       -> internalError "applyCode: Type error detected"
+  where
+    type_app op args = valueCode $ TyAppAV op args
 
 -- | Apply an abstract function to arguments and compute the result.
 --

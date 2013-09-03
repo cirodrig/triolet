@@ -642,7 +642,8 @@ worthPreInlining dmd ty expr =
                          inlckPartialApp `inlckOr`
                          inlckFunction `inlckOr`
                          inlckConlike
-           _ -> inlckTrivial
+           _ -> inlckTrivial `inlckOr`
+                inlckPartialApp
   in should_inline dmd expr
   where
     is_function_type = case ty of {FunT {} -> True; _ -> False}
