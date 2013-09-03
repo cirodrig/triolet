@@ -4937,7 +4937,7 @@ Indexable_array2 : IndexableDict (\ (a : box). Boxed (array2 (AsBare a))) =
   slice_array2_real
   preserve_array2_real;
 
-
+{-
 -- Workaround for inlining
 -- FIXME: Handle recursion properly
 Indexable_array2_2 : IndexableDict (\ (a : box). Boxed (array2 (AsBare a))) =
@@ -4960,7 +4960,7 @@ Indexable_array2_3 : IndexableDict (\ (a : box). Boxed (array2 (AsBare a))) =
   at_array2_real
   slice_array2_real_3
   preserve_array2_real;
-
+-}
 
 shape_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
   -> forall a : box. Boxed (array2 (AsBare a)) -> dim2 =
@@ -5013,7 +5013,10 @@ slice_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
 
 slice_array2_real @(a : box) (rep : ReprBox a)
   (lst : Boxed (array2 (AsBare a))) (d : dim2) (off : Boxed (Stored NoneType))
-  -> SomeIndexable dim2 a attribute(inline) =
+  -> SomeIndexable dim2 a
+  attribute(inline,
+            inline_struct(T D(C) T T) -- Inilne if array constructor is known
+           ) =
 
   case lst of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
     boxed tyob (mk_array2 @M @N lb_y stride_y size_y lb_x stride_x size_x ayref).
@@ -5042,9 +5045,9 @@ slice_array2_real @(a : box) (rep : ReprBox a)
                       (subscript @M @row_type (reprSizeAlign @row_type rep_row) ay real_y) real_x)))) in
 
   con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
-  (idCoercion @dim2) Indexable_array2_2 new_arr;
+  (idCoercion @dim2) Indexable_array2 new_arr;
 
-
+{-
 -- Workaround for inlining
 -- FIXME: Handle recursion properly
 slice_array2_real_2 @(a : box) (rep : ReprBox a)
@@ -5115,6 +5118,7 @@ slice_array2_real_3 @(a : box) (rep : ReprBox a)
 
   con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
   (idCoercion @dim2) Indexable_array2_3 new_arr;
+-}
 
 
 preserve_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
