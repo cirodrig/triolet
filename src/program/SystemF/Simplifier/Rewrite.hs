@@ -364,6 +364,8 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (coreBuiltin The_floordivI, rwFloorDivInt)
             , (coreBuiltin The_modI, rwModInt)
             , (coreBuiltin The_maxU, rwMaxUint)
+            , (coreBuiltin The_maxI, rwMaxInt)
+            , (coreBuiltin The_minI, rwMinInt)
             ]
 
     exprs = [(coreBuiltin The_count, count_expr)]
@@ -1366,13 +1368,27 @@ rwModInt inf [] [e1, e2]
 rwModInt _ _ _ = return Nothing
 
 rwMaxUint :: RewriteRule
-rwMaxUint inf [] [e1, e2]
-  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
-      let IntL m t = l1
-          IntL n _ = l2
-      in return $! Just $! ExpM (LitE inf (IntL (max m n) t))
-
+rwMaxUint inf [] [e1, e2] = minMaxOperator uintT max inf e1 e2
 rwMaxUint _ _ _ = return Nothing
+
+rwMaxInt :: RewriteRule
+rwMaxInt inf [] [e1, e2] = minMaxOperator intT max inf e1 e2
+rwMaxInt _ _ _ = return Nothing
+
+rwMinInt :: RewriteRule
+rwMinInt inf [] [e1, e2] = minMaxOperator intT min inf e1 e2
+rwMinInt _ _ _ = return Nothing
+
+minMaxOperator ty operator inf e1 e2
+  | ExpM (LitE _ l1) <- e1, ExpM (LitE _ l2) <- e2 =
+      let IntL m _ = l1
+          IntL n _ = l2
+      in return $! Just $! ExpM (LitE inf (IntL (operator m n) ty))
+
+  | ExpM (VarE _ v1) <- e1, ExpM (VarE _ v2) <- e2, v1 == v2 =
+      return $! Just $! e1
+
+  | otherwise = return Nothing
 
 rwGcd :: RewriteRule
 rwGcd inf [] [e1, e2]
