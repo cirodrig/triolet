@@ -3806,9 +3806,12 @@ zip_Indexable @(d : box) @(a b c : box)
   case y of someIndexable @t tyob co2 ix2 container2.
 
   -- Find the intersection of the two indexable objects' domains
-  let dom = shIntersect @d sh
-            (coerce @(shape s) @d (ix_shape @s ix1 @a container1))
-            (coerce @(shape t) @d (ix_shape @t ix2 @b container2)) in
+  let sh1 = coerce @(shape s) @d (ix_shape @s ix1 @a container1) in
+  let sh2 = coerce @(shape t) @d (ix_shape @t ix2 @b container2) in
+  let dom = shIntersect @d sh sh1 sh2 in
+
+  -- FIXME: This is wrong.  See note below.
+  if shCheckSubdomain @d sh sh1 dom then
 
   let off = shNoOffset @d sh in
 
@@ -3820,7 +3823,18 @@ zip_Indexable @(d : box) @(a b c : box)
   (coerce @(SomeIndexable (shape t) b) @(SomeIndexable d b)
    (ix_slice @t ix2 @b rep_b container2
     (coerce @d @(shape t) dom)
-    (coerce @(AsBox (offset d)) @(AsBox (offset (shape t))) off)));
+    (coerce @(AsBox (offset d)) @(AsBox (offset (shape t))) off)))
+
+  else except @(Zip2Indexable d c);
+
+-- NOTE zip_Indexable
+--
+-- We check whether the zipped domain is a split
+-- subdomain of the original domain.
+-- This is incorrect because it doesn't respect stride changes.
+-- The hack is there now in lieu of proper global constant propagation
+-- so that stride and bound information will be propagated past the
+-- conditional branches that compute subdomains.
 
 
 -- This function is recursive via flattenSplittable
