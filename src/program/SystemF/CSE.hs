@@ -61,6 +61,12 @@ import Type.Type
 import Globals
 import GlobalVar
 
+-- | True if the operator is known to be pure.
+--   Note that purity includes absence of nondeterminism and nontermination.
+isPureOp v = v `elem` pure_list
+  where
+    pure_list = [coreBuiltin The_defineIntIndex]
+
 -- | A singleton type is always a named type or type application,
 --   and always has an inhabited kind
 data SingletonType = SingletonType Var [Type]
@@ -110,12 +116,73 @@ insertST (SingletonType op args) x m =
 
 -------------------------------------------------------------------------------
 
-newtype CSE a = CSE (ReaderT (SingletonTypeMap ExpM) UnboxedTypeEvalM a)
+-- | A CSE-able function call.
+--
+--   Can only represent functions applied to variable or literal arguments.
+data CSECall = CSECall !Var [Type] [TrivialArg]
+
+data TrivialArg = VarArg !Var | LitArg !Lit
+
+eqArg (VarArg v1) (VarArg v2) = v1 == v2
+eqArg (LitArg l1) (LitArg l2) = eqLit l1 l2
+eqArg _           _           = False
+
+eqArgs (x:xs) (y:ys) = eqArg x y && eqArgs xs ys
+eqArgs []     []     = True
+eqArgs _      _      = False
+
+eqLit (IntL m _)   (IntL n _)   = m == n
+eqLit (FloatL f _) (FloatL g _) = f == g
+eqLit _            _            = False
+
+-- | Check whether two 'CSECall's are equal
+eqCall :: EvalMonad m => CSECall -> CSECall -> m Bool
+eqCall (CSECall op1 ty_args1 args1) (CSECall op2 ty_args2 args2) =
+  return (op1 == op2 && eqArgs args1 args2) >&&>
+  return (length ty_args1 == length ty_args2) >&&>
+  andM (zipWith compareTypes ty_args1 ty_args2)
+
+-- | Convert an expression to a CSECall if it is CSEable.
+--   CSEable expressions must be pure function calls with trivial arguments.
+asCSECall :: ExpM -> Maybe CSECall
+asCSECall (ExpM (AppE _ (ExpM (VarE _ op_var)) ty_args args))
+  | isPureOp op_var,
+    Just cse_args <- mapM asTrivialArg args =
+      Just $ CSECall op_var ty_args cse_args
+
+asCSECall _ = Nothing
+
+asTrivialArg (ExpM (VarE _ v)) = Just $ VarArg v
+asTrivialArg (ExpM (LitE _ l)) = Just $ LitArg l
+
+-- | A map from function calls to their known result value
+type CSEMap = [(CSECall, Var)] 
+
+lookupCSE :: EvalMonad m => CSECall -> CSEMap -> m (Maybe Var)
+lookupCSE call m = search m
+  where
+    search ((c,v) : m) = ifM (eqCall call c) (return (Just v)) (search m)
+    search []          = return Nothing
+
+insertCSE :: CSECall -> Var -> CSEMap -> CSEMap
+insertCSE c v m = (c,v) : m
+
+-------------------------------------------------------------------------------
+
+data CSEEnv =
+  CSEEnv
+  { singletonTypes :: !(SingletonTypeMap ExpM)
+  , cseCalls       :: !CSEMap
+  }
+
+emptyCSEEnv = CSEEnv Map.empty []
+
+newtype CSE a = CSE (ReaderT CSEEnv UnboxedTypeEvalM a)
                 deriving(Functor, Applicative, Monad, MonadIO)
 
 runCSE :: IdentSupply Var -> TypeEnv -> CSE a -> IO a
 runCSE var_supply tenv (CSE m) =
-  runTypeEvalM (runReaderT m Map.empty) var_supply tenv
+  runTypeEvalM (runReaderT m emptyCSEEnv) var_supply tenv
 
 instance EvalMonad CSE where liftTypeEvalM m = CSE $ lift m
 
@@ -128,7 +195,10 @@ instance Supplies CSE (Ident Var) where
   fresh = CSE $ lift fresh
 
 getSingletonTypeMap :: CSE (SingletonTypeMap ExpM)
-getSingletonTypeMap = CSE ask
+getSingletonTypeMap = CSE (asks singletonTypes)
+
+getCSECalls :: CSE CSEMap
+getCSECalls = CSE (asks cseCalls)
 
 -- | Look up an instance of a singleton type
 lookupSingleton :: SingletonType -> CSE (Maybe ExpM)
@@ -136,7 +206,10 @@ lookupSingleton st = getSingletonTypeMap >>= lookupST st
 
 -- | Add a singleton type to the environment
 withSingleton :: SingletonType -> ExpM -> CSE a -> CSE a
-withSingleton ty val (CSE m) = CSE (local (insertST ty val) m)
+withSingleton ty val (CSE m) = CSE (local insert_type m)
+  where
+    insert_type env =
+      env {singletonTypes = insertST ty val $ singletonTypes env}
 
 withSingleton' :: Type -> ExpM -> CSE a -> CSE a
 withSingleton' ty e m = do
@@ -144,6 +217,16 @@ withSingleton' ty e m = do
   case m_singleton of
     Nothing -> m
     Just st -> withSingleton st e m
+
+-- | Look up a value equivalent to a CSEable call
+lookupCSECall :: CSECall -> CSE (Maybe ExpM)
+lookupCSECall c = getCSECalls >>= lookupCSE c >>= return . (fmap varE')
+
+withCSECall :: CSECall -> Var -> CSE a -> CSE a
+withCSECall c v (CSE m) = CSE (local insert_call m)
+  where
+    insert_call env =
+      env {cseCalls = insertCSE c v $ cseCalls env}
 
 -- | Add a pattern binding to the environment.
 --   However, if the binding is a singleton type, don't replace it.
@@ -178,33 +261,45 @@ clearDemandInfo b = setPatMDmd unknownDmd b
 -- | Rewrite a let-binding.
 --   If it's a singleton type, look it up or add it to the
 --   environment.
+--   If it's a CSEable value, look it up or add it to the environment.
 rwLetBinding inf b rhs body = do
+  -- Singleton type?
   m_singleton <- asSingletonType (patMType b)
   case m_singleton of
-    Nothing -> not_singleton
     Just st -> do
       m_val <- lookupSingleton st
       case m_val of
         Nothing -> bind_singleton st
-        Just x  -> use_singleton x
+        Just x  -> use_rhs x
+    Nothing -> do
+      rhs' <- rwExp rhs
+      
+      -- CSEable value?
+      case asCSECall rhs' of
+        Just cse_call -> do
+          m_val <- lookupCSECall cse_call
+          case m_val of
+            Nothing -> bind_cse rhs' cse_call
+            Just x  -> use_rhs x
+        Nothing -> use_rhs rhs'
   where
     b' = clearDemandInfo b
 
-    not_singleton = do
-      rhs' <- rwExp rhs
+    -- Use the given RHS.  It's a simplified version of the
+    -- old RHS, a replacement produced by value CSE, or a replacement
+    -- produced by singleton type CSE.
+    use_rhs rhs' = do
       body' <- assumeBinder (patMBinder b') $ rwExp body
       return $ ExpM $ LetE inf b' rhs' body'
+
+    bind_cse rhs' cse_call = do
+      let cse_var = patMVar b'
+      withCSECall cse_call cse_var $ use_rhs rhs'
 
     bind_singleton st = do
       rhs' <- rwExp rhs
       let singleton_value = varE' (patMVar b')
-      body' <- assumeBinder (patMBinder b') $
-               withSingleton st singleton_value $ rwExp body
-      return $ ExpM $ LetE inf b' rhs' body'
-
-    use_singleton x = do
-      body' <- assumeBinder (patMBinder b') $ rwExp body
-      return $ ExpM $ LetE inf b' x body'
+      withSingleton st singleton_value $ use_rhs rhs'
 
 rwExp expression@(ExpM exp) =
   case exp
