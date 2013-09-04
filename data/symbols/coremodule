@@ -349,7 +349,7 @@ copy @(a : bare) (r : Repr a) (x : a) (y : OutPtr a)
 -- Convert from boxed to bare
 asbox @(a : bare) (r : Repr a) (x : Init a)
   -> AsBox a attribute(inline, inline_sequential,
-                       inline_struct(C T)
+                       inline_struct(D(T C T T) T)
                       ) =
   case r of repr tyob sa isref put get.
   case isref of {
@@ -370,7 +370,7 @@ asbox @(a : bare) (r : Repr a) (x : Init a)
 -- Convert from bare to boxed
 asbare @(a : bare) (r : Repr a) (x : AsBox a) (ret : OutPtr a) -> Store
   attribute(inline, inline_sequential,
-            inline_struct(C T)
+            inline_struct(D(T C T T) T T)
            ) =
 
   case r of repr tyob sa isref put get.
