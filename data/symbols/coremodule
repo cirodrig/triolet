@@ -2417,14 +2417,26 @@ putArray2Section_optimized @(a : box)
   (x : Array2Section a) (writer : OpaqueRef) (s1 : Store) -> Store
   attribute(builtin) =
 
-  case x of array2Section rep ay_ref dom.
+  case x of array2Section @M @N rep lb_y stride_y size_y
+                                    lb_x stride_x size_x ay_ref dom.
 
-  let subarray_ref = array2_extract_subarray @a rep ay_ref dom in
+  let rep_array2 = unboxedinfo array2 @(AsBare a) in
+  let ay = con_boxed @(array2 (AsBare a)) rep_array2
+           (mk_array2 @(AsBare a) @M @N
+            lb_y stride_y size_y lb_x stride_x size_x ay_ref) in
+  let subarray_ref = array2_extract_subarray @a rep ay dom in
 
   -- Put the fields
   let s2 = putBoxedObject @(ReprBox a) rep writer s1 in
-  let s3 = putBoxedObject @(Boxed (array2 (AsBare a))) ay_ref writer s2 in
-  putBoxedObject @dim2 dom writer s3;
+  let s3 = putInt lb_y writer s2 in
+  let s4 = putInt stride_y writer s3 in
+  let s5 = putInt (case size_y of fiInt x. x) writer s4 in
+  let s6 = putInt lb_x writer s5 in
+  let s7 = putInt stride_x writer s6 in
+  let s8 = putInt (case size_x of fiInt x. x) writer s7 in
+  let s9 = putBoxedObject @(StuckBox (arr M (arr N (AsBare a))))
+           ay_ref writer s8 in
+  putBoxedObject @dim2 dom writer s9;
 
 
 getArray2Section_optimized @(a : box) (rdr : MessageReader)
@@ -2432,9 +2444,18 @@ getArray2Section_optimized @(a : box) (rdr : MessageReader)
   attribute(builtin) =
 
   case getBoxedObject @(ReprBox a) rdr of (rdr2, rep).
-  case getBoxedObject @(Boxed (array2 (AsBare a) )) rdr2 of (rdr3, ay_ref).
-  case getBoxedObject @dim2 rdr3 of (rdr4, dom).
-  (rdr4, array2Section @a rep ay_ref dom);
+  case getInt rdr2 of (rdr3, lb_y).
+  case getInt rdr3 of (rdr4, stride_y).
+  case getInt rdr4 of (rdr5, size_int_y).
+  case defineIntIndex size_int_y of someIInt @M size_y.
+  case getInt rdr5 of (rdr6, lb_x).
+  case getInt rdr6 of (rdr7, stride_x).
+  case getInt rdr7 of (rdr8, size_int_x).
+  case defineIntIndex size_int_x of someIInt @N size_x.
+  case getBoxedObject @(StuckBox (arr M (arr N (AsBare a)))) rdr8 of (rdr9, ay_ref).
+  case getBoxedObject @dim2 rdr9 of (rdr10, dom).
+  (rdr10, array2Section @a @M @N rep
+          lb_y stride_y size_y lb_x stride_x size_x ay_ref dom);
 
 
 -------------------------------------------------------------------------------
@@ -2799,7 +2820,10 @@ data array2 (a : bare) : bare
 -- and the subdomain that's being accessed.
 data Array2Section (a : box) : bare
 {
-  array2Section (Repr (AsBare a), Boxed (array2 (AsBare a)), dim2);
+  array2Section @(M N : intindex)
+    (Repr (AsBare a),
+     int, int, FIInt M, int, int, FIInt N,
+     StuckBox (arr M (arr N (AsBare a))), dim2);
 };
 
 -- A 3D array.
@@ -4551,7 +4575,9 @@ Indexable_Array2Section : IndexableDict (\ (a : box). Boxed (Array2Section a)) =
 
 shape_Array2Section @(a : box) (s : Boxed (Array2Section a)) -> dim2 =
   case s of [reprSizeAlign @(Array2Section a) (unboxedinfo Array2Section @a)]
-            boxed tyob (array2Section rep_a ay_ref dom).
+            boxed tyob (array2Section @M @N rep_a
+                                      lb_y stride_y size_y
+                                      lb_x stride_x size_x ay_ref dom).
   dom;
 
 
@@ -4561,8 +4587,17 @@ at_Array2Section @(a : box)
 
   -- Since the section doesn't "move" indices, just access the underlying array
   case s of [reprSizeAlign @(Array2Section a) (unboxedinfo Array2Section @a)]
-            boxed tyob (array2Section rep_a ay_ref dom).
-  at_array2_real @a rep ay_ref i;
+            boxed tyob (array2Section @M @N rep_a
+                                      lb_y stride_y size_y
+                                      lb_x stride_x size_x ay_ref dom).
+
+  let rep_array2 = unboxedinfo array2 @(AsBare a) in
+  let sa_array2 = reprSizeAlign @(array2 (AsBare a)) rep_array2 in
+
+  let ay = con_boxed @(array2 (AsBare a)) rep_array2
+           (mk_array2 @(AsBare a) @M @N lb_y
+            stride_y size_y lb_x stride_x size_x ay_ref) in
+  at_array2_real @a rep ay i;
 
 
 slice_Array2Section @(a : box)
@@ -4574,11 +4609,16 @@ slice_Array2Section @(a : box)
   -- Since the section doesn't "move" indices, just slice the underlying array
   let rep_section = unboxedinfo Array2Section @a in
   case s of [reprSizeAlign @(Array2Section a) rep_section]
-            boxed tyob (array2Section rep_a ay_ref old_dom).
+            boxed tyob (array2Section @M @N rep_a
+                                      lb_y stride_y size_y
+                                      lb_x stride_x size_x ay_ref dom).
 
   con_someIndexable @dim2 @a @(\ (a : box). Boxed (Array2Section a))
   (idCoercion @dim2) Indexable_Array2Section
-  (con_boxed @(Array2Section a) rep_section (array2Section @a rep ay_ref dom));
+  (con_boxed @(Array2Section a) rep_section
+   (array2Section @a @M @N rep
+    lb_y stride_y size_y
+    lb_x stride_x size_x ay_ref dom));
 
 
 -- Don't deconstruct Array2Sections that are used in distributed computation.
@@ -4588,18 +4628,24 @@ preserve_Array2Section @(a : box) (x : Boxed (Array2Section a))
   let repr_Array2Section = unboxedinfo Array2Section @a in
   let sa_Array2Section = reprSizeAlign @(Array2Section a) repr_Array2Section in
 
-  case x of [sa_Array2Section] boxed tyob (array2Section rep ay_ref dom).
+  case x of [sa_Array2Section]
+            boxed tyob (array2Section @M @N rep
+                                      lb_y stride_y size_y
+                                      lb_x stride_x size_x ay_ref dom).
 
   -- Prevent it from being deconstructed prior to this program point
   let x2 = preserve @(Boxed (Array2Section a)) x in
 
   -- Now deconstruct and rebuild the Array2Section, using the old Repr object.
   -- This allows optimizations to propagate the Repr object.
-  case x2 of
-    [sa_Array2Section] boxed tyob (array2Section dummy_rep ay_ref dom).
+  case x2 of [sa_Array2Section]
+     boxed tyob (array2Section @M @N unused_rep
+                                      lb_y stride_y size_y
+                                      lb_x stride_x size_x ay_ref dom).
 
   con_boxed @(Array2Section a) repr_Array2Section
-  (array2Section @a rep ay_ref dom);
+  (array2Section @a @M @N rep
+   lb_y stride_y size_y lb_x stride_x size_x ay_ref dom);
 
 
 traverse_Array2Section @(a : box)
@@ -4617,11 +4663,20 @@ traverse_Array2Section @(a : box)
 build_Array2Section @(a : box)
   (rep : ReprBox a) (s : Stream dim2 a) -> Boxed (Array2Section a) =
 
+  let rep_array2 = unboxedinfo array2 @(AsBare a) in
+  let sa_array2 = reprSizeAlign @(array2 (AsBare a)) rep_array2 in
   let repr_Array2Section = unboxedinfo Array2Section @a in
-  let ay_ref = build_array2 @a rep s in
-  let dom = shape_array2_real @a ay_ref in
+  let ay = build_array2 @a rep s in
+  case ay of
+    [sa_array2] boxed tyob (mk_array2 @M @N
+                                      lb_y stride_y size_y
+                                      lb_x stride_x size_x ay_ref).
+
+  let dom = shape_array2_real @a ay in
   con_boxed @(Array2Section a) repr_Array2Section
-  (array2Section @a rep ay_ref dom);
+  (array2Section @a @M @N rep
+   lb_y stride_y size_y
+   lb_x stride_x size_x ay_ref dom);
 
 
 Functor_Zip2Indexable @(d : box) -> FunctorDict (Zip2Indexable d) =
@@ -5163,12 +5218,20 @@ slice_array2_real @(a : box) (rep : ReprBox a)
   -> SomeIndexable dim2 a
   attribute(inline) =
 
+  let rep_array2 = unboxedinfo array2 @(AsBare a) in
+  let sa_array2 = reprSizeAlign @(array2 (AsBare a)) rep_array2 in
   let rep_section = unboxedinfo Array2Section @a in
+
+  case lst of [sa_array2]
+    boxed tyob (mk_array2 @M @N lb_y stride_y size_y
+                                lb_x stride_x size_x ay_ref).
 
   con_someIndexable @dim2 @a @(\ (a : box). Boxed (Array2Section a))
   (idCoercion @dim2) Indexable_Array2Section
-  (con_boxed @(Array2Section a) rep_section (array2Section @a rep lst d));
-  
+  (con_boxed @(Array2Section a) rep_section
+   (array2Section @a @M @N rep lb_y stride_y size_y
+                           lb_x stride_x size_x ay_ref d));
+
 {-
   let new_arr = array2_extract_subarray @a rep lst d in
 
