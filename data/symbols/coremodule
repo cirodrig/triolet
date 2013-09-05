@@ -5032,7 +5032,7 @@ slice_array2_real @(a : box) (rep : ReprBox a)
   -> SomeIndexable dim2 a
   attribute(inline) =
 
-  let new_arr = slice_array2_as_slice @a rep lst d off in
+  let new_arr = slice_array2_as_slice @a rep lst d in
 
   con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
   (idCoercion @dim2) Indexable_array2 new_arr;
@@ -5040,10 +5040,10 @@ slice_array2_real @(a : box) (rep : ReprBox a)
 
 -- Slice an array2, but don't wrap it in a 'SomeIndexable'
 slice_array2_as_slice @(a : box) (rep : ReprBox a)
-  (lst : Boxed (array2 (AsBare a))) (d : dim2) (off : Boxed (Stored NoneType))
+  (lst : Boxed (array2 (AsBare a))) (d : dim2)
   -> Boxed (array2 (AsBare a))
   attribute(inline,
-            inline_struct(T D(C) T T) -- Inilne if array constructor is known
+            inline_struct(T T D(C C)) -- Inline if domain is known, so that we can propagate size information
            ) =
 
   case lst of [reprSizeAlign @(array2 (AsBare a)) (unboxedinfo array2 @(AsBare a))]
