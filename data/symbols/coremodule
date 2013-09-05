@@ -2769,6 +2769,15 @@ data array2 (a : bare) : bare
   (int, int, FIInt M, int, int, FIInt N, StuckBox (arr M (arr N a)));
 };
 
+-- An array section is a subarray that's treated like an array.
+--
+-- The array section consists of a reference to the original array
+-- and the subdomain that's being accessed.
+data Array2Section (a : box) : bare
+{
+  array2Section (Repr (AsBare a), Boxed (array2 (AsBare a)), dim2);
+};
+
 -- A 3D array.
 -- The array's domain is described by a lower bound, stride, and size in
 -- the Z, Y, and X dimensions.
@@ -4493,6 +4502,104 @@ build_ListSection @(a : box)
   listToListSection @a rep (build_list @a rep s);
 
 
+Functor_Array2Section : FunctorDict (\ (a : box). Boxed (Array2Section a)) =
+  functorDict @(\ (a : box). Boxed (Array2Section a))
+  (boxedinfo functorDict @(\ (a : box). Boxed (Array2Section a)))
+  map_Array2Section;
+
+
+map_Array2Section @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : Boxed (Array2Section a))
+  -> Boxed (Array2Section b) =
+
+  build_Array2Section @b rep_b
+  (map_Stream @dim2 @a @b rep_a rep_b f
+   (traverse_Array2Section @a rep_a s));
+
+
+Indexable_Array2Section : IndexableDict (\ (a : box). Boxed (Array2Section a)) =
+  indexableDict @(\ (a : box). Boxed (Array2Section a))
+  (boxedinfo indexableDict @(\ (a : box). Boxed (Array2Section a)))
+  Functor_Array2Section shape_Array2Section at_Array2Section slice_Array2Section
+  preserve_Array2Section;
+
+
+shape_Array2Section @(a : box) (s : Boxed (Array2Section a)) -> dim2 =
+  case s of [reprSizeAlign @(Array2Section a) (unboxedinfo Array2Section @a)]
+            boxed tyob (array2Section rep_a ay_ref dom).
+  dom;
+
+
+at_Array2Section @(a : box)
+  (rep : ReprBox a) (s : Boxed (Array2Section a)) (i : BoxIndex dim2) -> a
+  attribute(inline) =
+
+  -- Since the section doesn't "move" indices, just access the underlying array
+  case s of [reprSizeAlign @(Array2Section a) (unboxedinfo Array2Section @a)]
+            boxed tyob (array2Section rep_a ay_ref dom).
+  at_array2_real @a rep ay_ref i;
+
+
+slice_Array2Section @(a : box)
+  (rep : ReprBox a)
+  (s : Boxed (Array2Section a)) (dom : dim2) (o : Boxed (Stored NoneType))
+  -> SomeIndexable dim2 a
+  attribute(inline) =
+
+  -- Since the section doesn't "move" indices, just slice the underlying array
+  let rep_section = unboxedinfo Array2Section @a in
+  case s of [reprSizeAlign @(Array2Section a) rep_section]
+            boxed tyob (array2Section rep_a ay_ref old_dom).
+
+  con_someIndexable @dim2 @a @(\ (a : box). Boxed (Array2Section a))
+  (idCoercion @dim2) Indexable_Array2Section
+  (con_boxed @(Array2Section a) rep_section (array2Section @a rep ay_ref dom));
+
+
+-- Don't deconstruct Array2Sections that are used in distributed computation.
+preserve_Array2Section @(a : box) (x : Boxed (Array2Section a))
+  -> Boxed (Array2Section a) attribute(inline) =
+
+  let repr_Array2Section = unboxedinfo Array2Section @a in
+  let sa_Array2Section = reprSizeAlign @(Array2Section a) repr_Array2Section in
+
+  case x of [sa_Array2Section] boxed tyob (array2Section rep ay_ref dom).
+
+  -- Prevent it from being deconstructed prior to this program point
+  let x2 = preserve @(Boxed (Array2Section a)) x in
+
+  -- Now deconstruct and rebuild the Array2Section, using the old Repr object.
+  -- This allows optimizations to propagate the Repr object.
+  case x2 of
+    [sa_Array2Section] boxed tyob (array2Section dummy_rep ay_ref dom).
+
+  con_boxed @(Array2Section a) repr_Array2Section
+  (array2Section @a rep ay_ref dom);
+
+
+traverse_Array2Section @(a : box)
+  (rep : ReprBox a) (s : Boxed (Array2Section a)) -> Stream dim2 a =
+
+  con_stream @dim2 @a hintAny
+  (con_ixStream @dim2 @a
+   (con_rStream @dim2 @a @a rep (\ (x : a) -> a. x)
+    (con_someIndexable @dim2 @a @(\ (a : box). Boxed (Array2Section a))
+     (idCoercion @dim2)
+     Indexable_Array2Section
+     s)));
+
+
+build_Array2Section @(a : box)
+  (rep : ReprBox a) (s : Stream dim2 a) -> Boxed (Array2Section a) =
+
+  let repr_Array2Section = unboxedinfo Array2Section @a in
+  let ay_ref = build_array2 @a rep s in
+  let dom = shape_array2_real @a ay_ref in
+  con_boxed @(Array2Section a) repr_Array2Section
+  (array2Section @a rep ay_ref dom);
+
+
 Functor_Zip2Indexable @(d : box) -> FunctorDict (Zip2Indexable d) =
   functorDict @(Zip2Indexable d) (boxedinfo functorDict @(Zip2Indexable d))
   (map_Zip2Indexable @d);
@@ -5032,14 +5139,22 @@ slice_array2_real @(a : box) (rep : ReprBox a)
   -> SomeIndexable dim2 a
   attribute(inline) =
 
-  let new_arr = slice_array2_as_slice @a rep lst d in
+  let rep_section = unboxedinfo Array2Section @a in
+
+  con_someIndexable @dim2 @a @(\ (a : box). Boxed (Array2Section a))
+  (idCoercion @dim2) Indexable_Array2Section
+  (con_boxed @(Array2Section a) rep_section (array2Section @a rep lst d));
+  
+{-
+  let new_arr = array2_extract_subarray @a rep lst d in
 
   con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
   (idCoercion @dim2) Indexable_array2 new_arr;
+-}
 
 
--- Slice an array2, but don't wrap it in a 'SomeIndexable'
-slice_array2_as_slice @(a : box) (rep : ReprBox a)
+-- Extract a subarray of an array2 as a new array
+array2_extract_subarray @(a : box) (rep : ReprBox a)
   (lst : Boxed (array2 (AsBare a))) (d : dim2)
   -> Boxed (array2 (AsBare a))
   attribute(inline,
@@ -8955,7 +9070,7 @@ real_foreachSeq_dim1 @(a : box)
   in
   let generator = con_seq @(Boxed (Stored int)) @state (boxIntValue lo) next in
   bind_Seq @(Boxed (Stored int)) @a generator k;
-  
+
 
 ShapeDict_dim2 : ShapeDict dim2 =
   shapeDict @dim2 (boxedinfo shapeDict @dim2)
