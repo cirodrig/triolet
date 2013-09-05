@@ -9126,7 +9126,12 @@ real_splitN_dim2 (n : int) (dom : dim2)
 
   case dom of mk_dim2 tyob d_y d_x.
 
-  -- Split along larger dimension
+  -- Split along Y dimension.
+  --
+  -- Code for dynamically choosing split dimension (x or y) is disabled
+  -- because it doesn't interact well with value propagation in the
+  -- simplifier.
+  {-let x_is_larger =
   if dim1Cardinality d_x >=# dim1Cardinality d_y
   then
     let split_along_x = real_splitN_dim1 n d_x in
@@ -9136,7 +9141,7 @@ real_splitN_dim2 (n : int) (dom : dim2)
        case subd of subdomain tyob off subd_x.
        con_subdomain @dim2 off (con_dim2 d_y subd_x))
     split_along_x
-  else
+  else-}
     let split_along_y = real_splitN_dim1 n d_y in
     map_view @list_dim @(Subdomain dim1) @(Subdomain dim2)
     (repr_Box @(Subdomain dim1)) (repr_Box @(Subdomain dim2))
