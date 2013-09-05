@@ -38,7 +38,9 @@ import SystemF.Datatypes.TypeObject
 --   This information is used when generating serializer/deserializer code.
 overriddenSerializerTypes :: [(Var, (Var, Var))]
 overriddenSerializerTypes =
-  [(listSectionV, (putListSection_optimizedV, getListSection_optimizedV))]
+  [ (listSectionV, (putListSection_optimizedV, getListSection_optimizedV))
+  , (array2SectionV, (putArray2Section_optimizedV, getArray2Section_optimizedV))
+  ]
 
 -- | Primitive value types.  These get special auto-generated definitions.
 primitiveValTypes :: [Var]

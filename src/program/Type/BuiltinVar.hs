@@ -129,6 +129,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("opaqueRef", "OpaqueRef", TypeLevel, True)
 
         , ("listSection", "ListSection", TypeLevel, True) -- Has special serialization rules
+        , ("array2Section", "Array2Section", TypeLevel, True) -- Has special serialization rules
 
           -- Type variables
         , ("cursorTypeParameter", "a", TypeLevel, False)
@@ -190,6 +191,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("putPointerlessObject", "putPointerlessObject", ObjectLevel, True)
         , ("putBoxedObject", "putBoxedObject", ObjectLevel, True)
         , ("putListSection_optimized", "putListSection_optimized", ObjectLevel, True)
+        , ("putArray2Section_optimized", "putArray2Section_optimized", ObjectLevel, True)
         , ("getInt", "getInt", ObjectLevel, True)
         , ("getUint", "getUint", ObjectLevel, True)
         , ("getUint8AsUint", "getUint8AsUint", ObjectLevel, True)
@@ -211,6 +213,7 @@ $(let concat_decs d1 d2 = liftM2 (++) d1 d2
         , ("getPointerlessObject", "getPointerlessObject", ObjectLevel, True)
         , ("getBoxedObject", "getBoxedObject", ObjectLevel, True)
         , ("getListSection_optimized", "getListSection_optimized", ObjectLevel, True)
+        , ("getArray2Section_optimized", "getArray2Section_optimized", ObjectLevel, True)
 
           -- Global variables used for generating address arithmetic and
           -- size computation

@@ -2413,6 +2413,30 @@ getListSection_low_level : forall a : box.
   -> MessageReader -> (MessageReader, Init (ListSection a));
 
 
+putArray2Section_optimized @(a : box)
+  (x : Array2Section a) (writer : OpaqueRef) (s1 : Store) -> Store
+  attribute(builtin) =
+
+  case x of array2Section rep ay_ref dom.
+
+  let subarray_ref = array2_extract_subarray @a rep ay_ref dom in
+
+  -- Put the fields
+  let s2 = putBoxedObject @(ReprBox a) rep writer s1 in
+  let s3 = putBoxedObject @(Boxed (array2 (AsBare a))) ay_ref writer s2 in
+  putBoxedObject @dim2 dom writer s3;
+
+
+getArray2Section_optimized @(a : box) (rdr : MessageReader)
+  -> (MessageReader, Init (Array2Section a))
+  attribute(builtin) =
+
+  case getBoxedObject @(ReprBox a) rdr of (rdr2, rep).
+  case getBoxedObject @(Boxed (array2 (AsBare a) )) rdr2 of (rdr3, ay_ref).
+  case getBoxedObject @dim2 rdr3 of (rdr4, dom).
+  (rdr4, array2Section @a rep ay_ref dom);
+
+
 -------------------------------------------------------------------------------
 -- Sets of integers
 
@@ -12679,6 +12703,7 @@ view_zipWith @(sh : box)
     case sa of mk_view tyob (dA : sh) fA.
     case sb of mk_view tyob (dB : sh) fB.
     let dC : sh = shape_intersect dA dB in
+
     con_view @sh @c dC
     (\ (ix : AsBox (index sh)) -> c. t (fA ix) (fB ix));
 

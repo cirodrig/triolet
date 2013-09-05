@@ -28,8 +28,6 @@ builtinTypeNames =
   , "LinearMap"
   , "SliceObject"
   , "SomeIndexable"
-  , "ListSection"
-  , "Array2Section"
   , "Zip2Indexable"
   , "Subdomain"
   , "Tuple0"
