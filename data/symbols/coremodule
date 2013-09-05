@@ -4803,6 +4803,8 @@ slice_array1_real @(a : box) (rep : ReprBox a)
   (lst : Boxed (array1 (AsBare a))) (d : dim1) (off : Boxed (Stored NoneType))
   -> SomeIndexable dim1 a attribute(inline) =
 
+  -- FIXME: Use the same technique as in slice_array2
+
   case lst of [reprSizeAlign @(array1 (AsBare a)) (unboxedinfo array1 @(AsBare a))]
     boxed tyob (mk_array1 @N lb stride size ayref).
 
@@ -5028,6 +5030,18 @@ slice_array2 (f : FunctorDict (\ (a : box). Boxed (array2 (AsBare a))))
 slice_array2_real @(a : box) (rep : ReprBox a)
   (lst : Boxed (array2 (AsBare a))) (d : dim2) (off : Boxed (Stored NoneType))
   -> SomeIndexable dim2 a
+  attribute(inline) =
+
+  let new_arr = slice_array2_as_slice @a rep lst d off in
+
+  con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
+  (idCoercion @dim2) Indexable_array2 new_arr;
+
+
+-- Slice an array2, but don't wrap it in a 'SomeIndexable'
+slice_array2_as_slice @(a : box) (rep : ReprBox a)
+  (lst : Boxed (array2 (AsBare a))) (d : dim2) (off : Boxed (Stored NoneType))
+  -> Boxed (array2 (AsBare a))
   attribute(inline,
             inline_struct(T D(C) T T) -- Inilne if array constructor is known
            ) =
@@ -5047,19 +5061,16 @@ slice_array2_real @(a : box) (rep : ReprBox a)
 
   -- TODO: Use an array section if possible to avoid copying
   -- Copy the array subset into a new array
-  let new_arr = build_array2 @a rep
-                (traverse_view_real @dim2 @a ShapeDict_dim2 rep
-                 (con_view @dim2 @a d
-                  (\ (b_ix : BoxIndex dim2) -> a.
-                     case unpack_index2 b_ix of (y, x).
-                     let real_y = (y -# lb_y) //# stride_y in
-                     let real_x = (x -# lb_x) //# stride_x in
-                     bareToBox @(AsBare a) rep
-                     (subscript @N @(AsBare a) (reprSizeAlign @(AsBare a) rep)
-                      (subscript @M @row_type (reprSizeAlign @row_type rep_row) ay real_y) real_x)))) in
-
-  con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
-  (idCoercion @dim2) Indexable_array2 new_arr;
+  build_array2 @a rep
+  (traverse_view_real @dim2 @a ShapeDict_dim2 rep
+   (con_view @dim2 @a d
+    (\ (b_ix : BoxIndex dim2) -> a.
+       case unpack_index2 b_ix of (y, x).
+       let real_y = (y -# lb_y) //# stride_y in
+       let real_x = (x -# lb_x) //# stride_x in
+       bareToBox @(AsBare a) rep
+       (subscript @N @(AsBare a) (reprSizeAlign @(AsBare a) rep)
+        (subscript @M @row_type (reprSizeAlign @row_type rep_row) ay real_y) real_x))));
 
 {-
 -- Workaround for inlining
