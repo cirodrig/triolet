@@ -615,7 +615,6 @@ function getBoxedObject (owned des_info, cursor buffer) -> ReadResult(owned) {
     ReadResult(uint) {buffer3, global_offset} =
       ReadResult(uint) call getUint (des_info, buffer2);
     p = (pointer load Triolet_library_address_start) ^+ (global_offset as int);
-    () = () primcall triolet_db_int(int 308);
     ReadResult(owned) {buffer3, p as owned};
   }
   else if (control == uint 2) {
@@ -644,7 +643,6 @@ function getBoxedObject (owned des_info, cursor buffer) -> ReadResult(owned) {
       ReadResult(owned) call getBoxedObject (des_info, buffer2);
     x = ReadResult(owned) call (type_object @! TypeObject_mem.deserializer)
                                (type_object, des_info, buffer3);
-    () = () primcall triolet_db_int(int 308);
     x;
   };
 };
@@ -682,6 +680,20 @@ function serializeBoxedObject(owned x) -> (uint, pointer)
   b = owned primcall MkBuffer_create ();
   _ = unit call putBoxedObject (x, b, nil);
   (b @! MkBuffer.buffer_size, b @! MkBuffer.buffer);
+};
+
+// Take a buffer that contains a single object (plus anything it references,
+// transitively).  Deserialize the object.
+function deserializeBoxedObject(uint32 length, pointer dat) -> owned {
+  // FIXME: This buffer doesn't follow the memory layout rules for
+  // boxed objects
+  buffer_cursor = (dat as owned) ^+ int 0;
+  deserialization_info = owned primcall ReadBuffer_create ();
+
+  ReadResult(owned) {_, x} =
+    ReadResult(owned) call getBoxedObject(deserialization_info, buffer_cursor);
+
+  x;  
 };
 
 /* Write 'x' to a buffer, then read it back */

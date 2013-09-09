@@ -544,7 +544,8 @@ procedure farm_sequential (int n, owned type_obj, owned tasks) -> owned {
   results @! boxed_array.header = type_obj;
 
   _ = while (int i = int 0) (i < n) {
-    // Copy input and output to test buffer code
+    // To test whether buffering works correctly,
+    // use the calls to 'testCopyViaBuffer'
     //f_copy = owned call testCopyViaBuffer (null as owned, tasks @! boxed_array.member[i]);
     f_copy = tasks @! boxed_array.member[i];
     x = owned call f_copy (nil);
@@ -557,15 +558,12 @@ procedure farm_sequential (int n, owned type_obj, owned tasks) -> owned {
   results as owned;
 };
 
+// Take a buffer that contains a single object (plus anything it references,
+// transitively).  Deserialize the object.
+//
+// This simply exports 'deserializeBoxedObject' for use in C code.
 procedure triolet_deserialize (uint32 length, pointer dat) -> owned {
-  // FIXME: This buffer doesn't follow the memory layout rules for
-  // boxed objects
-  buffer_cursor = (dat as owned) ^+ int 0;
-
-  ReadResult(owned) {_, x} =
-    ReadResult(owned) call getBoxedObject(buffer_cursor);
-
-  x;
+  owned call deserializeBoxedObject(length, dat);
 };
 
 // Given a serialized function of type @NoneType -> a@ for some boxed type a,
@@ -573,15 +571,9 @@ procedure triolet_deserialize (uint32 length, pointer dat) -> owned {
 // serialized result.
 procedure triolet_run_task (int32 length, pointer dat, pointer use_result)
   -> int32 {
-  // FIXME: This buffer doesn't follow the memory layout rules for
-  // boxed objects
-  buffer_cursor = (dat as owned) ^+ int 0;
 
-  // Deserialize the function
-  ReadResult(owned) {_, f} =
-    ReadResult(owned) call getBoxedObject(buffer_cursor);
-
-  // Call the function
+  // Extract a function from the buffer and call it
+  f = owned call deserializeBoxedObject (length, dat);
   r = owned call f (nil);
 
   // Serialize the result
