@@ -155,8 +155,8 @@ data SerDes =
   { -- | Given a value and a write-buffer reference, serialize the value
     serialize   :: L.Val -> L.Val -> GenM ()
 
-    -- | Given a read-buffer reference, deserialize a value
-  , deserialize :: L.Val -> GenM DesResult
+    -- | Given a buffer-info reference and a read-buffer reference, deserialize a value
+  , deserialize :: L.Val -> L.Val -> GenM DesResult
   }
 
 -- | Create a serializer and deserializer from a pair of functions
@@ -169,10 +169,10 @@ callSerializerFun :: L.Val -> L.Val -> L.Val -> GenM ()
 callSerializerFun s value buffer =
   void $ emitAtom1 storeType $ L.closureCallA s [value, buffer, storeValue]
 
-callDeserializerFun :: ValueType -> L.Val -> L.Val -> GenM DesResult
-callDeserializerFun value_type s buffer = do
+callDeserializerFun :: ValueType -> L.Val -> L.Val -> L.Val -> GenM DesResult
+callDeserializerFun value_type s des_info buffer = do
   let result_type = readResultType value_type
-  x <- emitAtom1 result_type $ L.closureCallA s [buffer]
+  x <- emitAtom1 result_type $ L.closureCallA s [des_info, buffer]
   unpackDesResult value_type x
 
 boxedFieldSerializer =
@@ -272,15 +272,15 @@ algBareLayoutSerializer field_ss adt scrutinee buffer = do
       return storeValue
 
 algValueLayoutDeserializer :: [[SerDes]] -> AlgData LayoutField
-                           -> L.Val -> GenM DesResult
-algValueLayoutDeserializer field_ss adt buffer =
+                           -> L.Val -> L.Val -> GenM DesResult
+algValueLayoutDeserializer field_ss adt des_info buffer =
   case n_constructors of
     -- No tag
     1 -> do x <- deserialize_disjunct buffer 0
             unpackDesResult value_type x
 
     -- Read the tag, then deserialize one of the disjuncts
-    _ -> do DesResult buffer' tag <- deserializeUnboxedTag adt buffer
+    _ -> do DesResult buffer' tag <- deserializeUnboxedTag adt des_info buffer
             x <- tagDispatch2 (PrimType tag_type) n_constructors tag [result_type] $
                  deserialize_disjunct buffer'
             unpackDesResult value_type x
@@ -298,7 +298,7 @@ algValueLayoutDeserializer field_ss adt buffer =
                         algDisjunctFields $ disjunct con_index Nothing adt
           field_serializers = field_ss !! con_index
       (buffer', field_values) <-
-        deserializeFields buffer (zip field_serializers field_types)
+        deserializeFields des_info buffer (zip field_serializers field_types)
 
       -- Construct value
       new_value <- valueIntro alg_value_type con_index field_values
@@ -306,7 +306,9 @@ algValueLayoutDeserializer field_ss adt buffer =
       -- Pack into a record with the new buffer
       packDesResult $ DesResult buffer' new_value
       
-algBareLayoutDeserializer field_ss adt buffer = do
+algBareLayoutDeserializer :: [[SerDes]] -> AlgData LayoutField
+                          -> L.Val -> L.Val -> GenM DesResult
+algBareLayoutDeserializer field_ss adt des_info buffer = do
   mem_adt <- memoryLayout adt
   case n_constructors of
     -- No tag
@@ -314,7 +316,7 @@ algBareLayoutDeserializer field_ss adt buffer = do
             unpackDesResult (PrimType OwnedType) x
 
     -- Read the tag, then deserialize one of the disjuncts
-    _ -> do DesResult buffer' tag <- deserializeUnboxedTag adt buffer
+    _ -> do DesResult buffer' tag <- deserializeUnboxedTag adt des_info buffer
             x <- tagDispatch2 (PrimType tag_type) n_constructors tag [result_type] $
                  deserialize_disjunct mem_adt buffer'
             unpackDesResult (PrimType OwnedType) x
@@ -331,7 +333,7 @@ algBareLayoutDeserializer field_ss adt buffer = do
                         algDisjunctFields $ disjunct con_index Nothing adt
           field_serializers = field_ss !! con_index
       (buffer', field_values) <-
-        deserializeFields buffer (zip field_serializers field_types)
+        deserializeFields des_info buffer (zip field_serializers field_types)
 
       -- Construct value
       new_value <- memoryIntro mem_adt con_index Nothing field_values
@@ -347,8 +349,12 @@ data BoxedSerDes =
   { -- | Given a value and a write-buffer reference, serialize the value
     boxedSerialize   :: L.Val -> L.Val -> GenM ()
 
-    -- | Given a read-buffer reference, deserialize a value
-  , boxedDeserialize :: L.Val -> L.Val -> GenM DesResult
+    -- | Given a read-buffer reference, deserialize a value.
+    --
+    --   Parameters are the type object (boxed),
+    --   the deserialization info (boxed),
+    --   and the buffer (cursor).
+  , boxedDeserialize :: L.Val -> L.Val -> L.Val -> GenM DesResult
   }
 
 -- | Create a serializer for a disjunct of an algebraic boxed type.
@@ -390,17 +396,20 @@ boxedLayoutSerializer field_s adt con_index scrutinee buffer = do
 -- | A boxed object deserializer takes a the object's type object 
 --   as an extra type parameter.  The type object has already been
 --   deserialized.
-boxedLayoutDeserializer field_s adt con_index tyob buffer = do
+boxedLayoutDeserializer field_s adt con_index tyob des_info buffer = do
   mem_adt <- memoryLayout adt
 
   let dj = disjunct con_index (Just tyob) adt
   let field_types = map fieldInitializerType $ algDisjunctFields dj
 
-  (buffer', field_values) <-
-    deserializeFields buffer $ zip field_s field_types
+  let read_fields = do
+        (buffer', field_values) <-
+          deserializeFields des_info buffer $ zip field_s field_types
+        return (field_values, buffer')
 
-  -- Construct the new object
-  new_object <- memoryIntro mem_adt con_index (Just tyob) field_values
+  -- Construct the new object and read its fields
+  (new_object, buffer') <-
+    memoryIntroDeserialized mem_adt con_index des_info (Just tyob) read_fields
 
   -- Return the results
   return $ DesResult buffer' new_object
@@ -414,12 +423,13 @@ serializeFields buffer fields = mapM_ serialize_field fields
 
 -- | Deserialize a sequence of fields.  Return the new buffer and the field
 --   values or initializers.
-deserializeFields :: L.Val -> [(SerDes, ValueType)] -> GenM (L.Val, [L.Val])
-deserializeFields buffer fields = go id buffer fields
+deserializeFields :: L.Val -> L.Val -> [(SerDes, ValueType)]
+                  -> GenM (L.Val, [L.Val])
+deserializeFields des_info buffer fields = go id buffer fields
   where
     go hd buf ((s, ty):fs) = do
       -- Deserialize one field
-      DesResult buf' y <- deserialize s buf
+      DesResult buf' y <- deserialize s des_info buf
       go (hd . (y:)) buf' fs
 
     go hd buf [] = return (buf, hd [])
@@ -437,8 +447,8 @@ serializeUnboxedTag adt buffer con_index =
       void $ emitAtom1 storeType $ L.closureCallA (L.VarV serialize_function)
       [nativeWordV con_index, buffer, storeValue]
 
-deserializeUnboxedTag :: AlgData a -> L.Val -> GenM DesResult
-deserializeUnboxedTag adt buffer =
+deserializeUnboxedTag :: AlgData a -> L.Val -> L.Val -> GenM DesResult
+deserializeUnboxedTag adt des_info buffer =
   case unboxedMemTagType $ algDataNumConstructors adt
   of Nothing -> return $ DesResult buffer invalid
      Just pt ->
@@ -450,7 +460,7 @@ deserializeUnboxedTag adt buffer =
     invalid = internalError "deserializeUnboxedTag: No tag"
     use tag_type deserialize_function = do
       x <- emitAtom1 (readResultType $ PrimType nativeWordType) $
-           L.closureCallA (L.VarV deserialize_function) [buffer]
+           L.closureCallA (L.VarV deserialize_function) [des_info, buffer]
       unpackDesResult (PrimType tag_type) x
 
 fieldSerializers :: SerDynTypeInfo -> Alternative -> [LayoutField]
@@ -649,8 +659,8 @@ createBoxedTypeSerializers data_type =
 
      deserializer_fun <-
        parametricDefinition l_deserializer (dataTypeParams data_type)
-       info_types [PrimType OwnedType, PrimType CursorType]
-       [readResultType (PrimType OwnedType)] $ \ infos [type_ob, buffer] -> do
+       info_types [PrimType OwnedType, PrimType OwnedType, PrimType CursorType]
+       [readResultType (PrimType OwnedType)] $ \ infos [type_ob, des_info, buffer] -> do
          -- Compute layout information
          sps <- infoToSizeParameters data_type (map L.VarV infos)
          layout_dyn_info <- setupDynTypeInfo data_type param_types sps
@@ -662,7 +672,7 @@ createBoxedTypeSerializers data_type =
 
          -- Deserialize
          serdes <- boxedLayoutSerDes dyn_info adt ty dcon_index
-         result <- boxedDeserialize serdes (L.VarV type_ob) (L.VarV buffer)
+         result <- boxedDeserialize serdes (L.VarV type_ob) (L.VarV des_info) (L.VarV buffer)
          x <- packDesResult result
          return [x]
 
@@ -714,8 +724,8 @@ createBareTypeSerializers serializer_overrides data_type = do
 
   deserializer_fun <-
     parametricDefinition l_deserializer (dataTypeParams data_type)
-    info_types [PrimType CursorType]
-    [readResultType (PrimType OwnedType)] $ \ infos [buffer] ->
+    info_types [PrimType OwnedType, PrimType CursorType]
+    [readResultType (PrimType OwnedType)] $ \ infos [des_info, buffer] ->
       case lookup (dataTypeCon data_type) serializer_overrides
       of Just (_, d) ->
            -- Call the override deserializer function
@@ -733,7 +743,7 @@ createBareTypeSerializers serializer_overrides data_type = do
 
            -- Deserialize
            serdes <- unboxedLayoutSerDes dyn_info BareK ty l
-           result <- deserialize serdes (L.VarV buffer)
+           result <- deserialize serdes (L.VarV des_info) (L.VarV buffer)
            x <- packDesResult result
            return [x]
 
@@ -789,8 +799,8 @@ createValTypeSerializers data_type = do
 
   deserializer_fun <-
     parametricDefinition l_deserializer (dataTypeParams data_type)
-    [] [PrimType CursorType]
-    [readResultType (PrimType OwnedType)] $ \ [] [buffer] ->
+    [] [PrimType OwnedType, PrimType CursorType]
+    [readResultType (PrimType OwnedType)] $ \ [] [des_info, buffer] ->
       if serializable
       then do 
         -- Compute layout information
@@ -799,7 +809,7 @@ createValTypeSerializers data_type = do
 
         -- Deserialize
         serdes <- unboxedLayoutSerDes emptyTypeInfo BareK (storedT `AppT` ty) l
-        result <- deserialize serdes (L.VarV buffer)
+        result <- deserialize serdes (L.VarV des_info) (L.VarV buffer)
         x <- packDesResult result
         return [x]
       else do

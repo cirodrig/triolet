@@ -334,7 +334,7 @@ data Repr (a : bare) : box
   (SizeAlign a,       -- Size and alignment
    IsRef a,           -- Whether 'a' is an application of 'Ref'
    a -> MessageWriter, -- Serializer
-   MessageReader -> (MessageReader, OutPtr a -> Store) -- Deserializer
+   OpaqueRef -> MessageReader -> (MessageReader, OutPtr a -> Store) -- Deserializer
   )
   attribute(builtin);
 };
@@ -433,7 +433,7 @@ data ReprVal (a : val) : box
   reprVal
   (SizeAlignVal a,               -- Size and alignment
    Stored a -> MessageWriter, -- Serializer
-   MessageReader -> (MessageReader, OutPtr (Stored a) -> Store) -- Deserializer
+   OpaqueRef -> MessageReader -> (MessageReader, OutPtr (Stored a) -> Store) -- Deserializer
   )
   attribute(builtin);
 };
@@ -446,7 +446,7 @@ data TypeObject (a : box) : box
   typeObject
   (uint,                  -- Data constructor index
    a -> MessageWriter,    -- Serializer
-   TypeObject a -> MessageReader -> (MessageReader, a) -- Deserializer
+   TypeObject a -> OpaqueRef -> MessageReader -> (MessageReader, a) -- Deserializer
   ) 
   attribute(builtin);
 };
@@ -2339,33 +2339,33 @@ putBoxedObject : forall a : box. a -> MessageWriter attribute(builtin);
 putPointerlessObject : forall a : bare. SizeAlign a -> a -> OpaqueRef -> Store
   -> Store attribute(builtin);
 
-getInt : MessageReader -> (MessageReader, int) attribute(builtin);
-getUint : MessageReader -> (MessageReader, uint) attribute(builtin);
-getUint8AsUint : MessageReader -> (MessageReader, uint) attribute(builtin);
-getUint16AsUint : MessageReader -> (MessageReader, uint) attribute(builtin);
-getFloat : MessageReader -> (MessageReader, float) attribute(builtin);
-getByte : MessageReader -> (MessageReader, byte) attribute(builtin);
-getCursor : forall a : bare. MessageReader -> (MessageReader, cursor a) attribute(builtin);
-getStore : MessageReader -> (MessageReader, Store) attribute(builtin);
-getBareCoercion : forall a b : bare. MessageReader -> (MessageReader, coerce @bare a b) attribute(builtin);
-getBoxCoercion : forall a b : box. MessageReader -> (MessageReader, coerce @box a b) attribute(builtin);
-getStoredInt : MessageReader -> (MessageReader, Init (Stored int)) attribute(builtin);
-getStoredUint : MessageReader -> (MessageReader, Init (Stored uint)) attribute(builtin);
-getStoredFloat : MessageReader -> (MessageReader, Init (Stored float)) attribute(builtin);
-getStoredByte : MessageReader -> (MessageReader, Init (Stored byte)) attribute(builtin);
-getStoredInt64 : MessageReader -> (MessageReader, Init (Stored int64)) attribute(builtin);
-getStoredCursor : forall a : bare. MessageReader -> (MessageReader, Init (Stored (cursor a))) attribute(builtin);
+getInt : OpaqueRef -> MessageReader -> (MessageReader, int) attribute(builtin);
+getUint : OpaqueRef -> MessageReader -> (MessageReader, uint) attribute(builtin);
+getUint8AsUint : OpaqueRef -> MessageReader -> (MessageReader, uint) attribute(builtin);
+getUint16AsUint : OpaqueRef -> MessageReader -> (MessageReader, uint) attribute(builtin);
+getFloat : OpaqueRef -> MessageReader -> (MessageReader, float) attribute(builtin);
+getByte : OpaqueRef -> MessageReader -> (MessageReader, byte) attribute(builtin);
+getCursor : forall a : bare. OpaqueRef -> MessageReader -> (MessageReader, cursor a) attribute(builtin);
+getStore : OpaqueRef -> MessageReader -> (MessageReader, Store) attribute(builtin);
+getBareCoercion : forall a b : bare. OpaqueRef -> MessageReader -> (MessageReader, coerce @bare a b) attribute(builtin);
+getBoxCoercion : forall a b : box. OpaqueRef -> MessageReader -> (MessageReader, coerce @box a b) attribute(builtin);
+getStoredInt : OpaqueRef -> MessageReader -> (MessageReader, Init (Stored int)) attribute(builtin);
+getStoredUint : OpaqueRef -> MessageReader -> (MessageReader, Init (Stored uint)) attribute(builtin);
+getStoredFloat : OpaqueRef -> MessageReader -> (MessageReader, Init (Stored float)) attribute(builtin);
+getStoredByte : OpaqueRef -> MessageReader -> (MessageReader, Init (Stored byte)) attribute(builtin);
+getStoredInt64 : OpaqueRef -> MessageReader -> (MessageReader, Init (Stored int64)) attribute(builtin);
+getStoredCursor : forall a : bare. OpaqueRef -> MessageReader -> (MessageReader, Init (Stored (cursor a))) attribute(builtin);
 
 getArrWithSerializer : forall n : intindex, a : bare.
                        FIInt n -> Repr a
-                    -> (MessageReader -> (MessageReader, Init a))
-                    -> MessageReader -> (MessageReader, Init (arr n a));
+                    -> (OpaqueRef -> MessageReader -> (MessageReader, Init a))
+                    -> OpaqueRef -> MessageReader -> (MessageReader, Init (arr n a));
 
 getRef : forall a : box.
-         MessageReader -> (MessageReader, OutPtr (Ref a) -> Store) attribute(builtin);
+         OpaqueRef -> MessageReader -> (MessageReader, OutPtr (Ref a) -> Store) attribute(builtin);
 getPointerlessObject : forall a : bare. SizeAlign a -> MessageReader
   -> (MessageReader, OutPtr a -> Store) attribute(builtin);
-getBoxedObject : forall a : box. MessageReader -> (MessageReader, a) attribute(builtin);
+getBoxedObject : forall a : box. OpaqueRef -> MessageReader -> (MessageReader, a) attribute(builtin);
 
 -- For testing: Write an object to a buffer and read it back
 testCopyViaBuffer : forall a : box. Repr (AsBare a) -> a -> a;
@@ -2391,7 +2391,8 @@ putListSection_low_level : forall N : intindex, a : box.
 
 
 -- Read a list section from a buffer.
-getListSection_optimized @(a : box) (rdr : MessageReader)
+getListSection_optimized @(a : box)
+  (des_info : OpaqueRef) (rdr : MessageReader)
   -> (MessageReader, Init (ListSection a))
   attribute(builtin) =
 
@@ -2405,12 +2406,12 @@ getListSection_optimized @(a : box) (rdr : MessageReader)
       let rep_arr = repr_arr @N @(AsBare a) count rep in
       let arr_copy = initToBare @(arr N (AsBare a)) rep_arr mk_arr in
       listSection @a @N count rep (toCursor @(arr N (AsBare a)) arr_copy) ret)
-  rdr;
+  des_info rdr;
 
 getListSection_low_level : forall a : box.
   (forall N : intindex. FIInt N -> ReprBox a -> Init (arr N (AsBare a))
                      -> Init (ListSection a))
-  -> MessageReader -> (MessageReader, Init (ListSection a));
+  -> OpaqueRef -> MessageReader -> (MessageReader, Init (ListSection a));
 
 
 putArray2Section_optimized @(a : box)
@@ -2439,21 +2440,23 @@ putArray2Section_optimized @(a : box)
   putBoxedObject @dim2 dom writer s9;
 
 
-getArray2Section_optimized @(a : box) (rdr : MessageReader)
+getArray2Section_optimized @(a : box)
+  (des_info : OpaqueRef) (rdr : MessageReader)
   -> (MessageReader, Init (Array2Section a))
   attribute(builtin) =
 
-  case getBoxedObject @(ReprBox a) rdr of (rdr2, rep).
-  case getInt rdr2 of (rdr3, lb_y).
-  case getInt rdr3 of (rdr4, stride_y).
-  case getInt rdr4 of (rdr5, size_int_y).
+  case getBoxedObject @(ReprBox a) des_info rdr of (rdr2, rep).
+  case getInt des_info rdr2 of (rdr3, lb_y).
+  case getInt des_info rdr3 of (rdr4, stride_y).
+  case getInt des_info rdr4 of (rdr5, size_int_y).
   case defineIntIndex size_int_y of someIInt @M size_y.
-  case getInt rdr5 of (rdr6, lb_x).
-  case getInt rdr6 of (rdr7, stride_x).
-  case getInt rdr7 of (rdr8, size_int_x).
+  case getInt des_info rdr5 of (rdr6, lb_x).
+  case getInt des_info rdr6 of (rdr7, stride_x).
+  case getInt des_info rdr7 of (rdr8, size_int_x).
   case defineIntIndex size_int_x of someIInt @N size_x.
-  case getBoxedObject @(StuckBox (arr M (arr N (AsBare a)))) rdr8 of (rdr9, ay_ref).
-  case getBoxedObject @dim2 rdr9 of (rdr10, dom).
+  case getBoxedObject @(StuckBox (arr M (arr N (AsBare a)))) des_info rdr8 of
+    (rdr9, ay_ref).
+  case getBoxedObject @dim2 des_info rdr9 of (rdr10, dom).
   (rdr10, array2Section @a @M @N rep
           lb_y stride_y size_y lb_x stride_x size_x ay_ref dom);
 
@@ -3129,11 +3132,11 @@ putArr @(n : intindex) @(e : bare) (size : FIInt n) (repr_e : Repr e)
   putArrWithSerializer @n @e size sa_e put x buf s;
 
 getArr @(n : intindex) @(e : bare) (size : FIInt n) (repr_e : Repr e)
-  (buf : MessageReader) -> (MessageReader, Init (arr n e))
+  (des_info : OpaqueRef) (buf : MessageReader) -> (MessageReader, Init (arr n e))
   attribute(inline, builtin) =
 
   case repr_e of repr tyob sa_e is_ref_e put get.
-  getArrWithSerializer @n @e size repr_e get buf;
+  getArrWithSerializer @n @e size repr_e get des_info buf;
 
 repr_Stored @(a : val) (rep : ReprVal a)
   -> Repr (Stored a) attribute(inline, inline_postfinal, builtin) =

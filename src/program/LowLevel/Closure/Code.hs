@@ -692,6 +692,12 @@ genApply1 f x = do
               PrimType CursorType           -> llBuiltin the_prim_apply_c_f
               t -> internalError $ "genApply1: No method for " ++ show (pprValueType t)
 
+  -- When debugging, this check helps to catch malformed code.
+  -- Owned references must not be NULL.
+  when False $
+    when (valType promoted_x == PrimType OwnedType) $
+    emitAtom0 $ primCallA (VarV $ llBuiltin the_prim_triolet_assert_nonnull_owned) [promoted_x]
+  
   emitAtom1 (PrimType OwnedType) $ primCallA (VarV op) [f, promoted_x]
 
 genApplyLast f x ret_ptr = do
@@ -708,6 +714,12 @@ genApplyLast f x ret_ptr = do
               PrimType OwnedType            -> llBuiltin the_prim_apply_o
               PrimType CursorType           -> llBuiltin the_prim_apply_c
               t -> internalError $ "genApplyLast: No method for " ++ show (pprValueType t)
+
+  -- When debugging, this check helps to catch malformed code.
+  -- Owned references must not be NULL.
+  when False $
+    when (valType promoted_x == PrimType OwnedType) $
+    emitAtom0 $ primCallA (VarV $ llBuiltin the_prim_triolet_assert_nonnull_owned) [promoted_x]
 
   emitAtom0 $ primCallA (VarV op) [f, promoted_x, ret_ptr]
 

@@ -641,13 +641,13 @@ deserializerType dtype =
     instantiated_stored_initializer_type =
       (outPtrT `AppT` (storedT `AppT` instantiated_type)) `FunT` storeT      
 
-    -- > forall as. infoTypes -> MessageReader -> (MessageReader, t)
+    -- > forall as. infoTypes -> OpaquePtr -> MessageReader -> (MessageReader, t)
     -- (t is boxed)
     parametric_reader t =
       forallType typarams $ funType info_types $ buffer_reader_type t
 
     buffer_reader_type t =
-      message_type `FunT` (UTupleT [ValK, BoxK] `typeApp` [message_type, t])
+      opaqueRefT `FunT` message_type `FunT` (UTupleT [ValK, BoxK] `typeApp` [message_type, t])
 
     message_type = cursorT `AppT` (storedT `AppT` byteT)
 

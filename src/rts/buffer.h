@@ -3,7 +3,7 @@
 extern function core.internal.buffer.putArrWithSerializer
   (FinIndInt, SA, owned, cursor, owned, unit) -> unit;
 extern function core.internal.buffer.getArrWithSerializer
-  (FinIndInt, owned, owned, cursor) -> ReadResult(owned);
+  (FinIndInt, owned, owned, owned, cursor) -> ReadResult(owned);
 
 extern function core.internal.buffer.putInt (int, owned, unit) -> unit;
 extern function core.internal.buffer.putUint (uint, owned, unit) -> unit;
@@ -24,27 +24,29 @@ extern function core.internal.buffer.putStoredCursor (cursor, owned, unit) -> un
 extern function core.internal.buffer.putBoxedObject (owned, owned, unit) -> unit;
 
 extern function core.internal.buffer.putListSection_low_level (FinIndInt, owned, owned, owned, unit) -> unit;
-extern function core.internal.buffer.getListSection_low_level (owned, cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getListSection_low_level (owned, owned, cursor) -> ReadResult(owned);
 
-extern function core.internal.buffer.getInt (cursor) -> ReadResult(int);
-extern function core.internal.buffer.getUint (cursor) -> ReadResult(uint);
-extern function core.internal.buffer.getUint8AsUint (cursor) -> ReadResult(uint);
-extern function core.internal.buffer.getUint16AsUint (cursor) -> ReadResult(uint);
-extern function core.internal.buffer.getFloat (cursor) -> ReadResult(float);
-extern function core.internal.buffer.getByte (cursor) -> ReadResult(uint8);
-extern function core.internal.buffer.getInt64 (cursor) -> ReadResult(int64);
-extern function core.internal.buffer.getUnit (cursor) -> ReadResult(unit);
-extern function core.internal.buffer.getPointer (cursor) -> ReadResult(pointer);
-extern function core.internal.buffer.getCursor (cursor) -> ReadResult(cursor);
-extern function core.internal.buffer.getStoredInt (cursor) -> ReadResult(owned);
-extern function core.internal.buffer.getStoredUint (cursor) -> ReadResult(owned);
-extern function core.internal.buffer.getStoredFloat (cursor) -> ReadResult(owned);
-extern function core.internal.buffer.getStoredByte (cursor) -> ReadResult(owned);
-extern function core.internal.buffer.getStoredInt64 (cursor) -> ReadResult(owned);
-extern function core.internal.buffer.getStoredCursor (cursor) -> ReadResult(owned);
-extern function core.internal.buffer.getBoxedObject (cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getInt (owned, cursor) -> ReadResult(int);
+extern function core.internal.buffer.getUint (owned, cursor) -> ReadResult(uint);
+extern function core.internal.buffer.getUint8AsUint (owned, cursor) -> ReadResult(uint);
+extern function core.internal.buffer.getUint16AsUint (owned, cursor) -> ReadResult(uint);
+extern function core.internal.buffer.getFloat (owned, cursor) -> ReadResult(float);
+extern function core.internal.buffer.getByte (owned, cursor) -> ReadResult(uint8);
+extern function core.internal.buffer.getInt64 (owned, cursor) -> ReadResult(int64);
+extern function core.internal.buffer.getUnit (owned, cursor) -> ReadResult(unit);
+extern function core.internal.buffer.getPointer (owned, cursor) -> ReadResult(pointer);
+extern function core.internal.buffer.getCursor (owned, cursor) -> ReadResult(cursor);
+extern function core.internal.buffer.getStoredInt (owned, cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getStoredUint (owned, cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getStoredFloat (owned, cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getStoredByte (owned, cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getStoredInt64 (owned, cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getStoredCursor (owned, cursor) -> ReadResult(owned);
+extern function core.internal.buffer.getBoxedObject (owned, cursor) -> ReadResult(owned);
 
 extern function core.internal.buffer.serializeBoxedObject(owned) -> (uint, pointer);
+
+extern function core.internal.buffer.updateDeserializationTable (owned, owned) -> unit;
 
 extern function core.internal.buffer.testCopyViaBuffer (owned, owned) -> owned;
 

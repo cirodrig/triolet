@@ -42,8 +42,9 @@ extern function core.internal.inplace.lookup_hash_table
 import procedure triolet_hash_build
   (int, pointer, pointer, int, pointer) -> ();
 
-import procedure triolet_hash_lookup
-  (int, pointer, pointer, int) -> int;
+import procedure triolet_hash_new () -> owned;
+import procedure triolet_hash_lookup_ptr (owned, owned) -> uint32;
+import procedure triolet_hash_lookup_int (owned, uint32) -> owned;
+import procedure triolet_hash_insert_ptrint (owned, owned, uint32) -> ();
+import procedure triolet_hash_insert_intptr (owned, uint32, owned) -> ();
 
-import procedure triolet_hash_size
-  (int) -> int;

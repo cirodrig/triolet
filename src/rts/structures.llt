@@ -588,18 +588,24 @@ function typeObject_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function typeObject_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
-  ReadResult(uint) {buffer2, con_index} =
-    ReadResult(uint) call getUint(buffer);
-  ReadResult(owned) {buffer3, serializer} =
-    ReadResult(owned) call getBoxedObject(buffer2);
-  ReadResult(owned) {buffer4, deserializer} =
-    ReadResult(owned) call getBoxedObject(buffer3);
-
+function typeObject_deserialize (owned type_object,
+                                 owned des_info,
+                                 cursor buffer) -> ReadResult(owned) {
   // Construct a new object
   p = pointer primcall triolet_alloc (sizeof TypeObject_mem);
-
   p @! TypeObject_mem.header = type_object;
+
+  // Save it in the table
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  // Initialize fields
+  ReadResult(uint) {buffer2, con_index} =
+    ReadResult(uint) call getUint(des_info, buffer);
+  ReadResult(owned) {buffer3, serializer} =
+    ReadResult(owned) call getBoxedObject(des_info, buffer2);
+  ReadResult(owned) {buffer4, deserializer} =
+    ReadResult(owned) call getBoxedObject(des_info, buffer3);
+
   p @! TypeObject_mem.con_index = con_index;
   p @! TypeObject_mem.serializer = serializer;
   p @! TypeObject_mem.deserializer = deserializer;
@@ -727,12 +733,12 @@ procedure tag_sizealign (uint8 tag) -> (uint, uint) {
   };
 };
 
-function function_deserialize (owned type_obj, cursor buffer) -> ReadResult(owned) {
+function function_deserialize (owned type_obj, owned des_info, cursor buffer) -> ReadResult(owned) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 120);
 #endif
   ReadResult(pointer) {buffer2, info_table} =
-    ReadResult(pointer) call getPointer (buffer);
+    ReadResult(pointer) call getPointer (des_info, buffer);
 
   // Read info table to know where the captured variables are
   arity = (info_table @! FunInfo.arity) as int;
@@ -759,7 +765,10 @@ function function_deserialize (owned type_obj, cursor buffer) -> ReadResult(owne
 
   obj @! Function.header = type_obj;
   obj @! Function.info = info_table;
-  
+
+  // Add the newly created object to the deserialization table
+  _ = unit call updateDeserializationTable (des_info, obj as owned);
+
   // Read captured variables
   (_, buffer3, _) = while (int i = int 0,
              cursor buffer_cv = buffer2,
@@ -777,16 +786,16 @@ function function_deserialize (owned type_obj, cursor buffer) -> ReadResult(owne
       else if (tag == BITS32TAG) {
         // Get a uint32
         ReadResult(uint32) {buffer2, n} =
-           ReadResult(uint32) call getUint(buffer_cv);
+           ReadResult(uint32) call getUint(des_info, buffer_cv);
         !this_p = n;
         buffer2;
       }
       else if (tag == BITS64TAG) {
         // Get a uint64
         ReadResult(uint32) {buffer2, n1} =
-           ReadResult(uint32) call getUint(buffer_cv);
+           ReadResult(uint32) call getUint(des_info, buffer_cv);
         ReadResult(uint32) {buffer3, n2} =
-           ReadResult(uint32) call getUint(buffer2);
+           ReadResult(uint32) call getUint(des_info, buffer2);
         !this_p = n1;
         !(this_p ^+ (sizeof uint32 as int)) = n2;
         buffer3;
@@ -794,14 +803,14 @@ function function_deserialize (owned type_obj, cursor buffer) -> ReadResult(owne
       else if (tag == BITSOWNEDTAG) {
         // Get an owned pointer
         ReadResult(owned) {buffer2, n} =
-           ReadResult(owned) call getBoxedObject(buffer_cv);
+           ReadResult(owned) call getBoxedObject(des_info, buffer_cv);
         !this_p = n;
         buffer2;
       }
       else if (tag == BITSCURSORTAG) {
         // Get a cursor
         ReadResult(owned) {buffer2, n} =
-          ReadResult(owned) call getCursor(buffer_cv);
+          ReadResult(owned) call getCursor(des_info, buffer_cv);
         !this_p = n;
         buffer2;
       }

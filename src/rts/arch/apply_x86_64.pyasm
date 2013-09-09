@@ -299,19 +299,23 @@ function PAP_u_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function PAP_u_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
+function PAP_u_deserialize (owned type_object, owned des_info, cursor buffer) -> ReadResult(owned) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 110);
 #endif
+  // Create object
   typedef pap_type = PAP(unit);
-  ReadResult(owned) {buffer2, operator} =
-    ReadResult(owned) call getBoxedObject (buffer);
-
-  ReadResult(uint) {buffer3, arity} =
-    ReadResult(uint) call getUint (buffer2);
-
   p = pointer primcall triolet_alloc (sizeof pap_type);
   p @! pap_type.header = type_object;
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  // Get contents
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (des_info, buffer2);
+
   p @! pap_type.papTag = null;
   p @! pap_type.operator = operator;
   p @! pap_type.arity = arity as uint16;
@@ -337,22 +341,26 @@ function PAP_p_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function PAP_p_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
+function PAP_p_deserialize (owned type_object, owned des_info, cursor buffer) -> ReadResult(owned) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 111);
 #endif
+  // Create object
   typedef pap_type = PAP(pointer);
-  ReadResult(owned) {buffer2, operator} =
-    ReadResult(owned) call getBoxedObject (buffer);
-
-  ReadResult(uint) {buffer3, arity} =
-    ReadResult(uint) call getUint (buffer2);
-
-  ReadResult(pointer) {buffer4, operand} =
-    ReadResult(pointer) call getPointer (buffer3);
-
   p = pointer primcall triolet_alloc (sizeof pap_type);
   p @! pap_type.header = type_object;
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  // Get contents
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (des_info, buffer2);
+
+  ReadResult(pointer) {buffer4, operand} =
+    ReadResult(pointer) call getPointer (des_info, buffer3);
+
   p @! pap_type.papTag = null;
   p @! pap_type.operator = operator;
   p @! pap_type.arity = arity as uint16;
@@ -379,22 +387,26 @@ function PAP_o_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function PAP_o_deserialize (owned type_object, cursor buffer) -> ReadResult(owned) {
+function PAP_o_deserialize (owned type_object, owned des_info, cursor buffer) -> ReadResult(owned) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 112);
 #endif
+  // Create object
   typedef pap_type = PAP(owned);
-  ReadResult(owned) {buffer2, operator} =
-    ReadResult(owned) call getBoxedObject (buffer);
-
-  ReadResult(uint) {buffer3, arity} =
-    ReadResult(uint) call getUint (buffer2);
-
-  ReadResult(owned) {buffer4, operand} =
-    ReadResult(owned) call getBoxedObject (buffer3);
-
   p = pointer primcall triolet_alloc (sizeof pap_type);
   p @! pap_type.header = type_object;
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  // Get contents
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (des_info, buffer2);
+
+  ReadResult(owned) {buffer4, operand} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer3);
+
   p @! pap_type.papTag = null;
   p @! pap_type.operator = operator;
   p @! pap_type.arity = arity as uint16;
@@ -421,23 +433,25 @@ function PAP_c_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function PAP_c_deserialize (owned type_object, cursor buffer) -> ReadResult(cursor) {
+function PAP_c_deserialize (owned type_object, owned des_info, cursor buffer) -> ReadResult(cursor) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 113);
 #endif
+  // Create object
   typedef pap_type = PAP(cursor);
-
-  ReadResult(owned) {buffer2, operator} =
-    ReadResult(owned) call getBoxedObject (buffer);
-
-  ReadResult(uint) {buffer3, arity} =
-    ReadResult(uint) call getUint (buffer2);
-
-  ReadResult(cursor) {buffer4, operand} =
-    ReadResult(cursor) call getCursor (buffer3);
-
   p = pointer primcall triolet_alloc (sizeof pap_type);
   p @! pap_type.header = type_object;
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (des_info, buffer2);
+
+  ReadResult(cursor) {buffer4, operand} =
+    ReadResult(cursor) call getCursor (des_info, buffer3);
+
   p @! pap_type.papTag = null;
   p @! pap_type.operator = operator;
   p @! pap_type.arity = arity as uint16;
@@ -468,22 +482,24 @@ function PAP_i32_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function PAP_i32_deserialize (owned type_object, cursor buffer) -> ReadResult(cursor) {
+function PAP_i32_deserialize (owned type_object, owned des_info, cursor buffer) -> ReadResult(cursor) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 114);
 #endif
   typedef pap_type = PAP(int32);
-  ReadResult(owned) {buffer2, operator} =
-    ReadResult(owned) call getBoxedObject (buffer);
-
-  ReadResult(uint) {buffer3, arity} =
-    ReadResult(uint) call getUint (buffer2);
-
-  ReadResult(int32) {buffer4, operand} =
-    ReadResult(int32) call getInt (buffer3);
-
   p = pointer primcall triolet_alloc (sizeof pap_type);
   p @! pap_type.header = type_object;
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (des_info, buffer2);
+
+  ReadResult(int32) {buffer4, operand} =
+    ReadResult(int32) call getInt (des_info, buffer3);
+
   p @! pap_type.papTag = null;
   p @! pap_type.operator = operator;
   p @! pap_type.arity = arity as uint16;
@@ -510,22 +526,26 @@ function PAP_i64_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function PAP_i64_deserialize (owned type_object, cursor buffer) -> ReadResult(cursor) {
+function PAP_i64_deserialize (owned type_object, owned des_info, cursor buffer) -> ReadResult(cursor) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 115);
 #endif
+  // Create object
   typedef pap_type = PAP(int64);
-  ReadResult(owned) {buffer2, operator} =
-    ReadResult(owned) call getBoxedObject (buffer);
-
-  ReadResult(uint) {buffer3, arity} =
-    ReadResult(uint) call getUint (buffer2);
-
-  ReadResult(int64) {buffer4, operand} =
-    ReadResult(int64) call getInt64 (buffer3);
-
   p = pointer primcall triolet_alloc (sizeof pap_type);
   p @! pap_type.header = type_object;
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  // Get fields
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (des_info, buffer2);
+
+  ReadResult(int64) {buffer4, operand} =
+    ReadResult(int64) call getInt64 (des_info, buffer3);
+
   p @! pap_type.papTag = null;
   p @! pap_type.operator = operator;
   p @! pap_type.arity = arity as uint16;
@@ -553,22 +573,26 @@ function PAP_f32_serialize (owned obj, owned buf, unit dummy) -> unit {
   nil;
 };
 
-function PAP_f32_deserialize (owned type_object, cursor buffer) -> ReadResult(cursor) {
+function PAP_f32_deserialize (owned type_object, owned des_info, cursor buffer) -> ReadResult(cursor) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 116);
 #endif
+  // Create object
   typedef pap_type = PAP(float);
-  ReadResult(owned) {buffer2, operator} =
-    ReadResult(owned) call getBoxedObject (buffer);
-
-  ReadResult(uint) {buffer3, arity} =
-    ReadResult(uint) call getUint (buffer2);
-
-  ReadResult(float) {buffer4, operand} =
-    ReadResult(float) call getFloat (buffer3);
-
   p = pointer primcall triolet_alloc (sizeof pap_type);
   p @! pap_type.header = type_object;
+  _ = unit call updateDeserializationTable (des_info, p as owned);
+
+  // Get contents
+  ReadResult(owned) {buffer2, operator} =
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
+
+  ReadResult(uint) {buffer3, arity} =
+    ReadResult(uint) call getUint (des_info, buffer2);
+
+  ReadResult(float) {buffer4, operand} =
+    ReadResult(float) call getFloat (des_info, buffer3);
+
   p @! pap_type.papTag = null;
   p @! pap_type.operator = operator;
   p @! pap_type.arity = arity as uint16;

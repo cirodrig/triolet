@@ -98,6 +98,8 @@ builtinPrimitives =
      primFunctionType [PrimType nativeWordType] [])
   , (biName "triolet_db_pointer",
      primFunctionType [PrimType PointerType] [])
+  , (biName "triolet_assert_nonnull_owned",
+     primFunctionType [PrimType OwnedType] [])
     -- memory.c
   , (biName "triolet_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
@@ -353,7 +355,7 @@ builtinFunctions =
      Right [| SystemF.getFloatV |])
   , (CoreName module_buffer "getUnit",
      Left (closureFunctionType
-           [PrimType CursorType]
+           [PrimType OwnedType, PrimType CursorType]
            [RecordType $ constStaticRecord [PrimField CursorType, PrimField UnitType]]))
   , (CoreName module_buffer "getCursor",
      Right [| SystemF.getCursorV |])
@@ -375,6 +377,10 @@ builtinFunctions =
      Right [| coreBuiltin SystemF.The_getArrWithSerializer |])
   , (CoreName module_buffer "testCopyViaBuffer",
      Right [| coreBuiltin SystemF.The_testCopyViaBuffer |])
+  , (CoreName module_buffer "updateDeserializationTable",
+     Left (closureFunctionType
+           [PrimType OwnedType, PrimType OwnedType]
+           [PrimType UnitType]))
     
   , (CoreName module_prim "seqStore",
      Right [| coreBuiltin (SystemF.The_seqStore) |])

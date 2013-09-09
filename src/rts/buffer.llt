@@ -8,6 +8,7 @@ module core.internal.buffer;
 #include "apply_py.h"
 #include "structures.h"
 #include "buffer.h"
+#include "inplace.h"
 
 import procedure exit (int) -> ();
 
@@ -20,12 +21,7 @@ procedure MkBuffer_create () -> owned {
   p @! MkBuffer.buffer = pointer primcall triolet_alloc_nopointers (uint 1024);
   p @! MkBuffer.buffer_capacity = uint 1024;
   p @! MkBuffer.buffer_size = uint 0;
-  p @! MkBuffer.hashtable =
-    pointer primcall triolet_alloc (sizeof array (value int 32, owned));
-  p @! MkBuffer.hashtable_count =
-    pointer primcall triolet_alloc (sizeof array (value int 32, int));
-  p @! MkBuffer.ht_capacity = uint 32;
-  p @! MkBuffer.ht_size = uint 0;
+  p @! MkBuffer.hashtable = pointer primcall triolet_hash_new ();
 
   p as owned;
 };
@@ -265,27 +261,40 @@ function putBoxedObject (owned x, owned buf, unit dummy) -> unit {
     () = () primcall exit(int -1);
     nil;
   }
-
-#else
-
-  else if (x == typeObject_typeObject) {
-    // FIXME: Should never happen.  This variable should be global, thus
-    // subsumed by the case for global objects.
-    unit call putUint (uint 3, buf, dummy);
-  }
-  else if (x == triolet_typeObject_function) {
-    // FIXME: Should never happen.  This variable should be global, thus
-    // subsumed by the case for global objects.
-    unit call putUint (uint 2, buf, dummy);
-  }
 #endif
-  else {
-    _ = unit call putUint (uint 0, buf, dummy);
 
-    // Write the object header, then serialize the object contents
-    type_object = owned load x;
-    _ = unit call putBoxedObject (type_object, buf, nil);
-    unit call (type_object @! TypeObject_mem.serializer) (x, buf, nil);
+  else {
+#if 1
+    // Check if it's already been serialized
+    obj_id = uint32 primcall triolet_hash_lookup_ptr (buf @! MkBuffer.hashtable, x);
+#else
+    obj_id = ~# uint32 0;
+#endif
+
+    if (obj_id == ~# uint32 0) {
+      // It hasn't been serialized.
+      // Write the object to the buffer and add to the table.
+
+      // Write tag
+      _ = unit call putUint (uint 0, buf, dummy);
+
+      // Write object header
+      type_object = owned load x;
+      _ = unit call putBoxedObject (type_object, buf, nil);
+
+      // Give object a new ID.  This must be done after writing the object
+      // header and before writing the other fields.
+      () = () primcall updateSerializationTable (buf, x, obj_id);
+
+      // Serialize the object contents
+      unit call (type_object @! TypeObject_mem.serializer) (x, buf, nil);
+    }
+    else {
+      // Object has already been serialized.
+      // Write the object ID to the buffer.
+      _ = unit call putUint (uint 2, buf, dummy);
+      unit call putUint (obj_id as uint, buf, dummy);
+    };
   };
 };
 
@@ -300,18 +309,19 @@ function putListSection_low_level (FinIndInt count, owned rep,
   unit call put_contents (buf, nil);
 };
 
-function getListSection_low_level (owned mk_object, cursor buf)
+function getListSection_low_level (owned mk_object, owned des_info, cursor buf)
                                   -> ReadResult(owned)
 {
-  ReadResult(int) {buf2, n} = ReadResult(int) call getInt (buf);
+  ReadResult(int) {buf2, n} = ReadResult(int) call getInt (des_info, buf);
   length = FinIndInt {n};
-  ReadResult(owned) {buf3, rep} = ReadResult(owned) call getBoxedObject (buf2);
+  ReadResult(owned) {buf3, rep} =
+    ReadResult(owned) call getBoxedObject (des_info, buf2);
 
   // Read the array
   ReadResult(owned) {buf4, mk_array} =
     ReadResult(owned) call getArrWithSerializer (length, rep,
                                                  rep @! Repr_mem.deserializer,
-                                                 buf3);
+                                                 des_info, buf3);
 
   // Create a ListSection object from the array
   ReadResult(owned) {buf4, owned call mk_object (length, rep, mk_array)};
@@ -319,6 +329,16 @@ function getListSection_low_level (owned mk_object, cursor buf)
 
 
 ///////////////////////////////////////////////////////////////////////////////
+
+/* Create new deserialization information */
+procedure ReadBuffer_create() -> owned
+{
+  p = pointer primcall triolet_alloc (sizeof ReadBuffer);
+  // FIXME: assign header
+  p @! ReadBuffer.hashtable = pointer primcall triolet_hash_new ();
+  p @! ReadBuffer.next_object_id = uint32 0;
+  p as owned;
+};
 
 /* Advance to a position that's aligned to a multiple of 'align', and advance
  * past an object.  Return the positions at the beginning and end of the
@@ -336,7 +356,7 @@ procedure inline ReadBuffer_advance(cursor buffer, uint size, uint align)
   (start, end);
 };
 
-function inline getInt (cursor buffer) -> ReadResult(int) {
+function inline getInt (owned des_info, cursor buffer) -> ReadResult(int) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 100);
 #endif
@@ -346,7 +366,7 @@ function inline getInt (cursor buffer) -> ReadResult(int) {
   ReadResult(int) {end, n};
 };
 
-function inline getUint (cursor buffer) -> ReadResult(uint) {
+function inline getUint (owned des_info, cursor buffer) -> ReadResult(uint) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 101);
 #endif
@@ -359,7 +379,7 @@ function inline getUint (cursor buffer) -> ReadResult(uint) {
   ReadResult(uint) {end, n};
 };
 
-function inline getUint8AsUint (cursor buffer) -> ReadResult(uint) {
+function inline getUint8AsUint (owned des_info, cursor buffer) -> ReadResult(uint) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 102);
 #endif
@@ -369,7 +389,7 @@ function inline getUint8AsUint (cursor buffer) -> ReadResult(uint) {
   ReadResult(uint) {end, n as uint};
 };
 
-function inline getUint16AsUint (cursor buffer) -> ReadResult(uint) {
+function inline getUint16AsUint (owned des_info, cursor buffer) -> ReadResult(uint) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 103);
 #endif
@@ -379,7 +399,7 @@ function inline getUint16AsUint (cursor buffer) -> ReadResult(uint) {
   ReadResult(uint) {end, n as uint};
 };
 
-function inline getFloat (cursor buffer) -> ReadResult(float) {
+function inline getFloat (owned des_info, cursor buffer) -> ReadResult(float) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 104);
 #endif
@@ -389,7 +409,7 @@ function inline getFloat (cursor buffer) -> ReadResult(float) {
   ReadResult(float) {end, n};
 };
 
-function inline getByte (cursor buffer) -> ReadResult(uint8) {
+function inline getByte (owned des_info, cursor buffer) -> ReadResult(uint8) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 105);
 #endif
@@ -399,7 +419,7 @@ function inline getByte (cursor buffer) -> ReadResult(uint8) {
   ReadResult(uint8) {end, n};
 };
 
-function inline getInt64 (cursor buffer) -> ReadResult(int64) {
+function inline getInt64 (owned des_info, cursor buffer) -> ReadResult(int64) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 106);
 #endif
@@ -409,21 +429,21 @@ function inline getInt64 (cursor buffer) -> ReadResult(int64) {
   ReadResult(int64) {end, n};
 };
 
-function inline getUnit (cursor buffer) -> ReadResult(unit) {
+function inline getUnit (owned des_info, cursor buffer) -> ReadResult(unit) {
   // No change to buffer
   ReadResult(unit) {buffer, nil};
 };
 
-function getPointer (cursor buffer) -> ReadResult(pointer) {
+function getPointer (owned des_info, cursor buffer) -> ReadResult(pointer) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 107);
 #endif
   // Receive a segment and offset
   ReadResult(uint) {buffer2, segment} =
-    ReadResult(uint) call getUint (buffer);
+    ReadResult(uint) call getUint (des_info, buffer);
 
   ReadResult(uint) {buffer3, offset} =
-    ReadResult(uint) call getUint(buffer2);
+    ReadResult(uint) call getUint(des_info, buffer2);
 
   letrec {
     function finish (pointer base_address) -> ReadResult(pointer) {
@@ -444,19 +464,19 @@ function getPointer (cursor buffer) -> ReadResult(pointer) {
   };
 };
 
-function inline getCursor (cursor buffer) -> ReadResult(cursor) {
+function inline getCursor (owned des_info, cursor buffer) -> ReadResult(cursor) {
   ReadResult(owned) {buffer2, obj} =
-    ReadResult(owned) call getBoxedObject (buffer);
+    ReadResult(owned) call getBoxedObject (des_info, buffer);
 
   // Read the offset from the buffer
   ReadResult(uint) {buffer3, offset} =
-    ReadResult(uint) call getUint (buffer2);
+    ReadResult(uint) call getUint (des_info, buffer2);
 
   ReadResult(cursor) {buffer3, obj ^+ (offset as int)};
 };
 
-function inline getStoredInt (cursor buffer) -> ReadResult(owned) {
-  ReadResult(int) {end, n} = ReadResult(int) call getInt(buffer);
+function inline getStoredInt (owned des_info, cursor buffer) -> ReadResult(owned) {
+  ReadResult(int) {end, n} = ReadResult(int) call getInt(des_info, buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;
@@ -467,8 +487,8 @@ function inline getStoredInt (cursor buffer) -> ReadResult(owned) {
   ReadResult(owned) {end, write_result};
 };
 
-function inline getStoredUint (cursor buffer) -> ReadResult(owned) {
-  ReadResult(uint) {end, n} = ReadResult(uint) call getUint(buffer);
+function inline getStoredUint (owned des_info, cursor buffer) -> ReadResult(owned) {
+  ReadResult(uint) {end, n} = ReadResult(uint) call getUint(des_info, buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;
@@ -479,8 +499,8 @@ function inline getStoredUint (cursor buffer) -> ReadResult(owned) {
   ReadResult(owned) {end, write_result};
 };
 
-function inline getStoredFloat (cursor buffer) -> ReadResult(owned) {
-  ReadResult(float) {end, n} = ReadResult(float) call getFloat(buffer);
+function inline getStoredFloat (owned des_info, cursor buffer) -> ReadResult(owned) {
+  ReadResult(float) {end, n} = ReadResult(float) call getFloat(des_info, buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;
@@ -491,8 +511,8 @@ function inline getStoredFloat (cursor buffer) -> ReadResult(owned) {
   ReadResult(owned) {end, write_result};
 };
 
-function inline getStoredByte (cursor buffer) -> ReadResult(owned) {
-  ReadResult(uint8) {end, n} = ReadResult(uint8) call getByte(buffer);
+function inline getStoredByte (owned des_info, cursor buffer) -> ReadResult(owned) {
+  ReadResult(uint8) {end, n} = ReadResult(uint8) call getByte(des_info, buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;
@@ -503,8 +523,8 @@ function inline getStoredByte (cursor buffer) -> ReadResult(owned) {
   ReadResult(owned) {end, write_result};
 };
 
-function inline getStoredInt64 (cursor buffer) -> ReadResult(owned) {
-  ReadResult(int64) {end, n} = ReadResult(int64) call getInt64(buffer);
+function inline getStoredInt64 (owned des_info, cursor buffer) -> ReadResult(owned) {
+  ReadResult(int64) {end, n} = ReadResult(int64) call getInt64(des_info, buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;
@@ -515,8 +535,8 @@ function inline getStoredInt64 (cursor buffer) -> ReadResult(owned) {
   ReadResult(owned) {end, write_result};
 };
 
-function inline getStoredCursor (cursor buffer) -> ReadResult(owned) {
-  ReadResult(cursor) {end, n} = ReadResult(cursor) call getCursor(buffer);
+function inline getStoredCursor (owned des_info, cursor buffer) -> ReadResult(owned) {
+  ReadResult(cursor) {end, n} = ReadResult(cursor) call getCursor(des_info, buffer);
   letrec {
     function write_result (pointer ret) -> unit {
       !ret = n;
@@ -528,7 +548,7 @@ function inline getStoredCursor (cursor buffer) -> ReadResult(owned) {
 };
 
 function getArrWithSerializer
-  (FinIndInt length, owned repr_e, owned get_elem, cursor buffer)
+  (FinIndInt length, owned repr_e, owned get_elem, owned des_info, cursor buffer)
   -> ReadResult(owned) {
 
   FinIndInt {n_elems} = length;
@@ -564,7 +584,8 @@ function getArrWithSerializer
     tmp_data @! Obj(array_type).header = header;
 
     (_, buffer2) = while (int i = int 0, cursor b = buffer) (i < n_elems) {
-      ReadResult(owned) {b2, write_elem} = ReadResult(owned) call get_elem (b);
+      ReadResult(owned) {b2, write_elem} =
+        ReadResult(owned) call get_elem (des_info, b);
       _ = unit call write_elem (tmp_data @ Obj(array_type).payload[i]);
       (i + int 1, b2);
     };
@@ -581,40 +602,76 @@ function getArrWithSerializer
   };
 };
 
-function getBoxedObject (cursor buffer) -> ReadResult(owned) {
+function getBoxedObject (owned des_info, cursor buffer) -> ReadResult(owned) {
 #ifdef PRINT_GETS
   () = () primcall triolet_db_int(int 108);
 #endif
   // Get the control flag
   ReadResult(uint) {buffer2, control} =
-    ReadResult(uint) call getUint (buffer);
+    ReadResult(uint) call getUint (des_info, buffer);
 
   if (control == uint 1) {
     // This is a global offset; reconstruct its address
     ReadResult(uint) {buffer3, global_offset} =
-      ReadResult(uint) call getUint (buffer2);
+      ReadResult(uint) call getUint (des_info, buffer2);
     p = (pointer load Triolet_library_address_start) ^+ (global_offset as int);
+    () = () primcall triolet_db_int(int 308);
     ReadResult(owned) {buffer3, p as owned};
   }
-
-#if 0
-  else if (control == uint 3) {
-    // FIXME: Should never happen.  This variable should be global, thus
-    // subsumed by the case for global objects.
-    ReadResult(owned) {buffer2, typeObject_typeObject};
-  }
   else if (control == uint 2) {
-    // FIXME: Should never happen.  This variable should be global, thus
-    // subsumed by the case for global objects.
-    ReadResult(owned) {buffer2, triolet_typeObject_function};
+    // This object has been deserialized already
+    // Read its ID
+    ReadResult(uint) {buffer3, obj_id} =
+      ReadResult(uint) call getUint (des_info, buffer2);
+
+    // Look up in table
+    ptr = pointer primcall triolet_hash_lookup_int (des_info @! ReadBuffer.hashtable, obj_id);
+    if (ptr == null) {
+      // Error, not found in hash table
+      ReadResult(owned) primcall exit(int -1);
+    }
+    else {
+      // Return this pointer
+      ReadResult(owned) {buffer3, ptr as owned};
+    };
   }
-#endif
   else {
-    // Get the object's header, then the object
+    // Get the object's header, then the object.
+
+    // The function for getting the object will insert it in the
+    // deserialization hash table before reading fields.
     ReadResult(owned) {buffer3, type_object} =
-      ReadResult(owned) call getBoxedObject (buffer2);
-    ReadResult(owned) call (type_object @! TypeObject_mem.deserializer) (type_object, buffer3);
+      ReadResult(owned) call getBoxedObject (des_info, buffer2);
+    x = ReadResult(owned) call (type_object @! TypeObject_mem.deserializer)
+                               (type_object, des_info, buffer3);
+    () = () primcall triolet_db_int(int 308);
+    x;
   };
+};
+
+procedure inline updateSerializationTable (owned buf, owned x, uint32 obj_id) -> () {
+  obj_id = buf @! MkBuffer.next_object_id;
+  buf @! MkBuffer.next_object_id = obj_id + uint32 1;
+#ifdef PRINT_PUTS
+  () = () primcall triolet_db_int(int 2000);
+  () = () primcall triolet_db_int(obj_id as int);
+  () = () primcall triolet_db_pointer(x as pointer);
+#endif
+  () primcall triolet_hash_insert_ptrint (buf @! MkBuffer.hashtable, x, obj_id);
+};
+
+// Insert a new, uninitialized object into the deserialization table
+function updateDeserializationTable (owned des_info, owned obj) -> unit {
+  obj_id = des_info @! ReadBuffer.next_object_id;
+  des_info @! ReadBuffer.next_object_id = obj_id + uint32 1;
+#ifdef PRINT_GETS
+  () = () primcall triolet_db_int(int 1000);
+  () = () primcall triolet_db_int(obj_id as int);
+  () = () primcall triolet_db_pointer(obj as pointer);
+#endif
+  () = () primcall triolet_hash_insert_intptr (des_info @! ReadBuffer.hashtable,
+                                               obj_id, obj as owned);
+  nil;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -637,9 +694,10 @@ function testCopyViaBuffer (owned rep, owned x) -> owned
 
   // Deserialize
   // FIXME: buffer doesn't have an object header like it should
+  des_info = owned primcall ReadBuffer_create ();
   buffer1 = (b @! MkBuffer.buffer as owned) ^+ int 0;
   () = () primcall triolet_db_pointer(buffer1 as pointer);
   ReadResult(owned) {buffer2, y} =
-    ReadResult(owned) call getBoxedObject(buffer1);
+    ReadResult(owned) call getBoxedObject(des_info, buffer1);
   y;
 }

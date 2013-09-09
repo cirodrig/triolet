@@ -115,7 +115,7 @@ extern function core.internal.structures.typeObject_serialize
   (owned, owned, unit) -> unit;
 
 extern function core.internal.structures.typeObject_deserialize
-  (owned, cursor) -> ReadResult(owned);
+  (owned, owned, cursor) -> ReadResult(owned);
 
 extern data owned core.internal.structures.typeObject_typeObject;
 #if 0

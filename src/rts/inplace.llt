@@ -234,6 +234,7 @@ function inline appendScatter_update_real (SA elt_sizealign, owned writer, unit 
   nil;
 };
 
+#if 0
 function inline compute_hash_table_size (FinIndInt keys_size) -> int
 {
   FinIndInt {n} = keys_size;
@@ -263,3 +264,4 @@ function inline lookup_hash_table
   FinIndInt {n} = hash_size;
   int primcall triolet_hash_lookup (n, keys_array, inds_array, key);
 };
+#endif

@@ -120,13 +120,24 @@ record MkBuffer {
   owned header;                 // Object header
   pointer buffer;               // The buffer (array of bytes)
   pointer hashtable;            // Hash table of objects in buffer
-                                // (array of owned pointers)
-  pointer hashtable_count;      // Number of items in each hash bin
-                                // (array of int)
+                                // (defined and manipulated in C code)
+  uint32 next_object_id;        // First available integer object ID for
+                                // hash table.  An ID is consumed when
+                                // serializing a boxed object that isn't
+                                // already in the buffer.
   uint buffer_capacity;         // Number of allocated bytes in buffer
   uint buffer_size;             // Number of used bytes in buffer
-  uint ht_capacity;             // Number of allocated entries in hash table
-  uint ht_size;                 // Number of used entries in hash table
+};
+
+// Data used while reading a buffer.
+// The buffer reference itself is not stored in here.
+record ReadBuffer {
+  owned header;                 // Object header
+  pointer hashtable;            // Hash table of objects read from buffer
+                                // (defined and manipulated in C code)
+  uint32 next_object_id;        // First available integer object ID for
+                                // hash table.  An ID is consumed when
+                                // deserializing a boxed object.
 };
 
 // Result of reading from a buffer

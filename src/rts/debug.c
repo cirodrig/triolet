@@ -24,3 +24,8 @@ void triolet_db_pointer(void *p) {
 void triolet_exit(int arg) {
   exit(arg);
 }
+
+void triolet_assert_nonnull_owned(void *p) {
+  if (!p)
+    exit(-1);
+}

@@ -28,6 +28,7 @@ import Type.Type
 import Type.Environment
 import LowLevel.CodeTypes
 import LowLevel.Build
+import qualified LowLevel.Builtins as L
 import qualified LowLevel.Records as L
 import qualified LowLevel.Syntax as L
 import qualified LowLevel.Print as L
@@ -714,6 +715,48 @@ memoryIntro adt con_index m_tyob fields =
     write_fields offsets ptr =
       forM_ (zip3 (algDisjunctFields dj) offsets fields) $
       \(field, offset, value) -> writeMemoryField ptr field offset value
+
+-- | Create a boxed object in memory during deserialization.
+--
+--   This function is like 'memoryIntro', but it also updates the
+--   deserialization table.
+--   The object is added to the deserialization table _before_
+--   its fields are read so that cyclic references will be looked up properly.
+memoryIntroDeserialized :: AlgObjectType -> Int
+                        -> L.Val
+                        -> Maybe L.Val
+                        -> GenM ([L.Val], a)
+                        -> GenM (L.Val, a)
+memoryIntroDeserialized adt con_index des_info m_tyob read_fields =
+  case algDataBoxing adt
+  of IsBoxed -> do
+       -- Allocate memory and initialize header
+       let !(Just tyob) = m_tyob
+       (h_offsets, offsets, size) <- disjunctLayout dj
+       ptr <- createBoxedObject size h_offsets (algDisjunctHeader dj)
+       boxed_ptr <- emitAtom1 (PrimType OwnedType) $ L.PrimA L.PrimCastToOwned [ptr]
+
+       -- Save this object in the deserialization table
+       updateDeserializationTable des_info boxed_ptr
+
+       -- Read and initialize fields
+       (fields, x) <- read_fields
+       write_fields fields offsets ptr
+
+       -- Return result
+       return (boxed_ptr, x)
+
+     NotBoxed -> internalError "memoryIntroDeserialized: Must be boxed"
+  where
+    dj = disjunct con_index m_tyob adt
+    write_fields fields offsets ptr =
+      forM_ (zip3 (algDisjunctFields dj) offsets fields) $
+      \(field, offset, value) -> writeMemoryField ptr field offset value
+
+updateDeserializationTable des_info boxed_ptr =
+  emitAtom1 (PrimType UnitType) $
+  L.closureCallA (L.VarV (L.llBuiltin L.the_fun_updateDeserializationTable)) [des_info, boxed_ptr]
+  
 
 memoryElim :: AlgObjectType -> ValueType
            -> (Int -> Maybe L.Val -> [L.Val] -> GenM L.Val)
