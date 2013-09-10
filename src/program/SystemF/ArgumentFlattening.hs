@@ -1162,6 +1162,8 @@ deadValue t = do
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
            | con == floatV ->
                return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
+           | con == boolV ->
+               return $ valConE' (VarCon (coreBuiltin The_False) [] []) []
            | con `isCoreBuiltin` The_LinearMap -> do
                n <- deadValue (VarT intV)
                let con = VarCon (coreBuiltin The_LinearMap) [] []
