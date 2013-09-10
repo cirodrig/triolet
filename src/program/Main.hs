@@ -302,8 +302,9 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   -- local functions
   repr_mod <- iterateM (highLevelOptimizations times True SystemF.FinalSimplifierPhase) 3 repr_mod
 
-  -- Eliminate case-of-case 
-  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 2 repr_mod
+  -- Eliminate case-of-case
+  -- FIXME: This large iteration count is needed to simplify loop nests.  Can we do it faster?
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 24 repr_mod
 
   -- Argument flattening
   time times PrintTimer $ when debugMode $ void $ do
@@ -321,7 +322,7 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
   -- Reconstruct demand information after flattening variables,
   -- so that the next optimization pass can do more work
   repr_mod <- time times DemandTimer $ SystemF.localDemandAnalysis repr_mod
-  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 5 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 8 repr_mod
 
   time times PrintTimer $ when debugMode $ void $ do
     putStrLn ""

@@ -953,6 +953,9 @@ data IStream (sh a : box) : box
 
   -- As a random-access object
   ixStream (RStream sh a);
+
+  -- As a single value
+  unitStream (coerce @box sh list_dim, a);
 };
 
 con_seqStream @(a : box) (sq : Seq a) -> IStream list_dim a attribute(inline) =
@@ -973,6 +976,11 @@ con_nestedSeqStream @(a : box) (s : Seq (Stream list_dim a))
 con_ixStream @(sh a : box) (s : RStream sh a)
   -> IStream sh a attribute(inline) =
   ixStream @sh @a (boxedinfo ixStream @sh @a) s;
+
+con_unitStream @(a : box) (x : a)
+  -> IStream list_dim a attribute(inline) =
+  unitStream @list_dim @a (boxedinfo unitStream @list_dim @a)
+  (idCoercion @list_dim) x;
 
 -- A random-access stream.
 -- This is very similar to the encoding of the co-Yoneda lemma
@@ -3915,7 +3923,6 @@ zip_Indexable @(d : box) @(a b c : box)
 
 
 -- This function is recursive via flattenSplittable
--- FIXME: Handle recursive function inlining properly
 streamToSequence @(a : box) (s : Stream list_dim a)
   -> Seq a
   attribute(inline,
@@ -3936,6 +3943,9 @@ streamToSequence @(a : box) (s : Stream list_dim a)
 
   ; ixStream tyob rs.
       rStreamToSeq @a rs
+
+  ; unitStream tyob co x.
+      unit_Seq @a x
   };
 
 {-
@@ -4066,6 +4076,10 @@ peel_Stream @(a r : box)
       let vw = rStreamToView @list_dim @a rs in
 
       peel_view_list_dim @a @r rep_a par_hint value_k empty_k vw
+
+  ; unitStream tyob co x.
+      -- Return the value and an empty stream
+      value_k x (empty_Stream @a)
   };
 
 
@@ -4273,6 +4287,12 @@ build_view_real @(sh a : box) (sh_shape : ShapeDict sh) (s : Stream sh a)
                    (coerce @(BoxIndex sh) @(BoxIndex (shape t)) idx))
       in
       con_view @sh @a (coerce @(shape t) @sh dom) get
+
+  ; unitStream tyob co x.
+      -- Create a 1-element view
+      con_view @sh @a
+      (coerce @list_dim @sh (con_list_dim (justVal @int 1)))
+      (\ (idx : BoxIndex sh) -> a. x)
   };
 
 
@@ -4310,6 +4330,10 @@ map_Stream @(d a b : box)
   ; ixStream tyob rs.
       con_stream @d @b par_hint
        (con_ixStream @d @b (map_RStream @d @a @b f rs))
+
+  ; unitStream tyob co x.
+      con_stream @d @b par_hint
+      (coerce @(IStream list_dim b) @(IStream d b) (con_unitStream @b (f x)))
   };
 
 Traversable_Stream @(sh : box)
@@ -4463,6 +4487,10 @@ build_list @(a : box) (rep : ReprBox a) (s : Stream list_dim a)
 
   ; ixStream tybo (rStream @b tyob2 rep_b f si).
       tabulate_list @b @a rep_b rep par_hint f si
+
+  ; unitStream tyob co x.
+      -- TODO
+      except @(Boxed (list (AsBare a)))
   };
 
 
@@ -5578,6 +5606,10 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
       in
       reduce_loop @d @b @a sh rep_b rep par_hint
       reduce_unit reduce_slice f reduce_residual si
+
+  ; unitStream tyob co x.
+      -- Just return the value
+      x
   };
 
 
@@ -5855,6 +5887,9 @@ collect_Stream @(d : box) @(k v r : box)
                 reduce_unit reduce_slice combine_cursors reduce_residual si in
 
           finalize_cursor r_cursor
+
+      ; unitStream tyob co x.
+          do_seq None
       }
   in
 
@@ -8267,10 +8302,12 @@ real_zipWith_list_dim @(a b c : box)
       ; seqStream tyob co sq. zip_using_sequences None
       ; nestedIxStream @d2 tyob co sh2 vw. zip_using_sequences None
       ; nestedSeqStream tyob co sq. zip_using_sequences None
+      ; unitStream tyob co sq. zip_using_sequences None
       }
     ; seqStream tyob co sq. zip_using_sequences None
     ; nestedIxStream @d2 tyob co sh2 vw. zip_using_sequences None
     ; nestedSeqStream tyob co sq. zip_using_sequences None
+    ; unitStream tyob co sq. zip_using_sequences None
   };
 
 
@@ -8329,7 +8366,10 @@ real_fold_list_dim @(a acc : box)
           then foldit (i +# 1) (combine (gen (boxIntValue i)) x)
           else x
       in
-        foldit 0 init      
+        foldit 0 init
+
+  ; unitStream tyob co x.
+      combine x init
   };
   --fold_Seq @a @acc combine (streamToSequence @a s) init;
 
@@ -8378,6 +8418,9 @@ imp_fold_list_dim @(a : box)
       (\ (outer_i : BoxIndex list_dim) (state : Store) -> Store.
          combine (f (gen outer_i)) state)
       init
+
+  ; unitStream tyob co x.
+      combine x init
   };
 
 
@@ -8607,6 +8650,7 @@ fold_chain_dim @(a acc : box)
   ; seqStream tyob co sq. except @acc
   ; nestedIxStream @sh tyob co ix si. except @acc
   ; nestedSeqStream tyob co sq. except @acc
+  ; unitStream tyob co sq. except @acc
   };
 
 
@@ -8647,6 +8691,7 @@ imp_fold_chain_dim @(a : box)
   ; seqStream tyob co sq. except @Store
   ; nestedIxStream @sh tyob co ix si. except @Store
   ; nestedSeqStream tyob co sq. except @Store
+  ; unitStream tyob co sq. except @Store
   };
 
 
@@ -16864,7 +16909,7 @@ guard_Seq @(a : box) (b : bool) (sq : Seq a)
   letfun
     f (state : s) -> SeqStep s a =
       case state of guardState tyob flag inner_state.
-      if flag
+      if b
       then case generator inner_state of {
              seqYield inner_state2 x.
                seqYield @s @a (guardState @inner_s state_tyob True inner_state2) x
@@ -16889,7 +16934,7 @@ Seq_from_llist @(a : box) (rep : Repr (AsBare a)) (l : llist (AsBare a))
        cons tyob h t. seqYield @list_type @a t (asbox @(AsBare a) rep (copy @(AsBare a) rep h))
      ; nil tyob. seqDone @list_type @a
      });
-  
+
 
 -------------------------------------------------------------------------------
 -- RStream functions
@@ -16956,6 +17001,7 @@ fromIxStream @(sh a : box) (s : IStream sh a)
   ; nestedIxStream @d2 tyob co sh2 rs. except @(RStream sh a)
   ; nestedSeqStream tyob co sq. except @(RStream sh a)
   ; seqStream tyob co sq. except @(RStream sh a)
+  ; unitStream tyob co x. except @(RStream sh a)
   };
 
 
@@ -16963,15 +17009,17 @@ fromIxStream @(sh a : box) (s : IStream sh a)
 
 
 unit_Stream @(a : box) (rep : ReprBox a) (x : a) -> Stream list_dim a
-  attribute(inline, inline_sequential) =
+  attribute(inline) =
 
+  con_stream @list_dim @a hintSeq (con_unitStream @a x);
   {-
   -- Create a dim0 stream
   let vw = con_view @dim0 @a con_dim0
            (\ (idx : Boxed (Stored NoneType)) -> a. x) in
   traverse_view_real @list_dim @a ShapeDict_list_dim rep vw;
   -}  
-  con_stream @list_dim @a hintSeq (con_seqStream @a (unit_Seq @a x));
+  {-con_stream @list_dim @a hintSeq (con_seqStream @a (unit_Seq @a x));-}
+  
 
 
 empty_Stream @(a : box)
@@ -16987,33 +17035,36 @@ guard_Stream @(a : box) (rep : ReprBox a) (condition : bool)
             inline_struct(T T D(T C)) -- Inline if stream constructor is known
            ) =
 
+  -- Wrap the stream in an outer 'guard' condition
+  letfun
+    wrap (dummy : NoneType) -> IStream list_dim a =
+      let guarded = guard_Seq @(Stream list_dim a) condition
+                    (unit_Seq @(Stream list_dim a) s) in
+
+      con_nestedSeqStream @a guarded
+  in
+
   case s of stream tyob par_hint i_s.
   let s2 = case i_s of {
              seqStream tyob co sq.
                con_seqStream @a (guard_Seq @a condition sq)
 
            ; nestedIxStream @d2 tyob co sh_d2 rs.
-               -- Push the guard down
-               nestedIxStream @list_dim @a @d2 tyob co sh_d2
-               (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim a)
-                (guard_Stream @a rep condition) rs)
+               wrap None
 
            ; nestedSeqStream tyob co sq.
-               -- Push the guard down
-               nestedSeqStream @list_dim @a tyob co
-               (map_Seq @(Stream list_dim a) @(Stream list_dim a)
-                (guard_Stream @a rep condition) sq)
+               wrap None
 
            ; ixStream tyob rs.
-               con_nestedIxStream @a @list_dim ShapeDict_list_dim
-               (map_RStream @list_dim @a @(Stream list_dim a)
-                (\ (x : a) -> Stream list_dim a.
-                   con_stream @list_dim @a hintAny
-                   (con_seqStream @a
-                    (guard_Seq @a condition (unit_Seq @a x))))
-                rs)
-           }
-  in con_stream @list_dim @a par_hint s2;
+               wrap None
+
+           ; unitStream tyob co x.
+               con_seqStream @a
+               (guard_Seq @a condition (unit_Seq @a x))
+               
+           } in
+  con_stream @list_dim @a hintSeq s2;
+
 
 
 filter_Stream @(a : box) (rep : ReprBox a)
@@ -17065,6 +17116,12 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
 
               con_nestedIxStream @b @list_dim ShapeDict_list_dim
               (con_rStream @list_dim @(Stream list_dim b) @c rep_c extract2 si)
+
+          ; unitStream tyob co x.
+              -- Create a stream equivalent to (t x)
+              -- FIXME: The function should not be evaluated now!
+              -- Evaluation should be deferred until the stream runs.
+              case t x of stream tyob hint i_stream. i_stream
           } in
   con_stream @list_dim @b par_hint u;
 

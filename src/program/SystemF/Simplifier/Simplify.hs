@@ -395,10 +395,11 @@ isInliningCandidate phase def = inlining_ok && phase_ok && code_growth_ok
           in expSize (funBody function) `compareCodeSize` threshold
 
         is_stream =
-          -- Does the function return a stream?
+          -- Does the function return a stream or a SeqStep type?
           let FunM function = definiens def
           in case fromVarApp $ funReturn function
-             of Just (op, _) | op `isCoreBuiltin` The_Stream -> True
+             of Just (op, _) | op `isCoreBuiltin` The_Stream || 
+                               op `isCoreBuiltin` The_SeqStep -> True
                 _ -> False
 
     -- An arbitrary function size threshold.  Functions smaller than this
@@ -635,17 +636,28 @@ funIsSmallerThan f n = compareCodeSize (funSize f) n
 --   code or work.
 worthPreInlining :: Dmd -> Type -> ExpM -> TypeEnvM UnboxedMode Bool
 worthPreInlining dmd ty expr =
-  let should_inline =
+  let special_inlining
+        | is_SeqStep_type =
+            -- Hack for optimizing 'Seq' types.  Eagerly inline if used
+            -- in a case expression, so the case-of-case rule will activate.
+            case specificity dmd
+            of Inspected -> inlckTrue
+               _ -> should_inline
+        | otherwise = should_inline
+      should_inline =
         case multiplicity dmd
-        of OnceSafe -> inlckTrue
-           OnceUnsafe -> inlckTrivial `inlckOr`
-                         inlckPartialApp `inlckOr`
-                         inlckFunction `inlckOr`
-                         inlckConlike
-           _ -> inlckTrivial `inlckOr`
-                inlckPartialApp
-  in should_inline dmd expr
+             of OnceSafe -> inlckTrue
+                OnceUnsafe -> inlckTrivial `inlckOr`
+                              inlckPartialApp `inlckOr`
+                              inlckFunction `inlckOr`
+                              inlckConlike
+                _ -> inlckTrivial `inlckOr`
+                     inlckPartialApp
+  in special_inlining dmd expr
   where
+    is_SeqStep_type = case fromVarApp ty
+                      of Just (v, _) | v `isCoreBuiltin` The_SeqStep -> True
+                         _ -> False
     is_function_type = case ty of {FunT {} -> True; _ -> False}
 
 -- | Decide whether to inline the bare expression /before/ simplifying it.
@@ -2048,36 +2060,38 @@ rwCase1 inf scrut sps alts
 -- a constructor application.
 --
 -- Unpacking consumes fuel
-rwCase1 inf scrut sps alts
-  | ExpM (ConE {}) <- discardSubstitution scrut = eliminate_case scrut
-  | otherwise = do
-      -- Check for an application of "reify _ E".
-      -- If present, the argument E must be a data constructor application.
-      scrut' <- freshenHead scrut
-      case scrut' of
-        AppE _ op _ [arg] -> do
-          op' <- freshenHead op
-          case op' of
-            VarE _ v | v `isCoreBuiltin` The_reify ->
-              -- Verify that argument is a data constructor application.
-              -- Only the simplifier puts a 'reify' expression here, and
-              -- it should only put in a data constructor.
-              case discardSubstitution arg of
-                ExpM (ConE {}) -> eliminate_case arg
-                _ -> internalError "rwCase: Unexpected 'reify' in argument"
-            _ -> not_case_of_constructor
-        _ -> not_case_of_constructor
+rwCase1 inf scrut sps alts = ifElseFuel not_case_of_constructor $
+  condM (freshenHead scrut)
+  [ -- Data constructor application: Eliminate this case expression
+    do ConE _ scrut_con _ ty_ob scrut_args <- it
+       lift $ eliminate_case scrut_con ty_ob scrut_args
+
+    -- Application of @reify _ E@: Eliminate this case expression
+    -- The argument E must be a data constructor application
+  , do AppE _ op _ [arg] <- it
+       VarE _ v <- lift $ freshenHead op
+       aguard $ v `isCoreBuiltin` The_reify
+       
+       -- Verify that argument is a data constructor application.
+       -- Only the simplifier puts a 'reify' expression here, and
+       -- it should only put in a data constructor.
+       arg' <- lift $ freshenHead arg
+       case arg' of
+         ConE _ scrut_con _ ty_ob scrut_args ->
+           lift $ eliminate_case scrut_con ty_ob scrut_args
+         _ -> internalError "rwCase: Unexpected 'reify' in argument"
+
+  , lift $ not_case_of_constructor      
+  ]
   where
     not_case_of_constructor = rwCaseScrutinee inf scrut sps alts
 
     -- This is a case of data constructor expression.  The case
     -- expression and data constructor cancel out.
-    eliminate_case data_con_expr = do
+    eliminate_case scrut_con ty_ob scrut_args = do
       consumeFuel
 
-      -- Rename the scrutinee and get constructor fields
-      ConE _ scrut_con _ ty_ob scrut_args <- freshenHead data_con_expr
-
+      -- Match this constructor to a case alternative
       alt <- findAlternative alts scrut_con
       let ex_types = conExTypes scrut_con
       field_kinds <- conFieldKinds scrut_con

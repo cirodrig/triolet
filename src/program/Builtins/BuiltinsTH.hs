@@ -37,6 +37,7 @@ builtinTypeNames =
   , "Tuple4"
   , "intset"
   , "Stream"
+  , "SeqStep"
   --, "Stream1"
   --, "Sequence"
   --, "StreamNext"
@@ -731,11 +732,10 @@ builtinVariableNames =
   , "fun_dim1"
   , "make_sliceObject"
 
-    -- Pseudo-dictionary methods inserted by optimizations
   , "arr1D_build"
   , "arr2D_build"
   , "arr3D_build"
-  , "view_generate"
+  {-, "view_generate"
   , "view_map"
   , "view_zipWith"
   , "view_zipWith3"
@@ -746,7 +746,7 @@ builtinVariableNames =
   , "Sequence_map"
   , "Sequence_zipWith"
   , "Sequence_zipWith3"
-  , "Sequence_zipWith4"
+  , "Sequence_zipWith4"-}
 
     -- Integer index arithmetic 
   , "zero_fii"
