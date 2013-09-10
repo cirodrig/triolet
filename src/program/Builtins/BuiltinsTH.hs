@@ -863,6 +863,7 @@ builtinVariableNames =
     -- Collectors
   , "valueCollector"
   , "listCollector"
+  , "array3Collector"
 
     -- In-place update
 {-  , "intUpdateInPlace_int_coercion"

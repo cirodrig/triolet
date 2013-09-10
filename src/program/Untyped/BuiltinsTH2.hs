@@ -89,6 +89,7 @@ frontendSourceGlobals =
   , "floor"
   , "valueCollector"
   , "listCollector"
+  , "array3Collector"
   {-, "intScatter"
   , "floatScatter"
   , "boolScatter"

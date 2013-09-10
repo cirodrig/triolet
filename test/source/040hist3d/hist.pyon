@@ -1,7 +1,7 @@
 
 def f(a):
   domain = arrayDomain((0, -2, -2), (4, 3, 3))
-  alg = array3Scatter(domain, floatSumScatter)
-  return scatter(alg, (((z, y, x), n) for (z, y, x, n) in a))
+  alg = array3Collector(valueCollector(lambda x, y: x + y, 0), domain)
+  return collect(alg, ((((z, y, x), None), n) for (z, y, x, n) in a))
 
 export cplusplus f : list((int, int, int, float)) -> array3(float)

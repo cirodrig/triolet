@@ -716,7 +716,7 @@ mutableClass _ tc_map = do
   let int64_instance =
         value_instance (lookupBuiltinVar SF.int64V tc_map) (coreBuiltin The_Mutable_int64)
   let float_instance =
-        value_instance (lookupBuiltinVar SF.intV tc_map) (coreBuiltin The_Mutable_float)
+        value_instance (lookupBuiltinVar SF.floatV tc_map) (coreBuiltin The_Mutable_float)
   return [int_instance, int64_instance, float_instance]
   where
     value_instance frontend_type sf_dict_con =
@@ -1351,6 +1351,7 @@ varInitializers =
       , (TheV_floor, The_floor)
       , (TheV_valueCollector, The_valueCollector)
       , (TheV_listCollector, The_listCollector)
+      , (TheV_array3Collector, The_array3Collector)
       {- Temporarily commented out while porting the library
       , (TheV_intScatter, The_intScatter)
       , (TheV_floatScatter, The_floatScatter)
