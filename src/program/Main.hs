@@ -304,7 +304,12 @@ compilePyonMemToPyonAsm compile_flags repr_mod = do
 
   -- Eliminate case-of-case
   -- FIXME: This large iteration count is needed to simplify loop nests.  Can we do it faster?
-  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 20 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 12 repr_mod
+
+  -- CSE things that were introduced in the PostFinal stage
+  repr_mod <- time times CSETimer $ SystemF.commonSubexpressionElimination repr_mod
+
+  repr_mod <- iterateM (highLevelOptimizations times True SystemF.PostFinalSimplifierPhase) 2 repr_mod
 
   -- Argument flattening
   time times PrintTimer $ when debugMode $ void $ do
