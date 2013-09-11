@@ -907,6 +907,21 @@ con_zip2Indexable @(d c a b : box) (rep_a : ReprBox a) (rep_b : ReprBox b)
   zip2Indexable @d @c @a @b (boxedinfo zip2Indexable @d @c) rep_a rep_b f x y;
 
 
+data OuterPIndexable (c : box) : box
+{
+  outerPIndexable @(a b : box)
+  (Repr (AsBare a), Repr (AsBare b),
+   a -> b -> c, SomeIndexable dim1 a, SomeIndexable dim1 b);
+};
+
+con_outerPIndexable @(c a b : box) (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b -> c) (x : SomeIndexable dim1 a) (y : SomeIndexable dim1 b)
+  -> OuterPIndexable c attribute(inline) =
+
+  outerPIndexable @c @a @b (boxedinfo outerPIndexable @c)
+  rep_a rep_b f x y;
+
+
 -- The cartesian domain corresponding to an index type
 type cartesianDomain : bare -> box;
 type index : box -> bare;
@@ -2809,11 +2824,16 @@ data array1 (a : bare) : bare
   (int, int, FIInt N, StuckBox (arr N a));
 };
 
--- An array section is a subarray that's treated like an array
+-- An array section is a subarray that's treated like an array.
+--
+-- The array section consists of a reference to the original array
+-- and the subdomain that's being accessed.
 data Array1Section (a : box) : bare
 {
-  array1Section @(N : intindex)
-  (int, int, FIInt N, Repr (AsBare a), cursor (arr N (AsBare a)));
+  array1Section @(M : intindex)
+    (Repr (AsBare a),
+     int, int, FIInt M,
+     StuckBox (arr M (AsBare a)), dim1);
 };
 
 -- A 2D array.
@@ -4598,6 +4618,126 @@ build_ListSection @(a : box)
   listToListSection @a rep (build_list @a rep s);
 
 
+Functor_Array1Section : FunctorDict (\ (a : box). Boxed (Array1Section a)) =
+  functorDict @(\ (a : box). Boxed (Array1Section a))
+  (boxedinfo functorDict @(\ (a : box). Boxed (Array1Section a)))
+  map_Array1Section;
+
+
+map_Array1Section @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (s : Boxed (Array1Section a))
+  -> Boxed (Array1Section b) =
+
+  build_Array1Section @b rep_b
+  (map_Stream @dim1 @a @b rep_a rep_b f
+   (traverse_Array1Section @a rep_a s));
+
+
+Indexable_Array1Section : IndexableDict (\ (a : box). Boxed (Array1Section a)) =
+  indexableDict @(\ (a : box). Boxed (Array1Section a))
+  (boxedinfo indexableDict @(\ (a : box). Boxed (Array1Section a)))
+  Functor_Array1Section shape_Array1Section at_Array1Section slice_Array1Section
+  preserve_Array1Section;
+
+
+shape_Array1Section @(a : box) (s : Boxed (Array1Section a)) -> dim1 =
+  case s of [reprSizeAlign @(Array1Section a) (unboxedinfo Array1Section @a)]
+            boxed tyob (array1Section @M rep_a
+                                      lb_x stride_x size_x ay_ref dom).
+  dom;
+
+
+at_Array1Section @(a : box)
+  (rep : ReprBox a) (s : Boxed (Array1Section a)) (i : BoxIndex dim1) -> a
+  attribute(inline) =
+
+  -- Since the section doesn't "move" indices, just access the underlying array
+  case s of [reprSizeAlign @(Array1Section a) (unboxedinfo Array1Section @a)]
+            boxed tyob (array1Section @M rep_a
+                                      lb_x stride_x size_x ay_ref dom).
+
+  let rep_array1 = unboxedinfo array1 @(AsBare a) in
+  let sa_array1 = reprSizeAlign @(array1 (AsBare a)) rep_array1 in
+
+  let ay = con_boxed @(array1 (AsBare a)) rep_array1
+           (mk_array1 @(AsBare a) @M lb_x stride_x size_x ay_ref) in
+  at_array1_real @a rep ay i;
+
+
+slice_Array1Section @(a : box)
+  (rep : ReprBox a)
+  (s : Boxed (Array1Section a)) (dom : dim1) (o : Boxed (Stored NoneType))
+  -> SomeIndexable dim1 a
+  attribute(inline) =
+
+  -- Since the section doesn't "move" indices, just slice the underlying array
+  let rep_section = unboxedinfo Array1Section @a in
+  case s of [reprSizeAlign @(Array1Section a) rep_section]
+            boxed tyob (array1Section @M rep_a
+                                      lb_x stride_x size_x ay_ref dom).
+
+  con_someIndexable @dim1 @a @(\ (a : box). Boxed (Array1Section a))
+  (idCoercion @dim1) Indexable_Array1Section
+  (con_boxed @(Array1Section a) rep_section
+   (array1Section @a @M rep
+    lb_x stride_x size_x ay_ref dom));
+
+
+-- Don't deconstruct Array1Sections that are used in distributed computation.
+preserve_Array1Section @(a : box) (x : Boxed (Array1Section a))
+  -> Boxed (Array1Section a) attribute(inline) =
+
+  let repr_Array1Section = unboxedinfo Array1Section @a in
+  let sa_Array1Section = reprSizeAlign @(Array1Section a) repr_Array1Section in
+
+  case x of [sa_Array1Section]
+            boxed tyob (array1Section @M rep
+                                      lb_x stride_x size_x ay_ref dom).
+
+  -- Prevent it from being deconstructed prior to this program point
+  let x2 = preserve @(Boxed (Array1Section a)) x in
+
+  -- Now deconstruct and rebuild the Array1Section, using the old Repr object.
+  -- This allows optimizations to propagate the Repr object.
+  case x2 of [sa_Array1Section]
+     boxed tyob (array1Section @M unused_rep
+                                  lb_x stride_x size_x ay_ref dom).
+
+  con_boxed @(Array1Section a) repr_Array1Section
+  (array1Section @a @M rep lb_x stride_x size_x ay_ref dom);
+
+
+traverse_Array1Section @(a : box)
+  (rep : ReprBox a) (s : Boxed (Array1Section a)) -> Stream dim1 a =
+
+  con_stream @dim1 @a hintAny
+  (con_ixStream @dim1 @a
+   (con_rStream @dim1 @a @a rep (\ (x : a) -> a. x)
+    (con_someIndexable @dim1 @a @(\ (a : box). Boxed (Array1Section a))
+     (idCoercion @dim1)
+     Indexable_Array1Section
+     s)));
+
+
+build_Array1Section @(a : box)
+  (rep : ReprBox a) (s : Stream dim1 a) -> Boxed (Array1Section a) =
+
+  let rep_array1 = unboxedinfo array1 @(AsBare a) in
+  let sa_array1 = reprSizeAlign @(array1 (AsBare a)) rep_array1 in
+  let repr_Array1Section = unboxedinfo Array1Section @a in
+  let ay = build_array1 @a rep s in
+  case ay of
+    [sa_array1] boxed tyob (mk_array1 @N
+                                      lb_x stride_x size_x ay_ref).
+
+  let dom = shape_array1_real @a ay in
+  con_boxed @(Array1Section a) repr_Array1Section
+  (array1Section @a @N rep
+   lb_x stride_x size_x ay_ref dom);
+
+----
+
 Functor_Array2Section : FunctorDict (\ (a : box). Boxed (Array2Section a)) =
   functorDict @(\ (a : box). Boxed (Array2Section a))
   (boxedinfo functorDict @(\ (a : box). Boxed (Array2Section a)))
@@ -4820,6 +4960,90 @@ preserve_Zip2Indexable @(d : box) (sh : ShapeDict d)
     case x of zip2Indexable @(b c : box) tyob rep_b rep_c f c1 c2.
     zip2Indexable @d @a @b @c tyob rep_b rep_c f
     (preserve_SomeIndexable @d @b c1) (preserve_SomeIndexable @d @c c2);
+
+
+Functor_OuterPIndexable -> FunctorDict OuterPIndexable =
+  functorDict @OuterPIndexable (boxedinfo functorDict @OuterPIndexable)
+  map_OuterPIndexable;
+
+
+map_OuterPIndexable @(a b : box)
+  (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (f : a -> b) (x : OuterPIndexable a)
+  -> OuterPIndexable b attribute(inline) =
+
+  case x of outerPIndexable @c @d tyob rep_c rep_d g si1 si2.
+
+  con_outerPIndexable @b @c @d
+  rep_c rep_d (\ (y : c) (z : d) -> b. f (g y z)) si1 si2;
+
+
+Indexable_OuterPIndexable : IndexableDict OuterPIndexable =
+  indexableDict @OuterPIndexable (boxedinfo indexableDict @OuterPIndexable)
+  Functor_OuterPIndexable
+  shape_OuterPIndexable
+  at_OuterPIndexable
+  slice_OuterPIndexable
+  preserve_OuterPIndexable;
+
+
+shape_OuterPIndexable @(a : box) (x : OuterPIndexable a)
+  -> dim2 attribute(inline) =
+  case x of outerPIndexable @c @d tyob rep_c rep_d f si1 si2.
+  con_dim2 (someIndexableShape @dim1 @c si1)
+           (someIndexableShape @dim1 @d si2);
+
+
+at_OuterPIndexable @(a : box)
+  (rep : ReprBox a) (x : OuterPIndexable a) (i : BoxIndex dim2) -> a
+  attribute(inline) =
+
+  case x of outerPIndexable @c @d tyob rep_c rep_d f si1 si2.
+  case si1 of someIndexable @s tyob c1 ix1 container1.
+  case si2 of someIndexable @t tyob c2 ix2 container2.
+
+  case unpack_index2 i of (y, x).
+
+  f (ix_at @s ix1 @c rep_c container1
+     (coerce @(BoxIndex dim1) @(BoxIndex (shape s)) (boxIntValue y)))
+    (ix_at @t ix2 @d rep_d container2
+     (coerce @(BoxIndex dim1) @(BoxIndex (shape t)) (boxIntValue x)));
+
+
+slice_OuterPIndexable @(a : box)
+  (rep : ReprBox a) (x : OuterPIndexable a)
+  (dom : dim2) (off : BoxOffset dim2)
+  -> SomeIndexable dim2 a
+  attribute(inline,
+            inline_struct(T D(T T T T T) T T) -- Inline if object is known
+           ) =
+
+  case x of outerPIndexable @c @d tyob rep_c rep_d f si1 si2.
+  case si1 of someIndexable @s tyob c1 ix1 container1.
+  case si2 of someIndexable @t tyob c2 ix2 container2.
+
+  case dom of mk_dim2 tyob dom_y dom_x.
+  
+  con_someIndexable @dim2 @a @OuterPIndexable
+  (idCoercion @dim2)
+  Indexable_OuterPIndexable
+  (con_outerPIndexable @a @c @d rep_c rep_d f
+   (coerce @(SomeIndexable (shape s) c) @(SomeIndexable dim1 c)
+    (ix_slice @s ix1 @c rep_c container1
+     (coerce @dim1 @(shape s) dom_y)
+     (coerce @(AsBox (offset dim1)) @(AsBox (offset (shape s))) off)))
+   (coerce @(SomeIndexable (shape t) d) @(SomeIndexable dim1 d)
+    (ix_slice @t ix2 @d rep_d container2
+     (coerce @dim1 @(shape t) dom_x)
+     (coerce @(AsBox (offset dim1)) @(AsBox (offset (shape t))) off))));
+
+
+preserve_OuterPIndexable @(a : box)
+  (x : OuterPIndexable a) -> OuterPIndexable a attribute(inline) =
+
+  case x of outerPIndexable @(b c : box) tyob rep_b rep_c f c1 c2.
+  outerPIndexable @a @b @c tyob rep_b rep_c f
+  (preserve_SomeIndexable @dim1 @b c1) (preserve_SomeIndexable @dim1 @c c2);
 
 
 {-
@@ -15372,7 +15596,9 @@ safeSlice @(t : box -> box) @(a : box)
   someIndexableToView @(shape t) @a rep sliced_object;
 
 
-rows @(t : box -> box) @(a : box)
+-- This function is superseded by 'rows', which is compatible with
+-- parallel traversal
+old_rows @(t : box -> box) @(a : box)
   (indexable : IndexableDict t)
   (shape_is_dim2 : coerce @box (shape t) dim2)
   (rep : ReprBox a)
@@ -15403,6 +15629,46 @@ rows @(t : box -> box) @(a : box)
           let idx = pack_index2 (unboxIntValue y) (unboxIntValue x) in
           at_index @a rep container
           (coerce @(BoxIndex dim2) @(BoxIndex (shape t)) idx)))));
+
+
+rows @(a : box)
+  (rep : ReprBox a)
+  (container : Boxed (array2 (AsBare a)))
+  -> Stream dim1 (view dim1 a)
+  attribute(inline) =
+
+  let sa_a = reprSizeAlign @(AsBare a) rep in
+
+  let rep_array2 = unboxedinfo array2 @(AsBare a) in
+
+  case container of
+    [reprSizeAlign @(array2 (AsBare a)) rep_array2]
+    boxed tyob (mk_array2 @M @N
+                  lb_y stride_y size_y lb_x stride_x size_x ay_ref).
+
+  let rep_row = repr_arr @N @(AsBare a) size_x rep in
+  let rep_array1 = unboxedinfo array1 @(arr N (AsBare a)) in
+  let dom_x = arrayDescToDim1 @N lb_x stride_x size_x in
+
+  -- Reinterpret as an array of (arr N (AsBare a))
+  let rows_container =
+        con_boxed @(array1 (arr N (AsBare a)))
+        rep_array1
+        (mk_array1 @(arr N (AsBare a)) @M lb_y stride_y size_y ay_ref) in
+
+  -- Traverse this array to get a stream
+  let s = traverse_array1 @(AsBox (arr N (AsBare a))) rep_row rows_container in
+
+  -- Turn each row into a view
+  map_Stream @dim1 @(AsBox (arr N (AsBare a))) @(view dim1 a)
+  rep_row (repr_Box @(view dim1 a))
+  (\ (row : AsBox (arr N (AsBare a))) -> view dim1 a.
+    let bare_row = boxToBare @(arr N (AsBare a)) rep_row row in
+    con_view @dim1 @a dom_x
+    (\ (col : BoxIndex dim1) -> a.
+      bareToBox @(AsBare a) rep
+      (subscript @N @(AsBare a) sa_a bare_row (unboxIntValue col))))
+  s;
 
 
 outerproduct @(t u : box -> box) @(a b : box)
@@ -15440,19 +15706,46 @@ outerproduct_Stream @(a b : box)
   let type out_type = Boxed (Tuple2 (AsBare a) (AsBare b)) in
   let out_repr = unboxedinfo Tuple2 @(AsBare a) @(AsBare b) repr_a repr_b in
 
+  let sa_a = reprSizeAlign @(AsBare a) repr_a in
+  let sa_b = reprSizeAlign @(AsBare b) repr_b in
+
   case sa of stream tyob hint_a i_sa.
   case sb of stream tyob hint_b i_sb.
   let par_hint = leastParHint hint_a hint_b in
 
   case fromIxStream @dim1 @a i_sa of
-    rStream @a2 tyob rep_a2 extractA (someIndexable @tA tyob2 co ixA containerA).
+    rStream @a2 tyob rep_a2 extractA siA.
+  case siA of someIndexable @tA tyob2 co ixA containerA.
   case fromIxStream @dim1 @b i_sb of
-    rStream @b2 tyob rep_b2 extractB (someIndexable @tB tyob2 co ixB containerB).
+    rStream @b2 tyob rep_b2 extractB siB.
+  case siB of someIndexable @tB tyob2 co ixB containerB.
 
   -- Compute dimensions of the result
-  let dom = con_dim2 (coerce @(shape tA) @dim1 (ix_shape @tA ixA @a2 containerA))
-                     (coerce @(shape tB) @dim1 (ix_shape @tB ixB @b2 containerB)) in
+  let dom_y = coerce @(shape tA) @dim1 (ix_shape @tA ixA @a2 containerA) in
+  let dom_x = coerce @(shape tB) @dim1 (ix_shape @tB ixB @b2 containerB) in
+  let dom = con_dim2 dom_y dom_x in
 
+  -- Create an outer product object
+  letfun
+    make_pair (x : a2) (y : b2) -> out_type =
+      con_boxed @(Tuple2 (AsBare a) (AsBare b)) out_repr
+      (tuple2 @(AsBare a) @(AsBare b) sa_a sa_b
+       (asbare @(AsBare a) repr_a (extractA x))
+       (asbare @(AsBare b) repr_b (extractB y)))
+  in
+
+  let op = con_outerPIndexable @out_type @a2 @b2
+           rep_a2 rep_b2 make_pair siA siB in
+
+  -- Create a stream
+  con_stream @dim2 @out_type hintAny
+  (con_ixStream @dim2 @out_type
+   (con_rStream @dim2 @out_type @out_type out_repr
+    (\ (x : out_type) -> out_type. x)
+    (con_someIndexable @dim2 @out_type @OuterPIndexable (idCoercion @dim2)
+     Indexable_OuterPIndexable op)));
+
+{-
   letfun
     getA (idx : BoxIndex dim1) -> a =
       extractA (ix_at @tA ixA @a2 rep_a2 containerA
@@ -15473,7 +15766,7 @@ outerproduct_Stream @(a b : box)
      (tuple2 @(AsBare a) @(AsBare b)
       (reprSizeAlign @(AsBare a) repr_a)
       (reprSizeAlign @(AsBare b) repr_b)
-      (asbare @(AsBare a) repr_a valueA) (asbare @(AsBare b) repr_b valueB)));
+      (asbare @(AsBare a) repr_a valueA) (asbare @(AsBare b) repr_b valueB)));-}
 
 
 {-

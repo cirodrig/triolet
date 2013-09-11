@@ -244,8 +244,10 @@ shapePureTF bi = shapeLike bi $ \op args ->
            case args of [arg, _] -> liftM Just $ reduceToWhnf arg
        | isBuiltin bi The_Zip2Indexable op -> 
              case args of [arg, _] -> liftM Just $ reduceToWhnf arg
+       | isBuiltin bi The_OuterPIndexable op -> return_dim2
        | isBuiltin bi The_list op -> return_list_dim
        | isBuiltin bi The_ListSection op -> return_list_dim
+       | isBuiltin bi The_Array1Section op -> return_dim1
        | isBuiltin bi The_Array2Section op -> return_dim2
        | isBuiltin bi The_array0 op -> return_dim0
        | isBuiltin bi The_array1 op -> return_dim1
@@ -344,6 +346,7 @@ shapeMemTF bi = shapeLike bi $ \op args ->
            case args of [shape, _] -> return_shape shape
        | isBuiltin bi The_Zip2Indexable op -> 
              case args of [shape, _] -> return_shape shape
+       | isBuiltin bi The_OuterPIndexable op -> return_dim2
        | isBuiltin bi The_llist op -> return_list_dim
     _ -> return Nothing
   where
@@ -358,6 +361,7 @@ shapeMemTF bi = shapeLike bi $ \op args ->
       of Just (op, [_])
            | isBuiltin bi The_list op -> return_list_dim
            | isBuiltin bi The_ListSection op -> return_list_dim
+           | isBuiltin bi The_Array1Section op -> return_dim1
            | isBuiltin bi The_Array2Section op -> return_dim2
            | isBuiltin bi The_array0 op -> return_dim0
            | isBuiltin bi The_array1 op -> return_dim1
