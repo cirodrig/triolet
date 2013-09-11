@@ -13,7 +13,6 @@
 
 // Called from any rank to send/receive a message
 static void MPIMessage_initalize(MPIMessage *msg);
-static void MPIMessage_finalize(MPIMessage *msg);
 static void MPIMessage_send(int dst_rank, const MPIMessage *msg);
 static void MPIMessage_recv(int src_rank, MPIMessage *msg);
 
@@ -54,7 +53,7 @@ MPIMessage_initalize(MPIMessage *msg)
   msg->data = NULL;
 }
 
-static void
+void
 MPIMessage_finalize(MPIMessage *msg)
 {
   free(msg->data);
@@ -275,9 +274,8 @@ MPITask triolet_MPITask_launch(int length, char *data) {
 
 // This function can only be called from rank 0.
 // Wait for some work to finish.
-// Deallocate the task object.
-void *
-triolet_MPITask_wait(MPITask task) {
+MPIMessage
+triolet_MPITask_wait_raw(MPITask task) {
   assertRank0();
 
   // Wait and get the result of the task
@@ -289,6 +287,19 @@ triolet_MPITask_wait(MPITask task) {
 
   // The slave is now idle
   markProcessIdle(task->rank);
+
+  return output;
+}
+
+// This function can only be called from rank 0.
+// Wait for some work to finish.
+// Deallocate the task object.
+void *
+triolet_MPITask_wait(MPITask task) {
+  assertRank0();
+
+  // Wait and get the result of the task
+  MPIMessage output = triolet_MPITask_wait_raw(task);
 
   // Construct the result
   void *ret = triolet_deserialize(output.length, output.data);

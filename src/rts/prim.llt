@@ -516,7 +516,7 @@ procedure farm_parallel (int n, owned rep_output, owned tasks) -> owned {
   results = pointer primcall triolet_alloc (sizeof boxed_array);
   results @! boxed_array.header = rep_output;
 
-#if 1
+#if 0
   // SERIAL gather
   _ = while (int i = int 0) (i < n - int 1) {
     running_task = running_tasks @! running_task_array[i];

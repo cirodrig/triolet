@@ -549,7 +549,7 @@ struct BlockedDoer2 {
     int first_y = range.rows().begin();
     int end_y = range.rows().end();
     int first_x = range.cols().begin();
-    int end_x = range.cols().end(); 
+    int end_x = range.cols().end();
     blocked_doall2_worker(data, first_y, end_y, first_x, end_x);
   }
 };
@@ -630,7 +630,7 @@ struct PBTreeIntegerRange
 struct PBTreeRangeDoer
 {
   void *worker_fn;
-  
+
   PBTreeRangeDoer(void *_worker_fn) : worker_fn(_worker_fn) {};
 
   void operator()(PBTreeIntegerRange &range) const
@@ -711,18 +711,18 @@ triolet_join_tasks(int n, void **results, void **running_tasks);
 /* Functions imported from Triolet RTS */
 
 struct JoinTasksDoer {
-  SerializedObjectInfo *const buffers;
+  MPIMessage *const msgs;
   void **const objects;
 
-  JoinTasksDoer(SerializedObjectInfo *_buffers,
+  JoinTasksDoer(MPIMessage *_msgs,
                 void **_objects)
-    : buffers(_buffers), objects(_objects) {}
+    : msgs(_msgs), objects(_objects) {}
 
   void operator()(tbb::blocked_range<int> & range) const {
     int i;
     for (i = range.begin(); i < range.end(); i++) {
-      objects[i] = triolet_deserialize (buffers[i].length,
-                                        (char *)buffers[i].buffer);
+      objects[i] = triolet_deserialize (msgs[i].length,
+                                        msgs[i].data);
     }
   }
 };
@@ -730,23 +730,30 @@ struct JoinTasksDoer {
 extern "C" void
 triolet_join_tasks(int n, void **running_tasks, void **thunks)
 {
-  SerializedObjectInfo *buffers =
-    (SerializedObjectInfo *)GC_MALLOC(n * sizeof(SerializedObjectInfo));
+  MPIMessage *msgs =
+    (MPIMessage *)GC_MALLOC(n * sizeof(MPIMessage));
 
   // Join tasks seqeuntially (MPI may not support parallel calls)
   {
     int i;
     for (i = 0; i < n; i++) {
-      exit(-1); // TODO
-      //buffers[i] = triolet_MPITask_wait_raw(running_tasks[i]);
+      msgs[i] = triolet_MPITask_wait_raw((MPITask) running_tasks[i]);
     }
   }
 
   // Fill buffers in parallel
-  JoinTasksDoer doer(buffers, thunks);
+  JoinTasksDoer doer(msgs, thunks);
   tbb::parallel_for(tbb::blocked_range<int>(0, n), doer);
 
-  GC_FREE(buffers);
+  {
+    int i;
+    for (i = 0; i < n; i++) {
+      MPIMessage_finalize(&msgs[i]);
+      free(running_tasks[i]);
+    }
+  }
+
+  GC_FREE(msgs);
 }
 
 #endif

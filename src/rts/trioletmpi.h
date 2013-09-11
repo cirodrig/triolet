@@ -38,13 +38,18 @@ MPITask triolet_MPITask_launch(int32_t length, char *data);
 
 // This function can only be called from rank 0.
 // Wait for some work to finish.
+// The MPITask is freed.
 void *triolet_MPITask_wait(MPITask);
+
+// This function can only be called from rank 0.
+// Wait for some work to finish.
+MPIMessage triolet_MPITask_wait_raw(MPITask);
 
 // This function is implemented in Triolet.  Deserialize a single object.
 void *triolet_deserialize(int32_t length, char *data);
 
 // Serialize an object to a byte array
-SerializedObjectInfo triolet_serialize (void *);
+struct SerializedObjectInfo triolet_serialize (void *);
 
 // Begin executing a distributed task.
 // When the main rank runs a task, it calls this function.
@@ -64,6 +69,9 @@ int32_t triolet_get_num_distributed_places(void);
 
 // Check whether the current processor is executing a distributed task
 int32_t triolet_in_distributed_task(void);
+
+void MPIMessage_finalize(MPIMessage *msg);
+
 
 #endif  /* USE_MPI */
 
