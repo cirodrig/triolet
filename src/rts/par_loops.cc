@@ -20,6 +20,7 @@ extern "C" {
 #endif
 
 #ifdef USE_MPI
+# include "mpi.h"
 extern "C" {
 # include "trioletmpi.h"
 }
@@ -654,42 +655,98 @@ triolet_C_blocked_PBTree_doall(PBTree tree, void *worker_fn)
 #if defined(USE_TBB) && defined(USE_MPI)
 
 extern "C" void
-triolet_launch_tasks(int n, void *running_tasks, void *thunks);
+triolet_launch_tasks(int n, void **running_tasks, void **thunks);
 
 /* Functions imported from Triolet RTS */
 
-// Results about an object that has been serialized,
-// from 'serializeBoxedObject'
-struct SerializedObjectInfo {
-  uint32_t length;
-  void *buffer;
-};
-
-// Serialize an object to a byte array
-extern "C" SerializedObjectInfo
-triolet_serialize (void *);
-
 struct LaunchTasksDoer {
-  void *running_tasks;
-  void *thunks;
+  SerializedObjectInfo *const buffers;
+  void **const thunks;
 
-  LaunchTasksDoer(void *_running_tasks, void *_thunks)
-    : running_tasks(_running_tasks), thunks(_thunks) {}
+  LaunchTasksDoer(SerializedObjectInfo *_buffers,
+                  void **_thunks)
+    : buffers(_buffers), thunks(_thunks) {}
 
-  void operator()(tbb::blocked_range<int> & range) {
+  void operator()(tbb::blocked_range<int> & range) const {
     int i;
     for (i = range.begin(); i < range.end(); i++) {
-      SerializedObjectInfo info = triolet_serialize (thunks[i]);
-      running_tasks[i] = triolet_MPITask_launch(info.length, info.buffer);
+      buffers[i] = triolet_serialize (thunks[i]);
     }
   }
 };
 
 extern "C" void
-triolet_launch_tasks(int n, void *running_tasks, void *thunks)
+triolet_launch_tasks(int n, void **running_tasks, void **thunks)
 {
-  LaunchTasksDoer doer(running_tasks, thunks);
+  SerializedObjectInfo *buffers =
+    (SerializedObjectInfo *)GC_MALLOC(n * sizeof(SerializedObjectInfo));
+
+  // Fill buffers in parallel
+  LaunchTasksDoer doer(buffers, thunks);
   tbb::parallel_for(tbb::blocked_range<int>(0, n), doer);
+
+  // Launch tasks seqeuntially (MPI may not support parallel calls)
+  {
+    int i;
+    for (i = 0; i < n; i++) {
+      running_tasks[i] = triolet_MPITask_launch(buffers[i].length,
+                                                (char *)buffers[i].buffer);
+    }
+  }
+
+  GC_FREE(buffers);
+}
+
+#endif
+
+
+/*****************************************************************************/
+/* Parallelized task join for MPI */
+
+#if defined(USE_TBB) && defined(USE_MPI)
+
+extern "C" void
+triolet_join_tasks(int n, void **results, void **running_tasks);
+
+/* Functions imported from Triolet RTS */
+
+struct JoinTasksDoer {
+  SerializedObjectInfo *const buffers;
+  void **const objects;
+
+  JoinTasksDoer(SerializedObjectInfo *_buffers,
+                void **_objects)
+    : buffers(_buffers), objects(_objects) {}
+
+  void operator()(tbb::blocked_range<int> & range) const {
+    int i;
+    for (i = range.begin(); i < range.end(); i++) {
+      objects[i] = triolet_deserialize (buffers[i].length,
+                                        (char *)buffers[i].buffer);
+    }
+  }
+};
+
+extern "C" void
+triolet_join_tasks(int n, void **running_tasks, void **thunks)
+{
+  SerializedObjectInfo *buffers =
+    (SerializedObjectInfo *)GC_MALLOC(n * sizeof(SerializedObjectInfo));
+
+  // Join tasks seqeuntially (MPI may not support parallel calls)
+  {
+    int i;
+    for (i = 0; i < n; i++) {
+      exit(-1); // TODO
+      //buffers[i] = triolet_MPITask_wait_raw(running_tasks[i]);
+    }
+  }
+
+  // Fill buffers in parallel
+  JoinTasksDoer doer(buffers, thunks);
+  tbb::parallel_for(tbb::blocked_range<int>(0, n), doer);
+
+  GC_FREE(buffers);
 }
 
 #endif

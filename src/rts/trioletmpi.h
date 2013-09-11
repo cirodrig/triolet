@@ -20,6 +20,13 @@ typedef struct
   char *data;
 } MPIMessage;
 
+// Results about an object that has been serialized,
+// from 'serializeBoxedObject'
+struct SerializedObjectInfo {
+  uint32_t length;
+  void *buffer;
+};
+
 // Launch the MPI task interface.
 // If MPI rank is zero, then return.
 // If MPI rank is not zero, then run a loop that waits for MPI messages.
@@ -35,6 +42,9 @@ void *triolet_MPITask_wait(MPITask);
 
 // This function is implemented in Triolet.  Deserialize a single object.
 void *triolet_deserialize(int32_t length, char *data);
+
+// Serialize an object to a byte array
+SerializedObjectInfo triolet_serialize (void *);
 
 // Begin executing a distributed task.
 // When the main rank runs a task, it calls this function.

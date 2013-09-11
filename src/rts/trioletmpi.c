@@ -5,6 +5,7 @@
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #include "trioletmpi.h"
 
@@ -30,6 +31,10 @@ static void slaveProcess(int rank);
 
 static int numProcs; // number of processors in the system
 
+// A global lock on static information about the thread pool.
+// Protects 'is_busy' and 'thread_state'
+static pthread_mutex_t thread_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+
 // Array of length 'numProcs'.  Only used by rank 0.
 // is_busy[i] is zero iff node i+1 is idle.
 static int *is_busy;
@@ -38,6 +43,7 @@ static int *is_busy;
 // FIXME: This should be part of a thread-state object, but the infrastructure
 // for managing thread state objects isn't there
 ThreadState thread_state = {0};
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -105,20 +111,30 @@ assertRank0(void)
 static int
 getIdleProcess(void) {
   int i;
-  while(1) {
-    for(i=0;i<numProcs-1;i++) {
-      if(!is_busy[i]) {
-        is_busy[i] = 1;
-        return i+1;
-      }
+  pthread_mutex_lock(&thread_pool_lock);
+
+  // Search for an idle slave
+  for(i=0;i<numProcs-1;i++) {
+    if(!is_busy[i]) {
+      is_busy[i] = 1;
+      goto done;
     }
   }
+  // No idle slaves
+  fprintf(stderr, "Scheduling problem: no idle MPI processes available\n");
+  exit(-1);
+
+ done:
+  pthread_mutex_unlock(&thread_pool_lock);
+  return i+1;
 }
 
 // Record the fact that a rank is idle
 static void
 markProcessIdle(int rank) {
+  pthread_mutex_lock(&thread_pool_lock);
   is_busy[rank-1] = 0;
+  pthread_mutex_unlock(&thread_pool_lock);
 }
 
 // Called when rank 0 exits.
@@ -191,13 +207,7 @@ slaveProcess_sendResult(int32_t length, char *data)
 // If MPI rank is not zero, then run a loop that waits for MPI messages.
 int triolet_MPITask_setup(int *argc, char ***argv) {
   int thread_support_provided;
-  MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &thread_support_provided);
-  if (thread_support_provided != MPI_THREAD_MULTPLE &&
-      thread_support_provided != MPI_THREAD_SERIALIZED) {
-    fprintf(stderr,
-            "Cannot initialize Triolet: MPI library doesn't support threading");
-    exit(-1);
-  }
+  MPI_Init_thread(argc, argv, MPI_THREAD_SINGLE, &thread_support_provided);
 
   MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
   int rank;

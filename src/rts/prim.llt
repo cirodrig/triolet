@@ -490,11 +490,11 @@ procedure farm_parallel (int n, owned rep_output, owned tasks) -> owned {
   // Launch all tasks but the last
   running_tasks = pointer primcall triolet_alloc (sizeof running_task_array);
 
-#if 1
+#if 0
   // SEQUENTIAL launch
   _ = while (int i = int 0) (i < n - int 1) {
     (length, buf) =
-      (uint, pointer) call serializeBoxedObject(tasks @! boxed_array.member[i]);
+      (uint, pointer) primcall serializeBoxedObject(tasks @! boxed_array.member[i]);
 
     running_tasks @! running_task_array[i] =
       pointer primcall triolet_MPITask_launch (length, buf);
@@ -516,12 +516,20 @@ procedure farm_parallel (int n, owned rep_output, owned tasks) -> owned {
   results = pointer primcall triolet_alloc (sizeof boxed_array);
   results @! boxed_array.header = rep_output;
 
+#if 1
+  // SERIAL gather
   _ = while (int i = int 0) (i < n - int 1) {
     running_task = running_tasks @! running_task_array[i];
     results @! boxed_array.member[i] =
       owned primcall triolet_MPITask_wait (running_task);
     i + int 1;
   };
+#else
+  // PARALLEL gather
+  () = () primcall triolet_join_tasks(n - int 1,
+                                      running_tasks as pointer,
+                                      (results @ boxed_array.member) as pointer);  
+#endif
   results @! boxed_array.member[n - int 1] = local_result;
 
   results as owned;
@@ -573,6 +581,11 @@ procedure farm_sequential (int n, owned type_obj, owned tasks) -> owned {
 // This simply exports 'deserializeBoxedObject' for use in C code.
 procedure triolet_deserialize (uint32 length, pointer dat) -> owned {
   owned primcall deserializeBoxedObject(length, dat);
+};
+
+// This simply exports 'serializeBoxedObject' for use in C code.
+procedure triolet_serialize (owned obj) -> (uint, pointer) {
+  (uint, pointer) primcall serializeBoxedObject(obj);
 };
 
 // Given a serialized function of type @NoneType -> a@ for some boxed type a,

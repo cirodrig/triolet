@@ -85,7 +85,7 @@ targetLinkFlags econfig = "-g" :
     target_lib_paths = configTargetLibDirs econfig ++ configCxxLibDirs econfig
     -- Libraries to link against
     target_libs = ifTBB econfig ["tbb"] [] ++
-                  ifMPI econfig ["mpi"] [] ++
+                  ifMPI econfig ["mpi_cxx", "mpi"] [] ++
                   ["gc", "c", "m", "stdc++"]
 
 -- | GHC arguments to use while building the test driver
