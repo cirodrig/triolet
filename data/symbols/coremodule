@@ -5190,30 +5190,6 @@ Indexable_array1 : IndexableDict (\ (a : box). Boxed (array1 (AsBare a))) =
   preserve_array1_real;
 
 
--- Workaround for inlining
--- FIXME: Handle recursion properly
-Indexable_array1_2 : IndexableDict (\ (a : box). Boxed (array1 (AsBare a))) =
-  indexableDict @(\ (a : box). Boxed (array1 (AsBare a)))
-  (boxedinfo indexableDict @(\ (a : box). Boxed (array1 (AsBare a))))
-  Functor_array1
-  shape_array1_real
-  at_array1_real
-  slice_array1_real_2
-  preserve_array1_real;
-
-
--- Workaround for inlining
--- FIXME: Handle recursion properly
-Indexable_array1_3 : IndexableDict (\ (a : box). Boxed (array1 (AsBare a))) =
-  indexableDict @(\ (a : box). Boxed (array1 (AsBare a)))
-  (boxedinfo indexableDict @(\ (a : box). Boxed (array1 (AsBare a))))
-  Functor_array1
-  shape_array1_real
-  at_array1_real
-  slice_array1_real_3
-  preserve_array1_real;
-
-
 shape_array1 (f : FunctorDict (\ (a : box). Boxed (array1 (AsBare a))))
   -> forall a : box. Boxed (array1 (AsBare a)) -> dim1 =
   shape_array1_real;
@@ -5261,93 +5237,17 @@ slice_array1_real @(a : box) (rep : ReprBox a)
   (lst : Boxed (array1 (AsBare a))) (d : dim1) (off : Boxed (Stored NoneType))
   -> SomeIndexable dim1 a attribute(inline) =
 
-  -- FIXME: Use the same technique as in slice_array2
+  let rep_array1 = unboxedinfo array1 @(AsBare a) in
+  let sa_array1 = reprSizeAlign @(array1 (AsBare a)) rep_array1 in
+  let rep_section = unboxedinfo Array1Section @a in
 
-  case lst of [reprSizeAlign @(array1 (AsBare a)) (unboxedinfo array1 @(AsBare a))]
-    boxed tyob (mk_array1 @N lb stride size ayref).
+  case lst of [sa_array1]
+    boxed tyob (mk_array1 @N lb_x stride_x size_x ay_ref).
 
-  let sa_a = reprSizeAlign @(AsBare a) rep in
-  let rep_array = repr_arr @N @(AsBare a) size rep in
-
-  case ayref of [reprSizeAlign @(arr N (AsBare a)) rep_array] stuckBox tyob ay.
-
-  case dim1ToArraySize d of arraySize @M slice_lb slice_stride slice_size.
-
-  -- TODO: Use an array section if possible to avoid copying
-  -- Copy the array subset into a new array
-  let new_arr = build_array1 @a rep
-                (traverse_view_real @dim1 @a ShapeDict_dim1 rep
-                 (con_view @dim1 @a d
-                  (\ (b_ix : Boxed (Stored int)) -> a.
-                     let real_index = (unboxIntValue b_ix -# lb) //# stride in
-                     bareToBox @(AsBare a) rep
-                     (subscript @N @(AsBare a)
-                      (reprSizeAlign @(AsBare a) rep) ay real_index)))) in
-
-  con_someIndexable @dim1 @a @(\ (a : box). Boxed (array1 (AsBare a)))
-  (idCoercion @dim1) Indexable_array1_2 new_arr;
-
-
--- Workaround for inlining
--- FIXME: Handle recursion properly
-slice_array1_real_2 @(a : box) (rep : ReprBox a)
-  (lst : Boxed (array1 (AsBare a))) (d : dim1) (off : Boxed (Stored NoneType))
-  -> SomeIndexable dim1 a attribute(inline) =
-
-  case lst of [reprSizeAlign @(array1 (AsBare a)) (unboxedinfo array1 @(AsBare a))]
-    boxed tyob (mk_array1 @N lb stride size ayref).
-
-  let sa_a = reprSizeAlign @(AsBare a) rep in
-  let rep_array = repr_arr @N @(AsBare a) size rep in
-
-  case ayref of [reprSizeAlign @(arr N (AsBare a)) rep_array] stuckBox tyob ay.
-
-  case dim1ToArraySize d of arraySize @M slice_lb slice_stride slice_size.
-
-  -- TODO: Use an array section if possible to avoid copying
-  -- Copy the array subset into a new array
-  let new_arr = build_array1 @a rep
-                (traverse_view_real @dim1 @a ShapeDict_dim1 rep
-                 (con_view @dim1 @a d
-                  (\ (b_ix : Boxed (Stored int)) -> a.
-                     let real_index = (unboxIntValue b_ix -# lb) //# stride in
-                     bareToBox @(AsBare a) rep
-                     (subscript @N @(AsBare a)
-                      (reprSizeAlign @(AsBare a) rep) ay real_index)))) in
-
-  con_someIndexable @dim1 @a @(\ (a : box). Boxed (array1 (AsBare a)))
-  (idCoercion @dim1) Indexable_array1_2 new_arr;
-
-
--- Workaround for inlining
--- FIXME: Handle recursion properly
-slice_array1_real_3 @(a : box) (rep : ReprBox a)
-  (lst : Boxed (array1 (AsBare a))) (d : dim1) (off : Boxed (Stored NoneType))
-  -> SomeIndexable dim1 a attribute(inline_never) =
-
-  case lst of [reprSizeAlign @(array1 (AsBare a)) (unboxedinfo array1 @(AsBare a))]
-    boxed tyob (mk_array1 @N lb stride size ayref).
-
-  let sa_a = reprSizeAlign @(AsBare a) rep in
-  let rep_array = repr_arr @N @(AsBare a) size rep in
-
-  case ayref of [reprSizeAlign @(arr N (AsBare a)) rep_array] stuckBox tyob ay.
-
-  case dim1ToArraySize d of arraySize @M slice_lb slice_stride slice_size.
-
-  -- TODO: Use an array section if possible to avoid copying
-  -- Copy the array subset into a new array
-  let new_arr = build_array1 @a rep
-                (traverse_view_real @dim1 @a ShapeDict_dim1 rep
-                 (con_view @dim1 @a d
-                  (\ (b_ix : Boxed (Stored int)) -> a.
-                     let real_index = (unboxIntValue b_ix -# lb) //# stride in
-                     bareToBox @(AsBare a) rep
-                     (subscript @N @(AsBare a)
-                      (reprSizeAlign @(AsBare a) rep) ay real_index)))) in
-
-  con_someIndexable @dim1 @a @(\ (a : box). Boxed (array1 (AsBare a)))
-  (idCoercion @dim1) Indexable_array1_3 new_arr;
+  con_someIndexable @dim1 @a @(\ (a : box). Boxed (Array1Section a))
+  (idCoercion @dim1) Indexable_Array1Section
+  (con_boxed @(Array1Section a) rep_section
+   (array1Section @a @N rep lb_x stride_x size_x ay_ref d));
 
 
 preserve_array1 (f : FunctorDict (\ (a : box). Boxed (array1 (AsBare a))))
