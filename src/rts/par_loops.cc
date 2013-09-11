@@ -19,6 +19,12 @@ extern "C" {
 # include "tbb/task_scheduler_init.h"
 #endif
 
+#ifdef USE_MPI
+extern "C" {
+# include "trioletmpi.h"
+}
+#endif
+
 /*****************************************************************************/
 /* Generalized parallel reduction */
 
@@ -641,3 +647,49 @@ triolet_C_blocked_PBTree_doall(PBTree tree, void *worker_fn)
 }
 
 #endif  // USE_TBB
+
+/*****************************************************************************/
+/* Parallelized task launch for MPI */
+
+#if defined(USE_TBB) && defined(USE_MPI)
+
+extern "C" void
+triolet_launch_tasks(int n, void *running_tasks, void *thunks);
+
+/* Functions imported from Triolet RTS */
+
+// Results about an object that has been serialized,
+// from 'serializeBoxedObject'
+struct SerializedObjectInfo {
+  uint32_t length;
+  void *buffer;
+};
+
+// Serialize an object to a byte array
+extern "C" SerializedObjectInfo
+triolet_serialize (void *);
+
+struct LaunchTasksDoer {
+  void *running_tasks;
+  void *thunks;
+
+  LaunchTasksDoer(void *_running_tasks, void *_thunks)
+    : running_tasks(_running_tasks), thunks(_thunks) {}
+
+  void operator()(tbb::blocked_range<int> & range) {
+    int i;
+    for (i = range.begin(); i < range.end(); i++) {
+      SerializedObjectInfo info = triolet_serialize (thunks[i]);
+      running_tasks[i] = triolet_MPITask_launch(info.length, info.buffer);
+    }
+  }
+};
+
+extern "C" void
+triolet_launch_tasks(int n, void *running_tasks, void *thunks)
+{
+  LaunchTasksDoer doer(running_tasks, thunks);
+  tbb::parallel_for(tbb::blocked_range<int>(0, n), doer);
+}
+
+#endif

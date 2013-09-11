@@ -134,11 +134,15 @@ import procedure triolet_begin_distributed_task () -> ();
 import procedure triolet_end_distributed_task () -> ();
 import procedure triolet_get_num_distributed_places () -> int32;
 import procedure triolet_in_distributed_task() -> int32;
+import procedure triolet_launch_tasks(int, pointer, pointer) -> (); // TBB-parallel loop
 
 import procedure triolet_MPITask_launch(int32, pointer) -> pointer;
 import procedure triolet_MPITask_wait(pointer, pointer) -> owned;
 
 extern function core.internal.prim.farm (FinIndInt, owned, uint32, owned) -> owned;
+
+extern procedure core.internal.prim.triolet_serialize "triolet_serialize"
+  (owned) -> (uint, pointer);
 
 extern procedure core.internal.prim.triolet_deserialize "triolet_deserialize"
   (uint32, pointer) -> owned;

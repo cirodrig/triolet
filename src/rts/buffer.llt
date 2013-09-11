@@ -675,7 +675,7 @@ function updateDeserializationTable (owned des_info, owned obj) -> unit {
 ///////////////////////////////////////////////////////////////////////////////
 
 // Write 'x' to a new buffer
-function serializeBoxedObject(owned x) -> (uint, pointer)
+procedure serializeBoxedObject(owned x) -> (uint, pointer)
 {
   b = owned primcall MkBuffer_create ();
   _ = unit call putBoxedObject (x, b, nil);
@@ -684,7 +684,7 @@ function serializeBoxedObject(owned x) -> (uint, pointer)
 
 // Take a buffer that contains a single object (plus anything it references,
 // transitively).  Deserialize the object.
-function deserializeBoxedObject(uint32 length, pointer dat) -> owned {
+procedure deserializeBoxedObject(uint32 length, pointer dat) -> owned {
   // FIXME: This buffer doesn't follow the memory layout rules for
   // boxed objects
   buffer_cursor = (dat as owned) ^+ int 0;

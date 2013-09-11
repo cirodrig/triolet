@@ -44,8 +44,8 @@ extern function core.internal.buffer.getStoredInt64 (owned, cursor) -> ReadResul
 extern function core.internal.buffer.getStoredCursor (owned, cursor) -> ReadResult(owned);
 extern function core.internal.buffer.getBoxedObject (owned, cursor) -> ReadResult(owned);
 
-extern function core.internal.buffer.serializeBoxedObject(owned) -> (uint, pointer);
-extern function core.internal.buffer.deserializeBoxedObject(uint32, pointer) -> owned;
+extern procedure core.internal.buffer.serializeBoxedObject(owned) -> (uint, pointer);
+extern procedure core.internal.buffer.deserializeBoxedObject(uint32, pointer) -> owned;
 
 extern function core.internal.buffer.updateDeserializationTable (owned, owned) -> unit;
 

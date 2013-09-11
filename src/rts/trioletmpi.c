@@ -190,7 +190,15 @@ slaveProcess_sendResult(int32_t length, char *data)
 // If MPI rank is zero, then return.
 // If MPI rank is not zero, then run a loop that waits for MPI messages.
 int triolet_MPITask_setup(int *argc, char ***argv) {
-  MPI_Init(argc, argv);
+  int thread_support_provided;
+  MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &thread_support_provided);
+  if (thread_support_provided != MPI_THREAD_MULTPLE &&
+      thread_support_provided != MPI_THREAD_SERIALIZED) {
+    fprintf(stderr,
+            "Cannot initialize Triolet: MPI library doesn't support threading");
+    exit(-1);
+  }
+
   MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
