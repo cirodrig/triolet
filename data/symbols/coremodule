@@ -6181,6 +6181,37 @@ listCollector @(k v r : box)
   });
 
 
+-- Initialize an accumulator.
+-- Helper function for array3Collector
+array3Collector_initialize_acc @(L M N : intindex) @(acc : bare)
+  (count_z : FIInt L)
+  (count_y : FIInt M)
+  (count_x : FIInt N)
+  (repr_acc : Repr acc)
+  (c_init : OutPtr acc -> Store)
+  (ret : OutPtr (arr L (arr M (arr N acc))))
+  -> Store
+  attribute(inline, inline_final) =
+
+  let sa_acc = reprSizeAlign @acc repr_acc in
+  let rep_row = repr_arr @N @acc count_x repr_acc in
+  let sa_row = reprSizeAlign @(arr N acc) rep_row in
+  let rep_plane = repr_arr @M @(arr N acc) count_y rep_row in
+  let sa_plane = reprSizeAlign @(arr M (arr N acc)) rep_plane in
+  
+  doall @L count_z
+  (\ (k : int) -> Store.
+     doall @M count_y
+     (\ (j : int) -> Store.
+        doall @N count_x
+        (\ (i : int) -> Store.
+           c_init (subscript_out @N @acc sa_acc
+                   (subscript_out @M @(arr N acc) sa_row
+                    (subscript_out @L @(arr M (arr N acc)) sa_plane ret k)
+                    j)
+                   i))));
+
+
 array3Collector @(k v r : box)
   (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_r : ReprBox r)
   (coll : Collector k v r)
@@ -6225,21 +6256,11 @@ array3Collector @(k v r : box)
   let rep_arr = repr_arr @L @(arr M (arr N acc)) count_z rep_plane in
   let sa_arr = reprSizeAlign @acc_array rep_arr in
 
-  letfun
-    -- Initialize an accumulator
-    initialize_acc (ret : OutPtr acc_array) -> Store =
-      doall @L count_z
-      (\ (k : int) -> Store.
-         doall @M count_y
-         (\ (j : int) -> Store.
-            doall @N count_x
-            (\ (i : int) -> Store.
-               c_init (subscript_out @N @acc sa_acc
-                       (subscript_out @M @(arr N acc) sa_row
-                        (subscript_out @L @(arr M (arr N acc)) sa_plane ret k)
-                        j)
-                       i))))
-  in
+  let initialize_acc_1 =
+        array3Collector_initialize_acc @L @M @N @acc count_z count_y count_x repr_acc c_init in
+
+  let initialize_acc_2 =
+        array3Collector_initialize_acc @L @M @N @acc count_z count_y count_x repr_acc c_init in
 
   letfun
     -- Combine two accumulators
@@ -6303,7 +6324,7 @@ array3Collector @(k v r : box)
   rep_arr
 
   -- Initialize
-  initialize_acc
+  initialize_acc_1
 
   -- Load
   (\ (i : Boxed t2) (ret : OutPtr acc_array) (s : Store)
@@ -6363,7 +6384,7 @@ array3Collector @(k v r : box)
      let sa_c = reprSizeAlign @(Stored (cursor acc_array)) rep_c in
 
      let first_array =
-           con_stuckBox @acc_array rep_arr initialize_acc in
+           con_stuckBox @acc_array rep_arr initialize_acc_2 in
 
      letfun
        array_to_cursor (x : StuckBox acc_array) -> acc_cursor =
