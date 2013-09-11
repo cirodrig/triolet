@@ -730,7 +730,7 @@ createBareTypeSerializers serializer_overrides data_type = do
       of Just (_, d) ->
            -- Call the override deserializer function
            emitAtom [readResultType (PrimType OwnedType)] $
-           L.closureCallA (L.VarV d) (map L.VarV $ infos ++ [buffer])
+           L.closureCallA (L.VarV d) (map L.VarV $ infos ++ [des_info, buffer])
          Nothing -> do
            -- Compute layout information
            sps <- infoToSizeParameters data_type (map L.VarV infos)
