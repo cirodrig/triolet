@@ -7,6 +7,7 @@ builtinTypeNames =
   , "Complex"
   , "list"
   , "ParHint"
+  , "LoadBalancing"
   , "append_list"
   , "ListBuilder"
   , "OpaqueRef"
@@ -155,6 +156,7 @@ builtinVariableNames =
   , "False"
   , "None"
   , "hintAny"
+  , "balanceGuided"
   , "complex"
   , "interval"
   , "linearMap"
@@ -861,6 +863,8 @@ builtinVariableNames =
   , "fun_par"
   , "fun_localpar"
   , "fun_seq"
+  , "fun_staticBalancing"
+  , "fun_guidedBalancing"
 
     -- Collectors
   , "valueCollector"
@@ -1041,6 +1045,7 @@ builtinVariableNames =
   , "blocked_doall"
   , "blocked_doall2"
   , "blocked_greduce"
+  , "static_greduce"
   , "blocked_PBTree_doall"
   , "emptyStore"
   , "seqStore"

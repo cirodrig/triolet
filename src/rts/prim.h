@@ -173,22 +173,20 @@ extern procedure core.internal.prim.greduce_combine
 extern procedure core.internal.prim.greduce_unit
   "greduce_unit" (owned) -> owned;
 
-#if 0
-
 ///////////////////////////////////////////////////////////////////////////////
 // Blocked 1D reduction
-extern function core.internal.prim.blocked_1d_reduce
-  (FinIndInt, owned, owned, owned) -> owned;
+extern function core.internal.prim.static_greduce
+  (int, owned, owned, owned) -> owned;
 
 // C implementation of blocked_reduce
-import procedure triolet_C_blocked_reduce
-  (pointer, owned, int) -> owned;
+import procedure triolet_C_static_greduce
+  (int, owned, owned, owned) -> owned;
 
 // Functions called from the C side of the library
-extern procedure core.internal.prim.blocked_reduce_accumulate_range
-  "blocked_reduce_accumulate_range" (pointer, owned, int, int) -> owned;
-extern procedure core.internal.prim.blocked_reduce_reduce
-  "blocked_reduce_reduce" (pointer, owned, owned) -> owned;
+extern procedure core.internal.prim.greduce_static_range
+  "greduce_static_range" (owned, int32) -> owned;
+
+#if 0
 
 ///////////////////////////////////////////////////////////////////////////////
 // Blocked 2D reduction

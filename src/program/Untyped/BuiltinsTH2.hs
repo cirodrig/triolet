@@ -61,6 +61,8 @@ frontendSourceGlobals =
   , "par"
   , "localpar"
   , "seq"
+  , "staticBalancing"
+  , "guidedBalancing"
   , "range"
   , "indices"
   , "len"

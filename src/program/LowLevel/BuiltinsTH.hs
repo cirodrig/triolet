@@ -466,6 +466,8 @@ builtinFunctions =
      Right [| coreBuiltin (SystemF.The_blocked_doall2) |])
   , (CoreName module_prim "blocked_greduce",
      Right [| coreBuiltin (SystemF.The_blocked_greduce) |])    
+  , (CoreName module_prim "static_greduce",
+     Right [| coreBuiltin (SystemF.The_static_greduce) |])    
   , (CoreName module_prim "blocked_PBTree_doall",
      Right [| coreBuiltin (SystemF.The_blocked_PBTree_doall) |])
 

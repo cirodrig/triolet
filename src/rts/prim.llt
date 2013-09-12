@@ -670,6 +670,21 @@ procedure greduce_unit(owned unit_fn) -> owned
 };
 
 
+function static_greduce (int range,
+                         owned combine_fn,
+                         owned reduce_fn,
+                         owned unit_value) -> owned
+{
+  owned primcall triolet_C_static_greduce
+    (range as int32, combine_fn, reduce_fn, unit_value);
+};
+
+procedure greduce_static_range(owned reduce_fn, int32 index) -> owned
+{
+  owned call reduce_fn(index as int);
+};
+
+
 #if 0
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.

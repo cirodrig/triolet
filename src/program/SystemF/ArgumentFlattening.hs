@@ -1170,6 +1170,8 @@ deadValue t = do
                return $ valConE' con [n, n]
            | con `isCoreBuiltin` The_ParHint ->
                return $ valConE' (VarCon (coreBuiltin The_hintAny) [] []) []
+           | con `isCoreBuiltin` The_LoadBalancing ->
+               return $ valConE' (VarCon (coreBuiltin The_balanceGuided) [] []) []
          (VarT con, [p])
            | con `isCoreBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor

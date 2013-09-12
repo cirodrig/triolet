@@ -937,20 +937,27 @@ data ParHint : val
   hintPar ();                   -- Distributed parallel execution indicated
 };
 
+-- A load balancing strategy
+data LoadBalancing : val
+{
+  balanceGuided ();             -- Dynamically load balance (default)
+  balanceStatic ();             -- Decompose into a fixed number of pieces
+};
+
 -- The externally visible stream data type
 data Stream (sh a : box) : box
 {
-  stream (ParHint, IStream sh a);
+  stream (ParHint, LoadBalancing, IStream sh a);
 };
 
-con_stream @(sh a : box) (h : ParHint) (s : IStream sh a)
+con_stream @(sh a : box) (h : ParHint) (l : LoadBalancing) (s : IStream sh a)
   -> Stream sh a attribute(inline) =
-  stream @sh @a (boxedinfo stream @sh @a) h s;
+  stream @sh @a (boxedinfo stream @sh @a) h l s;
 
 
 -- Discard the hints on a stream
 unStream @(sh a : box) (s : Stream sh a) -> IStream sh a attribute(inline) =
-  case s of stream tyob h i_s. i_s;
+  case s of stream tyob h l i_s. i_s;
 
 
 -- The internal stream data type
@@ -3946,7 +3953,7 @@ zip_Indexable @(d : box) @(a b c : box)
 streamToSequence @(a : box) (s : Stream list_dim a)
   -> Seq a
   attribute(inline,
-            inline_struct(D(T C)) -- Stream constructor must be known
+            inline_struct(D(T T C)) -- Stream constructor must be known
            ) =
 
   case unStream @list_dim @a s of {
@@ -4050,7 +4057,7 @@ peel_Stream @(a r : box)
                   rep_ref_a rep_seq in
   let rep_maybe = unboxedinfo Maybe @peeled_pair rep_tuple in
 
-  case s of stream tyob_stream par_hint i_s.
+  case s of stream tyob_stream par_hint balancing i_s.
   case i_s of {
     seqStream tyob co sq.
       case peel_Seq @a sq of
@@ -4062,7 +4069,7 @@ peel_Stream @(a r : box)
               tuple2 (stuckRef x) (ref sq2)).
           -- Create a new stream that is the old stream with one item peeled
           let peeled_stream =
-                stream @list_dim @a tyob_stream par_hint
+                stream @list_dim @a tyob_stream par_hint balancing
                 (seqStream @list_dim @a tyob co sq2) in
           value_k x peeled_stream
       ; nothing.
@@ -4283,7 +4290,7 @@ build_view @(sh : box) (sh_shape : ShapeDict sh)
 traverse_view_real @(sh a : box)
   (sh_shape : ShapeDict sh) (rep : ReprBox a) (vw : view sh a)
   -> Stream sh a attribute(inline) =
-  con_stream @sh @a hintAny
+  con_stream @sh @a hintAny balanceGuided
   (con_ixStream @sh @a (viewToRStream @sh @a sh_shape rep vw));
 
 
@@ -4324,35 +4331,35 @@ map_Stream @(d a b : box)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (f : a -> b) (s : Stream d a) -> Stream d b
   attribute(inline,
-            inline_struct(T T T D(T C)) -- Stream constructor is known
+            inline_struct(T T T D(T T C)) -- Stream constructor is known
            ) =
-  case s of stream tyob_stream par_hint i_s.
+  case s of stream tyob_stream par_hint balancing i_s.
   case i_s of {
     seqStream tyob co sq.
       coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
+      (con_stream @list_dim @b par_hint balancing
        (con_seqStream @b (map_Seq @a @b f sq)))
 
   ; nestedIxStream @d2 tyob co shape_d2 rs.
       coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
+      (con_stream @list_dim @b par_hint balancing
        (con_nestedIxStream @b @d2 shape_d2
         (map_RStream @d2 @(Stream list_dim a) @(Stream list_dim b)
          (map_Stream @list_dim @a @b rep_a rep_b f) rs)))
 
   ; nestedSeqStream tyob co rs.
       coerce @(Stream list_dim b) @(Stream d b)
-      (con_stream @list_dim @b par_hint
+      (con_stream @list_dim @b par_hint balancing
        (con_nestedSeqStream @b
         (map_Seq @(Stream list_dim a) @(Stream list_dim b)
          (map_Stream @list_dim @a @b rep_a rep_b f) rs)))
 
   ; ixStream tyob rs.
-      con_stream @d @b par_hint
+      con_stream @d @b par_hint balancing
        (con_ixStream @d @b (map_RStream @d @a @b f rs))
 
   ; unitStream tyob co x.
-      con_stream @d @b par_hint
+      con_stream @d @b par_hint balancing
       (coerce @(IStream list_dim b) @(IStream d b) (con_unitStream @b (f x)))
   };
 
@@ -4480,7 +4487,7 @@ Traversable_list : TraversableDict (\ (a : box). Boxed (list (AsBare a))) =
 traverse_list @(a : box) (rep : ReprBox a) (lst : Boxed (list (AsBare a)))
   -> Stream list_dim a =
 
-  con_stream @list_dim @a hintAny
+  con_stream @list_dim @a hintAny balanceGuided
   (con_ixStream @list_dim @a
    (con_rStream @list_dim @a @a rep (\ (x : a) -> a. x)
     (con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
@@ -4491,7 +4498,7 @@ traverse_list @(a : box) (rep : ReprBox a) (lst : Boxed (list (AsBare a)))
 build_list @(a : box) (rep : ReprBox a) (s : Stream list_dim a)
   -> Boxed (list (AsBare a)) attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case i_s of {
     seqStream tyob co sq.
       -- TODO
@@ -4603,7 +4610,7 @@ preserve_ListSection @(a : box) (x : Boxed (ListSection a))
 traverse_ListSection @(a : box)
   (rep : ReprBox a) (s : Boxed (ListSection a)) -> Stream list_dim a =
 
-  con_stream @list_dim @a hintAny
+  con_stream @list_dim @a hintAny balanceGuided
   (con_ixStream @list_dim @a
    (con_rStream @list_dim @a @a rep (\ (x : a) -> a. x)
     (con_someIndexable @list_dim @a @(\ (a : box). Boxed (ListSection a))
@@ -4711,7 +4718,7 @@ preserve_Array1Section @(a : box) (x : Boxed (Array1Section a))
 traverse_Array1Section @(a : box)
   (rep : ReprBox a) (s : Boxed (Array1Section a)) -> Stream dim1 a =
 
-  con_stream @dim1 @a hintAny
+  con_stream @dim1 @a hintAny balanceGuided
   (con_ixStream @dim1 @a
    (con_rStream @dim1 @a @a rep (\ (x : a) -> a. x)
     (con_someIndexable @dim1 @a @(\ (a : box). Boxed (Array1Section a))
@@ -4839,7 +4846,7 @@ preserve_Array2Section @(a : box) (x : Boxed (Array2Section a))
 traverse_Array2Section @(a : box)
   (rep : ReprBox a) (s : Boxed (Array2Section a)) -> Stream dim2 a =
 
-  con_stream @dim2 @a hintAny
+  con_stream @dim2 @a hintAny balanceGuided
   (con_ixStream @dim2 @a
    (con_rStream @dim2 @a @a rep (\ (x : a) -> a. x)
     (con_someIndexable @dim2 @a @(\ (a : box). Boxed (Array2Section a))
@@ -5264,7 +5271,7 @@ Traversable_array1 : TraversableDict (\ (a : box). Boxed (array1 (AsBare a))) =
 traverse_array1 @(a : box) (rep : ReprBox a) (lst : Boxed (array1 (AsBare a)))
   -> Stream dim1 a =
 
-  con_stream @dim1 @a hintAny
+  con_stream @dim1 @a hintAny balanceGuided
   (con_ixStream @dim1 @a
    (con_rStream @dim1 @a @a rep (\ (x : a) -> a. x)
     (con_someIndexable @dim1 @a @(\ (a : box). Boxed (array1 (AsBare a)))
@@ -5275,7 +5282,7 @@ traverse_array1 @(a : box) (rep : ReprBox a) (lst : Boxed (array1 (AsBare a)))
 build_array1 @(a : box) (rep : ReprBox a) (s : Stream dim1 a)
   -> Boxed (array1 (AsBare a)) attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case fromIxStream @dim1 @a i_s of rStream @b tyob rep_b f si.
   tabulate_array1 @b @a rep_b rep par_hint f si;
 
@@ -5534,7 +5541,7 @@ Traversable_array2 : TraversableDict (\ (a : box). Boxed (array2 (AsBare a))) =
 traverse_array2 @(a : box) (rep : ReprBox a) (lst : Boxed (array2 (AsBare a)))
   -> Stream dim2 a =
 
-  con_stream @dim2 @a hintAny
+  con_stream @dim2 @a hintAny balanceGuided
   (con_ixStream @dim2 @a
    (con_rStream @dim2 @a @a rep (\ (x : a) -> a. x)
     (con_someIndexable @dim2 @a @(\ (a : box). Boxed (array2 (AsBare a)))
@@ -5545,7 +5552,7 @@ traverse_array2 @(a : box) (rep : ReprBox a) (lst : Boxed (array2 (AsBare a)))
 build_array2 @(a : box) (rep : ReprBox a) (s : Stream dim2 a)
   -> Boxed (array2 (AsBare a)) attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case fromIxStream @dim2 @a i_s of rStream @b tyob rep_b f si.
   tabulate_array2 @b @a rep_b rep par_hint f si;
 
@@ -5659,7 +5666,7 @@ chain @(a : box) (s1 s2 : Stream list_dim a) -> Stream list_dim a =
 reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
   (f : a -> a -> a) (z : a) (s : Stream d a)
   -> a attribute(inline,
-                 inline_struct(T T T T D(T C)) -- Inline if stream is known
+                 inline_struct(T T T T D(T T C)) -- Inline if stream is known
                 ) =
 
   letfun
@@ -5672,7 +5679,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
     reduce_unit (dummy : NoneType) -> a = z
   in
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case i_s of {
     seqStream tyob co sq.
       fold_Seq @a @a f sq z
@@ -5701,7 +5708,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
             shFold @d2 sh2 @a @a rep rep f local_s z
           else except @a
       in
-      reduce_loop @d2 @b @a sh2 rep_b rep par_hint
+      reduce_loop @d2 @b @a sh2 rep_b rep par_hint balancing
       reduce_unit reduce_slice f reduce_residual si
 
   ; nestedSeqStream tyob co sq.
@@ -5723,12 +5730,12 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
           if shCheckSubdomain @d sh input_domain slice_domain
           then
             -- Sequentially reduce the partial results for this loop
-            let local_s = con_stream @d @a hintSeq
+            let local_s = con_stream @d @a hintSeq balanceGuided
                           (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
             shFold @d sh @a @a rep rep f local_s z
           else except @a
       in
-      reduce_loop @d @b @a sh rep_b rep par_hint
+      reduce_loop @d @b @a sh rep_b rep par_hint balancing
       reduce_unit reduce_slice f reduce_residual si
 
   ; unitStream tyob co x.
@@ -5867,7 +5874,7 @@ collect_Stream @(d : box) @(k v r : box)
       finalizer
   in
 
-  case input of stream tyob par_hint i_s.
+  case input of stream tyob par_hint balancing i_s.
   case par_hint of {
     hintAny. do_seq None
   ; hintSeq. do_seq None
@@ -5962,7 +5969,7 @@ collect_Stream @(d : box) @(k v r : box)
       (stored @(cursor acc) (toCursor @acc x))
   in
 
-  case input of stream tyob par_hint i_s.
+  case input of stream tyob par_hint balancing i_s.
 
   letfun
     -- The parallel algorithm.  It starts by examining the stream argument.
@@ -5975,7 +5982,7 @@ collect_Stream @(d : box) @(k v r : box)
           letfun
             reduce_slice (si : SomeIndexable d2 dat) -> acc_cursor =
               -- Convert the slice back to a stream
-              let s = con_stream @list_dim @stream_elem hintSeq
+              let s = con_stream @list_dim @stream_elem hintSeq balanceGuided
                       (coerce @(IStream d stream_elem) @(IStream list_dim stream_elem)
                        (nestedIxStream @d @stream_elem @d2 tyob co sh2
                         (rStream @d2 @(Stream list_dim stream_elem) @dat
@@ -5987,7 +5994,7 @@ collect_Stream @(d : box) @(k v r : box)
 
           let r_cursor =
                 reduce_loop @d2 @dat @acc_cursor
-                sh2 rep_dat (repr_cursor @acc) par_hint
+                sh2 rep_dat (repr_cursor @acc) par_hint balancing
                 reduce_unit reduce_slice combine_cursors reduce_residual si in
 
           finalize_cursor r_cursor
@@ -6000,14 +6007,14 @@ collect_Stream @(d : box) @(k v r : box)
           letfun
             reduce_slice (si : SomeIndexable d dat) -> acc_cursor =
               -- Sequentially reduce the partial results for this loop
-              let local_s = con_stream @d @stream_elem hintSeq
+              let local_s = con_stream @d @stream_elem hintSeq balanceGuided
                             (ixStream @d @stream_elem tyob
                              (rStream @d @stream_elem @dat tyob2 rep_dat extract si)) in
               collect_slice @d shape_dict local_s
           in
           let r_cursor =
                 reduce_loop @d @dat @acc_cursor
-                shape_dict rep_dat (repr_cursor @acc) par_hint
+                shape_dict rep_dat (repr_cursor @acc) par_hint balancing
                 reduce_unit reduce_slice combine_cursors reduce_residual si in
 
           finalize_cursor r_cursor
@@ -6586,7 +6593,29 @@ fun_seq @(t : box -> box) @(a : box)
 -- Set the stream's parallelism hint to 'h'
 annotateParHint @(d a : box) (h : ParHint) (s : Stream d a)
   -> Stream d a attribute(inline) =
-  case s of stream tyob old_par_hint i_s. stream @d @a tyob h i_s;
+  case s of stream tyob old_par_hint balancing i_s.
+    stream @d @a tyob h balancing i_s;
+
+
+fun_staticBalancing @(t : box -> box) @(a : box)
+  (traversable : TraversableDict t) (rep : Repr (AsBare a)) (x : t a)
+  -> Stream (shape t) a attribute(inline) =
+  case traversable of traversableDict tyob traverse build.
+  annotateLoadBalancing @(shape t) @a balanceStatic (traverse @a rep x);
+
+
+fun_guidedBalancing @(t : box -> box) @(a : box)
+  (traversable : TraversableDict t) (rep : Repr (AsBare a)) (x : t a)
+  -> Stream (shape t) a attribute(inline) =
+  case traversable of traversableDict tyob traverse build.
+  annotateLoadBalancing @(shape t) @a balanceGuided (traverse @a rep x);
+
+
+-- Set the stream's load balancing hint to 'h'
+annotateLoadBalancing @(d a : box) (l : LoadBalancing) (s : Stream d a)
+  -> Stream d a attribute(inline) =
+  case s of stream tyob par_hint old_balancing i_s.
+    stream @d @a tyob par_hint l i_s;
 
 -------------------------------------------------------------------------------
 -- Parallelizable loops
@@ -6679,6 +6708,7 @@ tabulate_array2_seq @(a b : box)
 reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (par_hint : ParHint)
+  (balancing : LoadBalancing)
   (reduce_unit : NoneType -> b)
   (reduce_slice : SomeIndexable d a -> b)
   (reduce_pair : b -> b -> b)
@@ -6696,10 +6726,10 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
     hintAny. do_seq None
   ; hintSeq. do_seq None
   ; hintLocalPar.
-      reduce_loop_localpar @d @a @b sh rep_a rep_b
+      reduce_loop_localpar @d @a @b sh rep_a rep_b balancing
       reduce_unit reduce_slice reduce_pair input
   ; hintPar.
-      reduce_loop_dist @d @a @b sh rep_a rep_b
+      reduce_loop_dist @d @a @b sh rep_a rep_b balancing
       reduce_unit reduce_slice reduce_residual reduce_pair input
   };
 
@@ -6750,6 +6780,7 @@ tabulate_array2_localpar @(a b : box)
 
 reduce_loop_localpar @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (balancing : LoadBalancing)
   (reduce_unit : NoneType -> b)
   (reduce_slice : SomeIndexable d a -> b)
   (reduce_pair : b -> b -> b)
@@ -6767,25 +6798,54 @@ reduce_loop_localpar @(d : box) @(a b : box) (sh : ShapeDict d)
        (coerce @(BoxOffset d) @(BoxOffset (shape t)) off))
   in
 
-  blocked_greduce @d @b
-  (shNoOffset @d sh)
-  (\ (off : BoxOffset d) (dom : d) -> MaybeVal (d, BoxOffset d, d).
-     case shSplit @d sh dom of {
-       justVal (dom1, off2, dom2).
-         -- Add the new and old offsets
-         justVal @(d, BoxOffset d, d) (dom1, shAddOffset @d sh off off2, dom2)
-     ; nothingVal.
-         nothingVal @(d, BoxOffset d, d)
-     })
-  reduce_pair
+  let original_dom = coerce @(shape t) @d (ix_shape @t indexable @a container) in
 
-  -- Perform local reduction
-  (\ (off : BoxOffset d) (local_dom : d) -> b.
-     reduce_slice (slice_input off local_dom))
-  reduce_unit
+  case balancing of {
+    balanceStatic.
+  
+      -- Split work into at most 32 pieces
+      let dist_sizes : view list_dim (Subdomain d) =
+        shSplitN @d sh 32 original_dom in
 
-  (coerce @(shape t) @d (ix_shape @t indexable @a container));
+      case dist_sizes of mk_view tyob dist_pieces_dom get_piece.
+      let n_pieces =
+            case dist_pieces_dom of mk_list_dim tyob m_bound.
+            case m_bound of {
+              justVal n. n
+            ; nothingVal. except @int
+            } in
 
+      let sa_int = reprSizeAlign @(Stored int) repr_int in
+
+      -- Reduce over this list of subdomains
+      static_greduce @b n_pieces reduce_pair
+      (\ (i : int) -> b.
+         case get_piece (boxIntValue i) of
+           subdomain tyob local_off local_dom.
+         reduce_slice (slice_input local_off local_dom))
+      reduce_unit
+
+  ; balanceGuided.
+
+      blocked_greduce @d @b
+      (shNoOffset @d sh)
+      (\ (off : BoxOffset d) (dom : d) -> MaybeVal (d, BoxOffset d, d).
+         case shSplit @d sh dom of {
+           justVal (dom1, off2, dom2).
+             -- Add the new and old offsets
+             justVal @(d, BoxOffset d, d) (dom1, shAddOffset @d sh off off2, dom2)
+         ; nothingVal.
+             nothingVal @(d, BoxOffset d, d)
+         })
+      reduce_pair
+
+      -- Perform local reduction
+      (\ (off : BoxOffset d) (local_dom : d) -> b.
+         reduce_slice (slice_input off local_dom))
+      reduce_unit
+
+      original_dom
+  };
 
 -------------------------------------------------------------------------------
 -- Distributed versions of parallelizable loops
@@ -6897,6 +6957,7 @@ tabulate_array2_dist @(a b : box)
 
 reduce_loop_dist @(d : box) @(a b : box)
   (sh : ShapeDict d) (rep_a : ReprBox a) (rep_b : ReprBox b)
+  (balancing : LoadBalancing)
   (reduce_unit : NoneType -> b)
   (reduce_slice : SomeIndexable d a -> b)
   (reduce_residual : Stream list_dim b -> b)
@@ -6908,7 +6969,7 @@ reduce_loop_dist @(d : box) @(a b : box)
   letfun
     worker (chunk : SomeIndexable d a) -> b =
       reduce_loop_localpar @d @a @b
-      sh rep_a rep_b reduce_unit reduce_slice reduce_pair
+      sh rep_a rep_b balancing reduce_unit reduce_slice reduce_pair
       (preserve_SomeIndexable @d @a chunk)
   in
 
@@ -6921,14 +6982,18 @@ reduce_loop_dist @(d : box) @(a b : box)
 
   -- Sequentially compute the rest of the reductions
   let residual : Stream list_dim b =
-        annotateParHint @list_dim @b hintLocalPar
-        (map_Stream @list_dim @(Boxed (StuckRef b)) @b
-         (unboxedinfo StuckRef @b) rep_b
-         (\ (x : Boxed (StuckRef b)) -> b.
-            case x of [sa_ref_b] boxed tyob (stuckRef ux). ux)
-         (traverse_list @(Boxed (StuckRef b)) repr_ref_b partial_results)) in
+        map_Stream @list_dim @(Boxed (StuckRef b)) @b
+        (unboxedinfo StuckRef @b) rep_b
+        (\ (x : Boxed (StuckRef b)) -> b.
+           case x of [sa_ref_b] boxed tyob (stuckRef ux). ux)
+        (traverse_list @(Boxed (StuckRef b)) repr_ref_b partial_results) in
 
-  reduce_residual residual;
+  -- Use local parallelism and the specified load balancing strategy
+  let ann_residual =
+        annotateLoadBalancing @list_dim @b balancing
+        (annotateParHint @list_dim @b hintLocalPar residual) in
+
+  reduce_residual ann_residual;
 
 -------------------------------------------------------------------------------
 -- Distributed computation helper functions
@@ -7934,9 +7999,9 @@ flatten_guard_dim
 real_flatten_guard_dim @(a : box) (rep : ReprBox a) (s : Stream guard_dim a)
   -> Stream list_dim a attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   let rs = fromIxStream @guard_dim @a i_s in
-  con_stream @list_dim @a par_hint
+  con_stream @list_dim @a par_hint balancing
   (con_nestedIxStream @a @guard_dim
    (ShapeDict_guard_dim_loop_breaker None)
    (map_RStream @guard_dim @a @(Stream list_dim a) (unit_Stream @a rep) rs));
@@ -8345,7 +8410,7 @@ real_peel_list_dim @(a r : box)
                      ; justVal n. con_list_dim (justVal @int (n -# i))
                      } in
                let remainder_input =
-                     con_stream @list_dim @a (unboxParHintValue par_hint)
+                     con_stream @list_dim @a (unboxParHintValue par_hint) balanceGuided
                      (viewToSplittable @list_dim @a (ShapeDict_list_dim_loop_breaker None)
                       (con_view @list_dim @(Stream list_dim a) new_dom
                        (\ (j : Boxed (Stored int)) -> Stream list_dim a.
@@ -8424,23 +8489,24 @@ real_zipWith_list_dim @(a b c : box)
 
   letfun
     zip_using_sequences (dummy : NoneType) -> Stream list_dim c =
-      con_stream @list_dim @c hintAny
+      con_stream @list_dim @c hintAny balanceGuided
       (con_seqStream @c
        (zipWith_Seq @a @b @c f
         (streamToSequence @a s1) (streamToSequence @b s2)))
   in
 
-  case s1 of stream tyob par_hint1 i_s1.
+  case s1 of stream tyob par_hint1 balancing1 i_s1.
   case i_s1 of {
     ixStream tyob rs1.
-      case s2 of stream tyob par_hint2 i_s2.
+      case s2 of stream tyob par_hint2 balancing2 i_s2.
       case i_s2 of {
         ixStream tyob rs2.
           -- The most restrictive parallelism hint determines amount of
           -- parallelism
           let par_hint = leastParHint par_hint1 par_hint2 in
+          let balancing = leastBalancing balancing1 balancing2 in
 
-          con_stream @list_dim @c par_hint
+          con_stream @list_dim @c par_hint balancing
           (con_ixStream @list_dim @c
            (zipWith_RStream @list_dim @a @b @c ShapeDict_list_dim rep_a rep_b rep_c f rs1 rs2))
 
@@ -8474,7 +8540,7 @@ real_fold_list_dim @(a acc : box)
   (init : acc)
   -> acc
   attribute(inline,
-            inline_struct(T T T D(T C) T) -- Inline if stream constructor known
+            inline_struct(T T T D(T T C) T) -- Inline if stream constructor known
            ) =
 
   case unStream @list_dim @a s of {
@@ -8526,10 +8592,10 @@ imp_fold_list_dim @(a : box)
   (init : Store)
   -> Store
   attribute(inline,
-            inline_struct(T T D(T C) T) -- Stream constructor is known
+            inline_struct(T T D(T T C) T) -- Stream constructor is known
            ) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case i_s of {
     seqStream tyob co sq.
       imp_fold_Seq @a combine sq init
@@ -8766,7 +8832,7 @@ fold_chain_dim @(a acc : box)
   -> acc
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case i_s of {
     ixStream tyob (rStream @b tyob2 rep_b f (someIndexable @t tyob3 co ix_dict container)).
       case coerce @(shape t) @chain_dim (ix_shape @t ix_dict @b container) of
@@ -8807,7 +8873,7 @@ imp_fold_chain_dim @(a : box)
   -> Store
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case i_s of {
     ixStream tyob (rStream @b tyob2 rep_b f (someIndexable @t tyob3 co ix_dict container)).
       case coerce @(shape t) @chain_dim (ix_shape @t ix_dict @b container) of
@@ -9074,14 +9140,15 @@ real_zipWith_dim0 @(a b c : box)
   -> Stream dim0 c
   attribute(inline) =
 
-  case s1 of stream tyob par_hint1 i_s1.
+  case s1 of stream tyob par_hint1 balancing1 i_s1.
   let rs1 = fromIxStream @dim0 @a i_s1 in
-  case s2 of stream tyob par_hint2 i_s2.
+  case s2 of stream tyob par_hint2 balancing2 i_s2.
   let rs2 = fromIxStream @dim0 @b i_s2 in
 
   let par_hint = leastParHint par_hint1 par_hint2 in
+  let balancing = leastBalancing balancing1 balancing2 in
 
-  con_stream @dim0 @c par_hint
+  con_stream @dim0 @c par_hint balancing
   (con_ixStream @dim0 @c
    (zipWith_RStream @dim0 @a @b @c
     (ShapeDict_dim0_loop_breaker None) rep_a rep_b rep_c f rs1 rs2));
@@ -9106,7 +9173,7 @@ real_fold_dim0 @(a acc : box)
   -> acc
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case rStreamToView @dim0 @a (fromIxStream @dim0 @a i_s) of
     mk_view tyob dom get.
 
@@ -9122,7 +9189,7 @@ imp_fold_dim0 @(a : box)
   -> Store
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case rStreamToView @dim0 @a (fromIxStream @dim0 @a i_s) of
     mk_view tyob dom get.
 
@@ -9409,7 +9476,7 @@ real_peel_dim1 @(a r : box)
                let new_dom =
                      con_dim1 (interval (justVal @int (i +# stride)) m_hi) lm in
                let remainder_input =
-                     con_stream @list_dim @a (unboxParHintValue par_hint)
+                     con_stream @list_dim @a (unboxParHintValue par_hint) balanceGuided
                      (viewToSplittable @dim1 @a (ShapeDict_dim1_loop_breaker None)
                       (con_view @dim1 @(Stream list_dim a) new_dom visit)) in
 
@@ -9437,9 +9504,9 @@ real_flatten_dim1 @(a : box) (rep : ReprBox a) (s : Stream dim1 a)
   -> Stream list_dim a attribute(inline) =
 
   -- Flatten by creating a splittable stream
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   let rs = fromIxStream @dim1 @a i_s in
-  con_stream @list_dim @a par_hint
+  con_stream @list_dim @a par_hint balancing
   (con_nestedIxStream @a @dim1
    (ShapeDict_dim1_loop_breaker None)
    (map_RStream @dim1 @a @(Stream list_dim a) (unit_Stream @a rep) rs));
@@ -9485,14 +9552,15 @@ real_zipWith_dim1 @(a b c : box)
   -> Stream dim1 c
   attribute(inline) =
 
-  case s1 of stream tyob par_hint1 i_s1.
+  case s1 of stream tyob par_hint1 balancing1 i_s1.
   let rs1 = fromIxStream @dim1 @a i_s1 in
-  case s2 of stream tyob par_hint2 i_s2.
+  case s2 of stream tyob par_hint2 balancing2 i_s2.
   let rs2 = fromIxStream @dim1 @b i_s2 in
 
   let par_hint = leastParHint par_hint1 par_hint2 in
+  let balancing = leastBalancing balancing1 balancing2 in
 
-  con_stream @dim1 @c par_hint
+  con_stream @dim1 @c par_hint balancing
   (con_ixStream @dim1 @c
    (zipWith_RStream @dim1 @a @b @c
     (ShapeDict_dim1_loop_breaker None) rep_a rep_b rep_c f rs1 rs2));
@@ -9517,7 +9585,7 @@ real_fold_dim1 @(a acc : box)
   -> acc
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case rStreamToView @dim1 @a (fromIxStream @dim1 @a i_s) of
     mk_view tyob dom get.
 
@@ -9543,7 +9611,7 @@ imp_fold_dim1 @(a : box)
   -> Store
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case rStreamToView @dim1 @a (fromIxStream @dim1 @a i_s) of
     mk_view tyob dom get.
 
@@ -9842,9 +9910,9 @@ real_flatten_dim2 @(a : box) (rep : ReprBox a) (s : Stream dim2 a)
   -> Stream list_dim a attribute(inline) =
 
   -- Flatten by creating a splittable stream
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   let rs = fromIxStream @dim2 @a i_s in
-  con_stream @list_dim @a par_hint
+  con_stream @list_dim @a par_hint balancing
   (con_nestedIxStream @a @dim2
    (ShapeDict_dim2_loop_breaker None)
    (map_RStream @dim2 @a @(Stream list_dim a) (unit_Stream @a rep) rs));
@@ -9890,14 +9958,15 @@ real_zipWith_dim2 @(a b c : box)
   -> Stream dim2 c
   attribute(inline) =
 
-  case s1 of stream tyob par_hint1 i_s1.
+  case s1 of stream tyob par_hint1 balancing1 i_s1.
   let rs1 = fromIxStream @dim2 @a i_s1 in
-  case s2 of stream tyob par_hint2 i_s2.
+  case s2 of stream tyob par_hint2 balancing2 i_s2.
   let rs2 = fromIxStream @dim2 @b i_s2 in
 
   let par_hint = leastParHint par_hint1 par_hint2 in
+  let balancing = leastBalancing balancing1 balancing2 in
 
-  con_stream @dim2 @c par_hint
+  con_stream @dim2 @c par_hint balancing
   (con_ixStream @dim2 @c
    (zipWith_RStream @dim2 @a @b @c
     (ShapeDict_dim2_loop_breaker None) rep_a rep_b rep_c f rs1 rs2));
@@ -9922,7 +9991,7 @@ real_fold_dim2 @(a acc : box)
   -> acc
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case rStreamToView @dim2 @a (fromIxStream @dim2 @a i_s) of
     mk_view tyob dom get.
 
@@ -9964,7 +10033,7 @@ imp_fold_dim2 @(a : box)
   -> Store
   attribute(inline) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   case rStreamToView @dim2 @a (fromIxStream @dim2 @a i_s) of
     mk_view tyob dom get.
 
@@ -12772,6 +12841,14 @@ sliceToDomain (slice_obj : SliceObject) -> dim1
 internalApplyArraySlice (slice_obj : SliceObject) (dom : dim1) -> dim1 =
   let slice_dom : dim1 = sliceToDomain slice_obj in
   real_intersect_dim1 slice_dom dom;
+
+
+-- Pick the most restrictive balancing
+leastBalancing (x y : LoadBalancing) -> LoadBalancing =
+  case x of {
+    balanceGuided. y
+  ; balanceStatic. balanceStatic
+  };
 
 
 -- Pick the most restrictive parallelism hint
@@ -15609,8 +15686,8 @@ outerproduct_Stream @(a b : box)
   let sa_a = reprSizeAlign @(AsBare a) repr_a in
   let sa_b = reprSizeAlign @(AsBare b) repr_b in
 
-  case sa of stream tyob hint_a i_sa.
-  case sb of stream tyob hint_b i_sb.
+  case sa of stream tyob hint_a balancing_a i_sa.
+  case sb of stream tyob hint_b balancing_b i_sb.
   let par_hint = leastParHint hint_a hint_b in
 
   case fromIxStream @dim1 @a i_sa of
@@ -15638,7 +15715,10 @@ outerproduct_Stream @(a b : box)
            rep_a2 rep_b2 make_pair siA siB in
 
   -- Create a stream
-  con_stream @dim2 @out_type hintAny
+  let par_hint = leastParHint hint_a hint_b in
+  let balancing = leastBalancing balancing_a balancing_b in
+
+  con_stream @dim2 @out_type par_hint balancing
   (con_ixStream @dim2 @out_type
    (con_rStream @dim2 @out_type @out_type out_repr
     (\ (x : out_type) -> out_type. x)
@@ -16832,6 +16912,15 @@ blocked_greduce :
  -> d                                   -- Domain
  -> a;                                  -- Result
 
+-- Parallel reduction over an integer range
+static_greduce :
+    forall a : box.
+    int                                 -- Size of range
+ -> (a -> a -> a)                       -- Combine
+ -> (int -> a)                          -- Reduce
+ -> (NoneType -> a)                     -- Unit
+ -> a;
+
 -- Blocked parallel loop over a PBTree
 blocked_PBTree_doall :
     forall a b : bare.
@@ -17225,7 +17314,7 @@ fromIxStream @(sh a : box) (s : IStream sh a)
 unit_Stream @(a : box) (rep : ReprBox a) (x : a) -> Stream list_dim a
   attribute(inline) =
 
-  con_stream @list_dim @a hintSeq (con_unitStream @a x);
+  con_stream @list_dim @a hintSeq balanceGuided (con_unitStream @a x);
   {-
   -- Create a dim0 stream
   let vw = con_view @dim0 @a con_dim0
@@ -17238,7 +17327,7 @@ unit_Stream @(a : box) (rep : ReprBox a) (x : a) -> Stream list_dim a
 
 empty_Stream @(a : box)
   -> Stream list_dim a attribute(inline, inline_sequential) =
-  con_stream @list_dim @a hintSeq (con_seqStream @a (empty_Seq @a));
+  con_stream @list_dim @a hintSeq balanceGuided (con_seqStream @a (empty_Seq @a));
 
 
 guard_Stream @(a : box) (rep : ReprBox a) (condition : bool)
@@ -17246,7 +17335,7 @@ guard_Stream @(a : box) (rep : ReprBox a) (condition : bool)
   -> Stream list_dim a
   attribute(inline,
             inline_sequential,
-            inline_struct(T T D(T C)) -- Inline if stream constructor is known
+            inline_struct(T T D(T T C)) -- Inline if stream constructor is known
            ) =
 
   -- Wrap the stream in an outer 'guard' condition
@@ -17258,7 +17347,7 @@ guard_Stream @(a : box) (rep : ReprBox a) (condition : bool)
       con_nestedSeqStream @a guarded
   in
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   let s2 = case i_s of {
              seqStream tyob co sq.
                con_seqStream @a (guard_Seq @a condition sq)
@@ -17277,7 +17366,7 @@ guard_Stream @(a : box) (rep : ReprBox a) (condition : bool)
                (guard_Seq @a condition (unit_Seq @a x))
                
            } in
-  con_stream @list_dim @a hintSeq s2;
+  con_stream @list_dim @a hintSeq balancing s2;
 
 
 
@@ -17293,10 +17382,10 @@ filter_Stream @(a : box) (rep : ReprBox a)
 bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
   -> Stream list_dim b
   attribute(inline,
-            inline_struct(D(T C) T) -- Inline if stream constructor is known
+            inline_struct(D(T T C) T) -- Inline if stream constructor is known
            ) =
 
-  case s of stream tyob par_hint i_s.
+  case s of stream tyob par_hint balancing i_s.
   let u = case i_s of {
             seqStream tyob co sq.
               con_nestedSeqStream @b
@@ -17335,7 +17424,7 @@ bind_Stream @(a b : box) (s : Stream list_dim a) (t : a -> Stream list_dim b)
               -- Create a stream equivalent to (t x)
               -- FIXME: The function should not be evaluated now!
               -- Evaluation should be deferred until the stream runs.
-              case t x of stream tyob hint i_stream. i_stream
+              case t x of stream tyob hint balancing i_stream. i_stream
           } in
-  con_stream @list_dim @b par_hint u;
+  con_stream @list_dim @b par_hint balancing u;
 

@@ -1323,6 +1323,8 @@ varInitializers =
       , (TheV_par, The_fun_par)
       , (TheV_localpar, The_fun_localpar)
       , (TheV_seq, The_fun_seq)
+      , (TheV_staticBalancing, The_fun_staticBalancing)
+      , (TheV_guidedBalancing, The_fun_guidedBalancing)
       , (TheV_range, The_range)
       , (TheV_indices, The_fun_indices)
       , (TheV_len, The_len)

@@ -187,6 +187,66 @@ triolet_C_greduce(void *zero_offset,
 
 #endif
 
+/*****************************************************************************/
+/* 1D parallel reduction */
+/* Shares code with generalized reduction */
+
+/* Do reduction at one index. */
+extern "C" void *
+greduce_static_range(void *reduce_fn, int32_t index);
+
+#ifndef USE_TBB
+# error "Not implemented"
+#else
+
+struct SReduceFunc
+{
+  void *const reduce_fn;
+  void *const combine_fn;
+
+public:
+  void *operator()(tbb::blocked_range<int> range, void *acc) const {
+    int i;
+
+    // Generate and accumulate valeus
+    for (i = range.begin(); i < range.end(); i++) {
+      void *x = greduce_static_range(reduce_fn, i);
+      if (acc)
+        acc = greduce_combine(combine_fn, x, acc);
+      else
+        acc = x;
+    }
+    return acc;
+  }
+};
+
+extern "C"
+void *
+triolet_C_static_greduce(int32_t range,
+                         void *combine_fn,
+                         void *reduce_fn,
+                         void *unit_fn)
+{
+  SReduceFunc tbb_reduce = {reduce_fn, combine_fn};
+  GReduceReduction tbb_reduction = {combine_fn};
+  void *identity_value = NULL;
+
+  void *p = tbb::parallel_reduce(tbb::blocked_range<int>(0, range),
+                                 identity_value,
+                                 tbb_reduce,
+                                 tbb_reduction);
+
+  // If no value was produced, then return a unit value
+  if (p == NULL)
+    return greduce_unit(unit_fn);
+  else
+    return p;
+}
+
+#endif
+
+
+
 #if 0
 /*****************************************************************************/
 /* Parallelized reduction */
