@@ -5684,11 +5684,18 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
                  inline_struct(T T T T D(T T C)) -- Inline if stream is known
                 ) =
 
+  -- Perform a final reduction on partial results for the
+  -- distributed parallel case.
+  -- To avoid infinite recursion, the caller must decide (if appropriate)
+  -- not to use parallelism here.
+  let reduce_residual = reduce_Stream @list_dim @a ShapeDict_list_dim rep f z in
+
+{-
+  -- The old code, which is sequential
   letfun
-    -- Perform a final reduction on partial results
     reduce_residual (s : Stream list_dim a) -> a =
       real_fold_list_dim @a @a rep rep f s z
-  in
+-}
 
   letfun
     reduce_unit (dummy : NoneType) -> a = z
@@ -6810,7 +6817,7 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
 
   letfun do_seq (dummy : NoneType) -> b =
     reduce_loop_seq @d @a @b sh rep_a rep_b
-    reduce_slice reduce_residual input
+    reduce_slice input
   in
 
   case par_hint of {
@@ -6828,7 +6835,6 @@ reduce_loop @(d : box) @(a b : box) (sh : ShapeDict d)
 reduce_loop_seq @(d : box) @(a b : box) (sh : ShapeDict d)
   (rep_a : ReprBox a) (rep_b : ReprBox b)
   (reduce_slice : SomeIndexable d a -> b)
-  (reduce_residual : Stream list_dim b -> b)
   (input : SomeIndexable d a)
   -> b
   attribute(inline, inline_sequential) =
