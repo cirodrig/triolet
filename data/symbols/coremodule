@@ -1100,6 +1100,9 @@ data Collector (k v r : box) : box
     -- Write mutable value at index
     k -> v -> OutPtr acc -> Store -> Store,
 
+    -- Read immutable value from accumulator
+    k -> acc -> v,
+
     -- Update mutable value
     v -> v -> v,
 
@@ -3281,6 +3284,18 @@ repr_slice2 : Repr (Tuple2 SliceObject SliceObject) =
 
 repr_index3 : Repr (Tuple3 (Stored int) (Stored int) (Stored int)) attribute(inline) =
   unboxedinfo Tuple3 @(Stored int) @(Stored int) @(Stored int) repr_int repr_int repr_int;
+
+
+pack_index3 (z y x : int) -> Boxed (Tuple3 (Stored int) (Stored int) (Stored int))
+  attribute(inline) =
+
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+  let sa_tuple = reprSizeAlign @(Tuple3 (Stored int) (Stored int) (Stored int))
+                 (unboxedinfo Tuple3 @(Stored int) @(Stored int) @(Stored int)
+                  repr_int repr_int repr_int) in
+  con_boxed @(Tuple3 (Stored int) (Stored int) (Stored int)) repr_index3
+  (tuple3 @(Stored int) @(Stored int) @(Stored int) sa_int sa_int sa_int
+    (stored @int z) (stored @int y) (stored @int x));
 
 
 unpack_index3 (idx : Boxed (Tuple3 (Stored int) (Stored int) (Stored int)))
@@ -5730,7 +5745,7 @@ reduce_Stream @(d a : box) (sh : ShapeDict d) (rep : ReprBox a)
           if shCheckSubdomain @d sh input_domain slice_domain
           then
             -- Sequentially reduce the partial results for this loop
-            let local_s = con_stream @d @a hintSeq balanceGuided
+            let local_s = con_stream @d @a hintSeq balancing
                           (ixStream @d @a tyob (rStream @d @a @b tyob2 rep_b extract si)) in
             shFold @d sh @a @a rep rep f local_s z
           else except @a
@@ -5899,7 +5914,7 @@ collect_Stream @(d : box) @(k v r : box)
 
   case coll of
     collector @acc tyob
-    rep_acc init read write update combine combine_stream finalizer.
+    rep_acc init read write read_imm update combine combine_stream finalizer.
 
   letfun
     do_seq (dummy : NoneType) -> r =
@@ -5982,7 +5997,7 @@ collect_Stream @(d : box) @(k v r : box)
           letfun
             reduce_slice (si : SomeIndexable d2 dat) -> acc_cursor =
               -- Convert the slice back to a stream
-              let s = con_stream @list_dim @stream_elem hintSeq balanceGuided
+              let s = con_stream @list_dim @stream_elem hintSeq balancing
                       (coerce @(IStream d stream_elem) @(IStream list_dim stream_elem)
                        (nestedIxStream @d @stream_elem @d2 tyob co sh2
                         (rStream @d2 @(Stream list_dim stream_elem) @dat
@@ -6007,7 +6022,7 @@ collect_Stream @(d : box) @(k v r : box)
           letfun
             reduce_slice (si : SomeIndexable d dat) -> acc_cursor =
               -- Sequentially reduce the partial results for this loop
-              let local_s = con_stream @d @stream_elem hintSeq balanceGuided
+              let local_s = con_stream @d @stream_elem hintSeq balancing
                             (ixStream @d @stream_elem tyob
                              (rStream @d @stream_elem @dat tyob2 rep_dat extract si)) in
               collect_slice @d shape_dict local_s
@@ -6125,6 +6140,10 @@ valueCollector @(a : box)
   (\ (i : Boxed (Stored NoneType)) (x : a) (ret : OutPtr (AsBare a)) (s : Store) -> Store.
      write_a x ret s)
 
+  -- Read immutable value from accumulator
+  (\ (i : Boxed (Stored NoneType)) (x : AsBare a) -> a.
+     bareToBox @(AsBare a) rep_a x)
+
   f
 
   -- Combine two
@@ -6169,7 +6188,7 @@ listCollector @(k v r : box)
 
   case coll of
     collector @acc tyob repr_acc
-    c_init c_read c_write c_update c_combine c_combine_stream c_finalize.
+    c_init c_read c_write c_read_imm c_update c_combine c_combine_stream c_finalize.
 
   let type acc_cursor = Boxed (Stored (cursor (arr N acc))) in
 
@@ -6248,6 +6267,15 @@ listCollector @(k v r : box)
      then let i2_box = bareToBox @(AsBare k) rep_k i2 in
           c_write i2_box value (subscript_out @N @acc sa_acc ret idx) s
      else except @Store)
+
+  -- Read immutable accumulator
+  (\ (i : Boxed t2) (x : arr N acc) -> v.
+     case i of [sa_t2] boxed tyob ([sa_int, sa_k] tuple2 (stored idx) i2).
+
+     -- Bounds check
+     if and (idx >=# 0) (idx <# size_int)
+     then c_read_imm (bareToBox @(AsBare k) rep_k i2) (subscript @N @acc sa_acc x idx)
+     else except @v)
 
   c_update
 
@@ -6343,13 +6371,16 @@ array3Collector_initialize_acc @(L M N : intindex) @(acc : bare)
                    i))));
 
 
-array3Collector @(k v r : box)
-  (rep_k : ReprBox k) (rep_v : ReprBox v) (rep_r : ReprBox r)
-  (coll : Collector k v r)
+array3Collector @(v r : box)
+  (rep_v : ReprBox v) (rep_r : ReprBox r)
+  (coll : Collector (Boxed (Stored NoneType)) v r)
   (size : dim3)
-  -> Collector (Boxed (Tuple2 (index dim3) (AsBare k))) v (Boxed (array3 (AsBare r)))
+  (parallel_reduce : bool)
+  -> Collector (Boxed (Tuple2 (index dim3) (Stored NoneType)))  v (Boxed (array3 (AsBare r)))
   attribute(inline, inline_sequential) =
 
+  let type k = Boxed (Stored NoneType) in
+  let rep_k = repr_NoneType in
   let type result_type = Boxed (array3 (AsBare r)) in
   let type t2 = Tuple2 (index dim3) (AsBare k) in
   let rep_t2 = unboxedinfo Tuple2 @(index dim3) @(AsBare k) repr_index3 rep_k in
@@ -6373,7 +6404,7 @@ array3Collector @(k v r : box)
 
   case coll of
     collector @acc tyob repr_acc
-    c_init c_read c_write c_update c_combine c_combine_stream c_finalize.
+    c_init c_read c_write c_read_imm c_update c_combine c_combine_stream c_finalize.
 
   let type acc_array = arr L (arr M (arr N acc)) in
   let type acc_cursor = Boxed (Stored (cursor acc_array)) in
@@ -6503,6 +6534,26 @@ array3Collector @(k v r : box)
           s
      else except @Store)
 
+  -- Read immutable accumulator
+  (\ (i : Boxed t2) (imm_acc : acc_array) -> v.
+     case i of [sa_t2] boxed tyob ([sa_index, sa_k] tuple2 idx i2).
+     case idx of [sa_int, sa_int, sa_int] tuple3 (stored z) (stored y) (stored x).
+     let real_z = (z -# lb_z) //# stride_z in
+     let real_y = (y -# lb_y) //# stride_y in
+     let real_x = (x -# lb_x) //# stride_x in
+
+     -- Bounds check
+     if and (and (real_z >=# 0) (real_z <# count_z_int))
+            (and (and (real_y >=# 0) (real_y <# count_y_int))
+                 (and (real_x >=# 0) (real_x <# count_x_int)))
+     then c_read_imm (bareToBox @(AsBare k) rep_k i2)
+          (subscript @N @acc sa_acc
+           (subscript @M @(arr N acc) sa_row
+            (subscript @L @(arr M (arr N acc)) sa_plane imm_acc real_z)
+            real_y)
+           real_x)
+     else except @v)
+
   c_update
 
   -- Combine
@@ -6525,23 +6576,63 @@ array3Collector @(k v r : box)
          (stored @(cursor acc_array) (toCursor @acc_array ar))
      in
 
-     -- Parallel reduction
-     let total =
-           reduce_Stream @list_dim @(Boxed (Stored (cursor acc_array)))
-           ShapeDict_list_dim (repr_cursor @acc_array)
-           (\ (bc1 bc2 : acc_cursor) -> acc_cursor.
-              case bc1 of [sa_c] boxed tyob (stored c1).
-              case bc2 of [sa_c] boxed tyob (stored c2).
-              array_to_cursor
-              (con_stuckBox @acc_array rep_arr
-               (combine_acc (fromCursor @acc_array c1)
-                            (fromCursor @acc_array c2))))
-           (array_to_cursor first_array)
-           s in
+     if parallel_reduce
+     then
+       let total =
+             -- Parallel reduction
+             reduce_Stream @list_dim @(Boxed (Stored (cursor acc_array)))
+             ShapeDict_list_dim (repr_cursor @acc_array)
+             (\ (bc1 bc2 : acc_cursor) -> acc_cursor.
+                case bc1 of [sa_c] boxed tyob (stored c1).
+                case bc2 of [sa_c] boxed tyob (stored c2).
+                array_to_cursor
+                (con_stuckBox @acc_array rep_arr
+                 (combine_acc (fromCursor @acc_array c1)
+                              (fromCursor @acc_array c2))))
+             (array_to_cursor first_array)
+             s in
 
-     -- Copy to output
-     case total of [sa_c] boxed tyob (stored c).
-     copy @acc_array rep_arr (fromCursor @acc_array c) ret)
+       -- Copy to output
+       case total of [sa_c] boxed tyob (stored c).
+       copy @acc_array rep_arr (fromCursor @acc_array c) ret
+
+     else
+       -- Sequential reduction over all stream elements
+       imp_fold_list_dim @acc_cursor rep_c
+       (\ (a_cursor : acc_cursor) (state : Store) -> Store.
+          case a_cursor of [sa_c] boxed tyob (stored c1).
+          let input_array = fromCursor @acc_array c1 in
+
+          -- Traverse all array elements
+          foreach_dim3 size (boxNoneValue None)
+          (\ (idx : BoxIndex dim3) (i_state : Store) -> Store.
+
+             case unpack_index3 idx of (z, y, x).
+             let real_z = (z -# lb_z) //# stride_z in
+             let real_y = (y -# lb_y) //# stride_y in
+             let real_x = (x -# lb_x) //# stride_x in
+             let input_elt =
+                   (subscript @N @acc sa_acc
+                    (subscript @M @(arr N acc) sa_row
+                     (subscript @L @(arr M (arr N acc)) sa_plane input_array real_z)
+                     real_y)
+                    real_x) in
+             let output_elt =
+                   (subscript_out @N @acc sa_acc
+                    (subscript_out @M @(arr N acc) sa_row
+                     (subscript_out @L @(arr M (arr N acc)) sa_plane ret real_z)
+                     real_y)
+                    real_x) in
+
+              -- Read values
+              let inner_k = boxNoneValue None in
+              let input_val = c_read_imm inner_k input_elt in
+              case c_read inner_k output_elt i_state of (old_val, i_state2).
+              let new_val = c_update input_val old_val in
+              c_write inner_k new_val output_elt i_state2)
+          state)
+       s emptyStore
+    )
 
   -- Create result
   (case c_finalize of {
@@ -10073,7 +10164,7 @@ foreach_dim2
   ; go1 (y : int) (state : Store) -> Store =
       if y <# hi_y
       then let state2 = go2 y lo_x state in
-           go1 (y +# stride_y) state
+           go1 (y +# stride_y) state2
       else state
   } in
   go1 lo_y init;
@@ -10098,6 +10189,48 @@ real_foreachSeq_dim2 @(a : box)
    real_foreachSeq_dim1 @a dom_x
    (\ (x : Boxed (Stored int)) -> Seq a.
       k (pack_index2 (unboxIntValue y) (unboxIntValue x))));
+
+
+
+foreach_dim3
+  (dom : dim3)
+  (off : BoxOffset dim3)
+  (combine : BoxIndex dim3 -> Store -> Store)
+  (init : Store)
+  -> Store attribute(inline) =
+
+  -- Loop over the elements of the domain
+  case dom of mk_dim3 tyob dom_z dom_y dom_x.
+  case dom_y of mk_dim1 tyob (interval m_lo_z m_hi_z) (linearMap stride_z alignment_z).
+  case dom_y of mk_dim1 tyob (interval m_lo_y m_hi_y) (linearMap stride_y alignment_y).
+  case dom_x of mk_dim1 tyob (interval m_lo_x m_hi_x) (linearMap stride_x alignment_x).
+  let lo_z = case m_lo_z of {justVal n. n; nothingVal. except @int} in
+  let hi_z = case m_hi_z of {justVal n. n; nothingVal. except @int} in
+  let lo_y = case m_lo_y of {justVal n. n; nothingVal. except @int} in
+  let hi_y = case m_hi_y of {justVal n. n; nothingVal. except @int} in
+  let lo_x = case m_lo_x of {justVal n. n; nothingVal. except @int} in
+  let hi_x = case m_hi_x of {justVal n. n; nothingVal. except @int} in
+
+  let sa_int = reprSizeAlign @(Stored int) repr_int in
+
+  letfun {
+    go3 (z y x : int) (state : Store) -> Store =
+      if x <# hi_x
+      then let idx = pack_index3 z y x in
+           go3 z y (x +# stride_x) (combine idx state)
+      else go2 z (y +# stride_y) state
+
+  ; go2 (z y : int) (state : Store) -> Store =
+      if y <# hi_y
+      then go3 z y lo_x state
+      else go1 (z +# stride_z) state
+
+  ; go1 (z : int) (state : Store) -> Store =
+      if z <# hi_z
+      then go2 z lo_y state
+      else state
+  } in
+  go1 lo_z init;
 
 
 {-
