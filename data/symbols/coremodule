@@ -6896,7 +6896,7 @@ reduce_loop_localpar @(d : box) @(a b : box) (sh : ShapeDict d)
   
       -- Split work into at most 32 pieces
       let dist_sizes : view list_dim (Subdomain d) =
-        shSplitN @d sh 32 original_dom in
+        shSplitN @d sh 16 original_dom in
 
       case dist_sizes of mk_view tyob dist_pieces_dom get_piece.
       let n_pieces =
