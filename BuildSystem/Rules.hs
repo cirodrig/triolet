@@ -340,14 +340,14 @@ compileCxxRtsFile verb lbi econfig src_path obj_path =
   -- Run the compiler
   let exe = getTrioletExe lbi
       configured_args = rtsCcArgs True econfig exe lbi
-      args = ["-c", src_path, "-o", obj_path] ++ configured_args
+      args = ["-g", "-c", src_path, "-o", obj_path] ++ configured_args
       Just cxx = lookupProgram (simpleProgram "g++") $ withPrograms lbi
   in runCommand (invokeProgram verb cxx args)
 
 compileLltRtsFile verb lbi econfig src_path obj_path =
   let triolet = trioletFile lbi
       data_args = ["-B", dataBuildDir lbi]
-      args = data_args ++ [src_path, "-o", obj_path] ++ rtsLltArgs econfig lbi
+      args = data_args ++ [src_path, "-o", obj_path] ++ rtsLltArgs econfig lbi ++ ["--keep-c-files"]
   in runCommand (invokeString verb triolet args)
 
 needRtsHeaders lbi = do
@@ -397,7 +397,7 @@ compileRtsCoreFile verb lbi econfig =
     Shake.need $ interfaceFiles lbi
     let triolet = trioletFile lbi
         data_args = ["-B", dataBuildDir lbi]
-        args = data_args ++ ["--generate-builtin-library", "-o", obj_path]
+        args = data_args ++ ["--generate-builtin-library", "-o", obj_path, "--keep-c-files"]
     runCommand (invokeString verb triolet args)
   where
     build_dir = rtsBuildDir lbi
