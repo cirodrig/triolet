@@ -328,7 +328,7 @@ compileCRtsFile verb lbi econfig src_path obj_path =
   -- Run the compiler
   let exe = getTrioletExe lbi
       configured_args = rtsCcArgs False econfig exe lbi
-      args = ["-c", src_path, "-o", obj_path] ++ configured_args
+      args = ["-c", src_path, "-g", "-o", obj_path] ++ configured_args
 
       -- We can't use 'gccProgram' here because it automatically inserts the
       -- flag -m32 if the Haskell compiler's output is 32-bit x86 code.
@@ -347,7 +347,7 @@ compileCxxRtsFile verb lbi econfig src_path obj_path =
 compileLltRtsFile verb lbi econfig src_path obj_path =
   let triolet = trioletFile lbi
       data_args = ["-B", dataBuildDir lbi]
-      args = data_args ++ [src_path, "-o", obj_path] ++ rtsLltArgs econfig lbi ++ ["--keep-c-files"]
+      args = data_args ++ [src_path, "--keep-c-files", "-o", obj_path] ++ rtsLltArgs econfig lbi
   in runCommand (invokeString verb triolet args)
 
 needRtsHeaders lbi = do
@@ -397,7 +397,7 @@ compileRtsCoreFile verb lbi econfig =
     Shake.need $ interfaceFiles lbi
     let triolet = trioletFile lbi
         data_args = ["-B", dataBuildDir lbi]
-        args = data_args ++ ["--generate-builtin-library", "-o", obj_path, "--keep-c-files"]
+        args = data_args ++ ["--generate-builtin-library", "--keep-c-files", "-o", obj_path]
     runCommand (invokeString verb triolet args)
   where
     build_dir = rtsBuildDir lbi
