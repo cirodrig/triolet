@@ -9962,138 +9962,117 @@ split_dim2_asArray (n : int) (dom : dim2)
   let no_offset = boxNoneValue None in
   let empty_dom = con_dim1 (interval (justVal @int 0) (justVal @int 0)) (linearMap 1 0) in
 
-  letfun
-    save_subdomain (idx : int) (dom_y dom_x : dim1)
-                   (ret : OutPtr (arr N elt)) -> Store =
-      ref @(Subdomain dim2)
-      (con_subdomain @dim2 no_offset (con_dim2 dom_y dom_x))
-      (subscript_out @N @elt sa_elt ret idx) in
-
-  letfun {
-    subdivide_leaf_y (first size : int) (dom_y dom_x : dim1)
-                     (ret : OutPtr (arr N elt)) (store : Store) -> Store =
-
-      -- Call real_splitN_dim1 to subdivide
-      case real_splitN_dim1 size dom_y of mk_view tyob split_dom get.
-      
-      let split_size = case split_dom of mk_list_dim tyob x.
-                       case x of { justVal n. n; nothingVal. except @int } in
-
-      -- Fill the output
-      case defineIntIndex size of someIInt @M size_fiint.
-      seqStore store
-      (doall @M size_fiint
-       (\ (i : int) -> Store.
-          -- Get the split domain, or else an empty domain
-          let subdom_y =
-                if i <# split_size
-                then case get (boxIntValue i) of subdomain tyob o d. d
-                else empty_dom in
-
-          -- Write output
-          save_subdomain (first +# i) subdom_y dom_x ret))
-
-  ; subdivide_leaf_x (first size : int) (dom_y dom_x : dim1)
-                     (ret : OutPtr (arr N elt)) (store : Store) -> Store =
-
-      -- Call real_splitN_dim1 to subdivide
-      case real_splitN_dim1 size dom_x of mk_view tyob split_dom get.
-      
-      let split_size = case split_dom of mk_list_dim tyob x.
-                       case x of { justVal n. n; nothingVal. except @int } in
-
-      -- Fill the output
-      case defineIntIndex size of someIInt @M size_fiint.
-      seqStore store
-      (doall @M size_fiint
-       (\ (i : int) -> Store.
-          -- Get the split domain, or else an empty domain
-          let subdom_x =
-                if i <# split_size
-                then case get (boxIntValue i) of subdomain tyob o d. d
-                else empty_dom in
-
-          -- Write output
-          save_subdomain (first +# i) dom_y subdom_x ret))
-
-  ; fill_empty (first size : int) (dom_y dom_x : dim1)
-               (ret : OutPtr (arr N elt)) (store : Store) -> Store =
-     
-      -- Fill the output with empty domains
-      case defineIntIndex size of someIInt @M size_fiint.
-      seqStore store
-      (doall @M size_fiint
-       (\ (i : int) -> Store.
-          save_subdomain (first +# i) empty_dom empty_dom ret))
-
-  ; subdivide (first size : int) (dom_y dom_x : dim1)
-              (ret : OutPtr (arr N elt)) (store : Store) -> Store =
-      let cy = dim1Cardinality dom_y in
-      let cx = dim1Cardinality dom_x in
-      if size <# 4
-      then
-        -- Create 3 or fewer partitions by splitting in one dimension
-        if cy >=# cx
-        then subdivide_leaf_y first size dom_y dom_x ret store
-        else subdivide_leaf_x first size dom_y dom_x ret store
-      else
-        let size1 = size //# 2 in
-        let size2 = size -# size1 in
-
-        -- Create 4 or more partitions by dividing in half recursively
-        if cy >=# cx
-        then case real_split_dim1 dom_y of {
-               justVal (dom1_y, unused, dom2_y).
-                 let store2 = subdivide first size1 dom1_y dom_x ret store in
-                 subdivide (first +# size1) size2 dom2_y dom_x ret store2
-             ; nothingVal.
-                 let store2 = seqStore store
-                              (save_subdomain first dom_y dom_x ret) in
-                 fill_empty (first +# 1) (size -# 1) dom_y dom_x ret store2
-             }
-        else case real_split_dim1 dom_x of {
-               justVal (dom1_x, unused, dom2_x).
-                 let store2 = subdivide first size1 dom_y dom1_x ret store in
-                 subdivide (first +# size1) size2 dom_y dom2_x ret store2
-             ; nothingVal.
-                 let store2 = seqStore store
-                              (save_subdomain first dom_y dom_x ret) in
-                 fill_empty (first +# 1) (size -# 1) dom_y dom_x ret store2
-             }
-  } in
-
   (n, con_boxed @(list elt)
       (unboxedinfo list @elt)
       (make_list @elt @N count
        (con_stuckBox @(arr N elt) (repr_arr @N @elt count rep_elt)
         (\ (ret : OutPtr (arr N elt)) -> Store.
-           subdivide 0 n d_y d_x ret emptyStore))));
 
-{-
-  -- Split along Y dimension.
-  --
-  -- Code for dynamically choosing split dimension (x or y) is disabled
-  -- because it doesn't interact well with value propagation in the
-  -- simplifier.
-  {-let x_is_larger =
-  if dim1Cardinality d_x >=# dim1Cardinality d_y
-  then
-    let split_along_x = real_splitN_dim1 n d_x in
-    map_view @list_dim @(Subdomain dim1) @(Subdomain dim2)
-    (repr_Box @(Subdomain dim1)) (repr_Box @(Subdomain dim2))
-    (\ (subd : Subdomain dim1) -> Subdomain dim2.
-       case subd of subdomain tyob off subd_x.
-       con_subdomain @dim2 off (con_dim2 d_y subd_x))
-    split_along_x
-  else-}
-    let split_along_y = real_splitN_dim1 n d_y in
-    map_view @list_dim @(Subdomain dim1) @(Subdomain dim2)
-    (repr_Box @(Subdomain dim1)) (repr_Box @(Subdomain dim2))
-    (\ (subd : Subdomain dim1) -> Subdomain dim2.
-       case subd of subdomain tyob off subd_y.
-       con_subdomain @dim2 off (con_dim2 subd_y d_x))
-    split_along_y;
--}
+           letfun
+             -- Save one subdomain into one output array element
+             save_subdomain (idx : int) (dom_y dom_x : dim1) -> Store =
+               ref @(Subdomain dim2)
+               (con_subdomain @dim2 no_offset (con_dim2 dom_y dom_x))
+               (subscript_out @N @elt sa_elt ret idx) in
+
+           letfun {
+             -- Partition along the y dimension; no further subdivision
+             subdivide_leaf_y (first size : int) (dom_y dom_x : dim1)
+                              (store : Store) -> Store =
+
+               -- Call real_splitN_dim1 to subdivide
+               case real_splitN_dim1 size dom_y of mk_view tyob split_dom get.
+               
+               let split_size = case split_dom of mk_list_dim tyob x.
+                                case x of { justVal n. n; nothingVal. except @int } in
+
+               -- Fill the output
+               case defineIntIndex size of someIInt @M size_fiint.
+               seqStore store
+               (doall @M size_fiint
+                (\ (i : int) -> Store.
+                   -- Get the split domain, or else an empty domain
+                   let subdom_y =
+                         if i <# split_size
+                         then case get (boxIntValue i) of subdomain tyob o d. d
+                         else empty_dom in
+
+                   -- Write output
+                   save_subdomain (first +# i) subdom_y dom_x))
+
+             -- Partition along the x dimension; no further subdivision
+           ; subdivide_leaf_x (first size : int) (dom_y dom_x : dim1)
+                              (store : Store) -> Store =
+
+               -- Call real_splitN_dim1 to subdivide
+               case real_splitN_dim1 size dom_x of mk_view tyob split_dom get.
+               
+               let split_size = case split_dom of mk_list_dim tyob x.
+                                case x of { justVal n. n; nothingVal. except @int } in
+
+               -- Fill the output
+               case defineIntIndex size of someIInt @M size_fiint.
+               seqStore store
+               (doall @M size_fiint
+                (\ (i : int) -> Store.
+                   -- Get the split domain, or else an empty domain
+                   let subdom_x =
+                         if i <# split_size
+                         then case get (boxIntValue i) of subdomain tyob o d. d
+                         else empty_dom in
+
+                   -- Write output
+                   save_subdomain (first +# i) dom_y subdom_x))
+
+             -- Fill with empty domains
+           ; fill_empty (first size : int) (dom_y dom_x : dim1)
+                        (store : Store) -> Store =
+              
+               -- Fill the output with empty domains
+               case defineIntIndex size of someIInt @M size_fiint.
+               seqStore store
+               (doall @M size_fiint
+                (\ (i : int) -> Store.
+                   save_subdomain (first +# i) empty_dom empty_dom))
+
+             -- Recursively subdivide domain
+           ; subdivide (first size : int) (dom_y dom_x : dim1)
+                       (store : Store) -> Store =
+               let cy = dim1Cardinality dom_y in
+               let cx = dim1Cardinality dom_x in
+               if size <# 4
+               then
+                 -- Create 3 or fewer partitions by splitting in one dimension
+                 if cy >=# cx
+                 then subdivide_leaf_y first size dom_y dom_x store
+                 else subdivide_leaf_x first size dom_y dom_x store
+               else
+                 let size1 = size //# 2 in
+                 let size2 = size -# size1 in
+
+                 -- Create 4 or more partitions by dividing in half recursively
+                 if cy >=# cx
+                 then case real_split_dim1 dom_y of {
+                        justVal (dom1_y, unused, dom2_y).
+                          let store2 = subdivide first size1 dom1_y dom_x store in
+                          subdivide (first +# size1) size2 dom2_y dom_x store2
+                      ; nothingVal.
+                          let store2 = seqStore store
+                                       (save_subdomain first dom_y dom_x) in
+                          fill_empty (first +# 1) (size -# 1) dom_y dom_x store2
+                      }
+                 else case real_split_dim1 dom_x of {
+                        justVal (dom1_x, unused, dom2_x).
+                          let store2 = subdivide first size1 dom_y dom1_x store in
+                          subdivide (first +# size1) size2 dom_y dom2_x store2
+                      ; nothingVal.
+                          let store2 = seqStore store
+                                       (save_subdomain first dom_y dom_x) in
+                          fill_empty (first +# 1) (size -# 1) dom_y dom_x store2
+                      }
+           } in
+
+           subdivide 0 n d_y d_x emptyStore))));
 
 checkSubdomain_dim2
   (r1 : Repr (index dim2)) (r2 : Repr (offset dim2)) (r3 : Repr (slice dim2))
