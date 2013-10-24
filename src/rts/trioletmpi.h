@@ -34,7 +34,7 @@ int triolet_MPITask_setup(int *argc, char ***argv);
 
 // This function can only be called from rank 0.
 // Launch some work on an idle process.  Error if there are no idle processes.
-MPITask triolet_MPITask_launch(int32_t length, char *data);
+MPITask triolet_MPITask_launch(int32_t length, char *data, MPI_Request * req);
 
 // This function can only be called from rank 0.
 // Wait for some work to finish.
@@ -43,7 +43,7 @@ void *triolet_MPITask_wait(MPITask);
 
 // This function can only be called from rank 0.
 // Wait for some work to finish.
-MPIMessage triolet_MPITask_wait_raw(MPITask);
+MPIMessage triolet_MPITask_wait_raw(MPITask, MPI_Request * req);
 
 // This function is implemented in Triolet.  Deserialize a single object.
 void *triolet_deserialize(int32_t length, char *data);
@@ -72,6 +72,7 @@ int32_t triolet_in_distributed_task(void);
 
 void MPIMessage_finalize(MPIMessage *msg);
 
+void markProcessIdle(int);
 
 #endif  /* USE_MPI */
 

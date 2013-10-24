@@ -9,7 +9,7 @@
 
 #include "trioletmpi.h"
 
-//#define CHATTY_MPI
+// #define CHATTY_MPI
 
 // Called from any rank to send/receive a message
 static void MPIMessage_initalize(MPIMessage *msg);
@@ -20,7 +20,6 @@ static void MPIMessage_recv(int src_rank, MPIMessage *msg);
 // Called from rank 0
 static void assertRank0(void);
 static int getIdleProcess(void);
-static void markProcessIdle(int);
 static void onTermination(void);
 
 // Called from ranks other than 0
@@ -74,6 +73,18 @@ MPIMessage_send(int dst_rank, const MPIMessage *msg)
 }
 
 static void
+MPIMessage_isend(int dst_rank, const MPIMessage *msg, MPI_Request * req)
+{
+  char *data = msg->data;        // data buffer
+  int length = msg->length;      // length of the data buffer
+  MPI_Send(&length, 1, MPI_INT, dst_rank, WORK_TAG, MPI_COMM_WORLD);
+
+  if (length) {
+    MPI_Isend(data, length, MPI_CHARACTER, dst_rank, WORK_TAG, MPI_COMM_WORLD, req);
+  }
+}
+
+static void
 MPIMessage_recv(int src_rank, MPIMessage *msg)
 {
   char *data;                   // data buffer
@@ -91,6 +102,22 @@ MPIMessage_recv(int src_rank, MPIMessage *msg)
   }
   msg->length = length;
   msg->data = data;
+}
+
+static void
+MPIMessage_irecv(int src_rank, int * length, char ** data, MPI_Request * req)
+{
+  MPI_Recv(length, 1, MPI_INT, src_rank,
+           WORK_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+  if (*length != 0) {
+    *data = (char*)malloc(*length * sizeof(char));
+    MPI_Irecv(*data, *length, MPI_CHARACTER, src_rank,
+             WORK_TAG, MPI_COMM_WORLD, req);
+  }
+  else {
+    *data = NULL;
+  }
 }
 
 static void
@@ -119,6 +146,7 @@ getIdleProcess(void) {
       goto done;
     }
   }
+  
   // No idle slaves
   fprintf(stderr, "Scheduling problem: no idle MPI processes available\n");
   exit(-1);
@@ -129,7 +157,7 @@ getIdleProcess(void) {
 }
 
 // Record the fact that a rank is idle
-static void
+void
 markProcessIdle(int rank) {
   pthread_mutex_lock(&thread_pool_lock);
   is_busy[rank-1] = 0;
@@ -138,8 +166,11 @@ markProcessIdle(int rank) {
 
 // Called when rank 0 exits.
 static void onTermination(void) {
+  MPI_Request req;
   MPIMessage msg = {0, ""};
   int i;
+  int flag;
+  
 
 #ifdef CHATTY_MPI
   printf("Sending termination messages\n");
@@ -237,7 +268,7 @@ int triolet_MPITask_setup(int *argc, char ***argv) {
 
 // This function can only be called from rank 0.
 // Launch some work on an idle process.  Error if there are no idle processes.
-MPITask triolet_MPITask_launch(int length, char *data) {
+MPITask triolet_MPITask_launch(int length, char *data, MPI_Request * req) {
   // Correctness checks
   assertRank0();
   if (triolet_in_distributed_task()) {
@@ -262,7 +293,7 @@ MPITask triolet_MPITask_launch(int length, char *data) {
 #ifdef CHATTY_MPI
     printf("Launched task on rank %d; size %d\n", dst, length);
 #endif
-    MPIMessage_send(dst, &m);
+    MPIMessage_isend(dst, &m, req);
   }
 
   // Construct MPITask object to describe the running task
@@ -275,18 +306,20 @@ MPITask triolet_MPITask_launch(int length, char *data) {
 // This function can only be called from rank 0.
 // Wait for some work to finish.
 MPIMessage
-triolet_MPITask_wait_raw(MPITask task) {
+triolet_MPITask_wait_raw(MPITask task, MPI_Request * req) {
   assertRank0();
 
   // Wait and get the result of the task
   MPIMessage output;
-  MPIMessage_recv(task->rank, &output);
+  int length;
+  char * data;
+  MPIMessage_irecv(task->rank, &length, &data, req);
+
+  output.length = length;
+  output.data = data;
 #ifdef CHATTY_MPI
   printf("MPITask_wait: count=%d\n", output.length);
 #endif
-
-  // The slave is now idle
-  markProcessIdle(task->rank);
 
   return output;
 }
@@ -296,10 +329,17 @@ triolet_MPITask_wait_raw(MPITask task) {
 // Deallocate the task object.
 void *
 triolet_MPITask_wait(MPITask task) {
+  MPI_Request req;
+
   assertRank0();
 
   // Wait and get the result of the task
-  MPIMessage output = triolet_MPITask_wait_raw(task);
+  MPIMessage output = triolet_MPITask_wait_raw(task, &req);
+  
+  MPI_Wait(&req, MPI_STATUS_IGNORE);
+
+  // The slave is now idle
+  markProcessIdle(task->rank);
 
   // Construct the result
   void *ret = triolet_deserialize(output.length, output.data);

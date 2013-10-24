@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 extern "C" {
 #include "triolet.h"
@@ -25,6 +26,24 @@ extern "C" {
 # include "trioletmpi.h"
 }
 #endif
+
+
+
+uint64_t _hrtime(void) {
+#define NANOSEC ((uint64_t) 1e9)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (((uint64_t) ts.tv_sec) * NANOSEC + ts.tv_nsec);
+#undef NANOSEC
+}
+
+#define startTime(msg)        size_t startTime_##msg = _hrtime();
+#define endTime(msg)	      {\
+				size_t endTime_##msg = _hrtime();\
+				size_t elapsedTime = endTime_##msg - startTime_##msg;\
+				printf("%s Time: %zu\n", #msg, elapsedTime);\
+			      }
+
 
 /*****************************************************************************/
 /* Generalized parallel reduction */
@@ -738,8 +757,12 @@ struct LaunchTasksDoer {
 extern "C" void
 triolet_launch_tasks(int n, void **running_tasks, void **thunks)
 {
+  startTime(LaunchTasks);
+
   SerializedObjectInfo *buffers =
     (SerializedObjectInfo *)GC_MALLOC(n * sizeof(SerializedObjectInfo));
+  MPI_Request *reqs =
+    (MPI_Request *)GC_MALLOC(n * sizeof(MPI_Request));
 
   // Fill buffers in parallel
   LaunchTasksDoer doer(buffers, thunks);
@@ -750,11 +773,17 @@ triolet_launch_tasks(int n, void **running_tasks, void **thunks)
     int i;
     for (i = 0; i < n; i++) {
       running_tasks[i] = triolet_MPITask_launch(buffers[i].length,
-                                                (char *)buffers[i].buffer);
+                                                (char *)buffers[i].buffer,
+						&reqs[i]);
     }
   }
 
+  MPI_Waitall(n, reqs, MPI_STATUSES_IGNORE);
+
+  GC_FREE(reqs);
   GC_FREE(buffers);
+
+  endTime(LaunchTasks);
 }
 
 #endif
@@ -790,20 +819,36 @@ struct JoinTasksDoer {
 extern "C" void
 triolet_join_tasks(int n, void **running_tasks, void **thunks)
 {
+  startTime(JoiningTasks);
   MPIMessage *msgs =
     (MPIMessage *)GC_MALLOC(n * sizeof(MPIMessage));
+  MPI_Request *reqs =
+    (MPI_Request *)GC_MALLOC(n * sizeof(MPI_Request));
+
 
   // Join tasks seqeuntially (MPI may not support parallel calls)
   {
     int i;
     for (i = 0; i < n; i++) {
-      msgs[i] = triolet_MPITask_wait_raw((MPITask) running_tasks[i]);
+      msgs[i] = triolet_MPITask_wait_raw((MPITask) running_tasks[i], &reqs[i]);
+    }
+  }
+
+  MPI_Waitall(n, reqs, MPI_STATUSES_IGNORE);
+  {
+    int i;
+    for (i = 0; i < n; i++) {
+      MPITask task = (MPITask) running_tasks[i];
+      markProcessIdle(task->rank);
     }
   }
 
   // Fill buffers in parallel
   JoinTasksDoer doer(msgs, thunks);
   tbb::parallel_for(tbb::blocked_range<int>(0, n), doer);
+
+  
+  GC_FREE(reqs);
 
   {
     int i;
@@ -814,6 +859,8 @@ triolet_join_tasks(int n, void **running_tasks, void **thunks)
   }
 
   GC_FREE(msgs);
+
+  endTime(JoiningTasks);
 }
 
 #endif
