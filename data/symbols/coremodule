@@ -9467,7 +9467,7 @@ real_split_dim1 (d : dim1)
   if delta <# stride +# stride
   then nothingVal @(dim1, Boxed (Stored NoneType), dim1)
   else
-    let midpoint = hi +# lo //# 2 in
+    let midpoint = lo +# (delta //# 2) in
     let iv1 = trimInterval (interval (justVal @int lo) (justVal @int midpoint)) lm in
     let iv2 = trimInterval (interval (justVal @int midpoint) (justVal @int hi)) lm in
 
